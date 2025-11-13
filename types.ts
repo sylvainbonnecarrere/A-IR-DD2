@@ -12,6 +12,7 @@ export enum LLMProvider {
   Kimi = 'Kimi K2',
   DeepSeek = 'DeepSeek',
   LMStudio = 'LMStudio',
+  ArcLLM = 'Arc-LLM', // Arc-LLM provider for Video, Maps, Web Grounding
 }
 
 export enum LLMCapability {
@@ -29,6 +30,10 @@ export enum LLMCapability {
   CacheOptimization = 'Cache Optimization',
   LocalDeployment = 'Local Deployment',
   CodeSpecialization = 'Code Specialization',
+  // Arc-LLM specific capabilities
+  VideoGeneration = 'Video Generation',
+  MapsGrounding = 'Maps Grounding',
+  WebSearchGrounding = 'Web Search Grounding', // Distinct from basic WebSearch
 }
 
 export interface LLMConfig {
@@ -63,9 +68,9 @@ export interface Tool {
 export type OutputFormat = 'json' | 'xml' | 'yaml' | 'shell' | 'powershell' | 'python' | 'html' | 'css' | 'javascript' | 'typescript' | 'php' | 'sql' | 'mysql' | 'mongodb';
 
 export interface OutputConfig {
-    enabled: boolean;
-    format: OutputFormat;
-    useCodestralCompletion?: boolean;
+  enabled: boolean;
+  format: OutputFormat;
+  useCodestralCompletion?: boolean;
 }
 
 export interface Agent {
@@ -147,9 +152,9 @@ export interface ResolvedAgentInstance {
 }
 
 export interface ToolCall {
-    id: string;
-    name: string;
-    arguments: string; // JSON string of arguments
+  id: string;
+  name: string;
+  arguments: string; // JSON string of arguments
 }
 
 
@@ -180,7 +185,7 @@ export interface WorkflowNode {
 // V2 Robot Navigation Interfaces
 export enum RobotId {
   Archi = 'AR_001',
-  Bos = 'BO_002', 
+  Bos = 'BO_002',
   Com = 'CO_003',
   Phil = 'PH_004',
   Tim = 'TI_005'
@@ -239,7 +244,7 @@ export interface RobotCapabilities {
 export const ROBOT_CREATION_RIGHTS: Record<RobotId, RobotCapabilities> = {
   [RobotId.Archi]: {
     canCreate: ['agent'],
-    canModify: ['agent'], 
+    canModify: ['agent'],
     canDelete: ['agent']
   },
   [RobotId.Com]: {
@@ -270,4 +275,68 @@ export interface GovernanceValidationResult {
   robotId: RobotId;
   prototypeType: PrototypeType;
   operation: 'create' | 'modify' | 'delete';
+}
+
+// ============================================
+// Arc-LLM Specific Types
+// ============================================
+
+/**
+ * Options pour la génération de vidéo Arc-LLM
+ */
+export interface VideoGenerationOptions {
+  prompt: string;
+  referenceImages?: { mimeType: string; data: string }[]; // Max 3 images
+  resolution: '720p' | '1080p';
+  aspectRatio: '16:9' | '9:16';
+  extendFromVideoId?: string; // Pour extension de vidéo existante
+}
+
+/**
+ * Statut d'une génération vidéo (polling asynchrone)
+ */
+export interface VideoGenerationStatus {
+  operationId: string;
+  status: 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  videoUrl?: string; // Disponible si status = COMPLETED
+  progress?: number; // 0-100
+  error?: string; // Disponible si status = FAILED
+}
+
+/**
+ * Source cartographique extraite par Maps Grounding
+ * Structure similaire à groundingMetadata de Gemini
+ */
+export interface MapSource {
+  uri: string; // Lien Google Maps
+  placeTitle: string;
+  placeId: string;
+  coordinates: { latitude: number; longitude: number };
+  reviewExcerpts?: string[]; // Extraits d'avis utilisateurs
+}
+
+/**
+ * Source web extraite par Web Search Grounding
+ * Structure similaire aux citations Gemini
+ */
+export interface WebSearchSource {
+  uri: string;
+  webTitle: string;
+  snippet?: string; // Extrait de la source
+}
+
+/**
+ * Résultat Maps Grounding (pattern similaire à Gemini)
+ */
+export interface MapsGroundingResponse {
+  text: string;
+  mapSources: MapSource[];
+}
+
+/**
+ * Résultat Web Search Grounding (pattern similaire à Gemini)
+ */
+export interface WebSearchGroundingResponse {
+  text: string;
+  webSources: WebSearchSource[];
 }

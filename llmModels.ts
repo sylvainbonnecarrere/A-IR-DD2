@@ -56,4 +56,8 @@ export const LLM_MODELS: Record<LLMProvider, string[]> = {
         'llama-3.2-1b', // Meta efficient model
         'llama-3.2-3b', // Meta balanced model
     ],
+    [LLMProvider.ArcLLM]: [
+        'arc-video-v1', // Arc-LLM Video Generation Model
+        'arc-grounding-v1', // Arc-LLM Grounding (Maps + Web Search)
+    ],
 };

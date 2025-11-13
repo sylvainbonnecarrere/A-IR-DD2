@@ -187,6 +187,9 @@ export default {
 
     // V2AgentNode
     agent_not_found: "Erreur: Agent non trouvé",
+    confirm_delete_agent_title: "Confirmer la suppression",
+    confirm_delete_agent_message: "Voulez-vous vraiment supprimer l'agent \"{agentName}\" ?\n\nCette action est irréversible.",
+    confirm_delete: "Supprimer définitivement",
     analyzing_results: "Analyse des résultats...",
     tool_result_from: "Résultat de",
     tool_results_context: "Voici les résultats des outils que j'ai appelés pour répondre à votre demande",

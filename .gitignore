@@ -147,3 +147,11 @@ documentation/*
 
 # Métadonnées locales
 metadata.local.json
+
+# ===============================
+# FICHIERS DE TRAVAIL NON VERSIONNÉS
+# ===============================
+# TODO personnel et notes de travail
+TODO.md
+NOTES.md
+*.todo.md

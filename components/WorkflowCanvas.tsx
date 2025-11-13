@@ -11,6 +11,8 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { V2AgentNode } from './V2AgentNode';
+import { OptimizedWorkflowBackground } from './OptimizedWorkflowBackground';
+import { useDayNightTheme } from '../hooks/useDayNightTheme';
 import { WorkflowCanvasProvider } from '../contexts/WorkflowCanvasContext';
 import { PrototypeEditConfirmationModal } from './modals/PrototypeEditConfirmationModal';
 import { AgentFormModal } from './modals/AgentFormModal';
@@ -37,7 +39,7 @@ interface WorkflowCanvasProps {
 // nodeTypes défini GLOBALEMENT pour éviter les re-créations
 const NODE_TYPES = {
   customAgent: V2AgentNode,
-};
+} as const;
 
 // Mémoriser le composant ReactFlow pour éviter les re-renders
 const MemoizedReactFlow = memo(ReactFlow);
@@ -61,6 +63,12 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     onRemoveFromWorkflow,
     onNavigate
   } = props;
+
+  // Hook de thème jour/nuit
+  const theme = useDayNightTheme();
+
+  // Mémorisation explicite de NODE_TYPES pour satisfaire React Flow
+  const nodeTypes = useMemo(() => NODE_TYPES, []);
 
   // ISOLATION COMPLÈTE: un seul useState pour éviter les conflits React Flow
   const [internalState, setInternalState] = useState({
@@ -164,6 +172,16 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     setEdges((eds) => addEdge(connection, eds));
   }, [setEdges]);
 
+  // Handler pour libérer le focus quand on clique sur le canvas
+  const handlePaneClick = useCallback(() => {
+    // Retirer le focus de tout élément actif (textarea, input, etc.)
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    // Désélectionner tous les nodes en cliquant sur le canvas vide
+    setReactFlowNodes(nodes => nodes.map(node => ({ ...node, selected: false })));
+  }, [setReactFlowNodes]);
+
   const handleEditPrototype = useCallback((nodeId: string) => {
     setInternalState(prev => ({
       ...prev,
@@ -215,50 +233,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   return (
     <WorkflowCanvasProvider value={contextValue}>
       <div className="h-full w-full relative overflow-hidden">
-        {/* Blur Racing Game Style - Futuristic Neon Background */}
-        <div
-          className="absolute inset-0 bg-gradient-to-br from-gray-900 via-slate-800 to-black"
-          style={{
-            backgroundImage: `
-              linear-gradient(45deg, rgba(0, 255, 255, 0.1) 0%, transparent 50%),
-              linear-gradient(-45deg, rgba(255, 0, 255, 0.1) 0%, transparent 50%),
-              linear-gradient(90deg, rgba(0, 255, 0, 0.05) 0%, transparent 100%)
-            `
-          }}
-        >
-          {/* Racing Track Grid Pattern */}
-          <div className="absolute inset-0 opacity-20"
-            style={{
-              backgroundImage: `
-                repeating-linear-gradient(
-                  90deg,
-                  transparent,
-                  transparent 98px,
-                  rgba(0, 255, 255, 0.3) 100px
-                ),
-                repeating-linear-gradient(
-                  0deg,
-                  transparent,
-                  transparent 98px,
-                  rgba(255, 0, 255, 0.3) 100px
-                )
-              `
-            }}
-          ></div>
-
-          {/* Speed Lines Effect */}
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-500/5 to-transparent transform -skew-x-12 animate-pulse"></div>
-
-          {/* Neon Particles Racing Style */}
-          <div className="absolute top-1/4 left-1/4 w-3 h-3 bg-cyan-400 rounded-full animate-ping shadow-lg shadow-cyan-400/50"></div>
-          <div className="absolute top-3/4 right-1/3 w-2 h-2 bg-fuchsia-400 rounded-full animate-pulse shadow-lg shadow-fuchsia-400/50"></div>
-          <div className="absolute bottom-1/4 left-2/3 w-4 h-4 bg-lime-400 rounded-full animate-bounce shadow-lg shadow-lime-400/50"></div>
-          <div className="absolute top-1/2 right-1/4 w-2 h-2 bg-orange-400 rounded-full animate-ping shadow-lg shadow-orange-400/50"></div>
-
-          {/* Racing Speed Streaks */}
-          <div className="absolute top-10 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-pulse"></div>
-          <div className="absolute bottom-20 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-fuchsia-400 to-transparent animate-pulse delay-500"></div>
-        </div>
+        {/* Background optimisé avec thème jour/nuit */}
+        <OptimizedWorkflowBackground />
 
         <MemoizedReactFlow
           key="workflow-canvas-main" // Clé unique pour éviter les re-créations
@@ -267,29 +243,65 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
-          nodeTypes={NODE_TYPES}
+          onPaneClick={handlePaneClick}
+          nodeTypes={nodeTypes}
           fitView
           style={{ background: 'transparent' }}
           defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+          proOptions={{ hideAttribution: true }} // Masquer le lien promotionnel React Flow
         >
-          {/* MiniMap protégée contre les erreurs NaN */}
+          {/* MiniMap protégée contre les erreurs NaN - Thème adaptatif */}
           {internalState.minimapReady && (
             <MiniMap
               key="minimap-unique"
               width={200}
               height={140}
-              nodeStrokeColor="#00ffff"
-              nodeColor="#1a1a1a"
+              nodeStrokeColor={(node) => {
+                // Couleur adaptée au thème jour/nuit
+                const isMinimized = node.data?.isMinimized;
+                if (isMinimized) return '#666666';
+                // Utiliser la couleur primaire du thème actuel
+                return theme.particleColors[0] || '#00ffff';
+              }}
+              nodeColor={(node) => {
+                const isMinimized = node.data?.isMinimized;
+                const agentId = node.data?.robotId || '';
+
+                if (isMinimized) return '#2a2a2a';
+
+                // Couleurs adaptées au thème
+                if (theme.timeOfDay === 'morning') {
+                  // Matin : couleurs forestières
+                  if (agentId.includes('archi')) return 'rgba(34, 197, 94, 0.8)'; // Vert forêt
+                  if (agentId.includes('bos')) return 'rgba(251, 191, 36, 0.8)'; // Doré
+                  if (agentId.includes('com')) return 'rgba(74, 222, 128, 0.8)'; // Vert clair
+                  if (agentId.includes('phil')) return 'rgba(134, 239, 172, 0.8)'; // Vert pastel
+                  if (agentId.includes('tim')) return 'rgba(253, 224, 71, 0.8)'; // Jaune soleil
+                } else {
+                  // Nuit/Après-midi : couleurs neon
+                  if (agentId.includes('archi')) return 'rgba(0, 255, 255, 0.8)'; // Cyan
+                  if (agentId.includes('bos')) return 'rgba(255, 165, 0, 0.8)'; // Orange
+                  if (agentId.includes('com')) return 'rgba(0, 255, 0, 0.8)'; // Vert neon
+                  if (agentId.includes('phil')) return 'rgba(138, 43, 226, 0.8)'; // Violet
+                  if (agentId.includes('tim')) return 'rgba(255, 20, 147, 0.8)'; // Rose neon
+                }
+
+                return 'rgba(26, 26, 26, 0.9)';
+              }}
+              nodeClassName={(node) => {
+                return 'minimap-node-striped';
+              }}
               nodeBorderRadius={8}
-              position="bottom-right"
               pannable
               zoomable
-              maskColor="rgba(0, 20, 40, 0.6)"
+              maskColor={theme.timeOfDay === 'morning' ? 'rgba(5, 46, 22, 0.6)' : 'rgba(0, 20, 40, 0.6)'}
+              className="workflow-minimap-fixed"
               style={{
-                background: 'linear-gradient(135deg, rgba(0, 0, 0, 0.95) 0%, rgba(26, 26, 26, 0.9) 50%, rgba(51, 51, 51, 0.95) 100%)',
-                border: '2px solid rgba(0, 255, 255, 0.7)',
+                background: theme.backgroundGradient,
+                border: `2px solid ${theme.particleColors[0]}`,
                 borderRadius: '12px',
-                opacity: 0.95
+                opacity: 0.95,
+                boxShadow: `0 0 20px ${theme.primaryColor}, 0 8px 25px rgba(0, 0, 0, 0.7)`,
               }}
             />
           )}

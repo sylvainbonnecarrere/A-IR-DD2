@@ -3,6 +3,7 @@ import { Handle, Position, NodeProps } from 'reactflow';
 import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, AgentInstance } from '../types';
 import { Button } from './UI';
 import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon } from './Icons';
+import { ConfirmationModal } from './modals/ConfirmationModal';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowCanvasContext } from '../contexts/WorkflowCanvasContext';
@@ -87,6 +88,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   const [userInput, setUserInput] = useState('');
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [loadingMessage, setLoadingMessage] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -108,11 +110,24 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   };
 
   const handleDelete = () => {
-    if (confirm(`Supprimer l'agent "${displayName}" ?`)) {
-      if (onDeleteNode) {
-        onDeleteNode(id);
-      }
+    // Libérer le focus avant d'ouvrir le modal
+    (document.activeElement as HTMLElement)?.blur();
+    setShowDeleteConfirm(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (onDeleteNode) {
+      onDeleteNode(id);
     }
+    setShowDeleteConfirm(false);
+  };
+
+  const handleCancelDelete = () => {
+    setShowDeleteConfirm(false);
+    // Forcer le focus sur le canvas après annulation
+    setTimeout(() => {
+      (document.activeElement as HTMLElement)?.blur();
+    }, 100);
   };
 
   const handleEdit = () => {
@@ -578,22 +593,33 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   };
 
   return (
-    <div className={`
+    <div
+      className={`
       bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 
       border border-gray-600 rounded-lg shadow-lg 
       transition-all duration-300 ease-out
       relative overflow-hidden
       ${selected ?
-        'border-cyan-400 shadow-cyan-400/40 shadow-2xl' :
-        'border-gray-600 hover:border-gray-500'
-      }
+          'border-cyan-400 shadow-cyan-400/40 shadow-2xl' :
+          'border-gray-600 hover:border-gray-500'
+        }
       ${isMinimized ? 'w-64' : 'w-96'}
       group
       hover:shadow-2xl hover:shadow-cyan-500/20
       before:absolute before:inset-0 before:bg-gradient-to-br 
       before:from-cyan-500/5 before:via-transparent before:to-blue-500/5 
       before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-300
-    `}>
+    `}
+      onMouseDown={(e) => {
+        // Permettre les clics sur boutons ET la navigation canvas
+        const target = e.target as HTMLElement;
+        // Ne stopper la propagation QUE pour textarea/input (pas les boutons)
+        if (target.closest('textarea, input:not([type="file"])')) {
+          e.stopPropagation();
+        }
+        // Les boutons et le reste du canvas fonctionnent normalement
+      }}
+    >
       {/* Laser border effect on hover */}
       <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300">
         <div className="absolute inset-[1px] rounded-lg bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-purple-500/20 animate-pulse"></div>
@@ -840,6 +866,18 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                    hover:bg-cyan-300 hover:shadow-cyan-300/70 
                    transition-all duration-200
                    relative z-10"
+      />
+
+      {/* Modal de confirmation de suppression - Sécurité : aucune info de configuration affichée */}
+      <ConfirmationModal
+        isOpen={showDeleteConfirm}
+        title={t('confirm_delete_agent_title')}
+        message={t('confirm_delete_agent_message', { agentName: displayName })}
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+        confirmText={t('confirm_delete')}
+        cancelText={t('cancel')}
+        variant="danger"
       />
     </div>
   );

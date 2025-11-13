@@ -152,6 +152,9 @@ export default {
 
     // V2AgentNode
     agent_not_found: "Erro: Agente não encontrado",
+    confirm_delete_agent_title: "Confirmar Exclusão",
+    confirm_delete_agent_message: "Você realmente deseja excluir o agente \"{agentName}\"?\n\nEsta ação é irreversível.",
+    confirm_delete: "Excluir Permanentemente",
     analyzing_results: "Analisando resultados...",
     tool_result_from: "Resultado de",
     tool_results_context: "Aqui estão os resultados das ferramentas que chamei para responder à sua solicitação",
@@ -165,6 +168,42 @@ export default {
     type_message_placeholder: "Digite sua mensagem...",
     conversation_to_summarize: "Conversa para resumir",
     open_fullscreen: "Abrir tela cheia",
+
+    // Robot Navigation
+    robot_archi_name: "Archi",
+    robot_archi_description: "Arquiteto - Criador de protótipos de agentes e orquestrador do sistema",
+    robot_bos_name: "Bos",
+    robot_bos_description: "Supervisor - Monitoramento de fluxo de trabalho, depuração e rastreamento de custos",
+    robot_com_name: "Com",
+    robot_com_description: "Comunicador - Gerenciamento de API, autenticação e integrações externas",
+    robot_phil_name: "Phil",
+    robot_phil_description: "Filatelista - Especialista em transformação de dados e gerenciamento de arquivos",
+    robot_tim_name: "Tim",
+    robot_tim_description: "Temporal - Gerenciador de eventos, agendamento e controle de fluxo assíncrono",
+
+    // Navigation Items
+    nav_prototyping: "Prototipagem",
+    nav_prototyping_desc: "Criação e edição de protótipos de agentes",
+    nav_dashboard: "Painel",
+    nav_dashboard_desc: "Mapa global de fluxo de trabalho e visão geral do projeto",
+    nav_monitoring: "Monitoramento",
+    nav_monitoring_desc: "Monitoramento em tempo real de fluxos de trabalho ativos",
+    nav_debugging: "Depuração",
+    nav_debugging_desc: "Diagnóstico e resolução de problemas de fluxo de trabalho",
+    nav_costs: "Custos",
+    nav_costs_desc: "Análise de custos e otimização de recursos",
+    nav_connections: "Conexões",
+    nav_connections_desc: "Configuração de conexões de API e serviços externos",
+    nav_authentication: "Autenticação",
+    nav_authentication_desc: "Gerenciamento de chaves de API e autenticação",
+    nav_files: "Arquivos",
+    nav_files_desc: "Gerenciamento e análise de arquivos de dados",
+    nav_validation: "Validação",
+    nav_validation_desc: "Validação e transformação de dados",
+    nav_events: "Eventos",
+    nav_events_desc: "Configuração de gatilhos e eventos temporais",
+    nav_scheduling: "Agendamento",
+    nav_scheduling_desc: "Agendamento de tarefas e gerenciamento de calendário",
 
     // Robot specialization
     robot_specialization: 'Especialização do robô',

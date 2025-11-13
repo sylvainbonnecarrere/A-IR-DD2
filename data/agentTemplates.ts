@@ -106,7 +106,8 @@ const getProviderCapabilities = (provider: LLMProvider): LLMCapability[] => {
     [LLMProvider.Perplexity]: [LLMCapability.Chat, LLMCapability.FunctionCalling, LLMCapability.WebSearch],
     [LLMProvider.Qwen]: [LLMCapability.Chat, LLMCapability.FileUpload, LLMCapability.FunctionCalling],
     [LLMProvider.Kimi]: [LLMCapability.Chat, LLMCapability.FunctionCalling],
-    [LLMProvider.LMStudio]: [LLMCapability.Chat, LLMCapability.FunctionCalling, LLMCapability.LocalDeployment]
+    [LLMProvider.LMStudio]: [LLMCapability.Chat, LLMCapability.FunctionCalling, LLMCapability.LocalDeployment],
+    [LLMProvider.ArcLLM]: [LLMCapability.VideoGeneration, LLMCapability.MapsGrounding, LLMCapability.WebSearchGrounding]
   };
 
   return defaultCapabilities[provider] || [LLMCapability.Chat];
@@ -412,7 +413,8 @@ const adaptLLMProvider = (templateProvider: LLMProvider, availableProviders: LLM
     [LLMProvider.Perplexity]: [LLMProvider.OpenAI, LLMProvider.Anthropic, LLMProvider.DeepSeek, LLMProvider.Mistral],
     [LLMProvider.Qwen]: [LLMProvider.DeepSeek, LLMProvider.Mistral, LLMProvider.OpenAI, LLMProvider.Anthropic],
     [LLMProvider.Kimi]: [LLMProvider.DeepSeek, LLMProvider.Mistral, LLMProvider.OpenAI, LLMProvider.Anthropic],
-    [LLMProvider.LMStudio]: [LLMProvider.OpenAI, LLMProvider.Anthropic, LLMProvider.DeepSeek, LLMProvider.Mistral]
+    [LLMProvider.LMStudio]: [LLMProvider.OpenAI, LLMProvider.Anthropic, LLMProvider.DeepSeek, LLMProvider.Mistral],
+    [LLMProvider.ArcLLM]: [LLMProvider.Gemini, LLMProvider.OpenAI, LLMProvider.Anthropic, LLMProvider.DeepSeek]
   };
 
   const fallbacks = fallbackMap[templateProvider] || availableProviders;
