@@ -2,7 +2,6 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Agent, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
-import WorkflowCanvas from './components/WorkflowCanvas';
 import { AgentFormModal } from './components/modals/AgentFormModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { Header } from './components/Header';
@@ -114,10 +113,10 @@ function App() {
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; mimeType: string } | null>(null);
   const { t } = useLocalization();
 
-  // V2 Runtime Store access
+  // Runtime Store access
   const { updateLLMConfigs, setNavigationHandler, addNodeMessage } = useRuntimeStore();
 
-  // V2 Design Store access for integrity validation  
+  // Design Store access for integrity validation  
   const { validateWorkflowIntegrity, cleanupOrphanedInstances, addAgentInstance } = useDesignStore();
 
   // Sync LLM configs with runtime store
@@ -125,7 +124,7 @@ function App() {
     updateLLMConfigs(llmConfigs);
   }, [llmConfigs, updateLLMConfigs]);
 
-  // Configure navigation handler for V2AgentNodes
+  // Configure navigation handler for agent nodes
   useEffect(() => {
     setNavigationHandler(handleRobotNavigation);
   }, [setNavigationHandler]);
@@ -146,8 +145,7 @@ function App() {
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null);
   const [updateConfirmation, setUpdateConfirmation] = useState<UpdateConfirmationState | null>(null);
 
-  // V2 Navigation States
-  const [useV2Navigation, setUseV2Navigation] = useState(false);
+  // Robot Navigation State
   const [currentPath, setCurrentPath] = useState('/bos/dashboard');
 
   const handleRobotNavigation = (robotId: RobotId, path: string) => {
@@ -266,7 +264,6 @@ function App() {
       image: imageBase64,
       mimeType: 'image/png',
     };
-    // Update both React state (for legacy compatibility) and Zustand store (for V2AgentNode)
     handleUpdateNodeMessages(nodeId, prev => [...prev, imageMessage]);
     addNodeMessage(nodeId, imageMessage);
   };
@@ -284,7 +281,6 @@ function App() {
       image: newImage,
       mimeType: 'image/png',
     };
-    // Update both React state (for legacy compatibility) and Zustand store (for V2AgentNode)
     handleUpdateNodeMessages(nodeId, prev => [...prev, message]);
     addNodeMessage(nodeId, message);
   };
@@ -316,12 +312,9 @@ function App() {
       <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
         <Header
           onOpenSettings={() => setSettingsModalOpen(true)}
-          onToggleV2={() => setUseV2Navigation(!useV2Navigation)}
-          isV2Mode={useV2Navigation}
         />
         <div className="flex flex-1 overflow-hidden">
           <NavigationLayout
-            // V1 props
             agents={agents}
             isCollapsed={isSidebarCollapsed}
             onToggleCollapse={() => setSidebarCollapsed(!isSidebarCollapsed)}
@@ -329,43 +322,25 @@ function App() {
             onAddToWorkflow={addAgentToWorkflow}
             onDeleteAgent={handleDeleteAgent}
             onEditAgent={handleOpenEditAgentModal}
-            // V2 props
-            useV2Navigation={useV2Navigation}
             currentPath={currentPath}
             onNavigate={handleRobotNavigation}
           />
           <main className="flex-1 bg-gray-800/50 overflow-hidden">
-            {useV2Navigation ? (
-              <RobotPageRouter
-                currentPath={currentPath}
-                llmConfigs={llmConfigs}
-                onNavigate={handleRobotNavigation}
-                agents={agents}
-                workflowNodes={workflowNodes}
-                onDeleteNode={handleDeleteNode}
-                onUpdateNodeMessages={handleUpdateNodeMessages}
-                onUpdateNodePosition={handleUpdateNodePosition}
-                onToggleNodeMinimize={handleToggleNodeMinimize}
-                onOpenImagePanel={handleOpenImagePanel}
-                onOpenImageModificationPanel={handleOpenImageModificationPanel}
-                onOpenFullscreen={handleOpenFullscreen}
-                onAddToWorkflow={handleAddToWorkflow}
-              />
-            ) : (
-              <WorkflowCanvas
-                nodes={workflowNodes}
-                llmConfigs={llmConfigs}
-                agents={agents}
-                onDeleteNode={handleDeleteNode}
-                onUpdateNodeMessages={handleUpdateNodeMessages}
-                onUpdateNodePosition={handleUpdateNodePosition}
-                onToggleNodeMinimize={handleToggleNodeMinimize}
-                onOpenImagePanel={handleOpenImagePanel}
-                onOpenImageModificationPanel={handleOpenImageModificationPanel}
-                onOpenFullscreen={handleOpenFullscreen}
-                onNavigate={handleRobotNavigation}
-              />
-            )}
+            <RobotPageRouter
+              currentPath={currentPath}
+              llmConfigs={llmConfigs}
+              onNavigate={handleRobotNavigation}
+              agents={agents}
+              workflowNodes={workflowNodes}
+              onDeleteNode={handleDeleteNode}
+              onUpdateNodeMessages={handleUpdateNodeMessages}
+              onUpdateNodePosition={handleUpdateNodePosition}
+              onToggleNodeMinimize={handleToggleNodeMinimize}
+              onOpenImagePanel={handleOpenImagePanel}
+              onOpenImageModificationPanel={handleOpenImageModificationPanel}
+              onOpenFullscreen={handleOpenFullscreen}
+              onAddToWorkflow={handleAddToWorkflow}
+            />
           </main>
         </div>
 
