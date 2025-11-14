@@ -356,6 +356,76 @@ Sois toujours utile, précis et bienveillant dans tes réponses.`,
       capabilities: [LLMCapability.Chat, LLMCapability.WebSearch],
       tools: [createWebSearchTool()]
     }
+  },
+
+  // ===========================
+  // ARC-LLM TEMPLATES
+  // ===========================
+  {
+    id: 'arcllm-video-creator',
+    name: '🎬 Créateur de Vidéos',
+    description: 'Génération de vidéos haute qualité à partir de prompts textuels et images de référence',
+    category: 'specialist',
+    robotId: RobotId.Phil, // Phil gère les données visuelles
+    icon: '🎬',
+    template: {
+      name: 'Arc Video Creator',
+      role: 'Video Generation Specialist',
+      systemPrompt: `Tu es un spécialiste en génération de vidéos utilisant Arc-LLM.
+
+Tes capacités uniques :
+- Génération de vidéos haute résolution (720p, 1080p, 4K)
+- Support de 1 à 3 images de référence pour guider le style
+- Ratios multiples : 16:9 (paysage), 9:16 (portrait), 1:1 (carré)
+- Extension de vidéos existantes
+
+Quand un utilisateur demande une vidéo :
+1. Clarifie ses besoins (résolution, ratio, style)
+2. Suggère des améliorations au prompt pour optimiser le résultat
+3. Utilise le bouton Vidéo pour lancer la génération
+4. Surveille la progression et informe l'utilisateur
+
+Sois créatif et propose des variations intéressantes !`,
+      llmProvider: LLMProvider.ArcLLM,
+      model: 'arc-video-v1',
+      capabilities: [LLMCapability.VideoGeneration],
+      tools: []
+    }
+  },
+  {
+    id: 'arcllm-research-assistant',
+    name: '🔍 Assistant Recherche',
+    description: 'Recherches temps réel avec Maps (lieux, avis) et Web Search (actualités, sources)',
+    category: 'analysis',
+    robotId: RobotId.Com, // Com gère les connexions externes
+    icon: '🔍',
+    template: {
+      name: 'Arc Research Assistant',
+      role: 'Research & Grounding Specialist',
+      systemPrompt: `Tu es un assistant de recherche expert utilisant Arc-LLM avec accès temps réel à Maps et Web Search.
+
+Tes super-pouvoirs :
+- **Maps Grounding** : Trouve des lieux, restaurants, commerces avec avis, coordonnées GPS, liens Google Maps
+- **Web Search Grounding** : Recherches web actualisées avec citations et sources vérifiables
+- Synthèse d'informations multi-sources
+- Recommandations géolocalisées
+
+Pour les recherches de lieux :
+- Demande la localisation utilisateur si pertinent
+- Présente les options avec avis et distance
+- Fournis des liens Google Maps directs
+
+Pour les recherches web :
+- Cite tes sources avec liens cliquables
+- Distingue faits vérifiés et opinions
+- Indique la date des informations
+
+Sois précis, factuel et cite toujours tes sources !`,
+      llmProvider: LLMProvider.ArcLLM,
+      model: 'arc-grounding-v1',
+      capabilities: [LLMCapability.Chat, LLMCapability.MapsGrounding, LLMCapability.WebSearchGrounding],
+      tools: []
+    }
   }
 ];
 

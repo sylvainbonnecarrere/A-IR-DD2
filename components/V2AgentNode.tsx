@@ -4,6 +4,8 @@ import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, Ag
 import { Button } from './UI';
 import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon } from './Icons';
 import { ConfirmationModal } from './modals/ConfirmationModal';
+
+import { WebSearchGroundingPanel } from './panels/WebSearchGroundingPanel';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowCanvasContext } from '../contexts/WorkflowCanvasContext';
@@ -24,6 +26,35 @@ const MinimizeIcon = (props: React.SVGProps<SVGSVGElement>) => (
 const ToolIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+  </svg>
+);
+
+// Video icon Arc-LLM
+const VideoIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <polygon points="23 7 16 12 23 17 23 7"></polygon>
+    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+  </svg>
+);
+
+// Map icon Arc-LLM
+const MapIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+    <line x1="8" y1="2" x2="8" y2="18"></line>
+    <line x1="16" y1="6" x2="16" y2="22"></line>
+  </svg>
+);
+
+// Web Search icon Arc-LLM
+const WebSearchIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <circle cx="11" cy="11" r="8"></circle>
+    <path d="m21 21-4.35-4.35"></path>
+    <path d="M11 1v2"></path>
+    <path d="M11 19v2"></path>
+    <path d="M1 11h2"></path>
+    <path d="M19 11h2"></path>
   </svg>
 );
 
@@ -78,6 +109,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     onUpdateNodePosition,
     onOpenImagePanel,
     onOpenImageModificationPanel,
+    onOpenVideoPanel,
+    onOpenMapsPanel,
     onOpenFullscreen
   } = useWorkflowCanvasContext();
 
@@ -89,6 +122,11 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Arc-LLM states
+  const [showWebSearchResults, setShowWebSearchResults] = useState(false);
+  const [webSearchResults, setWebSearchResults] = useState<{ text: string; webSources: any[] }>({ text: '', webSources: [] });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -143,6 +181,37 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   const handleFullscreen = () => {
     // Open fullscreen chat modal for this node
     setFullscreenChatNodeId(id);
+  };
+
+
+
+  const handleWebSearchGrounding = async () => {
+    if (!agent || !userInput.trim()) return;
+
+    const agentConfig = llmConfigs?.find(c => c.provider === agent.llmProvider);
+    if (!agentConfig?.enabled || !agentConfig.apiKey) {
+      console.error('LLM not configured for web search grounding');
+      return;
+    }
+
+    setLoadingMessage('Recherche web...');
+
+    try {
+      const result = await llmService.generateContentWithWebSearchGrounding(
+        agent.llmProvider,
+        agentConfig.apiKey,
+        agent.model,
+        userInput,
+        agent.systemInstruction
+      );
+
+      setWebSearchResults(result);
+      setShowWebSearchResults(true);
+      setLoadingMessage('');
+    } catch (error) {
+      console.error('Web search grounding failed:', error);
+      setLoadingMessage('');
+    }
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -586,6 +655,130 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                 📎 {message.filename}
               </div>
             )}
+
+            {/* Maps Grounding Results */}
+            {message.mapsGrounding && message.mapsGrounding.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-600">
+                <div className="text-xs font-semibold text-cyan-400 mb-2">
+                  🗺️ Lieux trouvés ({message.mapsGrounding.length})
+                </div>
+                <div className="space-y-2">
+                  {message.mapsGrounding.map((place, index) => (
+                    <div key={index} className="bg-gray-800/50 rounded p-2 text-xs">
+                      <div className="font-semibold text-white mb-1">{place.placeTitle}</div>
+                      {place.coordinates && (
+                        <div className="text-gray-400 font-mono">
+                          📍 {place.coordinates.latitude.toFixed(4)}, {place.coordinates.longitude.toFixed(4)}
+                        </div>
+                      )}
+                      <a
+                        href={place.uri}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-cyan-400 hover:text-cyan-300 text-xs mt-1 inline-block"
+                      >
+                        🔗 Voir sur Maps
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Web Search Grounding Results */}
+            {message.webSearchGrounding && message.webSearchGrounding.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-600">
+                <div className="text-xs font-semibold text-cyan-400 mb-2">
+                  🔍 Sources web ({message.webSearchGrounding.length})
+                </div>
+                <div className="space-y-1">
+                  {message.webSearchGrounding.map((source, index) => (
+                    <a
+                      key={index}
+                      href={source.uri}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block bg-gray-800/50 rounded p-2 text-xs hover:bg-gray-700/50 transition-colors"
+                    >
+                      <div className="text-white font-semibold">{source.webTitle}</div>
+                      {source.snippet && (
+                        <div className="text-gray-400 mt-1 line-clamp-2">{source.snippet}</div>
+                      )}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Video Generation Results */}
+            {message.videoGeneration && (
+              <div className="mt-3 pt-3 border-t border-gray-600">
+                <div className="text-xs font-semibold text-pink-400 mb-2">
+                  🎬 Vidéo générée
+                </div>
+
+                {message.videoGeneration.status === 'processing' && (
+                  <div className="bg-gray-800/50 rounded p-3 text-xs">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="animate-spin h-4 w-4 border-2 border-pink-400 border-t-transparent rounded-full"></div>
+                      <span className="text-white">Génération en cours...</span>
+                    </div>
+                    <div className="text-gray-400 italic line-clamp-2">
+                      {message.videoGeneration.prompt}
+                    </div>
+                  </div>
+                )}
+
+                {message.videoGeneration.status === 'completed' && message.videoGeneration.videoUrl && (
+                  <div className="bg-gray-800/50 rounded p-2 space-y-2">
+                    <video
+                      src={message.videoGeneration.videoUrl}
+                      controls
+                      className="w-full rounded border border-gray-600"
+                      poster={message.videoGeneration.thumbnailUrl}
+                    >
+                      Your browser does not support the video tag.
+                    </video>
+                    <div className="flex gap-2">
+                      <a
+                        href={message.videoGeneration.videoUrl}
+                        download
+                        className="flex-1 bg-pink-600 hover:bg-pink-700 text-white text-xs font-semibold py-2 px-3 rounded transition-colors text-center"
+                      >
+                        📥 Télécharger
+                      </a>
+                      <button
+                        onClick={() => {
+                          // TODO: Implement video extension feature
+                          alert('Extension vidéo: Fonctionnalité à venir');
+                        }}
+                        className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold py-2 px-3 rounded transition-colors"
+                      >
+                        ➕ Prolonger (7s)
+                      </button>
+                    </div>
+                    <div className="text-gray-400 text-xs italic line-clamp-2">
+                      {message.videoGeneration.prompt}
+                    </div>
+                  </div>
+                )}
+
+                {message.videoGeneration.status === 'failed' && (
+                  <div className="bg-red-900/30 rounded p-3 text-xs">
+                    <div className="flex items-center gap-2 mb-2">
+                      <ErrorIcon className="text-red-400" />
+                      <span className="text-red-400 font-semibold">Échec de la génération</span>
+                    </div>
+                    {message.videoGeneration.error && (
+                      <div className="text-gray-400">{message.videoGeneration.error}</div>
+                    )}
+                    <div className="text-gray-400 italic mt-2 line-clamp-2">
+                      Prompt: {message.videoGeneration.prompt}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -828,6 +1021,57 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                       </Button>
                     )}
 
+                  {/* Arc-LLM Video Generation */}
+                  {agent?.capabilities?.includes(LLMCapability.VideoGeneration) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="p-2 h-8 w-8 text-gray-400 hover:text-pink-400 
+                               hover:bg-pink-500/20 hover:shadow-lg hover:shadow-pink-500/40
+                               transition-all duration-200 rounded-md
+                               hover:scale-110 active:scale-95"
+                      onClick={() => onOpenVideoPanel && onOpenVideoPanel(id)}
+                      disabled={isLoading}
+                      title="Générer une vidéo"
+                    >
+                      <VideoIcon />
+                    </Button>
+                  )}
+
+                  {/* Arc-LLM Maps Grounding */}
+                  {agent?.capabilities?.includes(LLMCapability.MapsGrounding) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="p-2 h-8 w-8 text-gray-400 hover:text-green-400 
+                               hover:bg-green-500/20 hover:shadow-lg hover:shadow-green-500/40
+                               transition-all duration-200 rounded-md
+                               hover:scale-110 active:scale-95"
+                      onClick={() => onOpenMapsPanel && onOpenMapsPanel(id)}
+                      disabled={isLoading}
+                      title="Recherche de lieux"
+                    >
+                      <MapIcon />
+                    </Button>
+                  )}
+
+                  {/* Arc-LLM Web Search Grounding */}
+                  {agent?.capabilities?.includes(LLMCapability.WebSearchGrounding) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="p-2 h-8 w-8 text-gray-400 hover:text-blue-400 
+                               hover:bg-blue-500/20 hover:shadow-lg hover:shadow-blue-500/40
+                               transition-all duration-200 rounded-md
+                               hover:scale-110 active:scale-95"
+                      onClick={handleWebSearchGrounding}
+                      disabled={isLoading || !userInput.trim()}
+                      title="Recherche web"
+                    >
+                      <WebSearchIcon />
+                    </Button>
+                  )}
+
                   {/* Send - avec effet spécial quand actif */}
                   <Button
                     type="submit"
@@ -879,6 +1123,16 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         cancelText={t('cancel')}
         variant="danger"
       />
+
+      {/* Arc-LLM Web Search Grounding Panel */}
+      {showWebSearchResults && webSearchResults.webSources.length > 0 && (
+        <WebSearchGroundingPanel
+          isOpen={showWebSearchResults}
+          onClose={() => setShowWebSearchResults(false)}
+          responseText={webSearchResults.text}
+          webSources={webSearchResults.webSources}
+        />
+      )}
     </div>
   );
 };

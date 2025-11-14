@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, Tool, OutputConfig, OutputFormat, RobotId } from '../../types';
 import { Button, Modal, ToggleSwitch } from '../UI';
-import { LLM_MODELS } from '../../llmModels';
+import { LLM_MODELS, LLM_MODELS_DETAILED, getModelCapabilities } from '../../llmModels';
 import { CloseIcon, PlusIcon } from '../Icons';
 import { useLocalization } from '../../hooks/useLocalization';
 import { validateAgentCapabilities, type CapabilityValidationResult } from '../../utils/lmStudioCapabilityValidator';
@@ -94,13 +94,21 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
   };
 
   // Helper function to get available capabilities for a provider (only if configured)  
-  const getAvailableCapabilities = (provider: LLMProvider): LLMCapability[] => {
+  const getAvailableCapabilities = (provider: LLMProvider, selectedModel?: string): LLMCapability[] => {
     const config = llmConfigs.find(c => c.provider === provider && c.enabled && c.apiKey);
     if (!config) {
       return []; // Return empty array if provider not configured
     }
 
-    // Return only capabilities that are enabled in the config
+    // If a specific model is selected, use its capabilities from LLM_MODELS_DETAILED
+    if (selectedModel) {
+      const modelCapabilities = getModelCapabilities(provider, selectedModel);
+      if (modelCapabilities.length > 0) {
+        return modelCapabilities;
+      }
+    }
+
+    // Fallback: Return only capabilities that are enabled in the config
     const caps = Object.keys(config.capabilities)
       .filter(cap => config.capabilities[cap as LLMCapability])
       .map(cap => cap as LLMCapability);
@@ -129,6 +137,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
   const [schemaErrors, setSchemaErrors] = useState<Record<string, string | null>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [lmStudioValidation, setLmStudioValidation] = useState<CapabilityValidationResult | null>(null);
+  const [capabilitiesExpanded, setCapabilitiesExpanded] = useState(false);
   const isEditing = !!existingAgent;
 
   useEffect(() => {
@@ -186,14 +195,16 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
 
 
   const availableCapabilities = useMemo(() => {
-    return getAvailableCapabilities(llmProvider);
-  }, [llmProvider, llmConfigs]);
+    return getAvailableCapabilities(llmProvider, model);
+  }, [llmProvider, model, llmConfigs]);
 
   const handleProviderChange = (provider: LLMProvider) => {
     setLlmProvider(provider);
     const availableModels = getAvailableModels(provider);
-    setModel(availableModels.length > 0 ? availableModels[0] : '');
-    setSelectedCapabilities(prev => prev.filter(cap => getAvailableCapabilities(provider).includes(cap)));
+    const firstModel = availableModels.length > 0 ? availableModels[0] : '';
+    setModel(firstModel);
+    setSelectedCapabilities(prev => prev.filter(cap => getAvailableCapabilities(provider, firstModel).includes(cap)));
+    setCapabilitiesExpanded(false); // Reset accordion when changing provider
   };
 
   const handleHistoryProviderChange = (provider: LLMProvider) => {
@@ -338,6 +349,76 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
                 </div>
               </div>
 
+              {/* Model Capabilities Info (Universal Collapsible) */}
+              {availableCapabilities.length > 0 && (
+                <div className={`border rounded-lg ${llmProvider === LLMProvider.Gemini ? 'bg-gradient-to-r from-blue-900/30 to-indigo-900/30 border-blue-500/30' :
+                    llmProvider === LLMProvider.ArcLLM ? 'bg-gradient-to-r from-purple-900/30 to-cyan-900/30 border-purple-500/30' :
+                      llmProvider === LLMProvider.OpenAI ? 'bg-gradient-to-r from-green-900/30 to-emerald-900/30 border-green-500/30' :
+                        llmProvider === LLMProvider.Anthropic ? 'bg-gradient-to-r from-orange-900/30 to-amber-900/30 border-orange-500/30' :
+                          'bg-gradient-to-r from-gray-900/30 to-slate-900/30 border-gray-500/30'
+                  }`}>
+                  <button
+                    type="button"
+                    onClick={() => setCapabilitiesExpanded(!capabilitiesExpanded)}
+                    className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-white/5 transition-colors rounded-lg"
+                  >
+                    <h4 className={`text-xs font-semibold flex items-center gap-2 ${llmProvider === LLMProvider.Gemini ? 'text-blue-300' :
+                        llmProvider === LLMProvider.ArcLLM ? 'text-purple-300' :
+                          llmProvider === LLMProvider.OpenAI ? 'text-green-300' :
+                            llmProvider === LLMProvider.Anthropic ? 'text-orange-300' :
+                              'text-gray-300'
+                      }`}>
+                      <span className={`${llmProvider === LLMProvider.Gemini ? 'text-indigo-400' :
+                          llmProvider === LLMProvider.ArcLLM ? 'text-cyan-400' :
+                            llmProvider === LLMProvider.OpenAI ? 'text-emerald-400' :
+                              llmProvider === LLMProvider.Anthropic ? 'text-amber-400' :
+                                'text-gray-400'
+                        }`}>✨</span>
+                      Capacités multimodales {llmProvider}
+                    </h4>
+                    <svg
+                      className={`w-4 h-4 text-gray-400 transition-transform ${capabilitiesExpanded ? 'rotate-180' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {capabilitiesExpanded && (
+                    <div className="px-3 pb-3 space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        {availableCapabilities.map(cap => (
+                          <span key={cap} className={`px-2 py-1 text-xs rounded-md border ${llmProvider === LLMProvider.Gemini ? 'bg-blue-500/20 text-blue-200 border-blue-400/30' :
+                              llmProvider === LLMProvider.ArcLLM ? 'bg-purple-500/20 text-purple-200 border-purple-400/30' :
+                                llmProvider === LLMProvider.OpenAI ? 'bg-green-500/20 text-green-200 border-green-400/30' :
+                                  llmProvider === LLMProvider.Anthropic ? 'bg-orange-500/20 text-orange-200 border-orange-400/30' :
+                                    'bg-gray-500/20 text-gray-200 border-gray-400/30'
+                            }`}>
+                            {cap}
+                          </span>
+                        ))}
+                      </div>
+                      {llmProvider === LLMProvider.Gemini && model === 'gemini-2.5-flash' && (
+                        <p className="text-xs text-gray-400">
+                          Génération vidéo + édition, recherche Maps/Web avec Google Search
+                        </p>
+                      )}
+                      {llmProvider === LLMProvider.ArcLLM && model === 'arc-video-v1' && (
+                        <p className="text-xs text-gray-400">
+                          Génération de vidéos haute résolution avec images de référence
+                        </p>
+                      )}
+                      {llmProvider === LLMProvider.ArcLLM && model === 'arc-grounding-v1' && (
+                        <p className="text-xs text-gray-400">
+                          Recherches temps réel avec Maps et Web Search
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Template adaptation notice */}
               {isEditing && existingAgent?.id === 'temp' && (
                 <div className="p-3 bg-blue-900/30 border border-blue-500/50 rounded-lg">
@@ -380,7 +461,19 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentForm_capabilitiesLabel')}</label>
                   <div className="space-y-2 p-3 bg-gray-900/50 rounded-md max-h-32 overflow-y-auto">
-                    {availableCapabilities.map(cap => <label key={cap} className="flex items-center"><input type="checkbox" checked={selectedCapabilities.includes(cap)} onChange={() => handleCapabilityToggle(cap)} className="h-4 w-4 rounded border-gray-500 bg-gray-700 text-indigo-600 focus:ring-indigo-500" /><span className="ml-3 text-sm text-gray-300">{cap}</span></label>)}
+                    {availableCapabilities.map(cap => (
+                      <label key={cap} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedCapabilities.includes(cap)}
+                          onChange={() => handleCapabilityToggle(cap)}
+                          className="h-4 w-4 rounded border-gray-500 bg-gray-700 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="ml-3 text-sm text-gray-300">
+                          {cap}
+                        </span>
+                      </label>
+                    ))}
                   </div>
                 </div>
               )}

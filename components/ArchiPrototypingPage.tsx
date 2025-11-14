@@ -211,33 +211,10 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
   };
 
   const confirmDeletion = () => {
-    if (agentToDelete) {
-      const affectedInstances = useDesignStore.getState().getInstancesOfPrototype(agentToDelete.id);
-
-      const result = deleteAgent(agentToDelete.id);
-
-      if (result.success) {
-        // PHASE 2A: Success notification with impact details
-        addNotification({
-          type: 'success',
-          title: 'Agent supprimé',
-          message: affectedInstances.length > 0
-            ? `"${agentToDelete.name}" et ses ${affectedInstances.length} instance(s) ont été supprimés.`
-            : `"${agentToDelete.name}" a été supprimé avec succès.`,
-          duration: 4000
-        });
-      } else {
-        addNotification({
-          type: 'error',
-          title: 'Suppression refusée',
-          message: result.error || 'Erreur de gouvernance',
-          duration: 5000
-        });
-      }
-
-      setDeletionConfirmOpen(false);
-      setAgentToDelete(null);
-    }
+    // La modale gère maintenant tout : options de suppression + notifications
+    // Cette fonction sert juste à fermer la modale après l'action
+    setDeletionConfirmOpen(false);
+    setAgentToDelete(null);
   };
 
   const cancelDeletion = () => {
@@ -257,18 +234,18 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
   return (
     <div className="h-full bg-gray-900 text-gray-100">
       {/* Header */}
-      <div className="p-6 border-b border-gray-700">
+      <div className="p-4 border-b border-gray-700">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <WrenchIcon className="w-8 h-8 text-indigo-400" />
+            <WrenchIcon className="w-6 h-6 text-indigo-400" />
             <div>
-              <h1 className="text-2xl font-bold text-white">Prototypage d'Agents</h1>
+              <h1 className="text-xl font-bold text-white">Prototypage d'Agents</h1>
               <p className="text-gray-400 text-sm">Créez et configurez les agents IA pour votre workflow</p>
             </div>
           </div>
 
           {/* Governance Indicator */}
-          <div className="bg-indigo-500/20 border border-indigo-500/30 rounded-lg px-4 py-2">
+          <div className="bg-indigo-500/20 border border-indigo-500/30 rounded-lg px-3 py-1.5">
             <div className="text-xs text-indigo-300 font-medium">Robot Actuel</div>
             <div className="text-sm text-indigo-100 font-bold">{currentRobotId}</div>
             <div className="text-xs text-indigo-400">Créateur autorisé</div>

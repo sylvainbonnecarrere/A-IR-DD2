@@ -27,6 +27,8 @@ interface WorkflowCanvasProps {
   onToggleNodeMinimize?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string) => void;
   onOpenImageModificationPanel?: (nodeId: string) => void;
+  onOpenVideoPanel?: (nodeId: string) => void;
+  onOpenMapsPanel?: (nodeId: string) => void;
   onOpenFullscreen?: (nodeId: string) => void;
   agents?: Agent[];
   workflowNodes?: WorkflowNode[];
@@ -36,13 +38,11 @@ interface WorkflowCanvasProps {
   onNavigate?: (robotId: any, path: string) => void; // Pour navigation vers prototypage
 }
 
-// nodeTypes défini GLOBALEMENT pour éviter les re-créations
+// nodeTypes défini GLOBALEMENT pour éviter les re-créations (React Flow best practice)
+// Ne JAMAIS définir ceci dans le composant ou utiliser useMemo
 const NODE_TYPES = {
   customAgent: V2AgentNode,
-} as const;
-
-// Mémoriser le composant ReactFlow pour éviter les re-renders
-const MemoizedReactFlow = memo(ReactFlow);
+};
 
 // Composant interne avec isolation complète
 const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCanvasProps) {
@@ -55,6 +55,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     onToggleNodeMinimize,
     onOpenImagePanel,
     onOpenImageModificationPanel,
+    onOpenVideoPanel,
+    onOpenMapsPanel,
     onOpenFullscreen,
     agents = [],
     workflowNodes = [],
@@ -66,9 +68,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
   // Hook de thème jour/nuit
   const theme = useDayNightTheme();
-
-  // Mémorisation explicite de NODE_TYPES pour satisfaire React Flow
-  const nodeTypes = useMemo(() => NODE_TYPES, []);
 
   // ISOLATION COMPLÈTE: un seul useState pour éviter les conflits React Flow
   const [internalState, setInternalState] = useState({
@@ -227,8 +226,10 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     onUpdateNodePosition,
     onOpenImagePanel,
     onOpenImageModificationPanel,
+    onOpenVideoPanel,
+    onOpenMapsPanel,
     onOpenFullscreen,
-  }), [handleEditPrototype, onNavigate, onDeleteNode, onToggleNodeMinimize, onUpdateNodePosition, onOpenImagePanel, onOpenImageModificationPanel, onOpenFullscreen]);
+  }), [handleEditPrototype, onNavigate, onDeleteNode, onToggleNodeMinimize, onUpdateNodePosition, onOpenImagePanel, onOpenImageModificationPanel, onOpenVideoPanel, onOpenMapsPanel, onOpenFullscreen]);
 
   return (
     <WorkflowCanvasProvider value={contextValue}>
@@ -236,19 +237,18 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         {/* Background optimisé avec thème jour/nuit */}
         <OptimizedWorkflowBackground />
 
-        <MemoizedReactFlow
-          key="workflow-canvas-main" // Clé unique pour éviter les re-créations
+        <ReactFlow
           nodes={reactFlowNodes}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onPaneClick={handlePaneClick}
-          nodeTypes={nodeTypes}
+          nodeTypes={NODE_TYPES}
           fitView
           style={{ background: 'transparent' }}
           defaultViewport={{ x: 0, y: 0, zoom: 1 }}
-          proOptions={{ hideAttribution: true }} // Masquer le lien promotionnel React Flow
+          proOptions={{ hideAttribution: true }}
         >
           {/* MiniMap protégée contre les erreurs NaN - Thème adaptatif */}
           {internalState.minimapReady && (
@@ -306,7 +306,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             />
           )}
           <Controls
-            key="controls-unique" // Clé unique pour éviter les dédoublements
             position="top-right"
             style={{
               background: 'linear-gradient(135deg, rgba(0, 0, 0, 0.9) 0%, rgba(26, 26, 26, 0.8) 100%)',
@@ -321,7 +320,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               backdropFilter: 'blur(12px)'
             }}
           />
-        </MemoizedReactFlow>
+        </ReactFlow>
 
         {/* Bouton flottant redirection vers prototypage Archi - Style Blur futuriste */}
         {onAddToWorkflow && onNavigate && (
@@ -407,7 +406,5 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   );
 });
 
-// Export par défaut - composant wrapper simple et mémorisé
-export default memo(function WorkflowCanvas(props: WorkflowCanvasProps) {
-  return <WorkflowCanvasInner {...props} />;
-});
+// Export direct du composant mémoïsé (pas de double wrapping)
+export default WorkflowCanvasInner;

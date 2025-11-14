@@ -121,18 +121,18 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
   return (
     <div className="h-full bg-gray-900 text-gray-100">
       {/* Header */}
-      <div className="p-6 border-b border-gray-700">
+      <div className="p-4 border-b border-gray-700">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <AntennaIcon className="w-8 h-8 text-blue-400" />
+            <AntennaIcon className="w-6 h-6 text-blue-400" />
             <div>
-              <h1 className="text-2xl font-bold text-white">{t('com_connections_api')}</h1>
+              <h1 className="text-xl font-bold text-white">{t('com_connections_api')}</h1>
               <p className="text-gray-400 text-sm">{t('com_connections_api_desc')}</p>
             </div>
           </div>
 
           {/* Robot Indicator */}
-          <div className="bg-blue-500/20 border border-blue-500/30 rounded-lg px-4 py-2">
+          <div className="bg-blue-500/20 border border-blue-500/30 rounded-lg px-3 py-1.5">
             <div className="text-xs text-blue-300 font-medium">{t('current_robot')}</div>
             <div className="text-sm text-blue-100 font-bold">{currentRobotId}</div>
             <div className="text-xs text-blue-400">{t('com_connection_specialist')}</div>

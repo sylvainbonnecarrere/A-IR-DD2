@@ -287,6 +287,173 @@ const { t, currentLanguage, changeLanguage } = useLocalization();
 
 ---
 
+## 🗺️ Maps Grounding - Guide Complet
+
+### Fonctionnalité
+
+**Maps Grounding** permet aux agents LLM de rechercher des lieux réels avec géolocalisation via Google Maps (Gemini) ou API Arc-LLM.
+
+**Providers supportés** :
+- ✅ Gemini (via `generateContentWithSearch` + Google Search tools)
+- ✅ Arc-LLM (mock avec données simulées)
+
+### Workflow UX
+
+#### 1. Activation
+L'utilisateur clique sur le bouton **🗺️ Maps** dans la toolbar de l'agent (visible si `LLMCapability.MapsGrounding` activée).
+
+#### 2. Panel de Configuration (`MapsGroundingConfigPanel`)
+Un **SlideOver** s'ouvre à droite avec :
+
+**Champs** :
+- **Requête de recherche** (textarea, requis)
+  - Placeholder : "Ex: Restaurants japonais à Paris"
+  - Validation : minimum 1 caractère
+
+- **Géolocalisation** (checkbox optionnel)
+  - ☑️ Utiliser ma position
+  - Bouton "Détecter ma position" → `navigator.geolocation`
+  - Champs Latitude/Longitude (modifiables manuellement)
+  - Par défaut : Paris (48.8566, 2.3522)
+
+**Exemples suggérés** :
+- "Restaurants italiens avec terrasse à Lyon"
+- "Pharmacies ouvertes 24h/24 à proximité"
+- "Hôtels avec spa et piscine à Marseille"
+
+**Actions** :
+- **Annuler** → Ferme le panel
+- **🔍 Rechercher** → Lance la recherche Maps
+
+#### 3. Exécution
+```typescript
+llmService.generateContentWithMaps(
+  provider,
+  apiKey,
+  model,
+  query,
+  systemInstruction,
+  userLocation?: { lat: number; lng: number }
+)
+```
+
+**Loading** : Message "🗺️ Recherche de lieux..." affiché dans l'agent.
+
+#### 4. Résultats
+
+**Double affichage** :
+
+**A) Dans le chat de l'agent** :
+```tsx
+<ChatMessage>
+  {text}
+  <MapsGroundingResults>
+    {mapSources.map(place => (
+      <PlaceCard>
+        <Title>{place.placeTitle}</Title>
+        <Coordinates>📍 {lat}, {lng}</Coordinates>
+        <Link href={place.uri}>🔗 Voir sur Maps</Link>
+      </PlaceCard>
+    ))}
+  </MapsGroundingResults>
+</ChatMessage>
+```
+
+**B) Panel SlideOver dédié** (`MapGroundingResultsPanel`) :
+- Texte de réponse complète
+- Liste détaillée des lieux :
+  - Nom du lieu
+  - Coordonnées GPS précises (6 décimales)
+  - Place ID
+  - Extraits d'avis (si disponibles)
+  - Lien Google Maps cliquable
+
+#### 5. Interactions
+- **Cliquer sur un lieu** → Ouvre Google Maps dans nouvel onglet
+- **Fermer le panel** → Résultats restent dans le chat
+- **Nouvelle recherche** → Ouvre à nouveau le panel de config
+
+### Structure des Données
+
+#### `MapsGroundingResponse`
+```typescript
+{
+  text: string;               // Réponse textuelle de l'agent
+  mapSources: MapSource[];    // Liste des lieux trouvés
+}
+```
+
+#### `MapSource`
+```typescript
+{
+  uri: string;                          // URL Google Maps
+  placeTitle: string;                   // Nom du lieu
+  placeId: string;                      // Identifiant Google Places
+  coordinates: {
+    latitude: number;
+    longitude: number;
+  };
+  reviewExcerpts?: string[];            // Extraits d'avis (optionnel)
+}
+```
+
+### Gestion d'Erreurs
+
+**Géolocalisation refusée** :
+```
+⚠️ Erreur géolocalisation: User denied Geolocation
+```
+→ Fallback : Recherche sans coordonnées (contexte texte uniquement)
+
+**Provider non supporté** :
+```
+❌ Erreur Maps Grounding: Maps Grounding not supported by OpenAI
+```
+
+**API Error** :
+```
+❌ Erreur Maps Grounding: {error.message}
+```
+
+### Exemples d'Usage
+
+**Cas 1 : Recherche locale avec géolocalisation**
+```
+Requête : "Boulangeries ouvertes maintenant"
+Position : 48.8566, 2.3522 (Paris)
+Résultat : 5 boulangeries dans un rayon de 2km
+```
+
+**Cas 2 : Recherche sans géolocalisation**
+```
+Requête : "Hôtels 5 étoiles à New York"
+Position : Non activée
+Résultat : Hôtels à Manhattan (coordonnées extraites du texte)
+```
+
+**Cas 3 : Recherche spécifique**
+```
+Requête : "Restaurants végans avec Wi-Fi gratuit à Lyon"
+Position : 45.7640, 4.8357 (Lyon)
+Résultat : Restaurants filtrés avec critères
+```
+
+### Performance & Optimisation
+
+**Polling** : Aucun (requête unique synchrone)  
+**Cache** : Pas de cache côté client (chaque recherche = appel API)  
+**Rate limiting** : Géré côté provider (Gemini, Arc-LLM)  
+**Timeout** : 30 secondes par défaut
+
+### Accessibilité
+
+- **Keyboard** : Tab navigation, Enter pour submit, Esc pour fermer
+- **Screen readers** : Labels aria sur tous les champs
+- **Contraste** : Couleurs conformes WCAG AA
+- **Focus** : Indicateurs visuels clairs (ring cyan)
+
+---
+
 ## 🔒 Sécurité & Gouvernance
 
 ### Validation creator_id
@@ -371,11 +538,179 @@ Tous les boutons iconiques ont `aria-label` :
 - [ ] Preview affichée après génération/import
 - [ ] Boutons conditionnels selon capabilities
 
+**Maps Grounding** (Gemini, Arc-LLM) :
+- [ ] Panel de configuration s'ouvre au clic 🗺️
+- [ ] Requête de recherche requise
+- [ ] Géolocalisation optionnelle (détection auto ou manuelle)
+- [ ] Coordonnées GPS affichées (lat/lng)
+- [ ] Résultats affichés dans le chat + panel SlideOver
+- [ ] Lieux cliquables → ouvrent Google Maps
+- [ ] Extraits d'avis affichés si disponibles
+
 **Chat Agent** :
 - [ ] Messages streaming affichés progressivement
 - [ ] Tool calls identifiables avec icône
 - [ ] Scroll auto vers nouveau message
 - [ ] Image overlay visible au hover
+
+---
+
+## 🎬 Workflow 5 : Génération de Vidéo (Veo 3.1)
+
+**Prérequis** : Agent avec capability `VideoGeneration` (actuellement Gemini Veo 3.1 uniquement)
+
+### UX Pattern : SlideOver Panel (Droite)
+
+1. **Déclenchement** :
+   - Clic sur bouton 🎬 dans mediabar de l'agent
+   - **Panel s'ouvre sur la droite** (SlideOver, max-w-md)
+
+2. **Configuration dans VideoGenerationConfigPanel** :
+   
+   **Sélection du mode** (5 options) :
+   - 📝 **Text-to-Video** : Génération basique depuis description textuelle
+   - 🖼️ **Image-to-Video** : Anime une image comme première frame
+   - 🎞️ **Interpolation** : Génère transition entre 2 frames (first + last)
+   - ➕ **Extension** : Continue une vidéo Veo existante (7s increments)
+   - 🎨 **With Reference Images** : Utilise jusqu'à 3 images de référence pour le style
+
+   **Inputs conditionnels** (selon mode) :
+   - **Prompt** (requis) : Description de la vidéo
+     * 💡 Audio cues: Use quotes for dialogue ("Hello"), describe sound effects (thunder crashes), describe ambient (bustling city)
+   - **Negative Prompt** (optionnel) : Ce qu'il faut exclure (ex: "cartoon, low quality")
+   - **First Frame** (image-to-video, interpolation) : Upload image première frame
+   - **Last Frame** (interpolation uniquement) : Upload image dernière frame
+   - **Reference Images** (with-references) : Max 3 images pour guider le style/contenu
+   
+   **Paramètres** :
+   - **Resolution** : 720p (défaut) ou 1080p (uniquement 16:9 + 8s)
+   - **Aspect Ratio** : 16:9 (landscape) ou 9:16 (portrait)
+   - **Duration** : 4s, 6s, ou 8s
+   - **Person Generation** : allow_all, allow_adult, dont_allow
+   - **Seed** (optionnel) : Améliore déterminisme (légèrement)
+
+3. **Génération** :
+   - Clic "🎬 Generate Video"
+   - **Validation automatique** :
+     * Prompt minimum 3 mots
+     * Frames requises selon mode
+     * Max 3 reference images
+     * Compatibilité résolution/aspect ratio
+   - Panel se ferme
+   - **Message de progression** apparaît dans chat agent :
+     ```
+     🎬 Génération en cours...
+     "Description du prompt..." (tronquée à 50 char)
+     Spinner animé
+     ```
+
+4. **Polling asynchrone** :
+   - Backend appelle `ai.models.generateVideos()` (opération asynchrone)
+   - Frontend polle `pollVideoOperation()` toutes les 10s
+   - Message mis à jour avec progression
+
+5. **Résultats** :
+   
+   **Success** :
+   ```
+   ✅ Vidéo générée avec succès !
+   
+   [Player vidéo avec controls natifs]
+   [📥 Télécharger] [➕ Prolonger (7s)]
+   
+   Prompt: "Description complète..."
+   ```
+   
+   **Failed** :
+   ```
+   ❌ Échec de la génération
+   Error: [Message d'erreur]
+   Prompt: "Description..."
+   ```
+
+6. **Actions post-génération** :
+   - **Télécharger** : Download direct de la vidéo
+   - **Prolonger** : Ouvre config panel avec mode "Extension" pré-sélectionné (TODO)
+
+### API Pattern (Gemini Veo 3.1)
+
+**Génération** :
+```javascript
+const result = await llmService.generateVideo(
+  LLMProvider.Gemini,
+  apiKey, // Ignored, uses process.env.API_KEY
+  {
+    prompt: "A close up of two people... A man murmurs, 'This must be it.'",
+    negativePrompt: "cartoon, drawing, low quality",
+    mode: 'text-to-video',
+    resolution: '720p',
+    aspectRatio: '16:9',
+    durationSeconds: 8,
+    personGeneration: 'allow_all',
+    // Mode-specific fields:
+    // firstFrame?: { mimeType, data }
+    // lastFrame?: { mimeType, data }
+    // referenceImages?: [{ image: {...}, referenceType: 'asset' }]
+    // existingVideo?: { uri, operationId }
+  }
+);
+// Returns: { operationId, status: 'PROCESSING', progress: 0 }
+```
+
+**Polling** :
+```javascript
+const status = await llmService.pollVideoOperation(
+  LLMProvider.Gemini,
+  apiKey,
+  operationId
+);
+// Returns: { operationId, status, progress, videoUrl?, error? }
+// status: 'PROCESSING' | 'COMPLETED' | 'FAILED'
+```
+
+### Validation Checklist
+
+**Panel Config** :
+- [ ] Mode selector avec 5 options
+- [ ] Prompt textarea avec placeholder audio cues
+- [ ] Negative prompt input (optionnel)
+- [ ] First frame upload (conditionnel : image-to-video, interpolation)
+- [ ] Last frame upload (conditionnel : interpolation uniquement)
+- [ ] Reference images upload (conditionnel : with-references, max 3)
+- [ ] Resolution select (720p/1080p)
+- [ ] Aspect ratio select (16:9/9:16)
+- [ ] Duration select (4s/6s/8s)
+- [ ] Person generation select
+- [ ] Seed input (optionnel)
+- [ ] Validation pré-submit (prompt requis, frames selon mode)
+- [ ] Validation compatibilité 1080p (uniquement 16:9 + 8s)
+
+**Intégration V2AgentNode** :
+- [ ] Bouton 🎬 visible si capability `VideoGeneration`
+- [ ] Bouton ouvre `VideoGenerationConfigPanel` (SlideOver)
+- [ ] Callback `handleVideoGeneration(config)` créé message initial
+- [ ] Polling `handleVideoPoll()` met à jour message
+- [ ] Message affiche statut (processing/completed/failed)
+- [ ] Video player natif si completed
+- [ ] Bouton télécharger fonctionnel
+- [ ] Bouton prolonger présent (TODO: implémentation extension)
+
+**Service Layer** :
+- [ ] `geminiService.generateVideo()` appelle `ai.models.generateVideos()`
+- [ ] Support tous les paramètres Veo 3.1 (mode, frames, references, negative prompt)
+- [ ] `geminiService.pollVideoOperation()` appelle `ai.operations.get()`
+- [ ] `llmService.generateVideo()` dispatch vers provider
+- [ ] `llmService.pollVideoOperation()` dispatch vers provider
+
+**Types** :
+- [ ] `VideoGenerationOptions` avec tous les champs (mode, frames, references, etc.)
+- [ ] `ChatMessage.videoGeneration` avec operationId, videoUrl, status, error
+
+**Documentation** :
+- [ ] Section dans UX_FEATURES_GUIDE.md avec workflow complet
+- [ ] Audio cues guidance (quotes, sound effects, ambient)
+- [ ] Mode-specific requirements (frames, references)
+- [ ] Resolution compatibility rules (1080p restrictions)
 
 ---
 

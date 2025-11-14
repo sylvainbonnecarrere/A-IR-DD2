@@ -172,6 +172,18 @@ export interface ChatMessage {
   toolName?: string;
   status?: 'executing_tool';
   isError?: boolean;
+  // Maps & Web Search Grounding (Arc-LLM, Gemini)
+  mapsGrounding?: MapSource[];
+  webSearchGrounding?: WebSearchSource[];
+  // Video Generation (Veo 3.1)
+  videoGeneration?: {
+    operationId: string;
+    videoUrl?: string; // Available when completed
+    thumbnailUrl?: string;
+    prompt: string;
+    status: 'processing' | 'completed' | 'failed';
+    error?: string;
+  };
 }
 
 export interface WorkflowNode {
@@ -282,14 +294,36 @@ export interface GovernanceValidationResult {
 // ============================================
 
 /**
- * Options pour la génération de vidéo Arc-LLM
+ * Options pour la génération de vidéo Arc-LLM (Gemini Veo 3.1)
  */
 export interface VideoGenerationOptions {
   prompt: string;
-  referenceImages?: { mimeType: string; data: string }[]; // Max 3 images
-  resolution: '720p' | '1080p';
-  aspectRatio: '16:9' | '9:16';
-  extendFromVideoId?: string; // Pour extension de vidéo existante
+  negativePrompt?: string; // Exclude unwanted elements
+
+  // Mode selection
+  mode: 'text-to-video' | 'image-to-video' | 'interpolation' | 'extension' | 'with-references';
+
+  // Image-to-video (animate single image as first frame)
+  firstFrame?: { mimeType: string; data: string };
+
+  // Interpolation (first + last frame)
+  lastFrame?: { mimeType: string; data: string };
+
+  // Extension (continue existing video)
+  existingVideo?: { uri: string; operationId: string };
+
+  // Reference images (max 3) for style/content guidance
+  referenceImages?: Array<{
+    image: { mimeType: string; data: string };
+    referenceType: 'asset'; // Gemini uses 'asset' for style references
+  }>;
+
+  // Parameters
+  resolution?: '720p' | '1080p';
+  aspectRatio?: '16:9' | '9:16';
+  durationSeconds?: 4 | 6 | 8;
+  personGeneration?: 'allow_all' | 'allow_adult' | 'dont_allow';
+  seed?: number; // Improves determinism slightly
 }
 
 /**

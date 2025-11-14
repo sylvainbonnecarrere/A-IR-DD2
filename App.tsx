@@ -7,6 +7,8 @@ import { SettingsModal } from './components/modals/SettingsModal';
 import { Header } from './components/Header';
 import { ImageGenerationPanel } from './components/panels/ImageGenerationPanel';
 import { ImageModificationPanel } from './components/panels/ImageModificationPanel';
+import { VideoGenerationConfigPanel } from './components/panels/VideoGenerationConfigPanel';
+import { MapsGroundingConfigPanel } from './components/panels/MapsGroundingConfigPanel';
 import { useLocalization } from './hooks/useLocalization';
 import { Button } from './components/UI';
 import { ConfirmationModal } from './components/modals/ConfirmationModal';
@@ -26,7 +28,7 @@ interface EditingImageInfo {
 }
 
 const initialLLMConfigs: LLMConfig[] = [
-  { provider: LLMProvider.Gemini, enabled: true, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.ImageGeneration]: true, [LLMCapability.ImageModification]: true, [LLMCapability.WebSearch]: true, [LLMCapability.URLAnalysis]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true } },
+  { provider: LLMProvider.Gemini, enabled: true, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.ImageGeneration]: true, [LLMCapability.ImageModification]: true, [LLMCapability.WebSearch]: true, [LLMCapability.URLAnalysis]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true, [LLMCapability.VideoGeneration]: true, [LLMCapability.MapsGrounding]: true, [LLMCapability.WebSearchGrounding]: true } },
   { provider: LLMProvider.OpenAI, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.ImageGeneration]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true } },
   { provider: LLMProvider.Mistral, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true, [LLMCapability.Embedding]: true, [LLMCapability.OCR]: true } },
   { provider: LLMProvider.Anthropic, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true } },
@@ -102,12 +104,16 @@ function App() {
   const [isAgentModalOpen, setAgentModalOpen] = useState(false);
   const [isImagePanelOpen, setImagePanelOpen] = useState(false);
   const [isImageModificationPanelOpen, setImageModificationPanelOpen] = useState(false);
+  const [isVideoPanelOpen, setVideoPanelOpen] = useState(false);
+  const [isMapsPanelOpen, setMapsPanelOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [workflowNodes, setWorkflowNodes] = useState<WorkflowNode[]>([]);
   const [llmConfigs, setLlmConfigs] = useState<LLMConfig[]>(loadLLMConfigs);
   const [currentImageNodeId, setCurrentImageNodeId] = useState<string | null>(null);
+  const [currentVideoNodeId, setCurrentVideoNodeId] = useState<string | null>(null);
+  const [currentMapsNodeId, setCurrentMapsNodeId] = useState<string | null>(null);
   const [editingImageInfo, setEditingImageInfo] = useState<EditingImageInfo | null>(null);
   const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; mimeType: string } | null>(null);
@@ -273,6 +279,16 @@ function App() {
     setImageModificationPanelOpen(true);
   };
 
+  const handleOpenVideoPanel = (nodeId: string) => {
+    setCurrentVideoNodeId(nodeId);
+    setVideoPanelOpen(true);
+  };
+
+  const handleOpenMapsPanel = (nodeId: string) => {
+    setCurrentMapsNodeId(nodeId);
+    setMapsPanelOpen(true);
+  };
+
   const handleImageModified = (nodeId: string, newImage: string, text: string) => {
     const message: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -338,6 +354,8 @@ function App() {
               onToggleNodeMinimize={handleToggleNodeMinimize}
               onOpenImagePanel={handleOpenImagePanel}
               onOpenImageModificationPanel={handleOpenImageModificationPanel}
+              onOpenVideoPanel={handleOpenVideoPanel}
+              onOpenMapsPanel={handleOpenMapsPanel}
               onOpenFullscreen={handleOpenFullscreen}
               onAddToWorkflow={handleAddToWorkflow}
             />
@@ -402,6 +420,22 @@ function App() {
           workflowNodes={workflowNodes}
           onClose={() => setImageModificationPanelOpen(false)}
           onImageModified={handleImageModified}
+        />
+
+        <VideoGenerationConfigPanel
+          isOpen={isVideoPanelOpen}
+          nodeId={currentVideoNodeId}
+          llmConfigs={llmConfigs}
+          workflowNodes={workflowNodes}
+          onClose={() => setVideoPanelOpen(false)}
+        />
+
+        <MapsGroundingConfigPanel
+          isOpen={isMapsPanelOpen}
+          nodeId={currentMapsNodeId}
+          llmConfigs={llmConfigs}
+          workflowNodes={workflowNodes}
+          onClose={() => setMapsPanelOpen(false)}
         />
 
         {fullscreenImage && (

@@ -8,6 +8,8 @@ interface WorkflowCanvasContextType {
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }) => void;
   onOpenImagePanel?: (nodeId: string) => void;
   onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, mimeType?: string) => void;
+  onOpenVideoPanel?: (nodeId: string) => void;
+  onOpenMapsPanel?: (nodeId: string) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
 }
 
