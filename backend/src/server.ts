@@ -19,6 +19,7 @@ import llmConfigsRoutes from './routes/llm-configs.routes';
 import llmProxyRoutes from './routes/llm-proxy.routes';
 import userSettingsRoutes from './routes/user-settings.routes';
 import userWorkspaceRoutes from './routes/user-workspace.routes';
+import { initializeDatabase } from './services/databaseInit';
 
 // SOLID: Valider la configuration au démarrage (fail-fast pattern)
 validateConfig();
@@ -169,6 +170,11 @@ async function startServer() {
     // Tentative connexion MongoDB (non-bloquante pour Jalon 1)
     try {
       await connectDatabase();
+      
+      // Initialize database schema, collections, and indexes (Code-First approach)
+      // This runs AFTER successful MongoDB connection
+      await initializeDatabase();
+      
     } catch (dbError) {
       console.warn('⚠️  MongoDB non disponible - Mode Guest uniquement');
       console.warn('   Pour activer le mode Authenticated, démarrer MongoDB :');

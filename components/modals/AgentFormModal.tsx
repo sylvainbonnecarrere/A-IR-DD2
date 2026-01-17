@@ -4,6 +4,7 @@ import { Button, Modal, ToggleSwitch } from '../UI';
 import { LLM_MODELS, LLM_MODELS_DETAILED, getModelCapabilities, getLMStudioMergedModels, invalidateLMStudioCache } from '../../llmModels';
 import { CloseIcon, PlusIcon } from '../Icons';
 import { useLocalization } from '../../hooks/useLocalization';
+import { useAuth } from '../../hooks/useAuth';
 import { validateAgentCapabilities, type CapabilityValidationResult } from '../../utils/lmStudioCapabilityValidator';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
@@ -82,6 +83,8 @@ const outputFormats: OutputFormat[] = ['json', 'xml', 'yaml', 'shell', 'powershe
 
 export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: AgentFormModalProps) => {
   const { t } = useLocalization();
+  const { user } = useAuth();
+  const isAuthenticated = user !== null;
   const enabledLLMProvider = llmConfigs.find(c => c.enabled)?.provider || LLMProvider.Gemini;
 
   // Helper function to get available models for a provider (only if configured)
@@ -416,13 +419,15 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
             <button type="button" onClick={() => setActiveTab('historique')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'historique' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>{t('agentForm_tab_history')}</button>
             {selectedCapabilities.includes(LLMCapability.FunctionCalling) && <button type="button" onClick={() => setActiveTab('fonctions')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'fonctions' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>{t('agentForm_tab_functions')}</button>}
             {selectedCapabilities.includes(LLMCapability.OutputFormatting) && <button type="button" onClick={() => setActiveTab('formatage')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'formatage' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>{t('agentForm_tab_formatting')}</button>}
-            {/* ⭐ NEW: Onglet Options de sauvegarde */}
-            <button type="button" onClick={() => setActiveTab('persistance')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-1.5 ${activeTab === 'persistance' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-              </svg>
-              Sauvegarde
-            </button>
+            {/* ⭐ Onglet Options de sauvegarde - Auth only */}
+            {isAuthenticated && (
+              <button type="button" onClick={() => setActiveTab('persistance')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-1.5 ${activeTab === 'persistance' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                </svg>
+                Sauvegarde
+              </button>
+            )}
           </nav>
         </div>
 

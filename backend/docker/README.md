@@ -1,20 +1,48 @@
-﻿# MongoDB Docker Setup for A-IR-DD2
+﻿# MongoDB Docker Setup for A-IR-DD2 (Code-First Architecture)
 
-This professional Docker setup ensures consistent MongoDB deployment across all environments (development, staging, production).
+This professional Docker setup implements a **Code-First** initialization architecture that eliminates fragile volume-based initialization scripts and ensures robust, cross-platform database initialization.
 
-## Quick Start
+## ✨ Architecture Evolution
 
-### Prerequisites
-- Docker & Docker Compose installed
-- Backend running Node.js 18+
+### ❌ Previous Approach (Deprecated)
+- Relied on Docker volume mount for `init-collections.js`
+- Fragile: Dependent on MongoDB internal initialization order
+- Platform-specific issues: Problems with authentication timing
+- Result: Corrupted data, initialization failures
 
-### Start MongoDB Container
+### ✅ Current Approach (Code-First)
+- MongoDB container is **"engine-only"**: No initialization logic
+- Backend Node.js service initializes schema after connection
+- **Idempotent design**: Safe to call multiple times
+- **Platform-agnostic**: Works identically on Windows, Mac, Linux
+- **Robust**: Automatic retry and error handling
+
+---
+
+## 🚀 Quick Start Guide
+
+### Phase 1: Reset Infrastructure (First-Time Setup)
+
+**CRITICAL** ⚠️ If you have an existing MongoDB volume from the previous approach:
+
+```bash
+cd backend/docker
+
+# Destroy old volume (data loss - this is intentional cleanup)
+docker-compose down -v
+
+# Verify volume is gone
+docker volume ls | grep mongodb
+# Should return nothing
+```
+
+### Phase 2: Start MongoDB (Engine Only)
 
 ```bash
 # From backend/docker directory
 cd backend/docker
 
-# Start MongoDB container (creates DB, schema, indexes automatically)
+# Start fresh MongoDB container
 docker-compose up -d
 
 # Verify container is running
@@ -22,42 +50,66 @@ docker ps | grep a-ir-dd2-mongodb
 
 # Check MongoDB is healthy
 docker-compose logs -f mongodb
-# Look for: "MongoDB initialization complete!"
+
+# Wait for status: "healthy"
+# Exit logs: Ctrl+C
 ```
 
-### Configure Backend
+### Phase 3: Configure Backend
 
 ```bash
-# Copy the Docker .env template to backend/.env
-cp .env.docker ../../.env
+# From backend root directory
+cd backend
 
-# Edit backend/.env and generate security keys
-# 1. Generate JWT_SECRET:
+# Copy environment template
+cp docker/.env.docker .env
+
+# Edit .env and generate security keys:
+# 1. Generate JWT_SECRET (32-char hex):
 #    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 #
-# 2. Generate ENCRYPTION_KEY:
+# 2. Generate ENCRYPTION_KEY (32-char hex):
 #    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 #
-# Paste outputs into backend/.env
+# Paste the outputs into backend/.env
 ```
 
-### Start Backend
+### Phase 4: Start Backend (Triggers Schema Initialization)
 
 ```bash
-# From backend directory
+cd backend
+
+# Install dependencies (first time only)
+npm install
+
+# Start development server
 npm run dev
 
-# Should show:
-# Ô£ô Trying to connect to MongoDB (1/5)...
-# Ô£ô Mongoose connected to server
-# Ô£ô MongoDB connected successfully
-# Ô£ô Backend listening on port 3001
+# Watch for logs:
+# ✅ Backend listening on port 3001
+# 🔧 Starting database initialization...
+# 📋 Creating collections with schema validation...
+# 🗂️  Creating indexes for performance...
+# 👤 Creating test user...
+# 🎯 Database initialization complete!
 ```
 
-### Verify Installation
+**This is where the magic happens!** 🪄
+- The backend detects MongoDB connection
+- Calls `databaseInitService.ts`
+- Collections, indexes, and test user are created automatically
+- Process is **idempotent** (safe to restart)
+
+### Phase 5: Verify Installation
 
 ```bash
-# Test MongoDB connection
+# Test Backend Health
+curl http://localhost:3001/api/health
+
+# Response should be:
+# {"status":"OK","message":"Backend is running"}
+
+# Test MongoDB Collections
 docker exec -it a-ir-dd2-mongodb mongosh \
   --username ${MONGO_USER} \
   --password ${MONGO_PASSWORD} \
@@ -65,7 +117,7 @@ docker exec -it a-ir-dd2-mongodb mongosh \
   a-ir-dd2-dev \
   --eval "show collections"
 
-# Expected output:
+# Should show all 9 collections:
 # agent_instances
 # agent_prototypes
 # agents
@@ -76,94 +128,108 @@ docker exec -it a-ir-dd2-mongodb mongosh \
 # workflow_nodes
 # workflows
 
-# Verify test user was created
+# Verify Test User
 docker exec -it a-ir-dd2-mongodb mongosh \
   --username ${MONGO_USER} \
   --password ${MONGO_PASSWORD} \
   --authenticationDatabase admin \
   a-ir-dd2-dev \
-  --eval "db.users.find()"
+  --eval "db.users.findOne({ email: 'test@example.com' })"
 
-# Should show: test@example.com account
+# Should show the test user document
 ```
 
-## Default Test User
+---
 
-A test user account is automatically created during initialization:
+## 🧪 Using the Test Account
 
-| Field | Value |
-|-------|-------|
-| **Email** | `test@example.com` |
-| **Password** | `TestPassword123` |
-| **Status** | Active |
-| **Purpose** | Testing authentication flow without creating new accounts |
+After successful installation:
 
-### Using Test Account
-
-1. Start MongoDB: `docker-compose up -d`
-2. Start backend: `npm run dev`
-3. Start frontend: `npm run dev`
+1. ✅ MongoDB running: `docker-compose ps`
+2. ✅ Backend running: `curl http://localhost:3001/api/health`
+3. ✅ Frontend running: `npm run dev` (from root)
 4. Open http://localhost:5173
 5. Click "Connexion" (Login)
-6. Enter:
-   - Email: `test@example.com`
-   - Password: `TestPassword123`
-7. Click "Se connecter" ÔåÆ Should log in successfully
-8. Go to Settings ÔåÆ Cl├®s API to test encrypted storage
+6. Enter credentials:
+   - Email: **`test@example.com`**
+   - Password: **`TestPassword123`**
+7. ✅ Successfully authenticated!
+8. Test persistence: Go to Settings → Clés API
 
-## What Gets Created
+---
 
-### Collections (Automatically Created)
-- **users**: User accounts with schema validation
-- **llm_configs**: Per-user LLM provider configurations
-- **user_settings** (J4.3): Encrypted API keys & preferences
-- **workflows**: Workflow definitions
-- **agents**: Agent prototypes
-- **workflow_nodes**: Workflow visual nodes
-- **workflow_edges**: Workflow connections
-- **agent_prototypes**: Agent templates
-- **agent_instances**: Runtime agent tracking
+## 📊 What Gets Created
 
-### Indexes (Automatically Created)
-- `users.email` (unique)
-- `llm_configs.userId + provider` (unique)
-- `user_settings.userId` (unique)
-- `workflows.creator_id`
-- `agents.creator_id`
-- And more for optimal query performance
+### Collections (9 Total)
+
+| Collection | Purpose | Key Fields |
+|-----------|---------|-----------|
+| `users` | User accounts | email (unique), password, role |
+| `llm_configs` | LLM credentials | userId, provider (unique pair) |
+| `user_settings` | User preferences | userId (unique), preferences, version |
+| `workflows` | Workflow definitions | name, creator_id, userId |
+| `agents` | Agent prototypes | name, creator_id |
+| `workflow_nodes` | Visual nodes | workflowId, nodeId, position |
+| `workflow_edges` | Visual connections | workflowId, source, target |
+| `agent_prototypes` | Agent templates | creator_id, name |
+| `agent_instances` | Runtime tracking | agentId, workflowId, executionState |
+
+### Indexes (Performance)
+
+- **users.email** (unique)
+- **llm_configs.userId + provider** (unique compound)
+- **user_settings.userId** (unique)
+- **workflows.creator_id**, **workflows.userId**
+- **agents.creator_id**
+- **workflow_nodes.workflowId**
+- **workflow_edges.workflowId**
+- **agent_prototypes.creator_id**
+- **agent_instances.agentId + createdAt**
 
 ### Schema Validation
-All collections have JSON Schema validation enabled to ensure data integrity.
 
-## Managing the Container
+All collections enforce JSON Schema validation on insert/update:
+- Type checking (bsonType)
+- Required fields validation
+- Enum constraints
+- Pattern matching for emails
 
-### View Logs
+---
+
+## 🛠️ Container Management
+
+### View Status
 ```bash
+cd backend/docker
+
+# Check if container is running
+docker-compose ps
+
 # Real-time logs
 docker-compose logs -f mongodb
 
-# Last 100 lines
-docker-compose logs --tail 100 mongodb
+# Last 50 lines
+docker-compose logs --tail 50 mongodb
 ```
 
-### Stop Container
+### Lifecycle Operations
 ```bash
-# Stop but keep data
+# Stop (keep data)
 docker-compose stop
 
-# Resume
+# Resume (same data)
 docker-compose start
-```
 
-### Delete Everything (ÔÜá´©Å Data Loss)
-```bash
-# Stop and remove container AND data
+# Restart (clear cache, keep data)
+docker-compose restart
+
+# Full cleanup (⚠️ DATA LOSS - use for reset)
 docker-compose down -v
 ```
 
-### Connect to MongoDB Directly
+### Direct MongoDB Access
 ```bash
-# Interactive shell (assurez-vous que vos variables d'environnement MONGO_USER/MONGO_PASSWORD sont d├®finies)
+# Connect to mongosh shell
 docker exec -it a-ir-dd2-mongodb mongosh \
   --username ${MONGO_USER} \
   --password ${MONGO_PASSWORD} \
@@ -171,75 +237,88 @@ docker exec -it a-ir-dd2-mongodb mongosh \
 
 # In mongosh:
 > use a-ir-dd2-dev
-> db.users.find()
+> db.users.countDocuments()
+> db.workflows.find().pretty()
 > exit()
 ```
 
+---
+
+## 📦 Backup & Restore
+
 ### Backup Database
 ```bash
-# Export all data
 docker exec a-ir-dd2-mongodb mongodump \
-  --username admin \
-  --password SecurePassword123! \
+  --username ${MONGO_USER} \
+  --password ${MONGO_PASSWORD} \
   --authenticationDatabase admin \
   --db a-ir-dd2-dev \
-  --archive=backup.archive
-
-# Restore from backup
-docker exec -i a-ir-dd2-mongodb mongorestore \
-  --username admin \
-  --password SecurePassword123! \
-  --authenticationDatabase admin \
-  --archive < backup.archive
+  --archive=backup-$(date +%Y%m%d-%H%M%S).archive
 ```
 
-## Security Considerations
+### Restore from Backup
+```bash
+docker exec -i a-ir-dd2-mongodb mongorestore \
+  --username ${MONGO_USER} \
+  --password ${MONGO_PASSWORD} \
+  --authenticationDatabase admin \
+  --archive < backup-20250116-143022.archive
+```
 
-### Current Setup (Development)
-- Ô£à Authentication enabled (admin/SecurePassword123!)
-- Ô£à Unique indexes prevent duplicates
-- Ô£à Schema validation enabled
-- ÔÜá´©Å Default password - change for production!
+---
 
-### Production Recommendations
-1. **Change default credentials** in `docker-compose.yml`:
+## 🔐 Security
+
+### Development (Current)
+✅ Authentication enabled  
+✅ Schema validation enforced  
+✅ Indexes for data integrity  
+✅ Test user segregated  
+⚠️ Credentials in plaintext (development only)
+
+### Production Checklist
+
+1. **Change Credentials**
    ```yaml
-   MONGO_INITDB_ROOT_USERNAME: prod_admin
-   MONGO_INITDB_ROOT_PASSWORD: <strong-random-password>
+   # docker-compose.yml
+   MONGO_INITDB_ROOT_USERNAME: prod_secure_admin
+   MONGO_INITDB_ROOT_PASSWORD: <generate-strong-password>
    ```
 
-2. **Enable Encryption at Rest** (MongoDB Enterprise):
-   ```yaml
-   command: --enableEncryption --encryptionKeyFile /path/to/key
-   ```
+2. **Network Security**
+   - ❌ Never expose port 27017 to internet
+   - ✅ Firewall: Restrict to backend container only
+   - ✅ Use container network isolation
 
-3. **Use MongoDB Atlas** (Cloud):
-   - Managed backups
-   - Global replication
-   - Automatic updates
-   - HTTPS/TLS by default
+3. **Data Protection**
+   - ✅ Enable MongoDB encryption at rest (Enterprise or Atlas)
+   - ✅ Use TLS/SSL for connections
+   - ✅ Implement automated daily backups
 
-4. **Network Security**:
-   - Never expose MongoDB port 27017 to internet
-   - Use firewall rules
-   - Restrict to backend container only
+4. **Access Control**
+   - ✅ Use Kubernetes secrets for credentials
+   - ✅ Implement RBAC
+   - ✅ Enable audit logging
 
-5. **Backup Strategy**:
-   - Automated daily backups
-   - Test restore procedures
-   - Off-site backup storage
+5. **Recommended: MongoDB Atlas**
+   - Cloud-managed MongoDB
+   - Automatic backups and recovery
+   - Global distribution
+   - Compliance features
 
-## Troubleshooting
+---
+
+## 🐛 Troubleshooting
 
 ### Container Won't Start
 ```bash
-# Check logs
+# Check logs for errors
 docker-compose logs mongodb
 
-# Common issues:
-# - Port 27017 already in use: kill process or change port in docker-compose.yml
-# - Docker daemon not running: start Docker Desktop or service
-# - Insufficient disk space: free up space or use external volume
+# Common causes:
+# 1. Port 27017 already in use
+# 2. Docker daemon not running
+# 3. Insufficient disk space
 ```
 
 ### Connection Refused
@@ -247,74 +326,99 @@ docker-compose logs mongodb
 # Verify container is running
 docker ps | grep a-ir-dd2-mongodb
 
-# If not running:
+# If not found:
 docker-compose up -d
 
 # Check initialization logs
-docker-compose logs -f
+docker-compose logs
 ```
 
 ### Authentication Failed
 ```bash
-# Verify credentials in backend/.env match docker-compose.yml
-# Default: admin / SecurePassword123!
+# Verify credentials match docker-compose.yml
+grep MONGO_ backend/.env
 
-# Test connection manually
-docker exec a-ir-dd2-mongodb mongosh \
+# Test credentials manually
+docker exec -it a-ir-dd2-mongodb mongosh \
   --username admin \
   --password SecurePassword123! \
   --authenticationDatabase admin
 ```
 
-### Data Persistence Issues
+### Collections Not Created
 ```bash
-# Verify volume exists
-docker volume ls | grep a-ir-dd2
+# Check backend initialization logs
+npm run dev
 
-# Inspect volume
-docker volume inspect backend_docker_mongodb_data
-
-# Check volume location
-# Windows: Docker Desktop > Settings > Resources > File Sharing
-# macOS: Docker Desktop > Preferences > Resources > File Sharing
-# Linux: /var/lib/docker/volumes/
+# Watch for initialization messages
+# If errors appear, check MongoDB connection
 ```
-
-## Files Reference
-
-- **docker-compose.yml**: Container orchestration configuration
-- **init-mongo.sh**: Initialization shell script (creates auth, runs init-collections.js)
-- **init-collections.js**: MongoDB schema and index creation
-- **.env.docker**: Template for backend/.env configuration
-
-## Environment Variables
-
-Key variables from `.env.docker`:
-
-```env
-# Must match docker-compose.yml environment variables
-MONGO_INITDB_ROOT_USERNAME=admin
-MONGO_INITDB_ROOT_PASSWORD=SecurePassword123!
-MONGO_INITDB_DATABASE=a-ir-dd2-dev
-
-# Connection string
-MONGODB_URI=mongodb://admin:SecurePassword123!@localhost:27017/a-ir-dd2-dev?authSource=admin
-
-# Security (Generate these!)
-JWT_SECRET=<your-32-char-hex>
-ENCRYPTION_KEY=<your-64-char-hex>
-```
-
-## Next Steps
-
-1. Ô£à Start MongoDB: `docker-compose up -d`
-2. Ô£à Configure backend/.env: Copy `.env.docker` and generate keys
-3. Ô£à Start backend: `npm run dev`
-4. Ô£à Start frontend: `npm run dev` (from root)
-5. Ô£à Verify: Test authentication at http://localhost:5173
 
 ---
 
-**Professional MongoDB setup for A-IR-DD2 J4.3**
+## 🔄 Development Workflow
 
-Built with Docker best practices for development and production readiness.
+### Daily Startup
+```bash
+# Terminal 1: MongoDB (backend/docker)
+cd backend/docker
+docker-compose up -d
+
+# Terminal 2: Backend (backend)
+cd backend
+npm run dev
+
+# Terminal 3: Frontend (root)
+npm run dev
+```
+
+### After Major Changes
+```bash
+# Restart everything fresh
+docker-compose down -v  # MongoDB reset
+npm run dev             # Triggers re-initialization
+```
+
+---
+
+## 📚 Reference
+
+### Files & Roles
+
+| File | Role | Status |
+|------|------|--------|
+| `docker-compose.yml` | Container orchestration | ✅ Active |
+| `init-collections.js` | Reference only | 📚 Documentation |
+| `backend/src/services/databaseInit.ts` | **Active initialization** | ✅ Primary |
+
+### Environment Variables
+```env
+# .env.docker template
+MONGODB_URI=mongodb://admin:SecurePassword123!@localhost:27017/a-ir-dd2-dev?authSource=admin
+MONGO_USER=admin
+MONGO_PASSWORD=SecurePassword123!
+JWT_SECRET=<generated-32-hex>
+ENCRYPTION_KEY=<generated-32-hex>
+```
+
+---
+
+## ✅ Checklist: First-Time Setup
+
+- [ ] Docker & Docker Compose installed
+- [ ] Old MongoDB volume cleaned: `docker-compose down -v`
+- [ ] MongoDB started: `docker-compose up -d`
+- [ ] Backend .env configured with generated keys
+- [ ] Backend started: `npm run dev` (wait for "initialization complete")
+- [ ] Collections verified: `show collections` in mongosh
+- [ ] Test user created: `db.users.findOne({ email: 'test@example.com' })`
+- [ ] Frontend started: `npm run dev`
+- [ ] Login tested with test@example.com / TestPassword123
+
+---
+
+**Professional MongoDB Setup for A-IR-DD2 J4.3**
+
+Last Updated: January 16, 2026
+
+Built with Code-First initialization for robustness and cross-platform consistency.

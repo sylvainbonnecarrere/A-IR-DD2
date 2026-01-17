@@ -201,8 +201,8 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
             } : null,
 
             nodes: agentInstances.map(agent => ({
-                id: agent.id,
-                agentId: agent.id,
+                id: agent._id?.toString() || agent.id,
+                agentId: agent._id?.toString() || agent.id,
                 agentName: agent.name,
                 position: agent.position || { x: 0, y: 0 },
                 provider: agent.llmProvider || agent.provider,
@@ -219,7 +219,7 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
 
             // ⭐ ÉTAPE 1.6: Ajout des propriétés polymorphes (content, metrics, status)
             agentInstances: agentInstances.map(agent => ({
-                id: agent.id,
+                id: agent._id?.toString() || agent.id,
                 name: agent.name,
                 provider: agent.llmProvider || agent.provider,
                 model: agent.llmModel || agent.model,

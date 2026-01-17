@@ -968,12 +968,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                             group-hover:text-gray-300 transition-colors duration-200">
               {effectiveAgent.llmProvider || 'Unknown'} • {effectiveAgent.model || 'Unknown'}
             </div>
-            <div className="text-sm text-cyan-400 font-medium select-text
-                            group-hover:text-cyan-300 transition-colors duration-200
-                            flex items-center space-x-2">
-              <span>{agent?.role || 'Agent'}</span>
-              <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse"></div>
-            </div>
           </div>
 
           {/* Messages - Text selectable avec nodrag pour empêcher complètement le drag */}
