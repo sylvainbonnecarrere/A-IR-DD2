@@ -43,7 +43,7 @@ docker volume ls | grep mongodb
 cd backend/docker
 
 # Start fresh MongoDB container
-docker-compose up -d
+docker-compose --env-file .env up -d
 
 # Verify container is running
 docker ps | grep a-ir-dd2-mongodb

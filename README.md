@@ -97,11 +97,11 @@ node -e "console.log('JWT_SECRET=' + require('crypto').randomBytes(32).toString(
 node -e "console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))"
 node -e "console.log('JWT_REFRESH_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
 
-# → Copy outputs to backend/.env
+# IMPORTANT :  → Copy outputs to backend/.env
 
 # 3. Start MongoDB with automatic initialization
 cd backend/docker
-docker-compose up -d
+docker-compose --env-file .env up -d
 
 # 4. Start services (2 terminals from root)
 # Terminal 1: cd backend && npm run dev
