@@ -85,9 +85,10 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 
 // Workflow routes (Jalon 3 - Phase 1)
-// CORRECTION SOLID: agent-instances imbriquées SOUS workflows pour héritage des params
+// ⭐ FIX: Monter agentInstancesRoutes AVANT workflowsRoutes pour éviter le conflit /:id/*
+// Le chemin spécifique /workflows/:workflowId/instances doit être prioritaire
+app.use('/api/workflows/:workflowId/instances', agentInstancesRoutes);
 app.use('/api/workflows', workflowsRoutes);
-workflowsRoutes.use('/:workflowId/instances', agentInstancesRoutes);
 app.use('/api/agent-prototypes', agentPrototypesRoutes);
 
 // LLM routes (Jalon 3 - Phase 2)

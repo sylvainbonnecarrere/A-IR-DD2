@@ -445,6 +445,66 @@ function AppContent() {
           instances: workspace.agentInstances?.length || 0
         });
 
+        // ⭐ NEW: Load persisted journals for each agent instance (lazy-load)
+        if (workspace.agentInstances && workspace.agentInstances.length > 0 && workspace.workflow?.id) {
+          console.log('[App] Loading persisted journals for instances...');
+          try {
+            for (const instance of workspace.agentInstances) {
+              const journalsResponse = await fetch(
+                `${API_BASE_URL}/api/workflows/${workspace.workflow.id}/instances/${instance.id}/journals`,
+                {
+                  headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                  }
+                }
+              );
+
+              if (!journalsResponse.ok) {
+                console.warn(`[App] Failed to load journals for instance ${instance.id}`);
+                continue;
+              }
+
+              const journalsData = await journalsResponse.json();
+              const journals = journalsData.journals || [];
+
+              if (journals.length > 0) {
+                // Convert journals to ChatMessages
+                const chatMessages: ChatMessage[] = journals
+                  .filter((j: any) => j.type === 'chat') // Only chat type for now
+                  .map((j: any) => {
+                    const payload = j.payload || {}; // ⭐ FIX: Read from 'payload' not 'content'
+                    const role = payload.role || 'agent';
+                    const content = payload.content || '';
+                    
+                    return {
+                      id: j._id || `journal-${j.timestamp}`,
+                      sender: role === 'user' ? 'user' :
+                             role === 'agent' ? 'agent' :
+                             role === 'tool' ? 'tool' :
+                             role === 'tool_result' ? 'tool_result' : 'agent',
+                      text: content,
+                      timestamp: new Date(j.createdAt || j.timestamp).getTime()
+                    } as ChatMessage;
+                  });
+
+                console.log(`[App] Raw journals:`, journals.slice(0, 2)); // Log first 2 for debugging
+                console.log(`[App] Converted messages:`, chatMessages.slice(0, 2));
+
+                // Load messages into runtime store using the node ID
+                const nodeId = `node-${instance.id}`; // Use same format as V2WorkflowNode
+                const { setNodeMessages } = useRuntimeStore.getState();
+                setNodeMessages(nodeId, chatMessages);
+
+                console.log(`[App] Loaded ${chatMessages.length} messages for instance ${nodeId}`);
+              }
+            }
+          } catch (error) {
+            console.error('[App] Error loading journals:', error);
+            // Don't fail hydration if journal loading fails
+          }
+        }
+
       } catch (err) {
         console.error('[App] Workspace hydration error:', err);
       } finally {

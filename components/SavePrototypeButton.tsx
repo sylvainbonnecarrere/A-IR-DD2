@@ -1,9 +1,10 @@
 /**
  * @file SavePrototypeButton.tsx
- * @description Bouton de sauvegarde manuelle du workflow
+ * @description Bouton de sauvegarde manuelle du workflow ET des journaux
  * @domain Design Domain - Persistence UI
  * 
  * ⭐ ÉTAPE 2 PLAN_DE_PERSISTENCE: Save Mode MANUEL
+ * ⭐ PHASE 3: Persistance des journaux (chat, erreurs, média)
  * 
  * DESIGN SPEC (BLUR GAME STYLE):
  * - Bouton ROND rouge
@@ -30,8 +31,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDesignStore } from '../stores/useDesignStore';
+import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { PersistenceService } from '../services/persistenceService';
 import { useSaveMode } from '../hooks/useSaveMode';
+import { getBackendUrl } from '../config/api.config';
+import { V2WorkflowNode } from '../types';
 
 interface SavePrototypeButtonProps {
     /** Current workflow ID */
@@ -62,13 +66,86 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     const [buttonState, setButtonState] = useState<ButtonState>('idle');
     const { isAuthenticated, accessToken } = useAuth();
     const { nodes, edges } = useDesignStore();
+    const { nodeMessages } = useRuntimeStore();
     const { isManualSave } = useSaveMode();
 
     // ⚠️ VISIBILITY GATE: Only render for authenticated users with manual save mode
     const shouldRender = isAuthenticated && isManualSave;
 
     /**
+     * ⭐ PHASE 3: Persister les journaux (messages de chat) pour tous les nodes
+     * Appelé en mode manuel quand l'utilisateur clique sur Save
+     */
+    const persistJournals = useCallback(async (): Promise<{ saved: number; errors: number }> => {
+        let saved = 0;
+        let errors = 0;
+        const backendUrl = getBackendUrl();
+
+        // Parcourir tous les nodes avec des messages
+        for (const [nodeId, messages] of Object.entries(nodeMessages)) {
+            if (!messages || messages.length === 0) continue;
+
+            // Trouver le node correspondant pour obtenir l'agentInstance
+            const node = nodes.find(n => n.id === nodeId) as V2WorkflowNode | undefined;
+            const agentInstance = node?.data?.agentInstance;
+            const effectiveWorkflowId = node?.data?.workflowId || workflowId;
+
+            if (!agentInstance?.id || !effectiveWorkflowId) {
+                console.warn(`[SavePrototypeButton] Skipping node ${nodeId} - no agentInstance or workflowId`);
+                continue;
+            }
+
+            console.log(`[SavePrototypeButton] 📤 Persisting ${messages.length} messages for instance ${agentInstance.id}`);
+
+            // Envoyer chaque message au backend
+            for (const message of messages) {
+                try {
+                    const response = await fetch(
+                        `${backendUrl}/api/workflows/${effectiveWorkflowId}/instances/${agentInstance.id}/journal`,
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${accessToken}`
+                            },
+                            body: JSON.stringify({
+                                type: 'chat',
+                                payload: {
+                                    role: message.sender === 'user' ? 'user' : 'agent',
+                                    content: message.text || '',
+                                    // Ajouter des métadonnées si disponibles
+                                    llmProvider: node?.data?.agent?.llmProvider,
+                                    modelUsed: node?.data?.agent?.model
+                                }
+                            })
+                        }
+                    );
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (result.skipped) {
+                            console.log(`[SavePrototypeButton] Message skipped: ${result.reason}`);
+                        } else {
+                            saved++;
+                        }
+                    } else {
+                        console.warn(`[SavePrototypeButton] Failed to persist message:`, await response.text());
+                        errors++;
+                    }
+                } catch (err) {
+                    console.error(`[SavePrototypeButton] Error persisting message:`, err);
+                    errors++;
+                }
+            }
+        }
+
+        console.log(`[SavePrototypeButton] ✅ Journals persisted: ${saved} saved, ${errors} errors`);
+        return { saved, errors };
+    }, [nodeMessages, nodes, workflowId, accessToken]);
+
+    /**
      * Handle save action
+     * ⭐ PHASE 3: Sauvegarde workflow + journaux en mode manuel
      */
     const handleSave = useCallback(async () => {
         if (buttonState === 'saving' || !shouldRender) return;
@@ -76,6 +153,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
         setButtonState('saving');
 
         try {
+            // 1. Sauvegarder le workflow (structure)
             const result = await PersistenceService.saveWorkflow(
                 {
                     id: workflowId,
@@ -99,6 +177,10 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                     accessToken: accessToken || undefined
                 }
             );
+
+            // 2. ⭐ PHASE 3: Sauvegarder les journaux (messages de chat)
+            const journalResult = await persistJournals();
+            console.log(`[SavePrototypeButton] Workflow save: ${result.success}, Journals: ${journalResult.saved} saved`);
 
             if (result.success) {
                 setButtonState('success');
@@ -124,6 +206,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
         edges,
         isAuthenticated,
         accessToken,
+        persistJournals,
         buttonState,
         shouldRender,
         onSaveComplete
