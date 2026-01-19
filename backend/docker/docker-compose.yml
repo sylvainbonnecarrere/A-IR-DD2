@@ -1,4 +1,4 @@
-﻿version: '3.8'
+﻿
 
 services:
   mongodb:
@@ -13,8 +13,9 @@ services:
       MONGO_INITDB_DATABASE: a-ir-dd2-dev
     volumes:
       - mongodb_data:/data/db
-      - ./init-mongo.sh:/docker-entrypoint-initdb.d/init-mongo.sh:ro
-      - ./init-collections.js:/docker-entrypoint-initdb.d/init-collections.js:ro
+      # Only run the collections init after auth is properly set up
+      - ./init-collections.js:/docker-entrypoint-initdb.d/01-init-collections.js:ro
+    command: ["mongod", "--auth"]
     networks:
       - a-ir-dd2-network
     healthcheck:
