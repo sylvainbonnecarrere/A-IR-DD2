@@ -467,10 +467,10 @@ router.post(
             // Persister selon le type ET la config
             switch (type) {
                 case 'chat':
-                    if (!persistenceConfig?.saveChatHistory) {
+                    if (!persistenceConfig?.saveChat) {
                         return res.status(200).json({ 
                             skipped: true, 
-                            reason: 'saveChatHistory is false in persistenceConfig' 
+                            reason: 'saveChat is false in persistenceConfig' 
                         });
                     }
                     result = await AgentJournal.createChatEntry(
@@ -551,6 +551,44 @@ router.delete('/:id',
         } catch (error) {
             console.error('[AgentInstances] DELETE error:', error);
             res.status(500).json({ error: 'Erreur suppression instance' });
+        }
+    }
+);
+
+// GET /api/workflows/:workflowId/instances/:id/journals - Charger tous les journaux (lazy-load)
+router.get('/:id/journals',
+    requireAuth,
+    requireOwnershipAsync(async (req) => {
+        const instance = await AgentInstance.findById(req.params.id);
+        return instance ? instance.userId.toString() : null;
+    }),
+    async (req, res) => {
+        try {
+            const user = req.user as IUser;
+            const { id: instanceId } = req.params;
+
+            // Vérifier l'ownership
+            const instance = await AgentInstance.findOne({ _id: instanceId, userId: user.id });
+            if (!instance) {
+                return res.status(403).json({ error: 'Unauthorized - user does not own this instance' });
+            }
+
+            // Récupérer TOUS les journaux pour cette instance, triés par timestamp
+            const journals = await AgentJournal.find({ agentInstanceId: instanceId })
+                .sort({ createdAt: 1 }) // Oldest first
+                .lean();
+
+            console.log(`[Journals] Loaded ${journals.length} entries for instance ${instanceId}`);
+
+            res.json({
+                success: true,
+                instanceId,
+                journals: journals || [],
+                count: journals?.length || 0
+            });
+        } catch (error) {
+            console.error('[Journals] GET error:', error);
+            res.status(500).json({ error: 'Failed to load journals' });
         }
     }
 );

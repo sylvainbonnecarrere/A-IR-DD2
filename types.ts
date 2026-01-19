@@ -88,12 +88,12 @@ export interface OutputConfig {
 export type MediaStorageType = 'db' | 'local' | 'cloud';
 
 export interface PersistenceConfig {
-  saveChat: boolean;             // Défaut: true - Sauvegarder les messages de chat
-  saveErrors: boolean;           // Défaut: true - Sauvegarder les erreurs rencontrées
-  saveHistorySummary: boolean;   // Défaut: false - Générer et stocker un résumé périodique (économie tokens)
-  saveLinks: boolean;            // Défaut: false - Sauvegarder les liens entre agents (placeholder)
-  saveTasks: boolean;            // Défaut: false - Sauvegarder les tâches assignées (placeholder)
-  mediaStorage: MediaStorageType; // Défaut: 'db' - GridFS, local filesystem, ou cloud storage
+  saveChat: boolean;              // Défaut: true - Sauvegarder les messages de chat
+  saveErrors: boolean;            // Défaut: true - Sauvegarder les erreurs rencontrées
+  saveHistorySummary: boolean;    // Défaut: false - Générer et stocker un résumé périodique (économie tokens)
+  saveLinks: boolean;             // Défaut: false - Sauvegarder les liens entre agents
+  saveTasks: boolean;             // Défaut: false - Sauvegarder les tâches assignées
+  mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
 }
 
 export const defaultPersistenceConfig: PersistenceConfig = {

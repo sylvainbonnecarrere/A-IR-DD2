@@ -17,6 +17,7 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { getBackendUrl } from '../config/api.config';
 import { useAuth } from '../contexts/AuthContext';
+import { useSaveModeStore } from '../stores/useSaveModeStore';
 
 export interface JournalQueueItem {
   id: string;
@@ -63,17 +64,26 @@ export const useJournalQueue = () => {
 
   /**
    * Ajouter une entrée à la queue
-   * ⭐ FIX: Vérifier l'authentification avant d'ajouter à la queue
+   * ⭐ FIX: Vérifier l'authentification ET le saveMode avant d'ajouter à la queue
+   * En mode manuel, les journaux sont persistés via le bouton Save, pas automatiquement
    */
   const enqueueEntry = useCallback((
     workflowId: string,
     instanceId: string,
     type: 'chat' | 'error' | 'media',
-    payload: any
+    payload: any,
+    forceImmediate: boolean = false // ⭐ NEW: Force l'envoi même en mode manuel (pour le bouton Save)
   ) => {
     // ⭐ FIX: Ne pas enregistrer si l'utilisateur n'est pas authentifié
     if (!accessTokenRef.current) {
       console.log(`[JournalQueue] Skipping ${type} entry - user not authenticated (guest mode)`);
+      return;
+    }
+    
+    // ⭐ FIX: En mode MANUEL, ne pas envoyer automatiquement (sauf si forcé par le bouton Save)
+    const saveMode = useSaveModeStore.getState().saveMode;
+    if (saveMode === 'manual' && !forceImmediate) {
+      console.log(`[JournalQueue] Skipping ${type} entry - save mode is 'manual' (use Save button)`);
       return;
     }
     

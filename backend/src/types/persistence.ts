@@ -30,16 +30,16 @@ export type MediaStorageMode = 'database' | 'local' | 'cloud';
  */
 export interface PersistenceConfig {
     // Granularité de l'enregistrement
-    saveChatHistory: boolean;       // Sauvegarder les échanges textuels (messages user/agent/tool)
+    saveChat: boolean;              // Sauvegarder les échanges textuels (messages user/agent/tool)
     saveErrors: boolean;            // Sauvegarder les logs d'erreurs
-    saveTaskExecution: boolean;     // Sauvegarder les étapes de raisonnement/tâches
-    saveMedia: boolean;             // Sauvegarder les images/sons/vidéos générés
+    saveTasks: boolean;             // Sauvegarder les étapes de raisonnement/tâches
+    saveLinks: boolean;             // Sauvegarder les liens entre agents
 
-    // Stratégie de stockage des médias (si saveMedia = true)
-    mediaStorageMode: MediaStorageMode;
+    // Stratégie de stockage des médias
+    mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' (inline), local (volume), cloud (S3/GCS)
 
     // Options avancées
-    summarizeHistory: boolean;      // Activer la compression automatique du contexte
+    saveHistorySummary: boolean;    // Activer la compression automatique du contexte
     retentionDays?: number;         // Durée de conservation en jours (null = illimité)
 }
 
@@ -47,12 +47,12 @@ export interface PersistenceConfig {
  * Configuration de persistance par défaut
  */
 export const DEFAULT_PERSISTENCE_CONFIG: PersistenceConfig = {
-    saveChatHistory: true,
+    saveChat: true,
     saveErrors: true,
-    saveTaskExecution: false,
-    saveMedia: false,
-    mediaStorageMode: 'local',
-    summarizeHistory: false,
+    saveTasks: false,
+    saveLinks: false,
+    mediaStorage: 'db',
+    saveHistorySummary: false,
     retentionDays: undefined
 };
 
