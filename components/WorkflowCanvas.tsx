@@ -107,6 +107,11 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   // Hook de thème jour/nuit
   const theme = useDayNightTheme();
 
+  // ⭐ REACT FLOW FIX: Memoize nodeTypes to prevent React Flow warning
+  // Even though NODE_TYPES is defined globally, React Flow's internal useMemo
+  // detects reference changes during component renders. This explicitly stabilizes it.
+  const memoizedNodeTypes = useMemo(() => NODE_TYPES, []);
+
   // Hook React Flow pour fitView
   const reactFlowInstance = useReactFlow();
 
@@ -151,10 +156,24 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     }
   }, [onNodesChangeInternal]);
 
-  // Calculer actualNodes de manière stable
+  // ⭐ FIX: Utiliser les nodes V2 du store Zustand comme source principale
+  // Cela garantit la cohérence entre les instances et les nodes
+  const { nodes: storeNodes } = useDesignStore();
+  
+  // Calculer actualNodes de manière stable - priorité: store > props.nodes > legacy workflowNodes
   const actualNodes = useMemo(() => {
-    return (nodes && nodes.length > 0) ? nodes : workflowNodes;
-  }, [nodes, workflowNodes]);
+    // Priorité 1: V2 nodes du store Zustand (source de vérité)
+    if (storeNodes && storeNodes.length > 0) {
+      console.log('[WorkflowCanvas] Using V2 nodes from store:', storeNodes.length);
+      return storeNodes;
+    }
+    // Priorité 2: nodes passés en props
+    if (nodes && nodes.length > 0) {
+      return nodes;
+    }
+    // Priorité 3: legacy workflowNodes
+    return workflowNodes;
+  }, [storeNodes, nodes, workflowNodes]);
 
   // Détecter si un panneau média est actif (pour calcul largeur maximized)
   const isMediaPanelActive = isImagePanelOpen || isImageModificationPanelOpen || isVideoPanelOpen || isMapsPanelOpen;
@@ -193,23 +212,71 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   useEffect(() => {
     if (actualNodes && actualNodes.length > 0) {
       const newReactFlowNodes: Node[] = actualNodes.map((wfNode, index) => {
-        // Résoudre l'instance depuis le store pour avoir les données à jour
-        const resolved = wfNode.instanceId ? getResolvedInstance(wfNode.instanceId) : null;
-        // Si pas d'instance résolue (node legacy), agentInstance sera null
-        // V2AgentNode devra gérer ce cas
-        const agentInstance = resolved?.instance || null;
+        // ⭐ SUPPORT BOTH NODE TYPES: V2WorkflowNode (from store) and WorkflowNode (legacy)
+        // V2WorkflowNode has wfNode.data.agentInstance (already resolved from store)
+        // WorkflowNode has wfNode.instanceId (legacy, needs resolution from store)
+        
+        let agentInstance = null;
+        let agent = null;
+        let robotId = 'unknown';
+        let position = { x: 100 + index * 200, y: 100 + index * 150 };
+        let isMinimized = false;
+        let isMaximized = false;
+        let nodeWorkflowId = workflowId;
+        
+        // Check if it's a V2WorkflowNode (has data property)
+        if ('data' in wfNode && wfNode.data) {
+          // V2WorkflowNode from store - use data directly
+          agentInstance = wfNode.data.agentInstance || null;
+          agent = wfNode.data.agent || null;
+          robotId = wfNode.data.robotId || 'unknown';
+          position = wfNode.position || position;
+          isMinimized = wfNode.data.isMinimized || false;
+          isMaximized = wfNode.data.isMaximized || false;
+          nodeWorkflowId = wfNode.data.workflowId || workflowId;
+          
+          // ⭐ FIX: Si agentInstance existe mais n'a pas de workflowId, l'ajouter
+          if (agentInstance && !agentInstance.workflowId) {
+            agentInstance = { ...agentInstance, workflowId: nodeWorkflowId };
+          }
+        } else {
+          // WorkflowNode (legacy) - has instanceId, need to resolve from store
+          const resolved = wfNode.instanceId ? getResolvedInstance(wfNode.instanceId) : null;
+          
+          if (!resolved && wfNode.instanceId) {
+            // ⭐ FIX: Chercher aussi directement dans agentInstances par ID
+            const directInstance = agentInstances.find(i => i.id === wfNode.instanceId);
+            if (directInstance) {
+              agentInstance = { ...directInstance, workflowId: directInstance.workflowId || workflowId };
+              console.log('[WorkflowCanvas] Found instance directly:', wfNode.instanceId);
+            } else {
+              console.warn(`[WorkflowCanvas] Instance not found for instanceId: ${wfNode.instanceId}. Available instances:`, 
+                agentInstances.map(i => ({ id: i.id, prototypeId: i.prototypeId }))
+              );
+            }
+          } else if (resolved) {
+            agentInstance = { ...resolved.instance, workflowId: resolved.instance.workflowId || workflowId };
+          }
+          
+          agent = wfNode.agent || null;
+          robotId = wfNode.agent?.id || 'unknown';
+          position = wfNode.position || position;
+          isMinimized = wfNode.isMinimized || false;
+          isMaximized = wfNode.isMaximized || false;
+        }
 
         return {
           id: wfNode.id || `node-${index}`,
           type: 'customAgent',
-          position: wfNode.position || { x: 100 + index * 200, y: 100 + index * 150 },
+          position,
           data: {
-            robotId: wfNode.agent?.id || 'unknown',
-            label: agentInstance?.name || wfNode.agent?.name || 'Agent',
-            agent: wfNode.agent, // Prototype (pour model, systemPrompt par défaut)
-            agentInstance: agentInstance, // Instance mise à jour depuis le store (peut être null)
-            isMinimized: wfNode.isMinimized || false,
-            isMaximized: wfNode.isMaximized || false
+            robotId,
+            label: agentInstance?.name || (wfNode.agent?.name || 'Agent'),
+            agent: agent || wfNode.agent, // ⭐ FIX: Utiliser agent résolu ou celui du legacy node
+            agentInstance, // Instance mise à jour depuis le store (peut être null)
+            workflowId: nodeWorkflowId, // ⭐ FIX: Utiliser le workflowId du node
+            isMinimized,
+            isMaximized
           },
         };
       });
@@ -427,7 +494,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onPaneClick={handlePaneClick}
-          nodeTypes={NODE_TYPES}
+          nodeTypes={memoizedNodeTypes}
           style={{ background: 'transparent' }}
           defaultViewport={{ x: 0, y: 0, zoom: 0.7 }}
           proOptions={{ hideAttribution: true }}

@@ -30,12 +30,14 @@ interface DesignStore {
   // Actions - Agents (Prototypes) with Governance
   addAgent: (agent: Omit<Agent, 'id' | 'creator_id' | 'created_at' | 'updated_at'>) => { success: boolean; error?: string; agentId?: string };
   updateAgent: (id: string, agent: Partial<Agent>) => { success: boolean; error?: string };
+  updateAgentId: (tempId: string, realObjectId: string) => { success: boolean; error?: string };
   deleteAgent: (id: string, options?: { deleteInstances?: boolean }) => { success: boolean; error?: string };
   selectAgent: (id: string | null) => void;
 
   // Actions - Agent Instances  
-  addAgentInstance: (prototypeId: string, position: { x: number; y: number }, name?: string) => string;
+  addAgentInstance: (prototypeId: string, position: { x: number; y: number }, name?: string, workflowId?: string) => string;
   updateAgentInstance: (id: string, updates: Partial<AgentInstance>) => void;
+  updateInstanceId: (tempId: string, realId: string) => void;
   updateInstanceConfig: (id: string, configUpdates: Partial<AgentInstance['configuration_json']>) => void;
   deleteAgentInstance: (id: string) => void;
   getResolvedInstance: (instanceId: string) => ResolvedAgentInstance | undefined;
@@ -186,6 +188,41 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     return { success: true };
   },
 
+  /**
+   * Replace temporary agent ID (created locally) with real ObjectId from backend
+   * Called after successful API creation of AgentPrototype
+   */
+  updateAgentId: (tempId, realObjectId) => {
+    const state = get();
+
+    // Find agent with tempId
+    const agentToUpdate = state.agents.find(a => a.id === tempId);
+    if (!agentToUpdate) {
+      return {
+        success: false,
+        error: `Agent avec ID temporaire "${tempId}" non trouvé`
+      };
+    }
+
+    // Update agent ID in agents array
+    set((state) => ({
+      agents: state.agents.map(agent =>
+        agent.id === tempId ? { ...agent, id: realObjectId } : agent
+      ),
+      // Update all instances that reference this prototype
+      agentInstances: state.agentInstances.map(instance =>
+        instance.prototypeId === tempId ? { ...instance, prototypeId: realObjectId } : instance
+      ),
+      // Update selected agent if it's the one being updated
+      selectedAgentId: state.selectedAgentId === tempId ? realObjectId : state.selectedAgentId,
+      // Note: V2WorkflowNodes reference agents via data.agent.id, but those are local state nodes
+      // They should automatically use the updated agent object
+    }));
+
+    console.log(`[useDesignStore] ✅ Updated agent ID: "${tempId}" → "${realObjectId}"`);
+    return { success: true };
+  },
+
   deleteAgent: (id, options = { deleteInstances: true }) => {
     const state = get();
 
@@ -253,7 +290,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   selectAgent: (id) => set({ selectedAgentId: id }),
 
   // Agent Instance actions
-  addAgentInstance: (prototypeId, position, name) => {
+  addAgentInstance: (prototypeId, position, name, workflowId) => {
     const prototype = get().agents.find(a => a.id === prototypeId);
     if (!prototype) throw new Error(`Prototype ${prototypeId} not found`);
 
@@ -280,6 +317,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     const instance: AgentInstance = {
       id: instanceId,
       prototypeId,
+      workflowId, // ⭐ NOUVEAU: Stocker workflowId pour persistance journal
       name: name || prototype.name,
       position,
       isMinimized: false,
@@ -297,6 +335,31 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   updateAgentInstance: (id, updates) => set((state) => ({
     agentInstances: state.agentInstances.map(instance =>
       instance.id === id ? { ...instance, ...updates } : instance
+    )
+  })),
+
+  /**
+   * Replace temporary instance ID (created locally) with real ID from backend
+   * Called after successful API creation of AgentInstance
+   */
+  updateInstanceId: (tempId, realId) => set((state) => ({
+    agentInstances: state.agentInstances.map(instance =>
+      instance.id === tempId ? { ...instance, id: realId } : instance
+    ),
+    // Update nodes that reference this instance
+    nodes: state.nodes.map(node => 
+      node.data.agentInstance?.id === tempId 
+        ? { 
+            ...node, 
+            data: { 
+              ...node.data, 
+              agentInstance: { 
+                ...node.data.agentInstance,
+                id: realId 
+              } 
+            } 
+          }
+        : node
     )
   })),
 

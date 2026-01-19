@@ -139,9 +139,7 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'general', label: 'Général', icon: <SettingsIcon className="w-4 h-4" /> },
-    ...(isAuthenticated ? [
-      { id: 'persistence', label: 'Sauvegarde', icon: <SaveIcon className="w-4 h-4" /> }
-    ] : [])
+    ...(isAuthenticated ? [{ id: 'persistence' as const, label: 'Sauvegarde', icon: <SaveIcon className="w-4 h-4" /> }] : [])
   ];
 
   // ============================================

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Agent, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId } from './types';
+import { Agent, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
 import { AgentFormModal } from './components/modals/AgentFormModal';
@@ -222,7 +222,7 @@ function AppContent() {
   const { updateLLMConfigs, setNavigationHandler, addNodeMessage } = useRuntimeStore();
 
   // Design Store access for integrity validation  
-  const { validateWorkflowIntegrity, cleanupOrphanedInstances, addAgentInstance, deleteNode, hydrateFromServer, setNodes, setEdges } = useDesignStore();
+  const { validateWorkflowIntegrity, cleanupOrphanedInstances, addAgentInstance, deleteNode, deleteAgentInstance, hydrateFromServer, setNodes, setEdges, updateInstanceId, addNode, agentInstances, nodes: storeNodes } = useDesignStore();
   
   // ⭐ SELF-HEALING: Workflow Store for hydrating workflow ID
   const { hydrateWorkflowFromServer, getCurrentWorkflowId } = useWorkflowStore();
@@ -281,22 +281,132 @@ function AppContent() {
           console.warn('[App] ⚠️ No workflow in server response - Self-Healing may have failed');
         }
 
-        // Hydrate stores with server data
-        if (workspace.agentInstances) {
+        // ⭐ FIX: Hydrater les prototypes d'agents dans le state React et le store Zustand
+        if (workspace.agentPrototypes && workspace.agentPrototypes.length > 0) {
+          const now = new Date().toISOString();
+          const hydratedPrototypes: Agent[] = workspace.agentPrototypes.map((proto: any) => ({
+            id: proto.id,
+            name: proto.name,
+            role: proto.description || 'assistant',
+            systemPrompt: proto.description || '',
+            llmProvider: (proto.provider as LLMProvider) || LLMProvider.Gemini,
+            model: proto.model || 'gemini-2.0-flash',
+            capabilities: [],
+            tools: [],
+            creator_id: RobotId.Archi,
+            created_at: now,
+            updated_at: now
+          }));
+          
+          // Hydrater le state React (legacy)
+          setAgents(hydratedPrototypes);
+          
+          // Hydrater le store Zustand
           hydrateFromServer({
-            agentInstances: workspace.agentInstances
+            agents: hydratedPrototypes
           });
+          
+          console.log('[App] ✅ Agent prototypes hydrated:', hydratedPrototypes.length);
         }
 
-        if (workspace.nodes) {
-          setNodes(workspace.nodes);
+        // ⭐ CRITICAL: Build V2WorkflowNodes from instances and hydrate to store
+        // This ensures nodes are properly linked to instances for WorkflowCanvas resolution
+        if (workspace.agentInstances && workspace.agentInstances.length > 0) {
+          // First pass: transform all instances to frontend format
+          const hydratedInstances: AgentInstance[] = [];
+          
+          const v2Nodes: V2WorkflowNode[] = workspace.agentInstances.map((instance: any) => {
+            // Find the agent prototype for this instance
+            const agentProto = workspace.agentPrototypes?.find((proto: any) => proto.id === instance.prototypeId);
+            
+            // ⭐ FIX: Build Agent object from instance data if prototype not found
+            // This ensures V2AgentNode always has an agent prop
+            const agent: Agent = agentProto ? {
+              id: agentProto.id,
+              name: agentProto.name,
+              role: agentProto.description || 'assistant',
+              systemPrompt: instance.systemInstruction || agentProto.description || '',
+              llmProvider: (agentProto.provider as LLMProvider) || LLMProvider.Gemini,
+              model: agentProto.model || 'gemini-2.0-flash',
+              capabilities: [],
+              tools: [],
+              creator_id: RobotId.Archi,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            } : {
+              // Fallback: build agent from instance data
+              id: instance.prototypeId || instance.id,
+              name: instance.name,
+              role: 'assistant',
+              systemPrompt: instance.systemInstruction || '',
+              llmProvider: (instance.provider as LLMProvider) || LLMProvider.Gemini,
+              model: instance.model || 'gemini-2.0-flash',
+              capabilities: [],
+              tools: [],
+              creator_id: RobotId.Archi,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            };
+            
+            // ⭐ FIX: Ensure instance has all required properties with correct structure
+            const hydratedInstance: AgentInstance = {
+              id: instance.id, // Real MongoDB ObjectId from backend
+              prototypeId: instance.prototypeId || agent.id,
+              name: instance.name,
+              position: instance.position || { x: 0, y: 0 },
+              isMinimized: false,
+              isMaximized: false,
+              workflowId: instance.workflowId || workspace.workflow?.id, // ⭐ CRITICAL: Pass workflowId for journal persistence
+              configuration_json: {
+                role: agent.role,
+                model: agent.model,
+                llmProvider: agent.llmProvider,
+                systemPrompt: agent.systemPrompt,
+                tools: agent.tools || [],
+                position: instance.position || { x: 0, y: 0 }
+              }
+            };
+            
+            // Collect hydrated instances for store
+            hydratedInstances.push(hydratedInstance);
+            
+            return {
+              id: `node-${instance.id}`, // Generate consistent V2 node ID
+              type: 'agent',
+              position: instance.position || { x: 0, y: 0 },
+              data: {
+                robotId: RobotId.Archi, // Agents are created by Archi
+                label: instance.name,
+                agent, // ⭐ FIX: Now includes the agent prototype
+                agentInstance: hydratedInstance, // ⭐ FIX: Properly structured instance
+                workflowId: workspace.workflow?.id, // ⭐ FIX: Pass workflowId for journal
+                isMinimized: false,
+                isMaximized: false
+              }
+            };
+          });
+          
+          // ⭐ FIX: Hydrate store with properly formatted instances AFTER transformation
+          hydrateFromServer({
+            agentInstances: hydratedInstances
+          });
+          
+          setNodes(v2Nodes);
+          console.log('[App] ✅ V2WorkflowNodes hydrated from instances:', v2Nodes.length, 
+            'with workflowId:', workspace.workflow?.id,
+            'instances:', hydratedInstances.map(i => ({ id: i.id, workflowId: i.workflowId })));
+        } else {
+          // Fall back to storing backend nodes if available
+          if (workspace.nodes) {
+            setNodes(workspace.nodes);
+          }
         }
 
         if (workspace.edges) {
           setEdges(workspace.edges);
         }
 
-        // Convert nodes to WorkflowNode format for legacy React state
+        // Convert instances to WorkflowNode format for legacy React state
         if (workspace.agentInstances && workspace.agentInstances.length > 0) {
           const now = new Date().toISOString();
           const hydrationNodes: WorkflowNode[] = workspace.agentInstances.map((instance: any) => ({
@@ -473,10 +583,11 @@ function AppContent() {
 
     // 🆕 Migration: Créer des instances pour les nodes legacy sans instanceId
     let migratedCount = 0;
+    const currentWorkflowId = getCurrentWorkflowId(); // ⭐ Get current workflow ID for migration
     const updatedNodes = workflowNodes.map(node => {
       if (!node.instanceId && node.agent) {
-        // Créer une instance pour ce node legacy
-        const instanceId = addAgentInstance(node.agent.id, node.position, node.agent.name);
+        // Créer une instance pour ce node legacy - pass workflowId
+        const instanceId = addAgentInstance(node.agent.id, node.position, node.agent.name, currentWorkflowId || undefined);
         migratedCount++;
         return { ...node, instanceId };
       }
@@ -627,12 +738,13 @@ function AppContent() {
     // Use instanceName if provided, otherwise use agent name
     const instanceName = agent.instanceName || agent.name;
 
-    // Add agent instance to DesignStore with custom instance name (local state)
-    const instanceId = addAgentInstance(agent.id, position, instanceName);
+    // ⭐ Get workflowId BEFORE creating instance
+    const workflowId = getCurrentWorkflowId();
+
+    // Add agent instance to DesignStore with custom instance name and workflowId
+    const instanceId = addAgentInstance(agent.id, position, instanceName, workflowId || undefined);
 
     // ⭐ AUTO-SAVE: Immediately persist to backend (if authenticated)
-    const workflowId = getCurrentWorkflowId();
-    
     if (isAuthenticated && accessToken && workflowId) {
       console.log('[App] 📤 Auto-saving new agent instance to backend:', {
         instanceId,
@@ -661,40 +773,227 @@ function AppContent() {
         { isAuthenticated, accessToken }
       );
       
+      // ⭐ FIX: Utiliser le backendId comme ID final, sinon le tempId
+      let finalInstanceId = instanceId;
+      
       if (result.success) {
         console.log('[App] ✅ Agent instance persisted to DB:', result.backendId);
-        // TODO: Update instanceId in store if backend returns different ID
+        // ⭐ CRITICAL FIX: Update instance ID in store with backend-generated ID
+        if (result.backendId && result.backendId !== instanceId) {
+          console.log('[App] Updating instance ID:', {
+            tempId: instanceId,
+            backendId: result.backendId
+          });
+          updateInstanceId(instanceId, result.backendId);
+          finalInstanceId = result.backendId; // ⭐ Utiliser le vrai ID backend
+        }
       } else {
         console.error('[App] ❌ Failed to persist agent instance:', result.error);
         // Don't block UI - instance exists locally, will sync later
       }
+      
+      // ⭐ CRITICAL: Create V2WorkflowNode in Zustand store AFTER ID resolution
+      // ⭐ FIX: Utiliser getState() pour obtenir la valeur actuelle du store (pas la closure stale)
+      const currentAgentInstances = useDesignStore.getState().agentInstances;
+      const updatedInstance = currentAgentInstances.find(inst => 
+        inst.id === finalInstanceId || inst.id === instanceId
+      );
+      
+      if (updatedInstance) {
+        // ⭐ FIX: Ensure workflowId is set on the instance
+        const instanceWithWorkflowId: AgentInstance = {
+          ...updatedInstance,
+          id: finalInstanceId, // ⭐ Forcer l'utilisation de l'ID final
+          workflowId: updatedInstance.workflowId || workflowId
+        };
+        
+        addNode({
+          type: 'agent',
+          position,
+          data: {
+            robotId: RobotId.Archi,
+            label: instanceName,
+            agent,
+            agentInstance: instanceWithWorkflowId,
+            workflowId,
+            isMinimized: false,
+            isMaximized: false
+          }
+        });
+        console.log('[App] ✅ V2WorkflowNode added with final instance ID:', finalInstanceId);
+      } else {
+        console.warn('[App] ⚠️ Instance not found after creation, creating node anyway');
+        // Créer le node avec les données disponibles
+        addNode({
+          type: 'agent',
+          position,
+          data: {
+            robotId: RobotId.Archi,
+            label: instanceName,
+            agent,
+            agentInstance: {
+              id: finalInstanceId,
+              prototypeId: agent.id,
+              name: instanceName,
+              position,
+              isMinimized: false,
+              isMaximized: false,
+              workflowId,
+              configuration_json: null
+            },
+            workflowId,
+            isMinimized: false,
+            isMaximized: false
+          }
+        });
+      }
+      
+      // Legacy: Also add to local state with the final ID
+      const newNode: WorkflowNode = {
+        id: `node-${Date.now()}`,
+        agent,
+        position,
+        messages: [],
+        isMinimized: false,
+        isMaximized: false,
+        instanceId: finalInstanceId // ⭐ Utiliser l'ID final
+      };
+      setWorkflowNodes(prev => [...prev, newNode]);
     } else {
       console.log('[App] Guest mode - agent instance saved to localStorage via store');
+      
+      // Guest mode: créer le node avec l'ID local
+      // ⭐ FIX: Utiliser getState() pour obtenir la valeur actuelle du store
+      const guestAgentInstances = useDesignStore.getState().agentInstances;
+      const localInstance = guestAgentInstances.find(inst => inst.id === instanceId);
+      if (localInstance) {
+        addNode({
+          type: 'agent',
+          position,
+          data: {
+            robotId: RobotId.Archi,
+            label: instanceName,
+            agent,
+            agentInstance: { ...localInstance, workflowId: localInstance.workflowId || 'guest-workflow' },
+            workflowId: 'guest-workflow',
+            isMinimized: false,
+            isMaximized: false
+          }
+        });
+      }
+      
+      // Legacy state
+      const newNode: WorkflowNode = {
+        id: `node-${Date.now()}`,
+        agent,
+        position,
+        messages: [],
+        isMinimized: false,
+        isMaximized: false,
+        instanceId
+      };
+      setWorkflowNodes(prev => [...prev, newNode]);
     }
+  }, [workflowNodes, addAgentInstance, isAuthenticated, accessToken, getCurrentWorkflowId, updateInstanceId, addNode, agentInstances]);
 
-    // Legacy: Also add to local state for now to maintain compatibility
-    const newNode: WorkflowNode = {
-      id: `node-${Date.now()}`,
-      agent,
-      position,
-      messages: [],
-      isMinimized: false,
-      isMaximized: false,
-      instanceId // ✅ Stocker instanceId pour accès au modal de configuration
-    };
-    setWorkflowNodes(prev => [...prev, newNode]);
-  }, [workflowNodes, addAgentInstance, isAuthenticated, accessToken, getCurrentWorkflowId]);
-
-  const handleDeleteNode = (nodeId: string) => {
+  /**
+   * ⭐ FIX: Suppression robuste d'un node avec persistance backend
+   * Gère les deux formats d'ID (legacy et V2)
+   */
+  const handleDeleteNode = useCallback(async (nodeId: string) => {
+    console.log('[App] handleDeleteNode called with:', nodeId);
+    
+    // 1. Trouver le node dans le state legacy pour obtenir l'instanceId
+    const legacyNode = workflowNodes.find(node => node.id === nodeId);
+    const instanceId = legacyNode?.instanceId;
+    
+    // 2. Trouver le node V2 dans le store (format: node-{instanceId})
+    const v2NodeId = instanceId ? `node-${instanceId}` : nodeId;
+    const v2Node = storeNodes.find(node => node.id === v2NodeId || node.id === nodeId);
+    const v2InstanceId = v2Node?.data?.agentInstance?.id;
+    
+    // Déterminer l'ID d'instance final
+    const finalInstanceId = instanceId || v2InstanceId;
+    
+    console.log('[App] Delete node resolution:', { 
+      nodeId, 
+      legacyInstanceId: instanceId, 
+      v2NodeId, 
+      v2InstanceId,
+      finalInstanceId 
+    });
+    
+    // 3. Supprimer du state legacy
     setWorkflowNodes(prev => prev.filter(node => node.id !== nodeId));
-    // CRITICAL: Also delete from Zustand store to maintain consistency
+    
+    // 4. Supprimer du store Zustand (essayer les deux formats d'ID)
     deleteNode(nodeId);
-  };
+    deleteNode(v2NodeId);
+    
+    // 5. Supprimer l'instance du store si trouvée
+    if (finalInstanceId) {
+      deleteAgentInstance(finalInstanceId);
+      
+      // 6. ⭐ CRITICAL: Persister la suppression au backend
+      if (isAuthenticated && accessToken) {
+        const workflowId = getCurrentWorkflowId();
+        if (workflowId) {
+          try {
+            const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+            const response = await fetch(`${backendUrl}/api/workflows/${workflowId}/instances/${finalInstanceId}`, {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            if (response.ok) {
+              console.log('[App] ✅ Agent instance deleted from backend:', finalInstanceId);
+            } else {
+              console.warn('[App] ⚠️ Backend delete failed:', response.status);
+            }
+          } catch (error) {
+            console.error('[App] ❌ Error deleting instance from backend:', error);
+          }
+        }
+      }
+    }
+  }, [workflowNodes, storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, accessToken, getCurrentWorkflowId]);
 
-  const handleDeleteNodes = (instanceIds: string[]) => {
+  const handleDeleteNodes = useCallback(async (instanceIds: string[]) => {
     // Batch delete multiple nodes by instanceId (used when deleting prototype with instances)
+    console.log('[App] handleDeleteNodes called with:', instanceIds);
+    
+    // 1. Supprimer du state legacy
     setWorkflowNodes(prev => prev.filter(node => !node.instanceId || !instanceIds.includes(node.instanceId)));
-  };
+    
+    // 2. Supprimer du store et backend pour chaque instance
+    for (const instanceId of instanceIds) {
+      // Supprimer du store
+      deleteNode(`node-${instanceId}`);
+      deleteAgentInstance(instanceId);
+      
+      // Persister au backend
+      if (isAuthenticated && accessToken) {
+        const workflowId = getCurrentWorkflowId();
+        if (workflowId) {
+          try {
+            const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+            await fetch(`${backendUrl}/api/workflows/${workflowId}/instances/${instanceId}`, {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+              }
+            });
+          } catch (error) {
+            console.error('[App] Error deleting instance:', instanceId, error);
+          }
+        }
+      }
+    }
+  }, [deleteNode, deleteAgentInstance, isAuthenticated, accessToken, getCurrentWorkflowId]);
 
   const handleUpdateNodePosition = (nodeId: string, position: { x: number; y: number }) => {
     setWorkflowNodes(prev =>

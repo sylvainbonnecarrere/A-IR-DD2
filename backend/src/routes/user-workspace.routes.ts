@@ -234,6 +234,9 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
                     totalMediaGenerated: 0,
                     callCount: 0
                 },
+                // ⭐ CRITICAL FIX: Include prototypeId and workflowId for proper hydration
+                prototypeId: agent.prototypeId?.toString() || agent.prototypeId,
+                workflowId: agent.workflowId?.toString() || agent.workflowId,
                 createdAt: agent.createdAt
             })),
 

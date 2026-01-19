@@ -107,7 +107,7 @@ docker-compose --env-file .env up -d
 # Terminal 1: cd backend && npm run dev
 # Terminal 2: npm run dev
 
-# 5. Login at http://localhost:5173
+# 5. Login at http://localhost:4000
 # Email: test@example.com
 # Password: TestPassword123
 ```
@@ -133,7 +133,7 @@ npm run dev
 
 ### 5. Verify Installation
 
-Open http://localhost:5173 and verify:
+Open http://localhost:4000 and verify:
 - ✅ App loads without errors
 - ✅ Login available ("Connexion" button visible)
 - ✅ Test account ready: test@example.com / TestPassword123
@@ -163,7 +163,7 @@ When using the Docker setup, a test account is automatically created:
 
 **Quick Test:**
 1. Start application (all services running)
-2. Go to http://localhost:5173
+2. Go to http://localhost:4000
 3. Click "Connexion"
 4. Use test account credentials
 5. Login successfully → Navigate to Settings to test encrypted key storage

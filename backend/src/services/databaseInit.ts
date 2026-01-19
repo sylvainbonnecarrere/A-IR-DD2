@@ -248,11 +248,18 @@ export async function initializeDatabase(): Promise<void> {
     // PHASE 1: Check existing collections and test user
     // NOTE: Use native MongoDB client, not Mongoose connection to avoid blocking
     const admin = db.admin();
-    const { collections } = await admin.listDatabases();
-    const currentDbCollections = await Promise.race([
-      db.listCollections().toArray(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('listCollections timeout')), 5000))
-    ]).catch(() => []);
+    
+    // Get current database collections with timeout protection
+    let currentDbCollections: any[] = [];
+    try {
+      currentDbCollections = await Promise.race([
+        db.listCollections().toArray(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('listCollections timeout')), 5000))
+      ]) as any[];
+    } catch (timeoutError) {
+      console.warn('[Database] listCollections timeout - proceeding with empty collection list');
+      currentDbCollections = [];
+    }
     
     const existingCollectionNames = new Set(
       Array.isArray(currentDbCollections) ? currentDbCollections.map((c: any) => c.name) : []
