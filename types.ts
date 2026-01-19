@@ -173,6 +173,7 @@ export interface EventPrototype {
 export interface AgentInstance {
   id: string; // ID unique de l'instance
   prototypeId: string; // Référence vers l'Agent prototype
+  workflowId?: string; // ⭐ NOUVEAU: ID du workflow contenant cette instance (pour persistance journal)
   name: string; // Peut être différent du prototype (personnalisation)
   position: { x: number; y: number };
   isMinimized: boolean;
@@ -309,7 +310,9 @@ export interface V2WorkflowNode {
   data: {
     robotId: RobotId;
     label: string;
+    agent?: Agent; // ⭐ Prototype de l'agent (pour model, systemPrompt par défaut)
     agentInstance?: AgentInstance; // Pour les nodes agent (référence à l'instance)
+    workflowId?: string; // ⭐ NOUVEAU: ID du workflow pour persistance journal
     isMinimized?: boolean;
     isMaximized?: boolean; // Mode agrandissement plein écran workflow
   };

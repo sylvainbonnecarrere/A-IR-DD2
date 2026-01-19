@@ -58,7 +58,7 @@ export class WebSocketManager {
           }
           const isLocalhost = origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
           const isProduction = process.env.NODE_ENV === 'production';
-          const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+          const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4000';
           
           if (isProduction) {
             if (origin === frontendUrl) {

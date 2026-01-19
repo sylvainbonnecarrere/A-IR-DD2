@@ -415,8 +415,8 @@ export const HyperspaceReveal: React.FC<HyperspaceRevealProps> = ({
                 left: isFixedPosition ? 0 : undefined,
                 right: isFixedPosition ? 0 : undefined,
                 bottom: isFixedPosition ? 0 : undefined,
-                width: '100%',
-                height: '100%',
+                width: '100vw',
+                height: '100vh',
                 overflow: 'hidden',
                 backgroundColor: '#000510'
             }}
@@ -433,7 +433,8 @@ export const HyperspaceReveal: React.FC<HyperspaceRevealProps> = ({
                     opacity: canvasOpacity,
                     transition: `opacity ${CONFIG.REVEAL_DURATION}ms ease-out`,
                     pointerEvents: isCanvasActive ? 'auto' : 'none',
-                    zIndex: 10
+                    zIndex: 10,
+                    display: 'block'
                 }}
             />
             

@@ -18,6 +18,7 @@ import { Agent, LLMConfig, PersistenceConfig, defaultPersistenceConfig } from '.
 import { Button } from '../UI';
 import { CloseIcon } from '../Icons';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
+import { useAuth } from '../../hooks/useAuth';
 
 interface WorkflowValidationModalProps {
   isOpen: boolean;
@@ -80,6 +81,8 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
   onConfirm,
   onCancel
 }) => {
+  const { user } = useAuth();
+  const isAuthenticated = user !== null;
   const [activeTab, setActiveTab] = useState<TabId>('general');
   const [instanceName, setInstanceName] = useState('');
   
@@ -136,7 +139,7 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'general', label: 'Général', icon: <SettingsIcon className="w-4 h-4" /> },
-    { id: 'persistence', label: 'Sauvegarde', icon: <SaveIcon className="w-4 h-4" /> }
+    ...(isAuthenticated ? [{ id: 'persistence' as const, label: 'Sauvegarde', icon: <SaveIcon className="w-4 h-4" /> }] : [])
   ];
 
   // ============================================
@@ -165,7 +168,7 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
 
       {/* Agent Info */}
       <div className="bg-gray-700 p-3 rounded-lg mb-4">
-        <p className="text-gray-300 text-sm">{agent.description || 'Aucune description'}</p>
+        <p className="text-gray-300 text-sm">{agent.role || agent.description || 'Pas de description'}</p>
       </div>
 
       {/* Validation Checks */}

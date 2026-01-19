@@ -43,6 +43,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
     setAgents,
     addAgent,
     updateAgent,
+    updateAgentId,
     deleteAgent,
     selectAgent,
     selectedAgentId,
@@ -225,12 +226,22 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       // Create new with governance (includes templates with id: 'temp')
       const result = addAgent(agentData);
       
-      if (result.success) {
+      if (result.success && result.agentId) {
         // ⭐ PERSISTENCE: Si user connecté, sauvegarder aussi dans MongoDB
-        if (isAuthenticated && accessToken && result.agentId) {
+        if (isAuthenticated && accessToken) {
           const apiResult = await createAgentPrototype(agentData, accessToken, currentRobotId);
-          if (!apiResult.success) {
-            // Note: On ne bloque pas - le prototype existe localement
+          if (apiResult.success && apiResult.data) {
+            // ⭐ CRITICAL FIX: Capture ObjectId from backend and update local store
+            const backendObjectId = apiResult.data._id || apiResult.data.id;
+            if (backendObjectId && backendObjectId !== result.agentId) {
+              console.log('[ArchiPrototypingPage] Updating agent ID:', {
+                tempId: result.agentId,
+                objectId: backendObjectId
+              });
+              updateAgentId(result.agentId, backendObjectId);
+            }
+          } else {
+            console.warn('[ArchiPrototypingPage] API creation failed, using local ID:', apiResult.error);
           }
         }
         

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
 import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, AgentInstance } from '../types';
 import { Button } from './UI';
@@ -14,6 +14,7 @@ import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
 import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
 import { useLocalization } from '../hooks/useLocalization';
+import { useJournalQueue } from '../hooks/useJournalQueue';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -70,6 +71,7 @@ export interface V2AgentNodeData {
   label: string;
   agent: Agent; // The prototype
   agentInstance?: AgentInstance; // The instance data
+  workflowId?: string; // ⭐ NOUVEAU: Pour persistance journal
   isMinimized?: boolean;
 }
 
@@ -197,8 +199,9 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       const { setConfigModalInstanceId } = useRuntimeStore.getState();
       setConfigModalInstanceId(agentInstance.id);
     } else {
-      console.error('No agentInstance found for node', id, '- agentInstance:', agentInstance);
-      alert('Cet agent n\'a pas encore d\'instance. Veuillez le supprimer et le recréer depuis la sidebar.');
+      console.error('[V2AgentNode] No agentInstance found for node', id, '- agentInstance:', agentInstance, '- data:', data);
+      console.error('[V2AgentNode] Agent:', agent?.name, 'id:', agent?.id);
+      alert(`Cet agent n'a pas encore d'instance. Vérifiez que l'agent a bien été créé dans la sidebar.\n\nDébug: agentInstance=${agentInstance}, agent=${agent?.name}`);
     }
   };
 
@@ -240,6 +243,36 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     }
   };
 
+  /**
+   * Persister une entrée journal dans MongoDB agent_journals via queue robuste
+   * Respecte persistenceConfig granulaire
+   * Gère les retries automatiques en cas de déconnexion
+   */
+  const { enqueueEntry } = useJournalQueue();
+
+  const persistJournalEntry = useCallback((entryType: 'chat' | 'error' | 'media', payload: any) => {
+    // ⭐ FALLBACK: Essayer d'abord data.workflowId (du contexte), puis agentInstance.workflowId
+    const effectiveWorkflowId = data.workflowId || agentInstance?.workflowId;
+    
+    if (!agentInstance?.id || !effectiveWorkflowId) {
+      console.warn('[Journal] Missing context for persistence:', { 
+        agentInstanceId: agentInstance?.id, 
+        workflowId: effectiveWorkflowId,
+        dataWorkflowId: data.workflowId,
+        instanceWorkflowId: agentInstance?.workflowId
+      });
+      return;
+    }
+
+    // Enqueuer sans bloquage (async, non-blocking)
+    enqueueEntry(
+      effectiveWorkflowId,
+      agentInstance.id,
+      entryType,
+      payload
+    );
+  }, [agentInstance?.id, agentInstance?.workflowId, data.workflowId, enqueueEntry]);
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedInput = userInput.trim();
@@ -278,6 +311,14 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     addNodeMessage(id, userMessage);
     setUserInput('');
     setAttachedFile(null);
+
+    // ⭐ Phase 3: Persister le message utilisateur (non-bloquant)
+    persistJournalEntry('chat', {
+      role: 'user',
+      content: trimmedInput,
+      llmProvider: effectiveAgent.llmProvider,
+      modelUsed: effectiveAgent.model
+    });
 
     // Get LLM config
     // llmConfigs now from hook above
@@ -424,6 +465,16 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         }
       }
 
+      // ⭐ Phase 3: Persister la réponse agent si elle existe et n'est pas une erreur
+      if (currentResponse.trim() && !toolCalls.length) {
+        persistJournalEntry('chat', {
+          role: 'agent',
+          content: currentResponse,
+          llmProvider: effectiveAgent.llmProvider,
+          modelUsed: effectiveAgent.model
+        });
+      }
+
       // Execute tools if any
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
@@ -530,6 +581,16 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
               }
             }
           }
+
+          // ⭐ Phase 3: Persister la réponse follow-up
+          if (followUpResponse.trim()) {
+            persistJournalEntry('chat', {
+              role: 'agent',
+              content: followUpResponse,
+              llmProvider: effectiveAgent.llmProvider,
+              modelUsed: effectiveAgent.model
+            });
+          }
         }
       }
 
@@ -541,6 +602,15 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         isError: true
       };
       addNodeMessage(id, errorMessage);
+
+      // ⭐ Phase 3: Persister l'erreur
+      persistJournalEntry('error', {
+        errorCode: 'AGENT_ERROR',
+        message: error instanceof Error ? error.message : String(error),
+        source: 'llm_service',
+        retryable: true,
+        attempts: 1
+      });
     } finally {
       setNodeExecuting(id, false);
       setLoadingMessage('');
@@ -967,12 +1037,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             <div className="text-xs text-gray-400 mb-1 select-text 
                             group-hover:text-gray-300 transition-colors duration-200">
               {effectiveAgent.llmProvider || 'Unknown'} • {effectiveAgent.model || 'Unknown'}
-            </div>
-            <div className="text-sm text-cyan-400 font-medium select-text
-                            group-hover:text-cyan-300 transition-colors duration-200
-                            flex items-center space-x-2">
-              <span>{agent?.role || 'Agent'}</span>
-              <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse"></div>
             </div>
           </div>
 
