@@ -771,9 +771,13 @@ function AppContent() {
   const confirmDeleteAgent = () => {
     if (deleteConfirmation) {
       const { agentId } = deleteConfirmation;
+      // ⭐ FIX: Close modal IMMEDIATELY before performing deletion to prevent double-click
+      // This prevents event bubbling from re-triggering the delete button
+      setDeleteConfirmation(null);
+      
+      // Then perform the actual deletion
       setAgents(prev => prev.filter(agent => agent.id !== agentId));
       setWorkflowNodes(prev => prev.filter(node => node.agent.id !== agentId));
-      setDeleteConfirmation(null);
     }
   };
 
