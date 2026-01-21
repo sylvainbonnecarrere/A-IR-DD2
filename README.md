@@ -15,6 +15,8 @@ A-IR-DD2 is a next-generation AI orchestration platform implementing a specializ
 ### 📚 Documentation
 > **Need help?** Check [DOCUMENTATION_MAP.md](DOCUMENTATION_MAP.md) for quick navigation to guides and FAQs.
 
+La version actuelle de A-IR-DD2 s'appuie sur une architecture centrale de création de prototypes. Ces prototypes permettent de générer et d'orchestrer des agents IA spécialisés directement au sein de l'éditeur de workflow visuel.
+
 ---
 
 ## ✨ Key Features
