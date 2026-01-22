@@ -1,26 +1,26 @@
-# Carte de la Documentation A-IR-DD2
+# A-IR-DD2 Documentation Map
 
-Bienvenue dans A-IR-DD2. Ce document fournit une vue d'ensemble synthétique pour vous aider à naviguer dans le projet.
+Welcome to A-IR-DD2. This document provides a concise overview to help you navigate the project.
 
-## Statut du Projet et Modes d'Utilisation
+## Project Status and Usage Modes
 
-Le projet est en cours de développement actif. Il existe deux manières principales d'utiliser l'application :
+The project is under active development. There are two main ways to use the application:
 
-*   **Mode Invité (Guest)** : Idéal pour des tests rapides. Toutes les configurations (y compris les clés API) sont stockées directement dans le `localStorage` de votre navigateur. Ces données ne sont pas chiffrées et ne persistent pas si vous changez d'appareil ou de navigateur.
-*   **Mode Connecté (Authenticated)** : Nécessite la création d'un compte. Ce mode offre une persistance complète des données dans une base de données MongoDB. Les clés API, les prototypes, les workflows et les préférences utilisateur sont stockés de manière sécurisée et synchronisés sur tous vos appareils.
+*   **Guest Mode**: Ideal for quick testing. All configurations (including API keys) are stored directly in your browser's `localStorage`. This data is not encrypted and does not persist if you switch devices or browsers.
+*   **Authenticated Mode**: Requires account creation. This mode offers full data persistence in a MongoDB database. API keys, prototypes, workflows, and user preferences are securely stored and synchronized across all your devices.
 
-## Cœur de l'Application : Développement d'Agents IA
+## Core Application: AI Agent Development
 
-Le développement actuel se concentre sur la fonctionnalité centrale de l'application : la création et l'orchestration d'agents d'intelligence artificielle.
+Current development focuses on the application's core functionality: the creation and orchestration of artificial intelligence agents.
 
-*   **Support Multi-LLM** : L'application intègre les API des principaux fournisseurs de modèles de langage (Gemini, OpenAI, Anthropic, etc.).
-*   **LLM sur Site (On-Premise)** : Il est également possible de se connecter à des modèles locaux via des services comme LMStudio, offrant une confidentialité maximale.
-*   **Configuration Centralisée** : La gestion de toutes les clés API et des fournisseurs se fait de manière unifiée via l'interface "Paramètres des LLMs".
+*   **Multi-LLM Support**: The application integrates APIs from major language model providers (Gemini, OpenAI, Anthropic, etc.).
+*   **On-Premise LLM**: It is also possible to connect to local models via services like LMStudio, offering maximum privacy.
+*   **Centralized Configuration**: Management of all API keys and providers is unified via the "LLM Settings" interface.
 
-## Processus de Création : Du Prototype à l'Instance
+## Creation Process: From Prototype to Instance
 
-Le workflow utilisateur pour la création d'agents est conçu autour d'une architecture de spécialisation par "robots".
+The user workflow for agent creation is designed around a "robot" specialization architecture.
 
-1.  **Utilisation du Robot Archi** : Le robot **Archi** est le spécialiste de l'architecture. L'utilisateur l'utilise pour accéder à la section de "Prototypage".
-2.  **Création de Prototypes** : Dans cette section, vous pouvez créer des **prototypes d'agents**. Un prototype définit le comportement de base d'un agent : son rôle (prompt système), ses capacités (génération d'images, recherche web, etc.) et les outils qu'il peut utiliser. Pour un utilisateur connecté, ces prototypes sont sauvegardés sur son compte.
-3.  **Instanciation sur le Workflow** : Une fois qu'un prototype est créé, vous pouvez l'ajouter à votre espace de travail visuel (le workflow). Cette action crée une **instance** de l'agent. Vous pouvez alors personnaliser cette instance (par exemple, en modifiant son nom ou son prompt pour une tâche spécifique) sans altérer le prototype original. Cela permet de réutiliser un même prototype pour créer de multiples agents spécialisés sur votre canvas.
+1.  **Using Robot Archi**: The **Archi** robot is the architecture specialist. The user uses it to access the "Prototyping" section.
+2.  **Creating Prototypes**: In this section, you can create **agent prototypes**. A prototype defines an agent's base behavior: its role (system prompt), capabilities (image generation, web search, etc.), and the tools it can use. For a logged-in user, these prototypes are saved to their account.
+3.  **Instantiation on Workflow**: Once a prototype is created, you can add it to your visual workspace (the workflow). This action creates an **instance** of the agent. You can then customize this instance (e.g., by modifying its name or prompt for a specific task) without altering the original prototype. This allows reusing a single prototype to create multiple specialized agents on your canvas.

@@ -15,18 +15,18 @@ A-IR-DD2 is a next-generation AI orchestration platform implementing a specializ
 ### 📚 Documentation
 > **Need help?** Check [DOCUMENTATION_MAP.md](DOCUMENTATION_MAP.md) for quick navigation to guides and FAQs.
 
-La version actuelle de A-IR-DD2 s'appuie sur une architecture centrale de création de prototypes. Ces prototypes permettent de générer et d'orchestrer des agents IA spécialisés directement au sein de l'éditeur de workflow visuel.
+The current version of A-IR-DD2 is built on a central prototype creation architecture. These prototypes enable the generation and orchestration of specialized AI agents directly within the visual workflow editor.
 
 ---
 
 ## ✨ Key Features
 
 ### 🤖 Robot Specialization Architecture
-- **Archi** (AR_001): Agent creation, workflow orchestration, system architecture
-- **Bos** (BO_002): Monitoring, supervision, cost tracking, debugging
-- **Com** (CO_003): API connections, authentication, external integrations  
-- **Phil** (PH_004): Data transformation, file handling, validation
-- **Tim** (TI_005): Event triggers, scheduling, rate limiting, async management
+- **Archi** (AR_001): Agent prototyping, instantiation, inter-agent links, task management, prototype library.
+- **Bos** (BO_002): Workflow mapping, live monitoring, analytics & costs, user governance, public playground.
+- **Com** (CO_003): API connections, SQL/NoSQL databases, vector DBs, MCP integrations, connector hub.
+- **Phil** (PH_004): RAG configuration, file handling, custom functions, external libraries, knowledge base.
+- **Tim** (TI_005): Triggers & webhooks, scheduling, polling, rate limiting, async task management.
 
 ### 🔄 Visual Workflow Editor (N8N-Style)
 - Drag & drop canvas with React Flow
