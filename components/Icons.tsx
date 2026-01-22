@@ -334,3 +334,269 @@ export const CogIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
 );
+
+// Specialized Menu Icons for Robots
+
+// ARCHI - Architecture & Structure
+export const RobotIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <rect x="3" y="11" width="18" height="10" rx="2" ry="2" />
+        <circle cx="12" cy="16" r="1" />
+        <path d="M9 11V9a3 3 0 0 1 6 0v2" />
+        <path d="M8 16h8" />
+        <path d="M12 8v3" />
+    </svg>
+);
+
+export const NetworkIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <circle cx="12" cy="12" r="3" />
+        <circle cx="6" cy="6" r="2" />
+        <circle cx="18" cy="6" r="2" />
+        <circle cx="6" cy="18" r="2" />
+        <circle cx="18" cy="18" r="2" />
+        <path d="M12 9V6" />
+        <path d="M9 12H6" />
+        <path d="M15 12h3" />
+        <path d="M12 15v3" />
+    </svg>
+);
+
+export const WorkflowIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <path d="M9 9h6" />
+        <path d="M9 12h6" />
+        <path d="M9 15h4" />
+        <path d="M16 9v6" />
+        <path d="M19 12l-3-3-3 3" />
+    </svg>
+);
+
+export const BlueprintIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <path d="M8 8h8" />
+        <path d="M8 12h8" />
+        <path d="M8 16h5" />
+        <path d="M16 8v8" />
+        <path d="M13 11l3-3" />
+        <path d="M13 13l3 3" />
+    </svg>
+);
+
+// BOS - Supervision & Business
+export const HeartbeatIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+        <circle cx="20" cy="12" r="1" />
+        <circle cx="4" cy="12" r="1" />
+    </svg>
+);
+
+export const ChartIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <line x1="18" y1="20" x2="18" y2="10" />
+        <line x1="12" y1="20" x2="12" y2="4" />
+        <line x1="6" y1="20" x2="6" y2="14" />
+        <polyline points="2,18 6,14 12,8 18,10 22,6" />
+    </svg>
+);
+
+export const AdminIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        <circle cx="12" cy="8" r="2" />
+        <path d="M12 10v4" />
+        <path d="M9 13h6" />
+    </svg>
+);
+
+export const GameIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <rect x="2" y="6" width="20" height="12" rx="2" ry="2" />
+        <circle cx="8" cy="12" r="1" />
+        <circle cx="12" cy="12" r="1" />
+        <circle cx="16" cy="12" r="1" />
+        <path d="M6 10v4" />
+        <path d="M18 10v4" />
+    </svg>
+);
+
+// COM - Connexions & Intégrations
+export const PlugIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M12 2v6" />
+        <path d="M8 8v4a4 4 0 0 0 8 0V8" />
+        <path d="M8 2h8" />
+        <path d="M12 22v-6" />
+        <path d="M8 16v4a4 4 0 0 0 8 0v-4" />
+        <path d="M8 22h8" />
+    </svg>
+);
+
+export const DatabaseIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <ellipse cx="12" cy="5" rx="9" ry="3" />
+        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+    </svg>
+);
+
+export const VectorIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <circle cx="9" cy="9" r="1" />
+        <circle cx="15" cy="9" r="1" />
+        <circle cx="9" cy="15" r="1" />
+        <circle cx="15" cy="15" r="1" />
+        <circle cx="12" cy="12" r="1" />
+    </svg>
+);
+
+export const HandshakeIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M20.42 4.58a5.4 5.4 0 0 0-7.65 0l-.77.78-.77-.78a5.4 5.4 0 0 0-7.65 0C1.46 6.7 1.33 10.28 4 13l8 8 8-8c2.67-2.72 2.54-6.3.42-8.42z" />
+        <path d="M12 5.5c1.5 0 3 1.5 3 3.5 0 1.5-.5 2.5-1.5 3.5L12 15l-1.5-2.5C9.5 11.5 9 10.5 9 9c0-2 1.5-3.5 3-3.5z" />
+    </svg>
+);
+
+export const HubIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 1v6" />
+        <path d="M12 17v6" />
+        <path d="M3.34 7.34l4.24 4.24" />
+        <path d="M16.42 16.42l4.24 4.24" />
+        <path d="M1 12h6" />
+        <path d="M17 12h6" />
+        <path d="M7.34 3.34l4.24 4.24" />
+        <path d="M16.42 7.34l4.24-4.24" />
+    </svg>
+);
+
+// PHIL - Data & Intelligence
+export const SearchIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <circle cx="11" cy="11" r="8" />
+        <path d="M21 21l-4.35-4.35" />
+        <circle cx="11" cy="11" r="3" />
+    </svg>
+);
+
+export const FileProcessIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14,2 14,8 20,8" />
+        <path d="M10 12l2 2 4-4" />
+        <path d="M16 18H8" />
+        <path d="M12 14v4" />
+    </svg>
+);
+
+export const CodeIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <polyline points="16 18 22 12 16 6" />
+        <polyline points="8 6 2 12 8 18" />
+    </svg>
+);
+
+export const PackageIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <line x1="16.5" y1="9.4" x2="7.5" y2="4.21" />
+        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+        <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+        <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+);
+
+export const BookIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+);
+
+// TIM - Temps & Événements
+export const LightningIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+    </svg>
+);
+
+export const CalendarIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+        <path d="M8 14l2 2 4-4" />
+    </svg>
+);
+
+export const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+        <circle cx="12" cy="12" r="3" />
+    </svg>
+);
+
+export const SpeedometerIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12,6 12,12 16,14" />
+        <path d="M6.34 6.34L7.76 7.76" />
+        <path d="M17.66 6.34L16.24 7.76" />
+        <path d="M6.34 17.66L7.76 16.24" />
+        <path d="M17.66 17.66L16.24 16.24" />
+    </svg>
+);
+
+export const AsyncIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M17 11h4a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4" />
+        <path d="M7 11H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+        <path d="M21 13v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <path d="M12 2v6" />
+        <path d="M8 8l4-4 4 4" />
+    </svg>
+);
+
+export const LoaderIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+);
+
+// CORRECTIF SÉMANTIQUE - Icônes ultra-précises pour menus spécifiques
+
+export const RobotHeadIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M12 2c3 0 6 1 6 5v6c0 3-2 4-3 4.5V22h-6v-4.5C8 17 6 16 6 13V7c0-4 3-5 6-5z" />
+        <circle cx="9" cy="10" r="1" fill="currentColor" />
+        <circle cx="15" cy="10" r="1" fill="currentColor" />
+        <path d="M10 14h4" />
+    </svg>
+);
+
+export const ChecklistMemoIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+        <path d="M7 8h4" />
+        <path d="M7 12h4" />
+        <path d="M7 16h4" />
+        <circle cx="16" cy="8" r="1.5" />
+        <circle cx="16" cy="12" r="1.5" />
+        <rect x="14.5" y="14.5" width="3" height="3" />
+    </svg>
+);
+
+export const ElectricPlugIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M6 9L6 3" />
+        <path d="M18 9L18 3" />
+        <path d="M8 3H16" />
+        <path d="M8 3V9C8 11.21 6.21 13 4 13H20C21.66 13 23 14.34 23 16V20C23 21.66 21.66 23 20 23H4C2.34 23 1 21.66 1 20V16C1 14.34 2.34 13 4 13" />
+        <circle cx="12" cy="17" r="2" />
+    </svg>
+);

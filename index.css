@@ -3,6 +3,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom animations */
+@layer utilities {
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  .animate-in {
+    animation: fadeIn 0.2s ease-in-out;
+  }
+}
+
 /* Custom global styles */
 body {
   font-family: 'Inter', sans-serif;

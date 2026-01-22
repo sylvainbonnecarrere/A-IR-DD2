@@ -3,6 +3,8 @@ import { RobotId, LLMConfig, Agent, WorkflowNode } from '../types';
 import { ArchiPrototypingPage } from './ArchiPrototypingPage';
 import WorkflowCanvas from './WorkflowCanvas';
 import { ComConnectionsPage } from './ComConnectionsPage';
+import { ComDatabasesPage } from './ComDatabasesPage';
+import { ComApiPage } from './ComApiPage';
 import { PhilDataPage } from './PhilDataPage';
 import { TimEventsPage } from './TimEventsPage';
 import { useLocalization } from '../hooks/useLocalization';
@@ -209,13 +211,16 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     );
   }
 
+  if (currentPath.startsWith('/com/connexions-api')) {
+    return <ComApiPage />;
+  }
+
+  if (currentPath.startsWith('/com/databases')) {
+    return <ComDatabasesPage />;
+  }
+
   if (currentPath.startsWith('/com')) {
-    return (
-      <ComConnectionsPage
-        llmConfigs={llmConfigs}
-        onNavigateToWorkflow={handleNavigateToWorkflow}
-      />
-    );
+    return <ComApiPage />;
   }
 
   if (currentPath.startsWith('/phil')) {
