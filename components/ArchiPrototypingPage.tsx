@@ -397,54 +397,48 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
             </div>
           </div>
 
-          {/* Governance Indicator */}
-          <div className="bg-indigo-500/20 border border-indigo-500/30 rounded-lg px-3 py-1.5">
-            <div className="text-xs text-indigo-300 font-medium">{t('current_robot_label')}</div>
-            <div className="text-sm text-indigo-100 font-bold">{currentRobotId}</div>
-            <div className="text-xs text-indigo-400">{t('authorized_creator')}</div>
-          </div>
-        </div>
-      </div>
+          <div className="flex items-center space-x-4">
+            {/* Action Buttons */}
+            <div className="flex space-x-2">
+              <Button
+                onClick={() => setTodoModalOpen(true)}
+                className="flex items-center space-x-2 text-xs"
+                variant="secondary"
+              >
+                <span>📝</span>
+                <span>Tâches</span>
+              </Button>
+              <Button
+                onClick={() => setGovernanceTestOpen(true)}
+                className="flex items-center space-x-2 text-xs"
+                variant="secondary"
+              >
+                <span>🔒</span>
+                <span>Gouvernance</span>
+              </Button>
+              <Button
+                onClick={handleCreateFromTemplate}
+                className="flex items-center space-x-2 text-xs"
+                variant="secondary"
+              >
+                <span>📋</span>
+                <span>Template</span>
+              </Button>
+              <Button
+                onClick={handleCreateAgent}
+                className="flex items-center space-x-2 text-xs"
+                variant="primary"
+              >
+                <PlusIcon className="w-4 h-4" />
+                <span>Créer</span>
+              </Button>
+            </div>
 
-      {/* Actions Bar */}
-      <div className="flex-shrink-0 p-6 border-b border-gray-700/50">
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-gray-400">
-            {agents.length} prototype(s) créé(s)
-          </div>
-          <div className="flex space-x-3">
-            <Button
-              onClick={() => setTodoModalOpen(true)}
-              className="flex items-center space-x-2"
-              variant="secondary"
-            >
-              <span>📝</span>
-              <span>Tâches</span>
-            </Button>
-            <Button
-              onClick={() => setGovernanceTestOpen(true)}
-              className="flex items-center space-x-2"
-              variant="secondary"
-            >
-              <span>🔒</span>
-              <span>Test Gouvernance</span>
-            </Button>
-            <Button
-              onClick={handleCreateFromTemplate}
-              className="flex items-center space-x-2"
-              variant="secondary"
-            >
-              <span>📋</span>
-              <span>Template</span>
-            </Button>
-            <Button
-              onClick={handleCreateAgent}
-              className="flex items-center space-x-2"
-              variant="primary"
-            >
-              <PlusIcon className="w-4 h-4" />
-              <span>Création de prototype</span>
-            </Button>
+            {/* Governance Indicator - Simplified */}
+            <div className="bg-indigo-500/20 border border-indigo-500/30 rounded-lg px-3 py-1.5 whitespace-nowrap">
+              <div className="text-xs text-indigo-300 font-medium">{t('current_robot_label')}</div>
+              <div className="text-sm text-indigo-100 font-bold">ARCHI</div>
+            </div>
           </div>
         </div>
       </div>

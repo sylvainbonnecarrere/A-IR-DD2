@@ -5,6 +5,7 @@ import { useLocalization } from '../hooks/useLocalization';
 interface IconMenuItemProps {
   item: RobotMenuItem;
   isActive: boolean;
+  isSubMenuOpen?: boolean;
   onItemClick: (robotId: RobotId, path: string) => void;
   className?: string;
 }
@@ -12,11 +13,48 @@ interface IconMenuItemProps {
 export const IconMenuItem: React.FC<IconMenuItemProps> = ({
   item,
   isActive,
+  isSubMenuOpen = false,
   onItemClick,
   className = ''
 }) => {
   const { t } = useLocalization();
   const IconComponent = item.iconComponent;
+
+  // Robot color mapping for dynamic states
+  const colorMap: { [key in RobotId]: { icon: string; iconMenu: string; background: string; glow: string } } = {
+    [RobotId.Archi]: {
+      icon: 'text-indigo-400',
+      iconMenu: 'text-indigo-300',
+      background: 'bg-indigo-600',
+      glow: 'shadow-indigo-500/30'
+    },
+    [RobotId.Bos]: {
+      icon: 'text-yellow-400',
+      iconMenu: 'text-yellow-300',
+      background: 'bg-yellow-600',
+      glow: 'shadow-yellow-500/30'
+    },
+    [RobotId.Com]: {
+      icon: 'text-green-400',
+      iconMenu: 'text-green-300',
+      background: 'bg-green-600',
+      glow: 'shadow-green-500/30'
+    },
+    [RobotId.Phil]: {
+      icon: 'text-cyan-400',
+      iconMenu: 'text-cyan-300',
+      background: 'bg-cyan-600',
+      glow: 'shadow-cyan-500/30'
+    },
+    [RobotId.Tim]: {
+      icon: 'text-red-400',
+      iconMenu: 'text-red-300',
+      background: 'bg-red-600',
+      glow: 'shadow-red-500/30'
+    }
+  };
+
+  const colors = colorMap[item.id];
 
   const handleClick = () => {
     onItemClick(item.id, item.path);
@@ -30,8 +68,10 @@ export const IconMenuItem: React.FC<IconMenuItemProps> = ({
         flex items-center justify-center
         transition-all duration-200
         ${isActive
-          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
-          : 'bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white'
+          ? `${colors.background} text-white shadow-lg ${colors.glow}`
+          : isSubMenuOpen
+            ? `bg-gray-700 ${colors.iconMenu}`
+            : 'bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white'
         }
         ${className}
       `}

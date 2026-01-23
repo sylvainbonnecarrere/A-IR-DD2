@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useLocalization } from '../hooks/useLocalization';
 import { useNotifications } from '../contexts/NotificationContext';
-import { PlusIcon, CloseIcon, LoaderIcon } from './Icons';
+import { PlusIcon, CloseIcon, LoaderIcon, ElectricPlugIcon } from './Icons';
+import JsonResultViewer from './JsonResultViewer';
+import TabbedDataEditor from './TabbedDataEditor';
 
 // ============== TYPES ==============
 
@@ -14,6 +16,16 @@ interface KeyValuePair {
   id: string;
   key: string;
   value: string;
+}
+
+interface ApiConnection {
+  id: string;
+  name: string;
+  method: HttpMethod;
+  url: string;
+  authType: AuthType;
+  createdAt: string;
+  lastUsed?: string;
 }
 
 interface ApiRequest {
@@ -34,29 +46,10 @@ interface ApiRequest {
 interface ApiResponse {
   status: number;
   statusText: string;
-  time: number; // ms
-  size: string; // KB
+  time: number;
+  size: string;
   data: any;
 }
-
-// ============== MOCK DATA ==============
-
-const MOCK_RESPONSE_DATA = [
-  {
-    id: 101,
-    user: 'Agent_Smith',
-    roles: ['admin', 'system'],
-    metadata: { created_at: '2024-01-01', ip: '192.168.1.1' },
-    active: true
-  },
-  {
-    id: 102,
-    user: 'Neo_User',
-    roles: ['user'],
-    metadata: { created_at: '2024-01-02', ip: '10.0.0.42' },
-    active: false
-  }
-];
 
 // ============== SUB-COMPONENTS ==============
 
@@ -79,12 +72,7 @@ const MethodDropdown: React.FC<{
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as HttpMethod)}
-      className={`
-        px-4 py-2 rounded-lg font-bold text-sm transition-all
-        bg-gradient-to-r ${color.bg} ${color.text}
-        border-2 border-${value === 'GET' ? 'blue' : value === 'POST' ? 'green' : value === 'PUT' ? 'orange' : value === 'DELETE' ? 'red' : value === 'PATCH' ? 'purple' : 'cyan'}-500/50
-        cursor-pointer hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-400/50
-      `}
+      className={`px-4 py-2 rounded-lg font-bold text-sm transition-all bg-gradient-to-r ${color.bg} ${color.text} border-2 border-${value === 'GET' ? 'blue' : value === 'POST' ? 'green' : value === 'PUT' ? 'orange' : value === 'DELETE' ? 'red' : value === 'PATCH' ? 'purple' : 'cyan'}-500/50 cursor-pointer hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-400/50`}
     >
       {['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'].map(method => (
         <option key={method} value={method}>{method}</option>
@@ -98,32 +86,25 @@ const KeyValueList: React.FC<{
   onAdd: () => void;
   onRemove: (id: string) => void;
   onChange: (id: string, field: 'key' | 'value', value: string) => void;
-  label?: string;
+  label: string;
   keyPlaceholder?: string;
   valuePlaceholder?: string;
-}> = ({
-  items,
-  onAdd,
-  onRemove,
-  onChange,
-  label = 'Paramètres',
-  keyPlaceholder = 'Clé',
-  valuePlaceholder = 'Valeur'
-}) => (
+}> = ({ items, onAdd, onRemove, onChange, label, keyPlaceholder = 'Clé', valuePlaceholder = 'Valeur' }) => (
   <div className="space-y-3">
     <div className="flex items-center justify-between">
       <label className="text-sm font-semibold text-gray-300">{label}</label>
       <button
+        type="button"
         onClick={onAdd}
-        className="p-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 transition-all"
+        className="text-xs px-2 py-1 bg-green-600/50 hover:bg-green-600 text-green-200 rounded transition-all"
       >
-        <PlusIcon className="w-4 h-4" />
+        + Ajouter
       </button>
     </div>
 
-    <div className="space-y-2 max-h-48 overflow-y-auto">
+    <div className="space-y-2 max-h-40 overflow-y-auto">
       {items.length === 0 ? (
-        <p className="text-xs text-gray-500 italic">Aucun élément. Cliquez sur + pour en ajouter.</p>
+        <p className="text-xs text-gray-500 italic">Aucun élément</p>
       ) : (
         items.map(item => (
           <div key={item.id} className="flex gap-2">
@@ -132,18 +113,19 @@ const KeyValueList: React.FC<{
               placeholder={keyPlaceholder}
               value={item.key}
               onChange={(e) => onChange(item.id, 'key', e.target.value)}
-              className="flex-1 px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-xs transition-all focus:outline-none focus:border-cyan-500"
+              className="flex-1 px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
             />
             <input
               type="text"
               placeholder={valuePlaceholder}
               value={item.value}
               onChange={(e) => onChange(item.id, 'value', e.target.value)}
-              className="flex-1 px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-xs transition-all focus:outline-none focus:border-cyan-500"
+              className="flex-1 px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
             />
             <button
+              type="button"
               onClick={() => onRemove(item.id)}
-              className="p-2 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-400 transition-all"
+              className="p-1 text-gray-400 hover:text-red-400 transition-colors"
             >
               <CloseIcon className="w-4 h-4" />
             </button>
@@ -162,10 +144,10 @@ const TabButton: React.FC<{
   <button
     onClick={onClick}
     className={`
-      px-4 py-2 text-sm font-semibold transition-all relative
-      ${active
-        ? 'text-cyan-400 border-b-2 border-cyan-500'
-        : 'text-gray-400 border-b-2 border-transparent hover:text-gray-300'
+      px-3 py-2 text-sm font-medium rounded-t-lg transition-all
+      ${active 
+        ? 'bg-green-600 text-white border-b-2 border-green-400' 
+        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
       }
     `}
   >
@@ -173,186 +155,68 @@ const TabButton: React.FC<{
   </button>
 );
 
-const JsonTreeView: React.FC<{ data: any; maxDepth?: number; currentDepth?: number }> = ({
-  data,
-  maxDepth = 5,
-  currentDepth = 0
-}) => {
-  const [expanded, setExpanded] = useState<{ [key: string]: boolean }>({});
+// Connection List Component
+interface ConnectionListProps {
+  connections: ApiConnection[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+}
 
-  const toggleExpand = (key: string) => {
-    setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
-  };
+const ConnectionList: React.FC<ConnectionListProps> = ({ connections, selectedId, onSelect, onDelete }) => {
+  const { t } = useLocalization();
 
-  const renderValue = (value: any, key: string, depth: number) => {
-    if (value === null) return <span className="text-gray-500">null</span>;
-    if (typeof value === 'boolean') return <span className="text-orange-400">{String(value)}</span>;
-    if (typeof value === 'number') return <span className="text-green-400">{value}</span>;
-    if (typeof value === 'string') return <span className="text-cyan-300">"{value}"</span>;
-    if (Array.isArray(value)) {
-      const isExpandable = value.length > 0 && depth < maxDepth;
-      return (
-        <div>
-          <button
-            onClick={() => toggleExpand(key)}
-            className="text-cyan-400 hover:text-cyan-300 font-bold"
-          >
-            {isExpandable ? (expanded[key] ? '▼' : '▶') : ''}
-            {` Array[${value.length}]`}
-          </button>
-          {isExpandable && expanded[key] && (
-            <div className="ml-4 mt-1 space-y-1">
-              {value.map((item, idx) => (
-                <div key={idx} className="text-gray-400">
-                  <span>[{idx}]</span>
-                  {renderValue(item, `${key}_${idx}`, depth + 1)}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      );
-    }
-    if (typeof value === 'object') {
-      const isExpandable = Object.keys(value).length > 0 && depth < maxDepth;
-      return (
-        <div>
-          <button
-            onClick={() => toggleExpand(key)}
-            className="text-cyan-400 hover:text-cyan-300 font-bold"
-          >
-            {isExpandable ? (expanded[key] ? '▼' : '▶') : ''}
-            {` Object`}
-          </button>
-          {isExpandable && expanded[key] && (
-            <div className="ml-4 mt-1 space-y-1">
-              {Object.entries(value).map(([k, v]) => (
-                <div key={k} className="text-gray-400">
-                  <span className="text-purple-400">{k}:</span>
-                  {renderValue(v, k, depth + 1)}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      );
-    }
-    return <span className="text-gray-400">{String(value)}</span>;
-  };
-
-  if (Array.isArray(data)) {
+  if (connections.length === 0) {
     return (
-      <div className="space-y-2">
-        {data.map((item, idx) => (
-          <div key={idx} className="pl-2 border-l-2 border-cyan-500/30">
-            {renderValue(item, `root_${idx}`, 0)}
-          </div>
-        ))}
+      <div className="flex flex-col items-center justify-center h-full text-center py-12">
+        <ElectricPlugIcon className="w-16 h-16 text-gray-600 mb-4 opacity-50" />
+        <p className="text-gray-400 text-sm">{t('no_connections')}</p>
+        <p className="text-gray-500 text-xs mt-1">{t('create_first_connection')}</p>
       </div>
     );
   }
 
   return (
-    <div>
-      {Object.entries(data).map(([key, value]) => (
-        <div key={key} className="text-sm">
-          <span className="text-purple-400">{key}:</span>
-          {renderValue(value, key, 0)}
+    <div className="space-y-2 overflow-y-auto">
+      {connections.map((conn) => (
+        <div
+          key={conn.id}
+          onClick={() => onSelect(conn.id)}
+          className={`
+            p-3 rounded-lg cursor-pointer transition-all border
+            ${selectedId === conn.id
+              ? 'bg-green-600/20 border-green-500 text-white'
+              : 'bg-gray-800/50 border-gray-700 text-gray-300 hover:bg-gray-800/80'
+            }
+          `}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <span className="font-semibold text-sm">{conn.name}</span>
+            <span className={`text-xs font-bold px-2 py-1 rounded ${
+              conn.method === 'GET' ? 'bg-blue-600 text-blue-200' :
+              conn.method === 'POST' ? 'bg-green-600 text-green-200' :
+              conn.method === 'PUT' ? 'bg-orange-600 text-orange-200' :
+              conn.method === 'DELETE' ? 'bg-red-600 text-red-200' :
+              'bg-purple-600 text-purple-200'
+            }`}>
+              {conn.method}
+            </span>
+          </div>
+          <p className="text-xs text-gray-500 truncate">{conn.url}</p>
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-xs text-gray-600">{new Date(conn.createdAt).toLocaleDateString()}</p>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(conn.id);
+              }}
+              className="text-xs px-2 py-1 bg-red-600/20 text-red-400 hover:bg-red-600/40 rounded transition-all"
+            >
+              Supprimer
+            </button>
+          </div>
         </div>
       ))}
-    </div>
-  );
-};
-
-const TableView: React.FC<{ data: any }> = ({ data }) => {
-  if (!Array.isArray(data) || data.length === 0) {
-    return <p className="text-gray-400 text-sm">Aucune donnée à afficher en tableau</p>;
-  }
-
-  const columns = Object.keys(data[0]);
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b border-gray-700 bg-gray-800/50">
-            {columns.map(col => (
-              <th key={col} className="px-4 py-2 text-left font-semibold text-cyan-400">
-                {col}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((row, idx) => (
-            <tr key={idx} className="border-b border-gray-700/50 hover:bg-gray-800/30 transition-colors">
-              {columns.map(col => (
-                <td key={`${idx}-${col}`} className="px-4 py-2 text-gray-300 text-xs">
-                  {typeof row[col] === 'object' ? JSON.stringify(row[col]) : String(row[col])}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
-
-const SchemaView: React.FC<{ data: any }> = ({ data }) => {
-  const getSchema = (obj: any, depth = 0): string => {
-    if (depth > 5) return 'Mixed';
-    if (obj === null) return 'null';
-    if (Array.isArray(obj)) {
-      const itemType = obj.length > 0 ? getSchema(obj[0], depth + 1) : 'Unknown';
-      return `Array<${itemType}>`;
-    }
-    if (typeof obj === 'object') {
-      const keys = Object.keys(obj);
-      if (keys.length === 0) return 'Object';
-      const entries = keys.slice(0, 3).map(k => `${k}: ${getSchema(obj[k], depth + 1)}`);
-      const suffix = keys.length > 3 ? `, ... (${keys.length - 3} more)` : '';
-      return `{ ${entries.join(', ')}${suffix} }`;
-    }
-    return typeof obj;
-  };
-
-  const renderSchema = (obj: any, depth = 0): React.ReactNode => {
-    const indent = depth * 20;
-    if (typeof obj === 'object' && obj !== null && !Array.isArray(obj)) {
-      return (
-        <div>
-          <span className="text-cyan-400">{'{'}</span>
-          <div className="ml-4 space-y-1">
-            {Object.entries(obj).map(([key, value]) => (
-              <div key={key} style={{ marginLeft: `${indent}px` }} className="text-gray-300 text-sm">
-                <span className="text-purple-400">{key}</span>
-                <span className="text-gray-500">: </span>
-                <span className="text-green-400">
-                  {Array.isArray(value) ? `Array<${typeof value[0]}>` : typeof value}
-                </span>
-              </div>
-            ))}
-          </div>
-          <span className="text-cyan-400">{'}'}</span>
-        </div>
-      );
-    }
-    return <span className="text-gray-400">{getSchema(obj, depth)}</span>;
-  };
-
-  return (
-    <div className="text-sm font-mono space-y-2">
-      <pre className="text-cyan-400">Root Schema:</pre>
-      {Array.isArray(data) && data.length > 0 ? (
-        <div>
-          <span className="text-cyan-400">Array&lt;</span>
-          {renderSchema(data[0], 1)}
-          <span className="text-cyan-400">&gt;</span>
-        </div>
-      ) : (
-        renderSchema(data, 0)
-      )}
     </div>
   );
 };
@@ -363,6 +227,30 @@ export const ComApiPage: React.FC = () => {
   const { t } = useLocalization();
   const { addNotification } = useNotifications();
 
+  // State: Connections list
+  const [connections, setConnections] = useState<ApiConnection[]>([
+    {
+      id: '1',
+      name: 'API Utilisateurs',
+      method: 'GET',
+      url: 'https://api.example.com/v1/users',
+      authType: 'bearer',
+      createdAt: new Date(Date.now() - 86400000).toISOString()
+    },
+    {
+      id: '2',
+      name: 'Créer Commande',
+      method: 'POST',
+      url: 'https://api.example.com/v1/orders',
+      authType: 'bearer',
+      createdAt: new Date(Date.now() - 3600000).toISOString()
+    }
+  ]);
+
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+
+  // State: Form
   const [request, setRequest] = useState<ApiRequest>({
     method: 'GET',
     url: 'https://api.example.com/v1/users',
@@ -378,7 +266,7 @@ export const ComApiPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body'>('params');
   const [responseView, setResponseView] = useState<ResponseView>('json');
 
-  // ---- Handlers ----
+  // ============== HANDLERS ==============
 
   const handleExecuteRequest = async () => {
     if (!request.url.trim()) {
@@ -392,7 +280,6 @@ export const ComApiPage: React.FC = () => {
     }
 
     setIsLoading(true);
-    // Simulation de 1s
     await new Promise(resolve => setTimeout(resolve, 1000));
     setIsLoading(false);
 
@@ -401,7 +288,10 @@ export const ComApiPage: React.FC = () => {
       statusText: 'OK',
       time: 245,
       size: '1.2',
-      data: MOCK_RESPONSE_DATA
+      data: [
+        { id: 101, user: 'Agent_Smith', roles: ['admin', 'system'], metadata: { created_at: '2024-01-01', ip: '192.168.1.1' }, active: true },
+        { id: 102, user: 'Neo_User', roles: ['user'], metadata: { created_at: '2024-01-02', ip: '10.0.0.42' }, active: false }
+      ]
     };
 
     setResponse(mockResponse);
@@ -414,350 +304,290 @@ export const ComApiPage: React.FC = () => {
   };
 
   const addKeyValuePair = (type: 'params' | 'headers') => {
-    const newPair: KeyValuePair = {
-      id: Date.now().toString(),
-      key: '',
-      value: ''
-    };
-
+    const newPair: KeyValuePair = { id: Date.now().toString(), key: '', value: '' };
     if (type === 'params') {
-      setRequest(prev => ({
-        ...prev,
-        queryParams: [...prev.queryParams, newPair]
-      }));
+      setRequest(prev => ({ ...prev, queryParams: [...prev.queryParams, newPair] }));
     } else {
-      setRequest(prev => ({
-        ...prev,
-        headers: [...prev.headers, newPair]
-      }));
+      setRequest(prev => ({ ...prev, headers: [...prev.headers, newPair] }));
     }
   };
 
   const removeKeyValuePair = (type: 'params' | 'headers', id: string) => {
     if (type === 'params') {
-      setRequest(prev => ({
-        ...prev,
-        queryParams: prev.queryParams.filter(p => p.id !== id)
-      }));
+      setRequest(prev => ({ ...prev, queryParams: prev.queryParams.filter(p => p.id !== id) }));
     } else {
-      setRequest(prev => ({
-        ...prev,
-        headers: prev.headers.filter(h => h.id !== id)
-      }));
+      setRequest(prev => ({ ...prev, headers: prev.headers.filter(h => h.id !== id) }));
     }
   };
 
-  const updateKeyValuePair = (
-    type: 'params' | 'headers',
-    id: string,
-    field: 'key' | 'value',
-    value: string
-  ) => {
+  const updateKeyValuePair = (type: 'params' | 'headers', id: string, field: 'key' | 'value', value: string) => {
     if (type === 'params') {
       setRequest(prev => ({
         ...prev,
-        queryParams: prev.queryParams.map(p =>
-          p.id === id ? { ...p, [field]: value } : p
-        )
+        queryParams: prev.queryParams.map(p => p.id === id ? { ...p, [field]: value } : p)
       }));
     } else {
       setRequest(prev => ({
         ...prev,
-        headers: prev.headers.map(h =>
-          h.id === id ? { ...h, [field]: value } : h
-        )
+        headers: prev.headers.map(h => h.id === id ? { ...h, [field]: value } : h)
       }));
     }
   };
 
+  const handleSaveConnection = () => {
+    if (!request.url.trim()) {
+      addNotification({
+        type: 'error',
+        title: '❌ Erreur',
+        message: 'L\'URL ne peut pas être vide',
+        duration: 3000
+      });
+      return;
+    }
+
+    const newConnection: ApiConnection = {
+      id: Date.now().toString(),
+      name: `Connexion ${connections.length + 1}`,
+      method: request.method,
+      url: request.url,
+      authType: request.authType,
+      createdAt: new Date().toISOString()
+    };
+
+    setConnections([newConnection, ...connections]);
+    setShowForm(false);
+    setRequest({
+      method: 'GET',
+      url: '',
+      authType: 'none',
+      queryParams: [],
+      headers: [{ id: '1', key: 'Content-Type', value: 'application/json' }],
+      bodyType: 'json',
+      bodyContent: '{}'
+    });
+
+    addNotification({
+      type: 'success',
+      title: '✅ Connexion créée',
+      message: 'Votre nouvelle connexion a été sauvegardée',
+      duration: 3000
+    });
+  };
+
+  const handleDeleteConnection = (id: string) => {
+    setConnections(connections.filter(c => c.id !== id));
+    if (selectedConnectionId === id) {
+      setSelectedConnectionId(null);
+    }
+    addNotification({
+      type: 'success',
+      title: '🗑️ Connexion supprimée',
+      message: 'La connexion a été supprimée avec succès',
+      duration: 3000
+    });
+  };
+
+  // ============== RENDER ==============
+
   return (
     <div className="h-full w-full bg-slate-900 text-white overflow-hidden flex flex-col">
-      {/* Fixed Background Grid */}
+      {/* Background Grid */}
       <div className="fixed inset-0 opacity-10 pointer-events-none">
         <div className="absolute inset-0 bg-[linear-gradient(0deg,transparent_24%,rgba(120,119,198,.05)_25%,rgba(120,119,198,.05)_26%,transparent_27%,transparent_74%,rgba(120,119,198,.05)_75%,rgba(120,119,198,.05)_76%,transparent_77%,transparent),linear-gradient(90deg,transparent_24%,rgba(120,119,198,.05)_25%,rgba(120,119,198,.05)_26%,transparent_27%,transparent_74%,rgba(120,119,198,.05)_75%,rgba(120,119,198,.05)_76%,transparent_77%,transparent)] bg-[50px_50px]" />
       </div>
 
       {/* Header */}
-      <div className="relative z-10 p-6 border-b border-gray-700 bg-gray-800/30">
-        <div className="flex items-center space-x-2 mb-4 text-sm text-gray-400">
-          <span>COM</span>
-          <span>•</span>
-          <span className="text-cyan-500">Connexions API</span>
+      <div className="flex-shrink-0 p-4 border-b border-gray-700 bg-gray-800/30 relative z-10">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <ElectricPlugIcon className="w-6 h-6 text-green-400" />
+            <div>
+              <h1 className="text-xl font-bold text-white">{t('api_connections_title')}</h1>
+              <p className="text-gray-400 text-sm">{t('api_connections_description')}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setShowForm(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg font-semibold hover:from-green-500 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/50"
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span>{t('create_api_connection')}</span>
+            </button>
+
+            <div className="bg-green-500/20 border border-green-500/30 rounded-lg px-3 py-1.5">
+              <div className="text-xs text-green-300 font-medium">{t('current_robot_label')}</div>
+              <div className="text-sm text-green-100 font-bold">COM</div>
+            </div>
+          </div>
         </div>
-        <h1 className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-          Configuration Requête HTTP
-        </h1>
       </div>
 
-      {/* Content - Split View */}
+      {/* Two Column Layout */}
       <div className="relative z-0 flex-1 overflow-hidden flex">
-        {/* Left Panel - Request Configuration */}
-        <div className="w-1/2 border-r border-gray-700 overflow-y-auto p-6 space-y-6">
-          {/* Method & URL */}
-          <div className="space-y-4">
-            <div className="flex gap-3">
-              <MethodDropdown
-                value={request.method}
-                onChange={(method) => setRequest(prev => ({ ...prev, method }))}
-              />
-              <input
-                type="text"
-                placeholder="https://api.example.com/v1/resource"
-                value={request.url}
-                onChange={(e) => setRequest(prev => ({ ...prev, url: e.target.value }))}
-                className="flex-1 px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-          </div>
-
-          {/* Authentication */}
-          <div className="space-y-3">
-            <label className="text-sm font-semibold text-gray-300">🔐 Authentification</label>
-            <select
-              value={request.authType}
-              onChange={(e) => setRequest(prev => ({ ...prev, authType: e.target.value as AuthType }))}
-              className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 text-sm transition-all focus:outline-none focus:border-cyan-500"
-            >
-              <option value="none">Aucune</option>
-              <option value="basic">Basic Auth</option>
-              <option value="bearer">Bearer Token</option>
-              <option value="header">Header Auth</option>
-            </select>
-
-            {request.authType === 'basic' && (
-              <div className="space-y-2 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-                <input
-                  type="text"
-                  placeholder="Nom d'utilisateur"
-                  value={request.basicUsername || ''}
-                  onChange={(e) => setRequest(prev => ({ ...prev, basicUsername: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-cyan-500"
-                />
-                <input
-                  type="password"
-                  placeholder="Mot de passe"
-                  value={request.basicPassword || ''}
-                  onChange={(e) => setRequest(prev => ({ ...prev, basicPassword: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-            )}
-
-            {request.authType === 'bearer' && (
-              <input
-                type="text"
-                placeholder="Token Bearer"
-                value={request.bearerToken || ''}
-                onChange={(e) => setRequest(prev => ({ ...prev, bearerToken: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-cyan-500"
-              />
-            )}
-
-            {request.authType === 'header' && (
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  placeholder="Clé (ex: X-API-Key)"
-                  value={request.headerAuthKey || ''}
-                  onChange={(e) => setRequest(prev => ({ ...prev, headerAuthKey: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-cyan-500"
-                />
-                <input
-                  type="text"
-                  placeholder="Valeur"
-                  value={request.headerAuthValue || ''}
-                  onChange={(e) => setRequest(prev => ({ ...prev, headerAuthValue: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Tabs */}
-          <div className="border-b border-gray-700">
-            <div className="flex space-x-4">
-              <TabButton
-                active={activeTab === 'params'}
-                onClick={() => setActiveTab('params')}
-              >
-                📋 Paramètres
-              </TabButton>
-              <TabButton
-                active={activeTab === 'headers'}
-                onClick={() => setActiveTab('headers')}
-              >
-                📝 En-têtes
-              </TabButton>
-              <TabButton
-                active={activeTab === 'body'}
-                onClick={() => setActiveTab('body')}
-              >
-                💾 Corps
-              </TabButton>
-            </div>
-          </div>
-
-          {/* Tab Content */}
-          <div>
-            {activeTab === 'params' && (
-              <KeyValueList
-                items={request.queryParams}
-                onAdd={() => addKeyValuePair('params')}
-                onRemove={(id) => removeKeyValuePair('params', id)}
-                onChange={(id, field, value) => updateKeyValuePair('params', id, field, value)}
-                label="Paramètres Query (URL)"
-                keyPlaceholder="Paramètre"
-                valuePlaceholder="Valeur"
-              />
-            )}
-
-            {activeTab === 'headers' && (
-              <KeyValueList
-                items={request.headers}
-                onAdd={() => addKeyValuePair('headers')}
-                onRemove={(id) => removeKeyValuePair('headers', id)}
-                onChange={(id, field, value) => updateKeyValuePair('headers', id, field, value)}
-                label="En-têtes HTTP"
-                keyPlaceholder="Clé (ex: Content-Type)"
-                valuePlaceholder="Valeur"
-              />
-            )}
-
-            {activeTab === 'body' && (
-              <div className="space-y-3">
-                <div>
-                  <label className="text-sm font-semibold text-gray-300 block mb-2">Type de corps</label>
-                  <select
-                    value={request.bodyType}
-                    onChange={(e) => setRequest(prev => ({ ...prev, bodyType: e.target.value as BodyType }))}
-                    className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 text-sm transition-all focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="json">JSON</option>
-                    <option value="formData">Form Data</option>
-                    <option value="raw">Raw</option>
-                  </select>
-                </div>
-
-                <textarea
-                  placeholder='{"key": "value"}'
-                  value={request.bodyContent}
-                  onChange={(e) => setRequest(prev => ({ ...prev, bodyContent: e.target.value }))}
-                  className="w-full h-40 px-4 py-3 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm font-mono transition-all focus:outline-none focus:border-cyan-500 resize-none"
-                />
-              </div>
-            )}
+        {/* Left Column - Connections List */}
+        <div className="w-64 border-r border-gray-700 bg-gray-800/20 overflow-y-auto p-4">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-gray-200 mb-4">📋 Vos Connexions</h2>
+            <ConnectionList
+              connections={connections}
+              selectedId={selectedConnectionId}
+              onSelect={setSelectedConnectionId}
+              onDelete={handleDeleteConnection}
+            />
           </div>
         </div>
 
-        {/* Right Panel - Response */}
-        <div className="w-1/2 overflow-y-auto p-6 space-y-6 bg-gray-800/20">
-          {/* Status Bar */}
-          <div className="space-y-4">
-            {response ? (
-              <div className="p-4 rounded-lg border border-green-600/50 bg-green-900/20">
-                <div className="grid grid-cols-3 gap-4 text-center">
-                  <div>
-                    <p className="text-xs text-gray-400">Status</p>
-                    <p className="text-lg font-bold text-green-400">
-                      {response.status} {response.statusText}
-                    </p>
+        {/* Right Column - Form or Empty State */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {!showForm && !selectedConnectionId && (
+            <div className="flex flex-col items-center justify-center h-full text-center">
+              <div className="text-6xl mb-4 opacity-30">🔌</div>
+              <p className="text-gray-400 text-lg mb-2">{t('no_selection')}</p>
+              <p className="text-gray-500 text-sm">{t('select_from_list')}</p>
+            </div>
+          )}
+
+          {showForm && (
+            <div className="max-w-2xl">
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-white mb-4">🔗 Nouvelle Connexion API</h2>
+
+                {/* Request Config */}
+                <div className="space-y-4 mb-6">
+                  <div className="flex gap-3">
+                    <MethodDropdown
+                      value={request.method}
+                      onChange={(method) => setRequest(prev => ({ ...prev, method }))}
+                    />
+                    <input
+                      type="text"
+                      placeholder="https://api.example.com/v1/resource"
+                      value={request.url}
+                      onChange={(e) => setRequest(prev => ({ ...prev, url: e.target.value }))}
+                      className="flex-1 px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-green-500"
+                    />
                   </div>
-                  <div>
-                    <p className="text-xs text-gray-400">Temps</p>
-                    <p className="text-lg font-bold text-blue-400">{response.time}ms</p>
+
+                  {/* Authentication */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-semibold text-gray-300">🔐 Authentification</label>
+                    <select
+                      value={request.authType}
+                      onChange={(e) => setRequest(prev => ({ ...prev, authType: e.target.value as AuthType }))}
+                      className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 text-sm transition-all focus:outline-none focus:border-green-500"
+                    >
+                      <option value="none">Aucune</option>
+                      <option value="basic">Basic Auth</option>
+                      <option value="bearer">Bearer Token</option>
+                      <option value="header">Header Auth</option>
+                    </select>
+
+                    {request.authType === 'bearer' && (
+                      <input
+                        type="text"
+                        placeholder="Token Bearer"
+                        value={request.bearerToken || ''}
+                        onChange={(e) => setRequest(prev => ({ ...prev, bearerToken: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-green-500"
+                      />
+                    )}
                   </div>
+
+                  {/* Tabs */}
+                  <div className="border-b border-gray-700">
+                    <div className="flex space-x-2">
+                      <TabButton active={activeTab === 'params'} onClick={() => setActiveTab('params')}>
+                        📋 Paramètres
+                      </TabButton>
+                      <TabButton active={activeTab === 'headers'} onClick={() => setActiveTab('headers')}>
+                        📝 En-têtes
+                      </TabButton>
+                      <TabButton active={activeTab === 'body'} onClick={() => setActiveTab('body')}>
+                        💾 Corps
+                      </TabButton>
+                    </div>
+                  </div>
+
+                  {/* Tab Content */}
                   <div>
-                    <p className="text-xs text-gray-400">Taille</p>
-                    <p className="text-lg font-bold text-purple-400">{response.size}KB</p>
+                    {activeTab === 'params' && (
+                      <KeyValueList
+                        items={request.queryParams}
+                        onAdd={() => addKeyValuePair('params')}
+                        onRemove={(id) => removeKeyValuePair('params', id)}
+                        onChange={(id, field, value) => updateKeyValuePair('params', id, field, value)}
+                        label="Paramètres Query"
+                      />
+                    )}
+                    {activeTab === 'headers' && (
+                      <KeyValueList
+                        items={request.headers}
+                        onAdd={() => addKeyValuePair('headers')}
+                        onRemove={(id) => removeKeyValuePair('headers', id)}
+                        onChange={(id, field, value) => updateKeyValuePair('headers', id, field, value)}
+                        label="En-têtes HTTP"
+                      />
+                    )}
+                    {activeTab === 'body' && (
+                      <TabbedDataEditor
+                        value={request.bodyContent}
+                        onChange={(value) => setRequest(prev => ({ ...prev, bodyContent: value }))}
+                        placeholder='{"key": "value"}'
+                      />
+                    )}
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div className="p-4 rounded-lg border border-gray-700 bg-gray-800/50">
-                <p className="text-sm text-gray-400">Aucune réponse. Cliquez sur Exécuter pour envoyer la requête.</p>
-              </div>
-            )}
 
-            {/* Execute Button */}
-            <button
-              onClick={handleExecuteRequest}
-              disabled={isLoading}
-              className={`
-                w-full px-6 py-3 rounded-lg font-semibold transition-all flex items-center justify-center gap-2
-                ${isLoading
-                  ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:from-green-500 hover:to-green-400 shadow-lg shadow-green-500/50'
-                }
-              `}
-            >
-              {isLoading ? (
-                <>
-                  <LoaderIcon className="w-5 h-5 animate-spin" />
-                  <span>Exécution...</span>
-                </>
-              ) : (
-                <>
-                  <span>▶</span>
-                  <span>Exécuter la requête</span>
-                </>
-              )}
-            </button>
-          </div>
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowForm(false)}
+                    className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold hover:bg-gray-600 transition-all"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={handleExecuteRequest}
+                    disabled={isLoading}
+                    className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 ${
+                      isLoading
+                        ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:from-green-500 hover:to-green-400 shadow-lg shadow-green-500/50'
+                    }`}
+                  >
+                    {isLoading ? <LoaderIcon className="w-4 h-4 animate-spin" /> : '▶'}
+                    {isLoading ? 'Test...' : 'Tester'}
+                  </button>
+                  <button
+                    onClick={handleSaveConnection}
+                    className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold hover:from-green-500 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/50"
+                  >
+                    💾 Sauvegarder
+                  </button>
+                </div>
 
-          {/* Response View Selector */}
-          {response && (
-            <div className="space-y-4">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setResponseView('json')}
-                  className={`
-                    flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition-all
-                    ${responseView === 'json'
-                      ? 'bg-cyan-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }
-                  `}
-                >
-                  📄 JSON
-                </button>
-                <button
-                  onClick={() => setResponseView('table')}
-                  className={`
-                    flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition-all
-                    ${responseView === 'table'
-                      ? 'bg-cyan-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }
-                  `}
-                >
-                  📊 Tableau
-                </button>
-                <button
-                  onClick={() => setResponseView('schema')}
-                  className={`
-                    flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition-all
-                    ${responseView === 'schema'
-                      ? 'bg-cyan-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }
-                  `}
-                >
-                  🗂️ Schéma
-                </button>
-              </div>
-
-              {/* Response Content */}
-              <div className="p-4 rounded-lg border border-gray-700 bg-gray-800/50 font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto">
-                {responseView === 'json' && (
-                  <JsonTreeView data={response.data} />
-                )}
-                {responseView === 'table' && (
-                  <TableView data={response.data} />
-                )}
-                {responseView === 'schema' && (
-                  <SchemaView data={response.data} />
+                {/* Response */}
+                {response && (
+                  <div className="mt-6">
+                    <JsonResultViewer
+                      data={response.data}
+                      status={response.status}
+                      statusText={response.statusText}
+                      time={response.time}
+                      size={response.size}
+                    />
+                  </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {selectedConnectionId && !showForm && (
+            <div className="max-w-2xl">
+              <h2 className="text-2xl font-bold text-white mb-4">Détails de la Connexion</h2>
+              <p className="text-gray-400">{t('connection_details_view')}</p>
             </div>
           )}
         </div>
