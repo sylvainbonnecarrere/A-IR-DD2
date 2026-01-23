@@ -609,4 +609,14 @@ export default {
     tim_rate_limiting_desc: 'Contrôler débits et quotas',
     tim_async_management: 'Async Management',
     tim_async_management_desc: 'Orchestrer tâches asynchrones',
+    
+    // COM API Page
+    api_connections_title: 'Connexions API',
+    api_connections_description: 'Créez et testez vos requêtes HTTP',
+    create_api_connection: 'Créer une connexion',
+    no_connections: 'Aucune connexion créée',
+    create_first_connection: 'Créez-en une pour commencer',
+    no_selection: 'Sélectionnez ou créez une connexion',
+    select_from_list: 'Choisissez dans la liste à gauche ou créez une nouvelle',
+    connection_details_view: 'Vue de détails - Fonctionnalité à venir',
 };

@@ -56,14 +56,14 @@ export const ROBOT_MENU_DATA: RobotMenuItem[] = [
       {
         id: RobotId.Archi,
         name: 'nav_prototyping',
-        iconComponent: RobotHeadIcon,
+        iconComponent: WrenchIcon,
         path: '/archi/prototype',
         description: 'nav_prototyping_desc'
       },
       {
         id: RobotId.Archi,
         name: 'archi_instanciation_agents',
-        iconComponent: RobotIcon,
+        iconComponent: RobotHeadIcon,
         path: '/archi/instanciation',
         description: 'archi_instanciation_agents_desc'
       },

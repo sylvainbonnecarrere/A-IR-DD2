@@ -31,13 +31,15 @@ Pour garantir la qualité et la cohérence des prochaines pages, l'agent dévelo
 1.  **Analyse de l'existant** : Avant de coder, analyser les standards du marché (ex: pour une page "Logs", voir Datadog/Splunk ; pour "Fichiers", voir S3/Drive).
 2.  **Charte Graphique Commune** :
     *   Se référer strictement à `Guides\UX\APP_DESIGN.md`.
+    *   Le modèle de page par défaut est celui d'ARCHI avec la page prototype d'agents. Il faut respecter l'en-tête, avec le titre de la page et ajouter à gauche la même icône qe le menu qui mène à cette page, le libellé à la couleur du robot, à droite le robot qui possède ce menu sur fond de son identité visuelle et au moins un bouton "Créer un" + le(s) type(s) de noeud que permet cette page.  
+    *   Sur chaque page, il faut une colonne à gauche avec la liste des éléments ou noeuds créés par l'utilisateur et en bas de son bloc un bouton ajouter a workflow (même s'il ne déclenche rien pour le moment puisque c'est un POC). Ce bloc doit avoir au moins un nom et les paramètres du formulaire doivent être modifiables graàce à un bouton dans le header du bloc (comme lorsqu'un prototype est créé, sur le bloc du prototype il y a un bouton de modification dans son header). à droite de cette colonne il faut au moins une colonne avec le(s) formulaire de création et éventuellement test. 
     *   Style : **Cyberpunk/Space** (Fonds `slate-900`, Bordures Néon, Glassmorphism).
 3.  **Identité Visuelle du Robot** : La page doit utiliser la couleur d'accentuation du robot concerné :
-    *   🤖 **Archi** : Cyan (`cyan-500`)
-    *   📊 **Bos** : Rouge (`red-500`)
-    *   🔌 **Com** : Bleu (`blue-500`)
-    *   🧠 **Phil** : Violet (`purple-500`)
-    *   ⏱️ **Tim** : Orange (`orange-500`)
+    *   🤖 **Archi** : Cyan (`purple-500`)
+    *   📊 **Bos** : Jaune  (`yellow-500`)
+    *   🔌 **Com** : Vert (`green-500`)
+    *   🧠 **Phil** : Bleu (`cyan-500`)
+    *   ⏱️ **Tim** : Rouge (`red-500`)
 
 ### 🛠️ Phase 2 : Développement Technique
 1.  **Layout "Safe"** :
