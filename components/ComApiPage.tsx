@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { useLocalization } from '../hooks/useLocalization';
 import { useNotifications } from '../contexts/NotificationContext';
-import { PlusIcon, CloseIcon, LoaderIcon, ElectricPlugIcon } from './Icons';
+import { PlusIcon, CloseIcon, LoaderIcon, ElectricPlugIcon, XIcon } from './Icons';
 import JsonResultViewer from './JsonResultViewer';
 import TabbedDataEditor from './TabbedDataEditor';
+import ConnectionListItem, { IConnectionItem } from './com/ConnectionListItem';
+import ResultViewer from './com/ResultViewer';
+import ResultExtractor from './com/ResultExtractor';
 
 // ============== TYPES ==============
 
@@ -18,17 +21,20 @@ interface KeyValuePair {
   value: string;
 }
 
-interface ApiConnection {
+interface ApiConnection extends IConnectionItem {
   id: string;
   name: string;
   method: HttpMethod;
   url: string;
+  format?: string;
   authType: AuthType;
   createdAt: string;
-  lastUsed?: string;
+  status?: 'tested' | 'error' | 'disconnected';
+  lastTestDate?: string;
 }
 
 interface ApiRequest {
+  connectionName: string;
   method: HttpMethod;
   url: string;
   authType: AuthType;
@@ -69,15 +75,29 @@ const MethodDropdown: React.FC<{
   const color = methodColors[value];
 
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as HttpMethod)}
-      className={`px-4 py-2 rounded-lg font-bold text-sm transition-all bg-gradient-to-r ${color.bg} ${color.text} border-2 border-${value === 'GET' ? 'blue' : value === 'POST' ? 'green' : value === 'PUT' ? 'orange' : value === 'DELETE' ? 'red' : value === 'PATCH' ? 'purple' : 'cyan'}-500/50 cursor-pointer hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-400/50`}
-    >
-      {['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'].map(method => (
-        <option key={method} value={method}>{method}</option>
-      ))}
-    </select>
+    <>
+      <style>{`
+        select option {
+          background-color: #1f2937;
+          color: #f3f4f6;
+          padding: 8px;
+        }
+        select option:checked {
+          background: linear-gradient(#10b981, #10b981);
+          background-color: #10b981 !important;
+          color: white !important;
+        }
+      `}</style>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as HttpMethod)}
+        className={`px-4 py-2 rounded-lg font-bold text-sm transition-all bg-gradient-to-r ${color.bg} ${color.text} border-2 border-${value === 'GET' ? 'blue' : value === 'POST' ? 'green' : value === 'PUT' ? 'orange' : value === 'DELETE' ? 'red' : value === 'PATCH' ? 'purple' : 'green'}-500/50 cursor-pointer hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-green-400/50`}
+      >
+        {['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'].map(method => (
+          <option key={method} value={method}>{method}</option>
+        ))}
+      </select>
+    </>
   );
 };
 
@@ -107,20 +127,20 @@ const KeyValueList: React.FC<{
         <p className="text-xs text-gray-500 italic">Aucun élément</p>
       ) : (
         items.map(item => (
-          <div key={item.id} className="flex gap-2">
+          <div key={item.id} className="flex gap-2 flex-wrap">
             <input
               type="text"
               placeholder={keyPlaceholder}
               value={item.key}
               onChange={(e) => onChange(item.id, 'key', e.target.value)}
-              className="flex-1 px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
+              className="flex-1 min-w-[80px] px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
             />
             <input
               type="text"
               placeholder={valuePlaceholder}
               value={item.value}
               onChange={(e) => onChange(item.id, 'value', e.target.value)}
-              className="flex-1 px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
+              className="flex-1 min-w-[80px] px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
             />
             <button
               type="button"
@@ -160,10 +180,19 @@ interface ConnectionListProps {
   connections: ApiConnection[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  onAddToWorkflow: (id: string) => void;
 }
 
-const ConnectionList: React.FC<ConnectionListProps> = ({ connections, selectedId, onSelect, onDelete }) => {
+const ConnectionList: React.FC<ConnectionListProps> = ({
+  connections,
+  selectedId,
+  onSelect,
+  onEdit,
+  onDelete,
+  onAddToWorkflow
+}) => {
   const { t } = useLocalization();
 
   if (connections.length === 0) {
@@ -179,43 +208,24 @@ const ConnectionList: React.FC<ConnectionListProps> = ({ connections, selectedId
   return (
     <div className="space-y-2 overflow-y-auto">
       {connections.map((conn) => (
-        <div
+        <ConnectionListItem
           key={conn.id}
-          onClick={() => onSelect(conn.id)}
-          className={`
-            p-3 rounded-lg cursor-pointer transition-all border
-            ${selectedId === conn.id
-              ? 'bg-green-600/20 border-green-500 text-white'
-              : 'bg-gray-800/50 border-gray-700 text-gray-300 hover:bg-gray-800/80'
-            }
-          `}
-        >
-          <div className="flex items-center justify-between mb-1">
-            <span className="font-semibold text-sm">{conn.name}</span>
-            <span className={`text-xs font-bold px-2 py-1 rounded ${
-              conn.method === 'GET' ? 'bg-blue-600 text-blue-200' :
-              conn.method === 'POST' ? 'bg-green-600 text-green-200' :
-              conn.method === 'PUT' ? 'bg-orange-600 text-orange-200' :
-              conn.method === 'DELETE' ? 'bg-red-600 text-red-200' :
-              'bg-purple-600 text-purple-200'
-            }`}>
-              {conn.method}
-            </span>
-          </div>
-          <p className="text-xs text-gray-500 truncate">{conn.url}</p>
-          <div className="flex items-center justify-between mt-2">
-            <p className="text-xs text-gray-600">{new Date(conn.createdAt).toLocaleDateString()}</p>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(conn.id);
-              }}
-              className="text-xs px-2 py-1 bg-red-600/20 text-red-400 hover:bg-red-600/40 rounded transition-all"
-            >
-              Supprimer
-            </button>
-          </div>
-        </div>
+          item={{
+            id: conn.id,
+            name: conn.name,
+            method: conn.method,
+            url: conn.url,
+            format: conn.format,
+            status: conn.status || 'disconnected',
+            lastTestDate: conn.lastTestDate
+          }}
+          isSelected={selectedId === conn.id}
+          onSelect={() => onSelect(conn.id)}
+          onEdit={() => onEdit(conn.id)}
+          onDelete={() => onDelete(conn.id)}
+          onAddToWorkflow={() => onAddToWorkflow(conn.id)}
+          type="api"
+        />
       ))}
     </div>
   );
@@ -234,24 +244,43 @@ export const ComApiPage: React.FC = () => {
       name: 'API Utilisateurs',
       method: 'GET',
       url: 'https://api.example.com/v1/users',
+      format: 'JSON',
       authType: 'bearer',
-      createdAt: new Date(Date.now() - 86400000).toISOString()
+      createdAt: new Date(Date.now() - 86400000).toISOString(),
+      status: 'tested',
+      lastTestDate: new Date(Date.now() - 3600000).toISOString()
     },
     {
       id: '2',
       name: 'Créer Commande',
       method: 'POST',
       url: 'https://api.example.com/v1/orders',
+      format: 'JSON',
       authType: 'bearer',
-      createdAt: new Date(Date.now() - 3600000).toISOString()
+      createdAt: new Date(Date.now() - 3600000).toISOString(),
+      status: 'tested',
+      lastTestDate: new Date(Date.now() - 1800000).toISOString()
+    },
+    {
+      id: '3',
+      name: 'Export CSV',
+      method: 'GET',
+      url: 'https://api.example.com/v1/export',
+      format: 'CSV',
+      authType: 'bearer',
+      createdAt: new Date(Date.now() - 7200000).toISOString(),
+      status: 'error'
     }
   ]);
 
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [workflowNodeName, setWorkflowNodeName] = useState('');
 
   // State: Form
   const [request, setRequest] = useState<ApiRequest>({
+    connectionName: '',
     method: 'GET',
     url: 'https://api.example.com/v1/users',
     authType: 'none',
@@ -265,6 +294,7 @@ export const ComApiPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body'>('params');
   const [responseView, setResponseView] = useState<ResponseView>('json');
+  const [extractedResult, setExtractedResult] = useState<{ path: string; value: any } | null>(null);
 
   // ============== HANDLERS ==============
 
@@ -345,9 +375,19 @@ export const ComApiPage: React.FC = () => {
       return;
     }
 
+    if (!request.connectionName.trim()) {
+      addNotification({
+        type: 'error',
+        title: '❌ Erreur',
+        message: 'Le nom de la connexion ne peut pas être vide',
+        duration: 3000
+      });
+      return;
+    }
+
     const newConnection: ApiConnection = {
       id: Date.now().toString(),
-      name: `Connexion ${connections.length + 1}`,
+      name: request.connectionName,
       method: request.method,
       url: request.url,
       authType: request.authType,
@@ -357,6 +397,7 @@ export const ComApiPage: React.FC = () => {
     setConnections([newConnection, ...connections]);
     setShowForm(false);
     setRequest({
+      connectionName: '',
       method: 'GET',
       url: '',
       authType: 'none',
@@ -385,6 +426,55 @@ export const ComApiPage: React.FC = () => {
       message: 'La connexion a été supprimée avec succès',
       duration: 3000
     });
+  };
+
+  const handleEditConnection = (id: string) => {
+    const conn = connections.find(c => c.id === id);
+    if (conn) {
+      setRequest({
+        connectionName: conn.name,
+        method: conn.method,
+        url: conn.url,
+        authType: conn.authType,
+        queryParams: [],
+        headers: [{ id: '1', key: 'Content-Type', value: 'application/json' }],
+        bodyType: 'json',
+        bodyContent: '{}'
+      });
+      setShowForm(true);
+    }
+  };
+
+  const handleAddToWorkflow = (id: string) => {
+    const conn = connections.find(c => c.id === id);
+    if (conn) {
+      setWorkflowNodeName(conn.name);
+      setShowWorkflowModal(true);
+    }
+  };
+
+  const handleConfirmWorkflow = async () => {
+    if (!workflowNodeName.trim()) {
+      addNotification({
+        type: 'error',
+        title: '❌ Erreur',
+        message: 'Le nom du nœud ne peut pas être vide',
+        duration: 3000
+      });
+      return;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    addNotification({
+      type: 'success',
+      title: '✨ Nœud ajouté',
+      message: `Nœud "${workflowNodeName}" ajouté au workflow (Simulation)`,
+      duration: 3000
+    });
+
+    setShowWorkflowModal(false);
+    setWorkflowNodeName('');
   };
 
   // ============== RENDER ==============
@@ -424,174 +514,297 @@ export const ComApiPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Two Column Layout */}
+      {/* Three Column Layout */}
       <div className="relative z-0 flex-1 overflow-hidden flex">
-        {/* Left Column - Connections List */}
-        <div className="w-64 border-r border-gray-700 bg-gray-800/20 overflow-y-auto p-4">
+        {/* Column 1: Connections List (Left) */}
+        <div className="w-72 border-r border-gray-700 bg-gray-800/20 overflow-y-auto p-4 flex flex-col">
           <div className="mb-4">
-            <h2 className="text-lg font-semibold text-gray-200 mb-4">📋 Vos Connexions</h2>
+            <h2 className="text-lg font-semibold text-gray-200 mb-3">📋 Vos Connexions</h2>
             <ConnectionList
               connections={connections}
               selectedId={selectedConnectionId}
               onSelect={setSelectedConnectionId}
+              onEdit={handleEditConnection}
               onDelete={handleDeleteConnection}
+              onAddToWorkflow={handleAddToWorkflow}
             />
           </div>
         </div>
 
-        {/* Right Column - Form or Empty State */}
-        <div className="flex-1 overflow-y-auto p-6">
+        {/* Column 2: Form (Center) */}
+        <div className="w-full max-w-2xl border-r border-gray-700 bg-gray-800/10 overflow-y-auto p-6 flex flex-col">
           {!showForm && !selectedConnectionId && (
             <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="text-6xl mb-4 opacity-30">🔌</div>
-              <p className="text-gray-400 text-lg mb-2">{t('no_selection')}</p>
-              <p className="text-gray-500 text-sm">{t('select_from_list')}</p>
+              <div className="text-6xl mb-4 opacity-30">⚙️</div>
+              <p className="text-gray-400 text-base mb-2">Aucune sélection</p>
+              <p className="text-gray-500 text-sm">Sélectionnez une connexion ou en créez une</p>
             </div>
           )}
 
           {showForm && (
-            <div className="max-w-2xl">
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold text-white mb-4">🔗 Nouvelle Connexion API</h2>
+            <div className="space-y-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-white">🔗 Configuration</h2>
+                <button
+                  onClick={() => setShowForm(false)}
+                  className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200"
+                >
+                  <XIcon className="w-5 h-5" />
+                </button>
+              </div>
 
-                {/* Request Config */}
-                <div className="space-y-4 mb-6">
-                  <div className="flex gap-3">
-                    <MethodDropdown
-                      value={request.method}
-                      onChange={(method) => setRequest(prev => ({ ...prev, method }))}
-                    />
-                    <input
-                      type="text"
-                      placeholder="https://api.example.com/v1/resource"
-                      value={request.url}
-                      onChange={(e) => setRequest(prev => ({ ...prev, url: e.target.value }))}
-                      className="flex-1 px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-green-500"
-                    />
-                  </div>
-
-                  {/* Authentication */}
-                  <div className="space-y-3">
-                    <label className="text-sm font-semibold text-gray-300">🔐 Authentification</label>
-                    <select
-                      value={request.authType}
-                      onChange={(e) => setRequest(prev => ({ ...prev, authType: e.target.value as AuthType }))}
-                      className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 text-sm transition-all focus:outline-none focus:border-green-500"
-                    >
-                      <option value="none">Aucune</option>
-                      <option value="basic">Basic Auth</option>
-                      <option value="bearer">Bearer Token</option>
-                      <option value="header">Header Auth</option>
-                    </select>
-
-                    {request.authType === 'bearer' && (
-                      <input
-                        type="text"
-                        placeholder="Token Bearer"
-                        value={request.bearerToken || ''}
-                        onChange={(e) => setRequest(prev => ({ ...prev, bearerToken: e.target.value }))}
-                        className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-green-500"
-                      />
-                    )}
-                  </div>
-
-                  {/* Tabs */}
-                  <div className="border-b border-gray-700">
-                    <div className="flex space-x-2">
-                      <TabButton active={activeTab === 'params'} onClick={() => setActiveTab('params')}>
-                        📋 Paramètres
-                      </TabButton>
-                      <TabButton active={activeTab === 'headers'} onClick={() => setActiveTab('headers')}>
-                        📝 En-têtes
-                      </TabButton>
-                      <TabButton active={activeTab === 'body'} onClick={() => setActiveTab('body')}>
-                        💾 Corps
-                      </TabButton>
-                    </div>
-                  </div>
-
-                  {/* Tab Content */}
-                  <div>
-                    {activeTab === 'params' && (
-                      <KeyValueList
-                        items={request.queryParams}
-                        onAdd={() => addKeyValuePair('params')}
-                        onRemove={(id) => removeKeyValuePair('params', id)}
-                        onChange={(id, field, value) => updateKeyValuePair('params', id, field, value)}
-                        label="Paramètres Query"
-                      />
-                    )}
-                    {activeTab === 'headers' && (
-                      <KeyValueList
-                        items={request.headers}
-                        onAdd={() => addKeyValuePair('headers')}
-                        onRemove={(id) => removeKeyValuePair('headers', id)}
-                        onChange={(id, field, value) => updateKeyValuePair('headers', id, field, value)}
-                        label="En-têtes HTTP"
-                      />
-                    )}
-                    {activeTab === 'body' && (
-                      <TabbedDataEditor
-                        value={request.bodyContent}
-                        onChange={(value) => setRequest(prev => ({ ...prev, bodyContent: value }))}
-                        placeholder='{"key": "value"}'
-                      />
-                    )}
-                  </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">📝 Nom de la connexion <span className="text-green-400">*</span></label>
+                  <input
+                    type="text"
+                    placeholder="ex: API Utilisateurs"
+                    value={request.connectionName}
+                    onChange={(e) => setRequest(prev => ({ ...prev, connectionName: e.target.value }))}
+                    className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-green-500"
+                  />
                 </div>
 
-                {/* Action Buttons */}
                 <div className="flex gap-3">
-                  <button
-                    onClick={() => setShowForm(false)}
-                    className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold hover:bg-gray-600 transition-all"
-                  >
-                    Annuler
-                  </button>
-                  <button
-                    onClick={handleExecuteRequest}
-                    disabled={isLoading}
-                    className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 ${
-                      isLoading
-                        ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:from-green-500 hover:to-green-400 shadow-lg shadow-green-500/50'
-                    }`}
-                  >
-                    {isLoading ? <LoaderIcon className="w-4 h-4 animate-spin" /> : '▶'}
-                    {isLoading ? 'Test...' : 'Tester'}
-                  </button>
-                  <button
-                    onClick={handleSaveConnection}
-                    className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold hover:from-green-500 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/50"
-                  >
-                    💾 Sauvegarder
-                  </button>
+                  <MethodDropdown
+                    value={request.method}
+                    onChange={(method) => setRequest(prev => ({ ...prev, method }))}
+                  />
+                  <input
+                    type="text"
+                    placeholder="https://api.example.com/v1/resource"
+                    value={request.url}
+                    onChange={(e) => setRequest(prev => ({ ...prev, url: e.target.value }))}
+                    className="flex-1 px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-green-500"
+                  />
                 </div>
 
-                {/* Response */}
-                {response && (
-                  <div className="mt-6">
-                    <JsonResultViewer
-                      data={response.data}
-                      status={response.status}
-                      statusText={response.statusText}
-                      time={response.time}
-                      size={response.size}
+                {/* Authentication */}
+                <div className="space-y-3">
+                  <label className="text-sm font-semibold text-gray-300">🔐 Authentification</label>
+                  <select
+                    value={request.authType}
+                    onChange={(e) => setRequest(prev => ({ ...prev, authType: e.target.value as AuthType }))}
+                    className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 text-sm transition-all focus:outline-none focus:border-green-500"
+                  >
+                    <option value="none">Aucune</option>
+                    <option value="basic">Basic Auth</option>
+                    <option value="bearer">Bearer Token</option>
+                    <option value="header">Header Auth</option>
+                  </select>
+
+                  {request.authType === 'bearer' && (
+                    <input
+                      type="password"
+                      placeholder="Token Bearer"
+                      value={request.bearerToken || ''}
+                      onChange={(e) => setRequest(prev => ({ ...prev, bearerToken: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-green-500"
                     />
+                  )}
+                </div>
+
+                {/* Tabs */}
+                <div className="border-b border-gray-700">
+                  <div className="flex space-x-2">
+                    <TabButton active={activeTab === 'params'} onClick={() => setActiveTab('params')}>
+                      📋 Paramètres
+                    </TabButton>
+                    <TabButton active={activeTab === 'headers'} onClick={() => setActiveTab('headers')}>
+                      📝 En-têtes
+                    </TabButton>
+                    <TabButton active={activeTab === 'body'} onClick={() => setActiveTab('body')}>
+                      💾 Corps
+                    </TabButton>
                   </div>
-                )}
+                </div>
+
+                {/* Tab Content */}
+                <div className="min-h-32 max-h-48 overflow-y-auto">
+                  {activeTab === 'params' && (
+                    <KeyValueList
+                      items={request.queryParams}
+                      onAdd={() => addKeyValuePair('params')}
+                      onRemove={(id) => removeKeyValuePair('params', id)}
+                      onChange={(id, field, value) => updateKeyValuePair('params', id, field, value)}
+                      label="Paramètres Query"
+                    />
+                  )}
+                  {activeTab === 'headers' && (
+                    <KeyValueList
+                      items={request.headers}
+                      onAdd={() => addKeyValuePair('headers')}
+                      onRemove={(id) => removeKeyValuePair('headers', id)}
+                      onChange={(id, field, value) => updateKeyValuePair('headers', id, field, value)}
+                      label="En-têtes HTTP"
+                    />
+                  )}
+                  {activeTab === 'body' && (
+                    <TabbedDataEditor
+                      value={request.bodyContent}
+                      onChange={(value) => setRequest(prev => ({ ...prev, bodyContent: value }))}
+                      placeholder='{"key": "value"}'
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 mt-6 pt-4 border-t border-gray-700">
+                <button
+                  onClick={() => setShowForm(false)}
+                  className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold hover:bg-gray-600 transition-all"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleExecuteRequest}
+                  disabled={isLoading}
+                  className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 ${
+                    isLoading
+                      ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-500'
+                  }`}
+                >
+                  {isLoading ? <LoaderIcon className="w-4 h-4 animate-spin" /> : '▶'}
+                  {isLoading ? 'Test...' : 'Tester'}
+                </button>
+                <button
+                  onClick={handleSaveConnection}
+                  className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold hover:from-green-500 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/50"
+                >
+                  💾 Sauvegarder
+                </button>
               </div>
             </div>
           )}
 
           {selectedConnectionId && !showForm && (
-            <div className="max-w-2xl">
-              <h2 className="text-2xl font-bold text-white mb-4">Détails de la Connexion</h2>
-              <p className="text-gray-400">{t('connection_details_view')}</p>
+            <div className="space-y-4">
+              {(() => {
+                const conn = connections.find(c => c.id === selectedConnectionId);
+                return conn ? (
+                  <>
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-xl font-bold text-white">📌 Détails</h2>
+                      <button
+                        onClick={() => setSelectedConnectionId(null)}
+                        className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200"
+                      >
+                        <XIcon className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-3 bg-gray-800/50 p-4 rounded-lg">
+                      <div>
+                        <p className="text-xs text-gray-400 uppercase">Nom</p>
+                        <p className="text-white font-semibold">{conn.name}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400 uppercase">Méthode</p>
+                        <p className={`font-bold text-sm inline-block px-2 py-1 rounded ${
+                          conn.method === 'GET' ? 'bg-blue-600 text-blue-200' :
+                          conn.method === 'POST' ? 'bg-green-600 text-green-200' :
+                          'bg-gray-600 text-gray-200'
+                        }`}>{conn.method}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400 uppercase">URL</p>
+                        <p className="text-gray-300 text-xs truncate break-all">{conn.url}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400 uppercase">Format</p>
+                        <p className="text-gray-300">{conn.format || 'JSON'}</p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleEditConnection(conn.id)}
+                      className="w-full px-4 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-500 transition-all"
+                    >
+                      ✏️ Modifier
+                    </button>
+                  </>
+                ) : null;
+              })()}
+            </div>
+          )}
+        </div>
+
+        {/* Column 3: Results (Right) */}
+        <div className="flex-1 overflow-y-auto p-6 flex flex-col space-y-6">
+          {response ? (
+            <>
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-white">📊 Résultat</h2>
+                <ResultViewer
+                  data={response.data}
+                  status={response.status}
+                  statusText={response.statusText}
+                  time={response.time}
+                  size={response.size}
+                  format="json"
+                />
+              </div>
+
+              <div className="border-t border-gray-700 pt-6">
+                <ResultExtractor
+                  data={response.data}
+                  onExtract={(path, value) => {
+                    setExtractedResult({ path, value });
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-center">
+              <div className="text-6xl mb-4 opacity-30">📊</div>
+              <p className="text-gray-400 text-lg mb-2">Aucun résultat</p>
+              <p className="text-gray-500 text-sm">Testez une requête pour voir la réponse</p>
             </div>
           )}
         </div>
       </div>
+
+      {/* Workflow Modal */}
+      {showWorkflowModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-8 w-96 shadow-2xl">
+            <h2 className="text-2xl font-bold text-white mb-6">⚙️ Ajouter au Workflow</h2>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Nom du Nœud <span className="text-green-400">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="ex: Requête Utilisateurs"
+                value={workflowNodeName}
+                onChange={(e) => setWorkflowNodeName(e.target.value)}
+                className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-white placeholder-gray-500 transition-all focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowWorkflowModal(false);
+                  setWorkflowNodeName('');
+                }}
+                className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold hover:bg-gray-600 transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleConfirmWorkflow}
+                className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold hover:from-green-500 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/50"
+              >
+                Confirmer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

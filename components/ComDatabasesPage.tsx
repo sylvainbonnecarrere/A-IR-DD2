@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useLocalization } from '../hooks/useLocalization';
-import { CheckCircleIcon, ChevronDownIcon, LoaderIcon, DatabaseIcon } from './Icons';
+import { CheckCircleIcon, ChevronDownIcon, LoaderIcon, DatabaseIcon, XIcon, PlusIcon } from './Icons';
+import ConnectionListItem, { IConnectionItem } from './com/ConnectionListItem';
+import DatabaseExplorer from './com/DatabaseExplorer';
 
 // ============== TYPES & CONSTANTS ==============
+
+interface DatabaseFormData {
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+}
 
 interface DatabaseProvider {
   id: string;
@@ -15,13 +25,14 @@ interface DatabaseProvider {
   description: string;
 }
 
-interface DatabaseFormData {
+interface DatabaseNode extends IConnectionItem {
+  id: string;
   name: string;
+  provider: string;
+  providerName: string;
   host: string;
-  port: number;
-  username: string;
-  password: string;
-  [key: string]: any;
+  status: 'connected' | 'disconnected' | 'testing';
+  createdAt: string;
 }
 
 const DATABASE_PROVIDERS: DatabaseProvider[] = [
@@ -127,9 +138,8 @@ interface DatabaseCardProps {
 
 const DatabaseCard: React.FC<DatabaseCardProps> = ({ provider, isSelected, onClick }) => {
   const borderMap: { [key: string]: string } = {
-    'cyan-500': 'border-cyan-500',
-    'orange-500': 'border-orange-500',
     'green-500': 'border-green-500',
+    'orange-500': 'border-orange-500',
     'red-500': 'border-red-500',
     'blue-500': 'border-blue-500',
     'yellow-500': 'border-yellow-500',
@@ -138,9 +148,8 @@ const DatabaseCard: React.FC<DatabaseCardProps> = ({ provider, isSelected, onCli
   };
 
   const shadowMap: { [key: string]: string } = {
-    'cyan-500': 'shadow-cyan-500/50',
-    'orange-500': 'shadow-orange-500/50',
     'green-500': 'shadow-green-500/50',
+    'orange-500': 'shadow-orange-500/50',
     'red-500': 'shadow-red-500/50',
     'blue-500': 'shadow-blue-500/50',
     'yellow-500': 'shadow-yellow-500/50',
@@ -152,24 +161,22 @@ const DatabaseCard: React.FC<DatabaseCardProps> = ({ provider, isSelected, onCli
     <div
       onClick={onClick}
       className={`
-        relative p-4 rounded-lg cursor-pointer transition-all duration-300
-        transform hover:scale-105 active:scale-95
-        ${
-          isSelected
-            ? `bg-gradient-to-br ${provider.color} ${borderMap[provider.glowColor] || 'border-cyan-500'} border-2 shadow-lg ${shadowMap[provider.glowColor] || 'shadow-cyan-500/50'}`
-            : 'bg-gray-800 border-2 border-gray-700 opacity-60 hover:opacity-80'
+        relative p-3 rounded-lg cursor-pointer transition-all duration-300
+        transform hover:scale-110 active:scale-95 aspect-square flex flex-col items-center justify-center
+        ${isSelected
+          ? `bg-gradient-to-br ${provider.color} ${borderMap[provider.glowColor] || 'border-green-500'} border-2 shadow-lg ${shadowMap[provider.glowColor] || 'shadow-green-500/50'}`
+          : 'bg-gray-800 border-2 border-gray-700 opacity-60 hover:opacity-80'
         }
       `}
     >
-      <div className={`text-4xl mb-2 transition-transform duration-300 ${isSelected ? 'scale-110' : 'scale-90'}`}>
+      <div className={`text-3xl mb-1 transition-transform duration-300 ${isSelected ? 'scale-125' : 'scale-100'}`}>
         {provider.icon}
       </div>
-      <h3 className="font-semibold text-white text-sm">{provider.name}</h3>
-      <p className="text-xs text-gray-300 mt-1">{provider.description}</p>
+      <h3 className="font-semibold text-white text-xs text-center">{provider.name}</h3>
       
       {isSelected && (
-        <div className="absolute top-2 right-2 animate-pulse">
-          <CheckCircleIcon className="w-5 h-5 text-white drop-shadow-lg" />
+        <div className="absolute top-1 right-1">
+          <CheckCircleIcon className="w-4 h-4 text-white drop-shadow-lg" />
         </div>
       )}
     </div>
@@ -199,7 +206,7 @@ const FormField: React.FC<FormFieldProps> = ({
 }) => (
   <div className="mb-4">
     <label className="block text-sm font-medium text-gray-300 mb-2">
-      {label} {required && <span className="text-cyan-500">*</span>}
+      {label} {required && <span className="text-green-500">*</span>}
     </label>
     <input
       type={type}
@@ -209,9 +216,9 @@ const FormField: React.FC<FormFieldProps> = ({
       className={`
         w-full px-4 py-2 rounded-lg bg-gray-700 border
         text-white placeholder-gray-500 transition-all
-        ${error ? 'border-red-500 focus:border-red-500' : 'border-gray-600 focus:border-cyan-500'}
+        ${error ? 'border-red-500 focus:border-red-500' : 'border-gray-600 focus:border-green-500'}
         focus:outline-none focus:ring-2
-        ${error ? 'focus:ring-red-500/30' : 'focus:ring-cyan-500/30'}
+        ${error ? 'focus:ring-red-500/30' : 'focus:ring-green-500/30'}
       `}
     />
     {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
@@ -272,7 +279,7 @@ const AdvancedOptions: React.FC = () => {
 
           <div className="border-t border-gray-700 pt-4">
             <label className="flex items-center space-x-3 cursor-pointer">
-              <input type="checkbox" className="w-4 h-4 accent-cyan-500" />
+              <input type="checkbox" className="w-4 h-4 accent-green-500" />
               <span className="text-sm text-gray-300">Activer SSH Tunneling</span>
             </label>
           </div>
@@ -293,6 +300,8 @@ export const ComDatabasesPage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [workflowNodeName, setWorkflowNodeName] = useState('');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   
   // Form state
   const [formData, setFormData] = useState<DatabaseFormData>({
@@ -304,15 +313,7 @@ export const ComDatabasesPage: React.FC = () => {
   });
 
   // ============== NEW STATE: DATABASE NODES LIST ==============
-  const [databaseNodes, setDatabaseNodes] = useState<Array<{
-    id: string;
-    name: string;
-    provider: string;
-    providerName: string;
-    host: string;
-    status: 'connected' | 'disconnected' | 'testing';
-    createdAt: string;
-  }>>([
+  const [databaseNodes, setDatabaseNodes] = useState<DatabaseNode[]>([
     {
       id: '1',
       name: 'Prod Users DB',
@@ -330,6 +331,15 @@ export const ComDatabasesPage: React.FC = () => {
       host: 'redis.example.com:6379',
       status: 'connected',
       createdAt: new Date(Date.now() - 3600000).toISOString()
+    },
+    {
+      id: '3',
+      name: 'Analytics DB',
+      provider: 'elasticsearch',
+      providerName: 'ElasticSearch',
+      host: 'elastic.example.com',
+      status: 'disconnected',
+      createdAt: new Date(Date.now() - 172800000).toISOString()
     }
   ]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -396,12 +406,38 @@ export const ComDatabasesPage: React.FC = () => {
     await new Promise(resolve => setTimeout(resolve, 1500));
     setIsSaving(false);
 
-    addNotification({
-      type: 'success',
-      title: '💾 Sauvegardé',
-      message: `Connexion "${formData.name}" créée avec succès`,
-      duration: 3000
-    });
+    if (editingNodeId) {
+      // Update existing connection
+      setDatabaseNodes(databaseNodes.map(n =>
+        n.id === editingNodeId
+          ? { ...n, name: formData.name, host: formData.host }
+          : n
+      ));
+      addNotification({
+        type: 'success',
+        title: '✏️ Mise à jour',
+        message: `Connexion "${formData.name}" mise à jour avec succès`,
+        duration: 3000
+      });
+    } else {
+      // Create new connection
+      const newNode: DatabaseNode = {
+        id: Date.now().toString(),
+        name: formData.name,
+        provider: selectedProvider,
+        providerName: selectedProviderData?.name || 'Unknown',
+        host: formData.host,
+        status: 'disconnected',
+        createdAt: new Date().toISOString()
+      };
+      setDatabaseNodes([...databaseNodes, newNode]);
+      addNotification({
+        type: 'success',
+        title: '💾 Sauvegardé',
+        message: `Connexion "${formData.name}" créée avec succès`,
+        duration: 3000
+      });
+    }
     
     setFormData({
       name: '',
@@ -411,6 +447,8 @@ export const ComDatabasesPage: React.FC = () => {
       password: ''
     });
     setSelectedProvider(null);
+    setEditingNodeId(null);
+    setShowCreateForm(false);
   };
 
   const onAddToWorkflow = async () => {
@@ -425,7 +463,7 @@ export const ComDatabasesPage: React.FC = () => {
     }
 
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
+
     addNotification({
       type: 'success',
       title: '✨ Nœud ajouté',
@@ -435,6 +473,43 @@ export const ComDatabasesPage: React.FC = () => {
 
     setShowWorkflowModal(false);
     setWorkflowNodeName('');
+  };
+
+  const handleDeleteNode = (id: string) => {
+    setDatabaseNodes(databaseNodes.filter(n => n.id !== id));
+    if (selectedNodeId === id) {
+      setSelectedNodeId(null);
+    }
+    addNotification({
+      type: 'success',
+      title: '🗑️ Base supprimée',
+      message: 'La base de données a été supprimée avec succès',
+      duration: 3000
+    });
+  };
+
+  const handleEditNode = (id: string) => {
+    const nodeToEdit = databaseNodes.find(n => n.id === id);
+    if (!nodeToEdit) return;
+
+    // Reset explorer view and set edit mode
+    setSelectedNodeId(null);
+    setEditingNodeId(id);
+    setSelectedProvider(nodeToEdit.provider);
+    setFormData({
+      name: nodeToEdit.name,
+      host: nodeToEdit.host,
+      port: 5432,
+      username: 'user',
+      password: 'pass'
+    });
+    setShowCreateForm(true);
+  };
+
+  const handleOpenExplorer = (id: string) => {
+    setShowCreateForm(false);
+    setSelectedProvider(null);
+    setSelectedNodeId(id);
   };
 
   // ============== RENDER ==============
@@ -460,314 +535,319 @@ export const ComDatabasesPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Governance Indicator - COM Green */}
-            <div className="bg-green-500/20 border border-green-500/30 rounded-lg px-3 py-1.5 whitespace-nowrap">
-              <div className="text-xs text-green-300 font-medium">{t('current_robot_label')}</div>
-              <div className="text-sm text-green-100 font-bold">COM</div>
+            <div className="flex items-center space-x-3">
+              <button
+                onClick={() => {
+                  setSelectedNodeId(null);
+                  setShowCreateForm(true);
+                }}
+                className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg font-semibold hover:from-green-500 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/50"
+              >
+                <PlusIcon className="w-4 h-4" />
+                <span>Ajouter une Base de données</span>
+              </button>
+
+              {/* Governance Indicator - COM Green */}
+              <div className="bg-green-500/20 border border-green-500/30 rounded-lg px-3 py-1.5 whitespace-nowrap">
+                <div className="text-xs text-green-300 font-medium">{t('current_robot_label')}</div>
+                <div className="text-sm text-green-100 font-bold">COM</div>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Content - Two Column Layout */}
         <div className="flex-1 overflow-hidden flex">
-          {/* Left Column - Database Nodes List */}
-          <div className="w-64 border-r border-gray-700 bg-gray-800/20 overflow-y-auto p-4">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold text-gray-200 mb-4">📊 Vos Bases de Données</h2>
-              {databaseNodes.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-gray-500 text-sm">Aucune base créée</p>
-                  <p className="text-gray-600 text-xs mt-1">Créez une nouvelle connexion</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {databaseNodes.map((node) => (
-                    <div
-                      key={node.id}
-                      onClick={() => setSelectedNodeId(node.id)}
-                      className={`
-                        p-3 rounded-lg cursor-pointer transition-all border
-                        ${selectedNodeId === node.id
-                          ? 'bg-green-600/20 border-green-500 text-white'
-                          : 'bg-gray-800/50 border-gray-700 text-gray-300 hover:bg-gray-800/80'
-                        }
-                      `}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-semibold text-sm">{node.name}</span>
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded ${
-                          node.status === 'connected' ? 'bg-green-600 text-green-200' :
-                          node.status === 'testing' ? 'bg-yellow-600 text-yellow-200' :
-                          'bg-red-600 text-red-200'
-                        }`}>
-                          {node.status === 'connected' ? '✓' : node.status === 'testing' ? '⟳' : '✗'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500 truncate">{node.providerName}</p>
-                      <p className="text-xs text-gray-600 truncate">{node.host}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right Column - Provider Selection & Form */}
-          <div className="flex-1 overflow-y-auto p-8">
-            {/* Providers Grid */}
-            <div className="mb-12">
-              <h2 className="text-2xl font-semibold mb-6 text-gray-200">
-                📦 Sélectionnez votre base de données
-              </h2>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                {DATABASE_PROVIDERS.map((provider) => (
-                  <div key={provider.id} className="fade-in">
-                    <DatabaseCard
-                      provider={provider}
-                      isSelected={selectedProvider === provider.id}
-                      onClick={() => handleProviderChange(provider.id)}
-                    />
-                  </div>
+        {/* Left Column - Database Nodes List */}
+        <div className="w-72 border-r border-gray-700 bg-gray-800/20 overflow-y-auto p-4 flex flex-col">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-gray-200 mb-3">📊 Vos Bases</h2>
+            {databaseNodes.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500 text-sm">Aucune base créée</p>
+                <p className="text-gray-600 text-xs mt-1">Créez une nouvelle connexion</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {databaseNodes.map((node) => (
+                  <ConnectionListItem
+                    key={node.id}
+                    item={{
+                      id: node.id,
+                      name: node.name,
+                      provider: node.providerName,
+                      host: node.host,
+                      status: node.status
+                    }}
+                    isSelected={selectedNodeId === node.id}
+                    onSelect={() => handleOpenExplorer(node.id)}
+                    onEdit={() => handleEditNode(node.id)}
+                    onDelete={() => handleDeleteNode(node.id)}
+                    onOpen={() => handleOpenExplorer(node.id)}
+                    onAddToWorkflow={() => {
+                      setWorkflowNodeName(node.name);
+                      setShowWorkflowModal(true);
+                    }}
+                    type="database"
+                  />
                 ))}
               </div>
-            </div>
+            )}
+          </div>
+        </div>
 
-            {/* Dynamic Form */}
-            {selectedProviderData && (
-              <div className="mb-12 p-8 rounded-xl border border-gray-700 bg-gray-800/50 backdrop-blur-md fade-in">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl font-semibold text-gray-100">
-                    🔗 Configurer {selectedProviderData.name}
+          {/* Right Column - Provider Selection & Explorer */}
+          <div className="flex-1 overflow-y-auto p-8 flex flex-col">
+            <style>{`
+              div::-webkit-scrollbar {
+                width: 8px;
+              }
+              div::-webkit-scrollbar-track {
+                background: rgba(31, 41, 55, 0.5);
+              }
+              div::-webkit-scrollbar-thumb {
+                background: rgba(75, 85, 99, 0.7);
+                border-radius: 4px;
+              }
+              div::-webkit-scrollbar-thumb:hover {
+                background: rgba(107, 114, 128, 0.9);
+              }
+            `}</style>
+            {showCreateForm ? (
+              // Provider Selection + Creation Form - Full Page Layout
+              <div className="flex flex-col h-full space-y-6">
+                <div className="flex items-center justify-between flex-shrink-0">
+                  <h2 className="text-xl font-bold text-white">
+                    {editingNodeId
+                      ? `✏️ Modifier la Base de Données : ${formData.name}`
+                      : '🆕 Nouvelle Base de Données'
+                    }
                   </h2>
                   <button
-                    onClick={() => setShowWorkflowModal(true)}
-                    className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white text-sm font-semibold rounded-lg hover:from-green-500 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/50"
+                    onClick={() => {
+                      setShowCreateForm(false);
+                      setSelectedProvider(null);
+                      setEditingNodeId(null);
+                      setFormData({
+                        name: '',
+                        host: '',
+                        port: 0,
+                        username: '',
+                        password: ''
+                      });
+                    }}
+                    className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200"
                   >
-                    ➕ Ajouter au Workflow
+                    <XIcon className="w-5 h-5" />
                   </button>
                 </div>
 
-                <form onSubmit={onSaveConnection}>
-                  <div className="grid grid-cols-2 gap-6 mb-6">
-                    <FormField
-                      label="Nom de la connexion"
-                      name="name"
-                      placeholder={`Ma connexion ${selectedProviderData.name}`}
-                      value={formData.name}
-                      onChange={(val) => handleFormChange('name', val)}
-                      required
-                    />
-                    {selectedProvider !== 'sqlite' && (
+                {/* Provider Grid - Always Visible - Single Row with Horizontal Scroll */}
+                <div className="flex-shrink-0 space-y-2">
+                  <p className="text-gray-400 text-sm font-medium">Sélectionnez le type de base de données :</p>
+                  <div className="flex gap-2 overflow-x-auto pb-2 scroll-smooth" style={{
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: '#4b5563 #1f2937'
+                  }}>
+                    <style>{`
+                      .provider-grid::-webkit-scrollbar {
+                        height: 6px;
+                      }
+                      .provider-grid::-webkit-scrollbar-track {
+                        background: #1f2937;
+                        border-radius: 3px;
+                      }
+                      .provider-grid::-webkit-scrollbar-thumb {
+                        background: #4b5563;
+                        border-radius: 3px;
+                      }
+                      .provider-grid::-webkit-scrollbar-thumb:hover {
+                        background: #6b7280;
+                      }
+                    `}</style>
+                    <div className="flex gap-2 min-w-max provider-grid">
+                      {DATABASE_PROVIDERS.map(provider => (
+                        <div key={provider.id} className="flex-shrink-0 w-24 h-24">
+                          <DatabaseCard
+                            provider={provider}
+                            isSelected={selectedProvider === provider.id}
+                            onClick={() => handleProviderChange(provider.id)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Connection Form - Shows Below Grid After Selection */}
+                {selectedProvider && (
+                  <div className="flex-1 overflow-y-auto border-t border-gray-700 pt-6">
+                    <form onSubmit={onSaveConnection} className="space-y-4 max-w-2xl">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <label className="text-sm font-semibold text-gray-300">
+                            Type sélectionné : <span className="text-green-400">{selectedProviderData?.name}</span>
+                          </label>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedProvider(null)}
+                          className="text-xs px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-all"
+                        >
+                          Changer de type
+                        </button>
+                      </div>
+
                       <FormField
-                        label="Host / IP"
+                        label="Nom de la connexion"
+                        name="name"
+                        placeholder="ex: Production PostgreSQL"
+                        value={formData.name}
+                        onChange={(val) => handleFormChange('name', val)}
+                        required
+                      />
+
+                      <FormField
+                        label="Hôte"
                         name="host"
-                        placeholder="localhost"
+                        placeholder="localhost ou adresse IP"
                         value={formData.host}
                         onChange={(val) => handleFormChange('host', val)}
                         required
                       />
-                    )}
 
-                    {selectedProvider !== 'sqlite' && (
+                      <div className="grid grid-cols-2 gap-4">
+                        <FormField
+                          label="Port"
+                          name="port"
+                          type="number"
+                          placeholder={String(selectedProviderData?.defaultPort)}
+                          value={String(formData.port)}
+                          onChange={(val) => handleFormChange('port', val)}
+                        />
+                        <FormField
+                          label="Base de données"
+                          name="database"
+                          placeholder="Nom de la BDD"
+                          value=""
+                          onChange={() => {}}
+                        />
+                      </div>
+
                       <FormField
-                        label="Port"
-                        name="port"
-                        type="number"
-                        placeholder={String(selectedProviderData.defaultPort)}
-                        value={String(formData.port || selectedProviderData.defaultPort)}
-                        onChange={(val) => handleFormChange('port', val)}
-                        required
+                        label="Utilisateur"
+                        name="username"
+                        placeholder="Nom d'utilisateur"
+                        value={formData.username}
+                        onChange={(val) => handleFormChange('username', val)}
                       />
-                    )}
 
-                    <FormField
-                      label="Nom d'utilisateur"
-                      name="username"
-                      placeholder="admin"
-                      value={formData.username}
-                      onChange={(val) => handleFormChange('username', val)}
-                      required
-                    />
+                      <FormField
+                        label="Mot de passe"
+                        name="password"
+                        type="password"
+                        placeholder="Mot de passe"
+                        value={formData.password}
+                        onChange={(val) => handleFormChange('password', val)}
+                      />
 
-                  <FormField
-                    label="Mot de passe"
-                    name="password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={formData.password}
-                    onChange={(val) => handleFormChange('password', val)}
-                    required
-                  />
-                </div>
+                      <AdvancedOptions />
 
-                {/* Specific Fields per Provider */}
-                {selectedProvider === 'postgresql' && (
-                  <div className="grid grid-cols-2 gap-6 mb-6 p-4 bg-blue-900/20 rounded-lg border border-blue-700/30">
-                    <FormField
-                      label="Nom de la base de données"
-                      name="database"
-                      placeholder="postgres"
-                      value={formData.password || ''}
-                      onChange={() => {}}
-                    />
-                    <FormField
-                      label="Schema (défaut: public)"
-                      name="schema"
-                      placeholder="public"
-                      value="public"
-                      onChange={() => {}}
-                    />
+                      <div className="flex gap-2 mt-6 pt-4 border-t border-gray-700">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCreateForm(false);
+                            setSelectedProvider(null);
+                            setEditingNodeId(null);
+                            setFormData({
+                              name: '',
+                              host: '',
+                              port: 0,
+                              username: '',
+                              password: ''
+                            });
+                          }}
+                          className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold hover:bg-gray-600 transition-all"
+                        >
+                          Annuler
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onTestConnection}
+                          disabled={isTesting}
+                          className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-all ${
+                            isTesting
+                              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                              : 'bg-blue-600 text-white hover:bg-blue-500'
+                          }`}
+                        >
+                          {isTesting ? 'Test...' : '🔗 Tester'}
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSaving}
+                          className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-all ${
+                            isSaving
+                              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                              : 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-500 hover:to-emerald-500 shadow-lg shadow-green-500/50'
+                          }`}
+                        >
+                          {isSaving
+                            ? editingNodeId
+                              ? '💾 Mise à jour...'
+                              : '💾 Sauvegarde...'
+                            : editingNodeId
+                            ? '💾 Mettre à jour'
+                            : '💾 Sauvegarder'
+                          }
+                        </button>
+                      </div>
+                    </form>
                   </div>
                 )}
-
-                {selectedProvider === 'mongodb' && (
-                  <div className="grid grid-cols-2 gap-6 mb-6 p-4 bg-green-900/20 rounded-lg border border-green-700/30">
-                    <FormField
-                      label="Auth Source"
-                      name="authSource"
-                      placeholder="admin"
-                      value="admin"
-                      onChange={() => {}}
-                    />
-                    <FormField
-                      label="Database"
-                      name="database"
-                      placeholder="test"
-                      value=""
-                      onChange={() => {}}
-                    />
-                  </div>
-                )}
-
-                {selectedProvider === 'elasticsearch' && (
-                  <div className="grid grid-cols-2 gap-6 mb-6 p-4 bg-yellow-900/20 rounded-lg border border-yellow-700/30">
-                    <FormField
-                      label="API Key"
-                      name="apiKey"
-                      type="password"
-                      placeholder="••••••••"
-                      value=""
-                      onChange={() => {}}
-                    />
-                    <FormField
-                      label="Cloud ID (optionnel)"
-                      name="cloudId"
-                      placeholder="deployment:region"
-                      value=""
-                      onChange={() => {}}
+              </div>
+            ) : selectedNodeId ? (
+              // Explorer View
+              (() => {
+                const node = databaseNodes.find(n => n.id === selectedNodeId);
+                return node ? (
+                  <div className="flex flex-col h-full">
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-xl font-bold text-white">🔍 Explorateur</h2>
+                      <button
+                        onClick={() => setSelectedNodeId(null)}
+                        className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200"
+                      >
+                        <XIcon className="w-5 h-5" />
+                      </button>
+                    </div>
+                    <DatabaseExplorer
+                      databaseName={node.name}
+                      provider={node.providerName}
+                      host={node.host}
+                      status={node.status}
+                      onRefresh={() => {
+                        // Stub
+                      }}
                     />
                   </div>
-                )}
-
-                {/* Advanced Options */}
-                <AdvancedOptions />
-
-                {/* Action Buttons */}
-                <div className="flex gap-4 mt-8">
-                  <button
-                    type="button"
-                    onClick={onTestConnection}
-                    disabled={isTesting}
-                    className={`
-                      flex-1 py-3 rounded-lg font-semibold transition-all
-                      ${
-                        isTesting
-                          ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      }
-                    `}
-                  >
-                    {isTesting ? (
-                      <span className="flex items-center justify-center space-x-2">
-                        <LoaderIcon className="w-4 h-4 animate-spin" />
-                        <span>Test en cours...</span>
-                      </span>
-                    ) : (
-                      '🧪 Tester la connexion'
-                    )}
-                  </button>
-
-                  <button
-                    type="submit"
-                    disabled={isSaving}
-                    className={`
-                      flex-1 py-3 rounded-lg font-semibold transition-all
-                      relative overflow-hidden
-                      ${
-                        isSaving
-                          ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                          : 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-500 hover:to-emerald-500 shadow-lg shadow-green-500/50'
-                      }
-                    `}
-                  >
-                    {isSaving ? (
-                      <span className="flex items-center justify-center space-x-2">
-                        <LoaderIcon className="w-4 h-4 animate-spin" />
-                        <span>Sauvegarde...</span>
-                      </span>
-                    ) : (
-                      '💾 Sauvegarder la connexion'
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          {/* Empty State */}
-          {!selectedProvider && (
-            <div className="text-center py-16 fade-in">
-              <div className="text-6xl mb-4">🗄️</div>
-              <p className="text-gray-400 text-lg">
-                Sélectionnez une base de données pour commencer la configuration
-              </p>
-            </div>
-          )}
-        </div>
+                ) : null;
+              })()
+            ) : (
+              // Empty State
+              <div className="text-center py-16 fade-in flex flex-col items-center justify-center">
+                <div className="text-6xl mb-4">🗄️</div>
+                <p className="text-gray-400 text-lg">
+                  Sélectionnez une base de données pour l'explorer
+                </p>
+              </div>
+            )}
+          </div>
         {/* End of Right Column */}
       </div>
       {/* End of Two Column Layout */}
       </div>
-
-      {/* Workflow Modal */}
-      {showWorkflowModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
-          <div className="bg-gray-800 border border-gray-700 rounded-xl p-8 w-96 shadow-2xl">
-            <h2 className="text-2xl font-bold text-white mb-6">⚙️ Configurer le Nœud BDD</h2>
-
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Nom du Nœud <span className="text-cyan-500">*</span>
-              </label>
-              <input
-                type="text"
-                placeholder={`ex: ${selectedProviderData?.name} Prod`}
-                value={workflowNodeName}
-                onChange={(e) => setWorkflowNodeName(e.target.value)}
-                className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-white placeholder-gray-500 transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500"
-              />
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setShowWorkflowModal(false);
-                  setWorkflowNodeName('');
-                }}
-                className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold hover:bg-gray-600 transition-all"
-              >
-                Annuler
-              </button>
-              <button
-                onClick={onAddToWorkflow}
-                className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold hover:from-green-500 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/50"
-              >
-                Confirmer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

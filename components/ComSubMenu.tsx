@@ -12,7 +12,7 @@ interface ComSubMenuProps {
 
 /**
  * ComSubMenu - Composant de navigation spécialisé pour le robot Com
- * Robot Communicateur avec accent bleu/cyan
+ * Robot Communicateur avec accent vert/emerald
  */
 export const ComSubMenu: React.FC<ComSubMenuProps> = ({
   nestedItems,
@@ -50,13 +50,13 @@ export const ComSubMenu: React.FC<ComSubMenuProps> = ({
         top: `${position.top}px`,
         left: `${position.left}px`,
         background: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
-        borderColor: '#0ea5e9',
-        boxShadow: '0 0 20px rgba(14, 165, 233, 0.3), 0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+        borderColor: '#10b981',
+        boxShadow: '0 0 20px rgba(16, 185, 129, 0.3), 0 4px 6px -1px rgba(0, 0, 0, 0.1)',
       }}
     >
       {/* Header du submenu */}
       <div className="px-4 py-3 border-b border-gray-600">
-        <h3 className="text-sm font-semibold text-cyan-400 uppercase tracking-wide">
+        <h3 className="text-sm font-semibold text-green-400 uppercase tracking-wide">
           {t('com_connections_header')}
         </h3>
         <p className="text-xs text-gray-400 mt-1">
@@ -76,16 +76,16 @@ export const ComSubMenu: React.FC<ComSubMenuProps> = ({
               onClick={() => handleNavigation(item)}
               className={`
                 w-full px-4 py-3 flex items-center space-x-3 text-left transition-all duration-200
-                hover:bg-cyan-500/20 hover:border-l-2 hover:border-cyan-400
+                hover:bg-green-500/20 hover:border-l-2 hover:border-green-400
                 ${isActive
-                  ? 'bg-cyan-500/30 border-l-2 border-cyan-400 text-cyan-300'
+                  ? 'bg-green-500/30 border-l-2 border-green-400 text-green-300'
                   : 'text-gray-300 hover:text-white'
                 }
               `}
             >
               <div className={`
                 w-5 h-5 flex-shrink-0 transition-colors duration-200
-                ${isActive ? 'text-cyan-400' : 'text-gray-400'}
+                ${isActive ? 'text-green-400' : 'text-gray-400'}
               `}>
                 <IconComponent />
               </div>
@@ -93,7 +93,7 @@ export const ComSubMenu: React.FC<ComSubMenuProps> = ({
               <div className="flex-1 min-w-0">
                 <div className={`
                   text-sm font-medium transition-colors duration-200
-                  ${isActive ? 'text-cyan-300' : 'text-gray-300'}
+                  ${isActive ? 'text-green-300' : 'text-gray-300'}
                 `}>
                   {t(item.name)}
                 </div>
@@ -105,7 +105,7 @@ export const ComSubMenu: React.FC<ComSubMenuProps> = ({
               </div>
 
               {isActive && (
-                <div className="w-2 h-2 bg-cyan-400 rounded-full flex-shrink-0"></div>
+                <div className="w-2 h-2 bg-green-400 rounded-full flex-shrink-0"></div>
               )}
             </button>
           );
