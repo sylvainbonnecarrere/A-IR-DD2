@@ -395,7 +395,11 @@ export default {
     view_workflows: 'View Workflows',
 
     // ArchiSubMenu
-    archi_prototyping_header: 'Archi • Prototyping',
+    archi_prototyping_header: 'ARCHI • Prototyper',
+    bos_supervision_header: 'BOS • Supervisor',
+    com_connections_header: 'COM • Connector',
+    phil_data_header: 'PHIL • Data Specialist',
+    tim_events_header: 'TIM • Time Manager',
     archi_prototyping_desc: 'Agent creation and orchestration',
     prototyping: 'Prototyping',
 
@@ -507,4 +511,70 @@ export default {
     button_delete: 'Delete',
     button_edit: 'Edit',
     button_add_to_templates: '💾 Add to Templates',
+
+    // ARCHI - Additional menus (AR_001.2 - AR_001.5)
+    archi_instanciation_agents: 'RLM Agent Prototyping',
+    archi_instanciation_agents_desc: 'Management, recursive context decomposition',
+    archi_liens_interactions: 'Links & Interactions',
+    archi_liens_interactions_desc: 'Connect agents together',
+    archi_gestion_taches: 'Task Management',
+    archi_gestion_taches_desc: 'Configure actions and sequences',
+    archi_bibliotheque_prototypes: 'Prototype Library',
+    archi_bibliotheque_prototypes_desc: 'Explore saved agents',
+    
+    // BOS - Additional menus (BO_002.2 - BO_002.5)
+    bos_monitoring_live: 'Live Monitoring',
+    bos_monitoring_live_desc: 'Real-time logs/performance view',
+    bos_analytics_couts: 'Analytics & Costs',
+    bos_analytics_couts_desc: 'Track spending and usage',
+    bos_gouvernance_utilisateurs: 'User Governance',
+    bos_gouvernance_utilisateurs_desc: 'Manage permissions and access',
+    bos_playground_public: 'Public Playground',
+    bos_playground_public_desc: 'End-user interface for workflow',
+    
+    // COM - All menus (CO_003.1 - CO_003.5)
+    com_connexions_api: 'API Connections',
+    com_connexions_api_desc: 'Integrate external web services',
+    com_bases_donnees: 'Databases',
+    com_bases_donnees_desc: 'Link SQL/NoSQL to workflow',
+    com_bdd_vectorielles: 'Vector Databases',
+    com_bdd_vectorielles_desc: 'Link Pinecone, Weaviate, Chroma',
+    com_integrations_mcp: 'MCP Integrations',
+    com_integrations_mcp_desc: 'Add Model Context Protocol',
+    com_hub_connecteurs: 'Connectors Hub',
+    com_hub_connecteurs_desc: 'Browse available integrations',
+    
+    // PHIL - All menus (PH_004.1 - PH_004.5)
+    phil_rag_configuration: 'RAG Configuration',
+    phil_rag_configuration_desc: 'Chunks, embeddings and retrieval',
+    phil_file_handling: 'File Handling',
+    phil_file_handling_desc: 'Formats, transformations and reports',
+    phil_fonctions_personnalisees: 'Custom Functions',
+    phil_fonctions_personnalisees_desc: 'Create React/Python scripts',
+    phil_bibliotheques_externes: 'External Libraries',
+    phil_bibliotheques_externes_desc: 'Install packages and tools',
+    phil_knowledge_base: 'Knowledge Base',
+    phil_knowledge_base_desc: 'Manage documents and contexts',
+    
+    // TIM - All menus (TI_005.1 - TI_005.5)
+    tim_triggers_webhooks: 'Triggers & Webhooks',
+    tim_triggers_webhooks_desc: 'Trigger workflows from events',
+    tim_scheduling: 'Scheduling',
+    tim_scheduling_desc: 'Schedule recurring executions',
+    tim_polling_watch: 'Polling & Watch',
+    tim_polling_watch_desc: 'Monitor data sources',
+    tim_rate_limiting: 'Rate Limiting',
+    tim_rate_limiting_desc: 'Control flows and quotas',
+    tim_async_management: 'Async Management',
+    tim_async_management_desc: 'Orchestrate asynchronous tasks',
+    
+    // COM API Page
+    api_connections_title: 'API Connections',
+    api_connections_description: 'Create and test your HTTP requests',
+    create_api_connection: 'Create a connection',
+    no_connections: 'No connections created',
+    create_first_connection: 'Create one to get started',
+    no_selection: 'Select or create a connection',
+    select_from_list: 'Choose from the list on the left or create a new one',
+    connection_details_view: 'Details view - Coming soon',
 };

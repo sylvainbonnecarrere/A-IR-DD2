@@ -121,8 +121,8 @@ export class MediaStorageService {
             : undefined;
 
         // Routage selon le mode de stockage
-        switch (config.mediaStorageMode) {
-            case 'database':
+        switch (config.mediaStorage) {
+            case 'db':
                 return this.saveToDatabase(file, metadata, checksum);
             
             case 'local':
@@ -133,7 +133,7 @@ export class MediaStorageService {
             
             default:
                 throw new MediaStorageError(
-                    `Mode de stockage non supporté: ${config.mediaStorageMode}`,
+                    `Mode de stockage non supporté: ${config.mediaStorage}`,
                     'INVALID_STORAGE_MODE'
                 );
         }

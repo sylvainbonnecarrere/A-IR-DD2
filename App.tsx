@@ -466,7 +466,8 @@ function AppContent() {
               }
 
               const journalsData = await journalsResponse.json();
-              const journals = journalsData.journals || [];
+              // ⭐ FIX: Le contrôleur retourne { data: [...], meta: {...} }, pas { journals: [...] }
+              const journals = journalsData.data || journalsData.journals || [];
 
               if (journals.length > 0) {
                 // Convert journals to ChatMessages

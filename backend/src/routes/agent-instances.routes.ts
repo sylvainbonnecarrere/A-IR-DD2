@@ -573,9 +573,9 @@ router.get('/:id/journals',
                 return res.status(403).json({ error: 'Unauthorized - user does not own this instance' });
             }
 
-            // Récupérer TOUS les journaux pour cette instance, triés par timestamp
+            // Récupérer TOUS les journaux pour cette instance, triés par timestamp (ancien → récent)
             const journals = await AgentJournal.find({ agentInstanceId: instanceId })
-                .sort({ createdAt: 1 }) // Oldest first
+                .sort({ timestamp: 1 }) // ⭐ FIX: Use timestamp field (not createdAt), order: oldest first
                 .lean();
 
             console.log(`[Journals] Loaded ${journals.length} entries for instance ${instanceId}`);

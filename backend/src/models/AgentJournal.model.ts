@@ -11,7 +11,7 @@
  * Pattern polymorphique : le champ 'payload' varie selon 'type'.
  * 
  * Index optimisé pour :
- * - Récupération paginée par agentInstanceId + timestamp DESC
+ * - Récupération paginée par agentInstanceId + timestamp ASC (chronologique)
  * - Filtrage par type (chat, error, media, etc.)
  * - Nettoyage en cascade par workflowId
  * 
@@ -210,11 +210,12 @@ const AgentJournalSchema = new Schema<IAgentJournal>({
 // ============================================
 
 /**
- * Index principal pour récupération de l'historique
- * Requête type: db.agent_journals.find({ agentInstanceId: X }).sort({ timestamp: -1 })
+ * Index principal pour récupération de l'historique (ordre chronologique)
+ * Requête type: db.agent_journals.find({ agentInstanceId: X }).sort({ timestamp: 1 })
+ * ⭐ FIX: Tri en ordre croissant (ancien → récent) pour hydratation correcte des conversations
  */
 AgentJournalSchema.index(
-    { agentInstanceId: 1, timestamp: -1 },
+    { agentInstanceId: 1, timestamp: 1 },
     { name: 'idx_instance_timeline' }
 );
 
@@ -327,7 +328,7 @@ AgentJournalSchema.statics.findByInstance = async function(
     const [total, data] = await Promise.all([
         this.countDocuments(filter),
         this.find(filter)
-            .sort({ timestamp: -1 })
+            .sort({ timestamp: 1 })
             .skip((page - 1) * limit)
             .limit(limit)
             .exec()

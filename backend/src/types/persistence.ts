@@ -31,9 +31,12 @@ export type MediaStorageMode = 'database' | 'local' | 'cloud';
 export interface PersistenceConfig {
     // Granularité de l'enregistrement
     saveChat: boolean;              // Sauvegarder les échanges textuels (messages user/agent/tool)
+    saveChatHistory?: boolean;      // ⭐ Alias pour saveChat (compatibilité)
     saveErrors: boolean;            // Sauvegarder les logs d'erreurs
     saveTasks: boolean;             // Sauvegarder les étapes de raisonnement/tâches
+    saveTaskExecution?: boolean;    // ⭐ Alias pour saveTasks (compatibilité)
     saveLinks: boolean;             // Sauvegarder les liens entre agents
+    saveMedia?: boolean;            // ⭐ Activer sauvegarde des fichiers médias
 
     // Stratégie de stockage des médias
     mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' (inline), local (volume), cloud (S3/GCS)
@@ -48,9 +51,12 @@ export interface PersistenceConfig {
  */
 export const DEFAULT_PERSISTENCE_CONFIG: PersistenceConfig = {
     saveChat: true,
+    saveChatHistory: true,
     saveErrors: true,
     saveTasks: false,
+    saveTaskExecution: false,
     saveLinks: false,
+    saveMedia: true,
     mediaStorage: 'db',
     saveHistorySummary: false,
     retentionDays: undefined

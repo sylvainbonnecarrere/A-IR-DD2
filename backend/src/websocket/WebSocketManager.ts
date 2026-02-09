@@ -51,7 +51,7 @@ export class WebSocketManager {
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
       cors: {
-        origin: (origin: string, callback: (err: Error | null, allow?: boolean) => void) => {
+        origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
           if (!origin) {
             callback(null, true);
             return;
@@ -74,9 +74,6 @@ export class WebSocketManager {
             }
           }
         },
-        credentials: true
-      },
-        methods: ["GET", "POST"],
         credentials: true
       },
       transports: ['websocket', 'polling']

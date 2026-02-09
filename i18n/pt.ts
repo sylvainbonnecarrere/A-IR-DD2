@@ -362,7 +362,11 @@ export default {
     view_workflows: 'Ver Fluxos de Trabalho',
 
     // ArchiSubMenu
-    archi_prototyping_header: 'Archi • Prototipagem',
+    archi_prototyping_header: 'ARCHI • Prototipador',
+    bos_supervision_header: 'BOS • Supervisor',
+    com_connections_header: 'COM • Conector',
+    phil_data_header: 'PHIL • Especialista em Dados',
+    tim_events_header: 'TIM • Gerente de Tempo',
     archi_prototyping_desc: 'Criação e orquestração de agentes',
     prototyping: 'Prototipagem',
 
@@ -474,4 +478,69 @@ export default {
     button_delete: 'Excluir',
     button_edit: 'Editar',
     button_add_to_templates: '💾 Adicionar aos Modelos',
+    // ARCHI - Additional menus (AR_001.2 - AR_001.5)
+    archi_instanciation_agents: 'Prototipagem de Agentes RLM',
+    archi_instanciation_agents_desc: 'Gestão, decomposição de contexto recursivo',
+    archi_liens_interactions: 'Conexões e Interações',
+    archi_liens_interactions_desc: 'Conectar agentes entre si',
+    archi_gestion_taches: 'Gestão de Tarefas',
+    archi_gestion_taches_desc: 'Configurar ações e sequências',
+    archi_bibliotheque_prototypes: 'Biblioteca de Protótipos',
+    archi_bibliotheque_prototypes_desc: 'Explorar agentes salvos',
+    
+    // BOS - Additional menus (BO_002.2 - BO_002.5)
+    bos_monitoring_live: 'Monitoramento em Tempo Real',
+    bos_monitoring_live_desc: 'Visualização de logs/desempenho em tempo real',
+    bos_analytics_couts: 'Análise e Custos',
+    bos_analytics_couts_desc: 'Rastrear despesas e uso',
+    bos_gouvernance_utilisateurs: 'Governança de Usuários',
+    bos_gouvernance_utilisateurs_desc: 'Gerenciar permissões e acesso',
+    bos_playground_public: 'Playground Público',
+    bos_playground_public_desc: 'Interface para usuários finais',
+    
+    // COM - All menus (CO_003.1 - CO_003.5)
+    com_connexions_api: 'Conexões de API',
+    com_connexions_api_desc: 'Integrar serviços web externos',
+    com_bases_donnees: 'Bancos de Dados',
+    com_bases_donnees_desc: 'Vincular SQL/NoSQL ao fluxo de trabalho',
+    com_bdd_vectorielles: 'Bancos de Dados Vetoriais',
+    com_bdd_vectorielles_desc: 'Vincular Pinecone, Weaviate, Chroma',
+    com_integrations_mcp: 'Integrações MCP',
+    com_integrations_mcp_desc: 'Adicionar Model Context Protocol',
+    com_hub_connecteurs: 'Hub de Conectores',
+    com_hub_connecteurs_desc: 'Explorar integrações disponíveis',
+    
+    // PHIL - All menus (PH_004.1 - PH_004.5)
+    phil_rag_configuration: 'Configuração RAG',
+    phil_rag_configuration_desc: 'Fragmentos, incorporações e recuperação',
+    phil_file_handling: 'Manipulação de Arquivos',
+    phil_file_handling_desc: 'Formatos, transformações e relatórios',
+    phil_fonctions_personnalisees: 'Funções Personalizadas',
+    phil_fonctions_personnalisees_desc: 'Criar scripts React/Python',
+    phil_bibliotheques_externes: 'Bibliotecas Externas',
+    phil_bibliotheques_externes_desc: 'Instalar pacotes e ferramentas',
+    phil_knowledge_base: 'Base de Conhecimento',
+    phil_knowledge_base_desc: 'Gerenciar documentos e contextos',
+    
+    // TIM - All menus (TI_005.1 - TI_005.5)
+    tim_triggers_webhooks: 'Acionadores e Webhooks',
+    tim_triggers_webhooks_desc: 'Disparar fluxos de trabalho a partir de eventos',
+    tim_scheduling: 'Agendamento',
+    tim_scheduling_desc: 'Agendar execuções recorrentes',
+    tim_polling_watch: 'Sondagem e Vigilância',
+    tim_polling_watch_desc: 'Monitorar fontes de dados',
+    tim_rate_limiting: 'Limitação de Taxa',
+    tim_rate_limiting_desc: 'Controlar fluxos e cotas',
+    tim_async_management: 'Gerenciamento Assincrónico',
+    tim_async_management_desc: 'Orquestrar tarefas assincrónicas',
+    
+    // COM API Page
+    api_connections_title: 'Conexões de API',
+    api_connections_description: 'Criar e testar suas solicitações HTTP',
+    create_api_connection: 'Criar Conexão',
+    no_connections: 'Sem conexões criadas',
+    create_first_connection: 'Crie uma para começar',
+    no_selection: 'Selecione uma conexão ou crie uma nova',
+    select_from_list: 'Selecione da lista à esquerda ou crie uma nova',
+    connection_details_view: 'Visualização de Detalhes - em breve',
 };

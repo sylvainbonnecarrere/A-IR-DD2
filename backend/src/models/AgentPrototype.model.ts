@@ -6,11 +6,15 @@ import mongoose, { Document, Schema } from 'mongoose';
  */
 export interface IPersistenceConfig {
     saveChat: boolean;             // Défaut: true - Sauvegarder les messages de chat
+    saveChatHistory?: boolean;     // ⭐ Alias pour saveChat (compatibilité)
     saveErrors: boolean;           // Défaut: true - Sauvegarder les erreurs rencontrées
+    saveTasks: boolean;            // Défaut: false - Sauvegarder les tâches assignées
+    saveTaskExecution?: boolean;   // ⭐ Alias pour saveTasks (compatibilité)
+    saveLinks: boolean;            // Défaut: false - Sauvegarder les liens entre agents
+    saveMedia?: boolean;           // ⭐ Activer sauvegarde des fichiers médias
     saveHistorySummary: boolean;   // Défaut: false - Générer et stocker un résumé périodique
-    saveLinks: boolean;            // Défaut: false - Sauvegarder les liens entre agents (placeholder)
-    saveTasks: boolean;            // Défaut: false - Sauvegarder les tâches assignées (placeholder)
-    mediaStorage: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
+    mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
+    retentionDays?: number;        // Durée de conservation en jours
 }
 
 export interface IAgentPrototype extends Document {

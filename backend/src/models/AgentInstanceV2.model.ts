@@ -82,16 +82,19 @@ const ConfigurationSchema = new Schema<AgentInstanceConfiguration>({
 }, { _id: false });
 
 const PersistenceConfigSchema = new Schema<PersistenceConfig>({
+    saveChat: { type: Boolean, default: true },
     saveChatHistory: { type: Boolean, default: true },
     saveErrors: { type: Boolean, default: true },
+    saveTasks: { type: Boolean, default: false },
     saveTaskExecution: { type: Boolean, default: false },
-    saveMedia: { type: Boolean, default: false },
-    mediaStorageMode: {
+    saveLinks: { type: Boolean, default: false },
+    saveMedia: { type: Boolean, default: true },
+    mediaStorage: {
         type: String,
-        enum: ['database', 'local', 'cloud'] as MediaStorageMode[],
-        default: 'local'
+        enum: ['db', 'local', 'cloud'] as const,
+        default: 'db'
     },
-    summarizeHistory: { type: Boolean, default: false },
+    saveHistorySummary: { type: Boolean, default: false },
     retentionDays: { type: Number, min: 1 }
 }, { _id: false });
 

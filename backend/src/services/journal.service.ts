@@ -156,13 +156,13 @@ export class JournalService {
     ): boolean {
         switch (type) {
             case 'chat':
-                return config.saveChatHistory;
+                return config.saveChatHistory ?? config.saveChat ?? true;
             case 'error':
-                return config.saveErrors;
+                return config.saveErrors ?? true;
             case 'task':
-                return config.saveTaskExecution;
+                return config.saveTaskExecution ?? config.saveTasks ?? false;
             case 'media':
-                return config.saveMedia;
+                return config.saveMedia ?? true;
             case 'system':
                 return true; // Toujours sauvegarder les événements système
             default:
@@ -389,7 +389,7 @@ export class JournalService {
     /**
      * Journaliser un média (image, fichier)
      * 
-     * Respecte la config `saveMedia` et `mediaStorageMode`
+     * Respecte la config `saveMedia` et `mediaStorage`
      * Délègue le stockage au MediaStorageService
      */
     async logMedia(

@@ -568,7 +568,7 @@ router.get('/:id/v2/graph',
  * 
  * Body: {
  *   agentConfig: { name, role, prototypeId?, robotId, configuration },
- *   persistenceOptions: { saveChatHistory, saveMedia, mediaStorageMode, ... },
+ *   persistenceOptions: { saveChat, saveChatHistory, saveMedia, mediaStorage, saveHistorySummary, ... },
  *   position: { x, y }
  * }
  * 

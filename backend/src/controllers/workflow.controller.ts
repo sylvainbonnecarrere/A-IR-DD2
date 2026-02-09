@@ -53,10 +53,17 @@ const AgentConfigurationSchema = z.object({
 });
 
 const PersistenceOptionsSchema = z.object({
+    // ⭐ New properties
+    saveChat: z.boolean().optional(),
     saveChatHistory: z.boolean().optional(),
     saveErrors: z.boolean().optional(),
+    saveTasks: z.boolean().optional(),
     saveTaskExecution: z.boolean().optional(),
+    saveLinks: z.boolean().optional(),
     saveMedia: z.boolean().optional(),
+    mediaStorage: z.enum(['db', 'local', 'cloud']).optional(),
+    saveHistorySummary: z.boolean().optional(),
+    // ⭐ Legacy properties (backward compatibility)
     mediaStorageMode: z.enum(['database', 'local', 'cloud']).optional(),
     summarizeHistory: z.boolean().optional(),
     retentionDays: z.number().positive().optional()

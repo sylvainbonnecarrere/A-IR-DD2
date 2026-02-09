@@ -38,10 +38,17 @@ const UpdateInstanceBodySchema = z.object({
     }).optional(),
     status: z.enum(['idle', 'running', 'error', 'paused', 'completed']).optional(),
     persistenceConfig: z.object({
+        // ⭐ New properties
+        saveChat: z.boolean().optional(),
         saveChatHistory: z.boolean().optional(),
         saveErrors: z.boolean().optional(),
+        saveTasks: z.boolean().optional(),
         saveTaskExecution: z.boolean().optional(),
+        saveLinks: z.boolean().optional(),
         saveMedia: z.boolean().optional(),
+        mediaStorage: z.enum(['db', 'local', 'cloud']).optional(),
+        saveHistorySummary: z.boolean().optional(),
+        // ⭐ Legacy properties (backward compatibility)
         mediaStorageMode: z.enum(['database', 'local', 'cloud']).optional(),
         summarizeHistory: z.boolean().optional(),
         retentionDays: z.number().positive().optional()
@@ -354,16 +361,16 @@ export class InstanceController {
 
             switch (type) {
                 case 'chat':
-                    shouldSave = config.saveChatHistory;
+                    shouldSave = config.saveChatHistory ?? config.saveChat ?? true;
                     break;
                 case 'error':
-                    shouldSave = config.saveErrors;
+                    shouldSave = config.saveErrors ?? true;
                     break;
                 case 'task':
-                    shouldSave = config.saveTaskExecution;
+                    shouldSave = config.saveTaskExecution ?? config.saveTasks ?? false;
                     break;
                 case 'media':
-                    shouldSave = config.saveMedia;
+                    shouldSave = config.saveMedia ?? true;
                     break;
                 case 'system':
                     shouldSave = true; // Toujours logger les événements système
