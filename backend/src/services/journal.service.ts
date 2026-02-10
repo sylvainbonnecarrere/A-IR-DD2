@@ -9,13 +9,15 @@
  * 
  * Pattern : Service Layer avec injection de dépendances
  * 
+ * ⚠️ ÉTAPE 4: Références AgentInstance à corriger vers AgentInstance
+ * 
  * @see backend/src/models/AgentJournal.model.ts
- * @see backend/src/models/AgentInstanceV2.model.ts
+ * @see backend/src/models/AgentInstance.model.ts
  * @see backend/src/services/mediaStorage.service.ts
  */
 
 import mongoose from 'mongoose';
-import { AgentInstanceV2, IAgentInstanceV2 } from '../models/AgentInstanceV2.model';
+import { AgentInstance, IAgentInstance } from '../models/AgentInstance.model';
 import { AgentJournal, IAgentJournal } from '../models/AgentJournal.model';
 import { MediaStorageService } from './mediaStorage.service';
 import {
@@ -137,14 +139,14 @@ export class JournalService {
      */
     private async getInstanceWithConfig(
         instanceId: string
-    ): Promise<IAgentInstanceV2 | null> {
+    ): Promise<IAgentInstance | null> {
         if (!mongoose.Types.ObjectId.isValid(instanceId)) {
             return null;
         }
 
-        return AgentInstanceV2.findById(instanceId)
+        return AgentInstance.findById(instanceId)
             .select('_id workflowId userId persistenceConfig state status')
-            .lean() as Promise<IAgentInstanceV2 | null>;
+            .lean() as Promise<IAgentInstance | null>;
     }
 
     /**
@@ -174,7 +176,7 @@ export class JournalService {
      * Créer une entrée de journal générique
      */
     private async createJournalEntry(
-        instance: IAgentInstanceV2,
+        instance: IAgentInstance,
         type: JournalEntryType,
         payload: JournalPayload,
         options: JournalOptions = {}
@@ -220,7 +222,7 @@ export class JournalService {
                 setFields['state.currentTask'] = stateUpdates.currentTask;
             }
 
-            await AgentInstanceV2.findByIdAndUpdate(
+            await AgentInstance.findByIdAndUpdate(
                 instanceId,
                 { $set: setFields }
             );
@@ -364,7 +366,7 @@ export class JournalService {
 
             // Mettre à jour le statut de l'instance si erreur non récupérable
             if (!params.recoverable) {
-                await AgentInstanceV2.findByIdAndUpdate(
+                await AgentInstance.findByIdAndUpdate(
                     params.instanceId,
                     { $set: { status: 'error' } }
                 );
@@ -621,7 +623,7 @@ export class JournalService {
         status: 'idle' | 'running' | 'error' | 'paused' | 'completed'
     ): Promise<boolean> {
         try {
-            const result = await AgentInstanceV2.findByIdAndUpdate(
+            const result = await AgentInstance.findByIdAndUpdate(
                 instanceId,
                 { 
                     $set: { 

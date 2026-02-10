@@ -190,7 +190,8 @@ export type JournalPayload =
 /**
  * État d'exécution d'une instance d'agent
  */
-export type AgentInstanceStatus = 'idle' | 'running' | 'error' | 'paused' | 'completed';
+// ✅ ÉTAPE 1: Harmonisé avec le modèle AgentInstance.model.ts (enum: running, completed, failed, stopped)
+export type AgentInstanceStatus = 'running' | 'completed' | 'failed' | 'stopped';
 
 /**
  * État runtime court terme d'un agent
@@ -295,6 +296,17 @@ export interface CreateInstanceResponse {
         role: string;
         status: AgentInstanceStatus;
         persistenceConfig: PersistenceConfig;
+        // ✅ ÉTAPE 1: Ajouter configuration complète pour le frontend
+        configuration_json?: {
+            llmProvider: string;
+            llmModel: string;
+            systemPrompt: string;
+            role: string;
+            tools: any[];
+            capabilities: string[];
+            outputConfig?: any;
+            historyConfig?: any;
+        };
     };
     node: {
         _id: string;

@@ -24,5 +24,4 @@ export { default as localLLMRoutes } from './local-llm.routes';
 // ============================================
 // ROUTES V2 (Nouvelle architecture - Jalon 2)
 // ============================================
-
-export { default as instancesRoutes } from './instances.routes';
+// ✅ ÉTAPE 4: instances.routes supprimé - utiliser agentInstancesRoutes à la place

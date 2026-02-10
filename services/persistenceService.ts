@@ -228,7 +228,7 @@ export async function createAgentInstance(
     data: CreateAgentInstanceData,
     workflowId: string,
     options: PersistenceOptions
-): Promise<{ success: boolean; backendId?: string; error?: string }> {
+): Promise<{ success: boolean; backendId?: string; instance?: any; error?: string }> {
     try {
         if (!options.isAuthenticated) {
             // Guest mode: localStorage - just store with frontend ID
@@ -295,12 +295,18 @@ export async function createAgentInstance(
             };
         }
 
-        const created = await response.json();
-        console.log('[PersistenceService] ✅ Agent instance created in DB:', created._id || created.id);
+        const response_data = await response.json();
+        console.log('[PersistenceService] ✅ Agent instance created in DB:', response_data.instance?._id || response_data._id);
         
+        // ✅ ÉTAPE 2: Retourner l'instance complète avec configuration_json
+        // Le backend retourne { instance: {..., configuration_json}, node: {...} }
+        const backendInstance = response_data.instance || response_data;
+        // ⭐ CRITICAL FIX: Convertir ObjectId en string pour éviter mismatch avec tempId string
+        const backendIdString = (backendInstance._id || backendInstance.id)?.toString?.() || backendInstance._id || backendInstance.id;
         return { 
             success: true, 
-            backendId: created._id || created.id 
+            backendId: backendIdString,
+            instance: backendInstance // ✅ Instance complète avec configuration_json enrichie
         };
         
     } catch (err) {

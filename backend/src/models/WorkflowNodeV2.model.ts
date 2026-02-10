@@ -3,7 +3,7 @@
  * 
  * Différences avec V1 :
  * - Ajout de workflowId (FK vers Workflow)
- * - Ajout de instanceId (FK vers AgentInstanceV2 pour type='agent')
+ * - Ajout de instanceId (FK vers AgentInstance pour type='agent')
  * - Ajout de uiConfig pour la configuration visuelle React Flow
  * 
  * @see Guides/WIP/PLAN_CORRECTIF_PERSISTANCE_WORKFLOW.md
@@ -90,7 +90,7 @@ const WorkflowNodeV2Schema = new Schema<IWorkflowNodeV2>({
     // Lien instance agent
     instanceId: {
         type: Schema.Types.ObjectId,
-        ref: 'AgentInstanceV2'
+        ref: 'AgentInstance'
     },
     
     // Type

@@ -58,21 +58,31 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
         const currentResolved = getResolvedInstance(configModalInstanceId);
         if (!currentResolved) return;
 
-        // Réinitialiser editedConfig avec la config actuelle
-        const currentConfig = currentResolved.instance.configuration_json || {
-            role: currentResolved.prototype.role || '',
-            model: currentResolved.prototype.model || '',
-            llmProvider: currentResolved.prototype.llmProvider || 'openai',
-            systemPrompt: currentResolved.prototype.systemPrompt || '',
-            tools: JSON.parse(JSON.stringify(currentResolved.prototype.tools || [])),
-            outputConfig: currentResolved.prototype.outputConfig ? JSON.parse(JSON.stringify(currentResolved.prototype.outputConfig)) : undefined,
-            capabilities: currentResolved.prototype.capabilities ? [...currentResolved.prototype.capabilities] : [],
-            historyConfig: currentResolved.prototype.historyConfig ? JSON.parse(JSON.stringify(currentResolved.prototype.historyConfig)) : undefined,
+        // ✅ ÉTAPE 2: Utiliser configuration_json du backend en priorité (enrichie depuis ÉTAPE 1)
+        // Fallback vers le prototype si configuration_json n'existe pas
+        const instanceConfig = currentResolved.instance.configuration_json;
+        const prototypeConfig = currentResolved.prototype;
+        
+        const currentConfig = {
+            role: instanceConfig?.role || prototypeConfig.role || '',
+            model: instanceConfig?.model || prototypeConfig.model || '',
+            llmProvider: (instanceConfig?.llmProvider || prototypeConfig.llmProvider || 'openai') as LLMProvider,
+            systemPrompt: instanceConfig?.systemPrompt || prototypeConfig.systemPrompt || '',
+            tools: JSON.parse(JSON.stringify(instanceConfig?.tools || prototypeConfig.tools || [])),
+            outputConfig: instanceConfig?.outputConfig 
+                ? JSON.parse(JSON.stringify(instanceConfig.outputConfig))
+                : (prototypeConfig.outputConfig ? JSON.parse(JSON.stringify(prototypeConfig.outputConfig)) : undefined),
+            capabilities: instanceConfig?.capabilities 
+                ? [...instanceConfig.capabilities]
+                : (prototypeConfig.capabilities ? [...prototypeConfig.capabilities] : []),
+            historyConfig: instanceConfig?.historyConfig
+                ? JSON.parse(JSON.stringify(instanceConfig.historyConfig))
+                : (prototypeConfig.historyConfig ? JSON.parse(JSON.stringify(prototypeConfig.historyConfig)) : undefined),
             position: currentResolved.instance.position,
-            links: currentResolved.instance.configuration_json?.links || [],
-            tasks: currentResolved.instance.configuration_json?.tasks || [],
-            logs: currentResolved.instance.configuration_json?.logs || [],
-            errors: currentResolved.instance.configuration_json?.errors || []
+            links: instanceConfig?.links || [],
+            tasks: instanceConfig?.tasks || [],
+            logs: instanceConfig?.logs || [],
+            errors: instanceConfig?.errors || []
         };
 
         setEditedConfig(currentConfig);

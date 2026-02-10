@@ -158,7 +158,7 @@ const AgentJournalSchema = new Schema<IAgentJournal>({
     // Relations
     agentInstanceId: {
         type: Schema.Types.ObjectId,
-        ref: 'AgentInstanceV2',
+        ref: 'AgentInstance',
         required: true
     },
     workflowId: {

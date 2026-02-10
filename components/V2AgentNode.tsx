@@ -194,15 +194,75 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   };
 
   const handleEdit = () => {
-    // Ouvrir le modal de configuration de l'instance au niveau global
+    // Robust instance lookup with multiple fallback strategies
+    const storeState = useDesignStore.getState();
+    
+    // First try: Direct agentInstance from props
     if (agentInstance && typeof agentInstance === 'object' && 'id' in agentInstance && agentInstance.id) {
       const { setConfigModalInstanceId } = useRuntimeStore.getState();
       setConfigModalInstanceId(agentInstance.id);
-    } else {
-      console.error('[V2AgentNode] No agentInstance found for node', id, '- agentInstance:', agentInstance, '- data:', data);
-      console.error('[V2AgentNode] Agent:', agent?.name, 'id:', agent?.id);
-      alert(`Cet agent n'a pas encore d'instance. Vérifiez que l'agent a bien été créé dans la sidebar.\n\nDébug: agentInstance=${agentInstance}, agent=${agent?.name}`);
+      return;
     }
+
+    // Fallback 1: Try to find instance by node ID in store
+    const nodeIdPattern = id.replace('node-', ''); // Extract ID from 'node-ABC' → 'ABC'
+    const instanceByNodeId = storeState.agentInstances.find(inst => inst.id === nodeIdPattern);
+    
+    if (instanceByNodeId && instanceByNodeId.id) {
+      console.warn('[V2AgentNode] ⭐ ÉTAPE 4: Found instance by node ID pattern:', nodeIdPattern);
+      const { setConfigModalInstanceId } = useRuntimeStore.getState();
+      setConfigModalInstanceId(instanceByNodeId.id);
+      return;
+    }
+
+    // Fallback 2: Try to find instance by agent name
+    if (agent?.name) {
+      const instanceByName = storeState.agentInstances.find(inst => inst.name === agent.name);
+      if (instanceByName && instanceByName.id) {
+        console.warn('[V2AgentNode] ⭐ ÉTAPE 4: Found instance by agent name:', agent.name);
+        const { setConfigModalInstanceId } = useRuntimeStore.getState();
+        setConfigModalInstanceId(instanceByName.id);
+        return;
+      }
+    }
+
+    // Fallback 3: Try to find instance by prototypeId
+    if (agent?.id) {
+      const instanceByPrototype = storeState.agentInstances.find(inst => inst.prototypeId === agent.id);
+      if (instanceByPrototype && instanceByPrototype.id) {
+        console.warn('[V2AgentNode] ⭐ ÉTAPE 4: Found instance by prototype ID:', agent.id);
+        const { setConfigModalInstanceId } = useRuntimeStore.getState();
+        setConfigModalInstanceId(instanceByPrototype.id);
+        return;
+      }
+    }
+
+    // ❌ All fallbacks failed - detailed error message for debugging
+    console.error('[V2AgentNode] ❌ ÉTAPE 4: Instance lookup FAILED - no instance found', {
+      nodeId: id,
+      agentName: agent?.name,
+      agentId: agent?.id,
+      agentInstanceProp: agentInstance,
+      nodeIdPattern: nodeIdPattern,
+      availableInstances: storeState.agentInstances.map(i => ({ id: i.id, name: i.name, prototypeId: i.prototypeId }))
+    });
+
+    const errorDetails = [
+      `Node ID: ${id}`,
+      `Agent: ${agent?.name || 'N/A'} (ID: ${agent?.id || 'N/A'})`,
+      `agentInstance prop: ${agentInstance ? JSON.stringify(agentInstance) : 'undefined'}`,
+      `Available instances: ${storeState.agentInstances.length}`,
+      storeState.agentInstances.length > 0 ? `Sample: ${JSON.stringify(storeState.agentInstances[0])}` : 'No instances in store'
+    ].join('\n');
+
+    alert(
+      `❌ Instance non trouvée pour cet agent.\n\n` +
+      `Cela signifie que:\n` +
+      `1. L'agent n'a pas été ajouté au workflow correctement\n` +
+      `2. Ou l'ID d'instance n'est pas synchronisé\n` +
+      `3. Ou vous avez rechargé la page et perdu l'instance local\n\n` +
+      `Debug Info:\n${errorDetails}`
+    );
   };
 
   const handleFullscreen = () => {

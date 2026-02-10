@@ -341,26 +341,34 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   /**
    * Replace temporary instance ID (created locally) with real ID from backend
    * Called after successful API creation of AgentInstance
+   * 
+   * ⭐ ÉTAPE 1 FIX: Also renames the node ID from 'node-tempId' to 'node-realId'
+   * This ensures node.id matches instance.id, fixing "Instance non trouvée" errors
    */
   updateInstanceId: (tempId, realId) => set((state) => ({
     agentInstances: state.agentInstances.map(instance =>
       instance.id === tempId ? { ...instance, id: realId } : instance
     ),
-    // Update nodes that reference this instance
-    nodes: state.nodes.map(node => 
-      node.data.agentInstance?.id === tempId 
-        ? { 
-            ...node, 
-            data: { 
-              ...node.data, 
-              agentInstance: { 
-                ...node.data.agentInstance,
-                id: realId 
-              } 
-            } 
+    // ⭐ CRITICAL: Update nodes that reference this instance
+    // Both rename the node ID itself AND update the instance reference inside
+    nodes: state.nodes.map(node => {
+      // Check if node references this instance (by old tempId)
+      if (node.data.agentInstance?.id === tempId) {
+        return {
+          ...node,
+          // ⭐ ÉTAPE 1 FIX: Rename the node ID itself from 'node-tempId' to 'node-realId'
+          id: `node-${realId}`,
+          data: {
+            ...node.data,
+            agentInstance: {
+              ...node.data.agentInstance,
+              id: realId  // Also update the instance reference inside
+            }
           }
-        : node
-    )
+        };
+      }
+      return node;
+    })
   })),
 
   updateInstanceConfig: (id, configUpdates) => set((state) => ({

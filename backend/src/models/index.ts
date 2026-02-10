@@ -52,12 +52,15 @@ export {
     IAgentInstanceMetrics
 } from './AgentInstance.model';
 
+// ✅ ÉTAPE 1: AgentInstanceV2 commenté - à supprimer en ÉTAPE 4
 // Nouvelle architecture (V2)
+/*
 export { 
     AgentInstanceV2, 
     AgentInstanceLean,
     IAgentInstanceV2 
 } from './AgentInstanceV2.model';
+*/
 
 export { AgentJournal, IAgentJournal } from './AgentJournal.model';
 

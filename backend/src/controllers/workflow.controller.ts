@@ -14,7 +14,7 @@ import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Workflow } from '../models/Workflow.model';
-import { AgentInstanceV2, IAgentInstanceV2 } from '../models/AgentInstanceV2.model';
+import { AgentInstance, IAgentInstance } from '../models/AgentInstance.model';
 import { WorkflowNodeV2, IWorkflowNodeV2 } from '../models/WorkflowNodeV2.model';
 import { AgentJournal } from '../models/AgentJournal.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
@@ -148,26 +148,54 @@ export class WorkflowController {
                     ...body.persistenceOptions
                 };
 
+                // ✅ ÉTAPE 1: Créer en AgentInstance (table réelle, pas V2)
+                const config = body.agentConfig.configuration;
+                
                 const instanceData = {
                     workflowId: new mongoose.Types.ObjectId(workflowId),
                     userId: new mongoose.Types.ObjectId(user.id),
                     prototypeId: body.agentConfig.prototypeId
                         ? new mongoose.Types.ObjectId(body.agentConfig.prototypeId)
                         : undefined,
+                    
+                    // ✅ Identifiant d'exécution unique
+                    executionId: `exec-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                    
+                    // ✅ Snapshot du prototype (config du moment de la création)
                     name: body.agentConfig.name,
                     role: body.agentConfig.role,
                     robotId: body.agentConfig.robotId,
-                    configuration: body.agentConfig.configuration as AgentInstanceConfiguration,
-                    persistenceConfig,
-                    state: {
-                        memory: '',
-                        variables: {},
-                        lastActivity: new Date()
+                    llmProvider: config.llmProvider || 'openai',
+                    llmModel: config.llmModel || 'gpt-4',
+                    systemPrompt: config.systemPrompt || '',
+                    tools: config.tools || [],
+                    // ✅ Capabilities initialisé à vide (pas dans le schema input)
+                    capabilities: [],
+                    outputConfig: config.outputConfig,
+                    historyConfig: config.historyConfig,
+                    
+                    // ✅ Canvas properties
+                    position: body.position,
+                    isMinimized: false,
+                    isMaximized: false,
+                    zIndex: 0,
+                    
+                    // ✅ Contenu et métriques
+                    content: [],
+                    metrics: {
+                        executionCount: 0,
+                        totalTokensUsed: 0,
+                        averageResponseTime: 0,
+                        lastExecutionTime: new Date(),
+                        errorCount: 0
                     },
-                    status: 'idle' as const
+                    
+                    // ✅ État
+                    status: 'running',
+                    persistenceConfig
                 };
 
-                const [instance] = await AgentInstanceV2.create([instanceData], { session });
+                const [instance] = await AgentInstance.create([instanceData], { session });
 
                 // 2. Créer le nœud visuel lié
                 const nodeData = {
@@ -212,7 +240,18 @@ export class WorkflowController {
                         name: instance.name,
                         role: instance.role,
                         status: instance.status,
-                        persistenceConfig: instance.persistenceConfig
+                        persistenceConfig: instance.persistenceConfig,
+                        // ✅ ÉTAPE 1: Inclure configuration complète pour le frontend
+                        configuration_json: {
+                            llmProvider: instance.llmProvider,
+                            llmModel: instance.llmModel,
+                            systemPrompt: instance.systemPrompt,
+                            role: instance.role,
+                            tools: instance.tools || [],
+                            capabilities: instance.capabilities || [],
+                            outputConfig: instance.outputConfig,
+                            historyConfig: instance.historyConfig
+                        }
                     },
                     node: {
                         _id: node._id.toString(),
@@ -315,8 +354,8 @@ export class WorkflowController {
                     // Supprimer les journaux
                     journalsDeleted = await AgentJournal.deleteByInstance(node.instanceId);
 
-                    // Supprimer l'instance
-                    await AgentInstanceV2.deleteOne(
+                    // ✅ Supprimer l'instance en AgentInstance (pas V2)
+                    await AgentInstance.deleteOne(
                         { _id: node.instanceId },
                         { session }
                     );

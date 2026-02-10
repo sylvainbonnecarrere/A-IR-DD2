@@ -4,6 +4,7 @@ export const locales = {
     de: 'Deutsch',
     es: 'Español',
     pt: 'Português',
+    ua: 'Українська',
 };
 
 export const defaultLocale = 'fr';

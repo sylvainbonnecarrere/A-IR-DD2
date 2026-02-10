@@ -8,9 +8,10 @@ import en from '../i18n/en';
 import de from '../i18n/de';
 import es from '../i18n/es';
 import pt from '../i18n/pt';
+import ua from '../i18n/ua';
 
 type Translations = Record<string, string>;
-const allTranslations: Record<Locale, Translations> = { fr, en, de, es, pt };
+const allTranslations: Record<Locale, Translations> = { fr, en, de, es, pt, ua };
 
 interface LocalizationContextType {
     locale: Locale;

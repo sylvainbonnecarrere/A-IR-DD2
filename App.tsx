@@ -242,23 +242,47 @@ function AppContent() {
       setHydrationProgress(10);
 
       try {
-        console.log('[App] Starting workspace hydration...');
+        // CRITICAL: Hard reset on authenticated user login to prevent stale data
+        useDesignStore.getState().resetAll();
+        localStorage.clear();
+        sessionStorage.clear();
+        sessionStorage.setItem('_arc_hydrating', 'true');
+        
         setHydrationProgress(30);
 
-        const response = await fetch(`${API_BASE_URL}/api/user/workspace`, {
+        // Parallel load: workspace and instances from API
+        const workspacePromise = fetch(`${API_BASE_URL}/api/user/workspace`, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json'
           }
         });
 
+        let instancesResponse: Response | null = null;
+
         setHydrationProgress(60);
 
-        if (!response.ok) {
-          throw new Error(`Hydration failed: ${response.status}`);
+        const workspaceResponse = await workspacePromise;
+
+        if (!workspaceResponse.ok) {
+          throw new Error(`Hydration failed: ${workspaceResponse.status}`);
         }
 
-        const workspace = await response.json();
+        const workspace = await workspaceResponse.json();
+        
+        if (workspace.workflow?.id) {
+          console.log('[App] Loading instances for workflowId:', workspace.workflow.id);
+          try {
+            instancesResponse = await fetch(`${API_BASE_URL}/api/workflows/${workspace.workflow.id}/instances`, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+              }
+            });
+          } catch (err) {
+            console.error('[App] Error loading instances:', err);
+          }
+        }
         setHydrationProgress(80);
 
         // ⭐ SELF-HEALING: Hydrate workflow with REAL MongoDB ID from server
@@ -281,10 +305,13 @@ function AppContent() {
           console.warn('[App] ⚠️ No workflow in server response - Self-Healing may have failed');
         }
 
+        // ⭐ DECLARE EARLY: Declare these variables BEFORE the if blocks so they're accessible later
+        let hydratedPrototypes: Agent[] = [];
+        
         // ⭐ FIX: Hydrater les prototypes d'agents dans le state React et le store Zustand
         if (workspace.agentPrototypes && workspace.agentPrototypes.length > 0) {
           const now = new Date().toISOString();
-          const hydratedPrototypes: Agent[] = workspace.agentPrototypes.map((proto: any) => ({
+          hydratedPrototypes = workspace.agentPrototypes.map((proto: any) => ({
             id: proto.id,
             name: proto.name,
             role: proto.description || 'assistant',
@@ -301,21 +328,109 @@ function AppContent() {
           // Hydrater le state React (legacy)
           setAgents(hydratedPrototypes);
           
-          // Hydrater le store Zustand
-          hydrateFromServer({
-            agents: hydratedPrototypes
+          // ⭐ NOTE: hydrateFromServer call moved to AFTER instances are ready
+          // This ensures ATOMIC hydration (agents + instances together)
+          console.log('[App] ✅ Agent prototypes loaded:', hydratedPrototypes.length);
+        }
+
+        // Load external instances from API
+        const externalInstances = instancesResponse && instancesResponse.ok 
+          ? await instancesResponse.json() 
+          : [];
+        
+        // Merge instances from both sources, deduplicating by ID
+        const allInstancesMap = new Map();
+        
+        if (workspace.agentInstances && workspace.agentInstances.length > 0) {
+          workspace.agentInstances.forEach((inst: any) => {
+            allInstancesMap.set(inst.id, inst);
+          });
+        }
+        
+        if (externalInstances.length > 0) {
+          externalInstances.forEach((inst: any) => {
+            if (!allInstancesMap.has(inst.id)) {
+              allInstancesMap.set(inst.id, inst);
+            }
+          });
+        }
+        
+        const mergedInstances = Array.from(allInstancesMap.values());
+        
+        // Filter out any undefined/null instances
+        const validMergedInstances = mergedInstances.filter((inst: any) => inst && inst.id);
+        
+        // Prepare hydration for Zustand store
+        let hydratedInstancesForStore: AgentInstance[] = [];
+        
+        // Hydrate instances to store before building nodes
+        if (validMergedInstances.length > 0) {
+          hydratedInstancesForStore = validMergedInstances.map((instance: any) => {
+            const agentProto = workspace.agentPrototypes?.find((proto: any) => proto.id === instance.prototypeId);
+            const agent: Agent = agentProto ? {
+              id: agentProto.id,
+              name: agentProto.name,
+              role: agentProto.description || 'assistant',
+              systemPrompt: instance.systemInstruction || agentProto.description || '',
+              llmProvider: (agentProto.provider as LLMProvider) || LLMProvider.Gemini,
+              model: agentProto.model || 'gemini-2.0-flash',
+              capabilities: [],
+              tools: [],
+              creator_id: RobotId.Archi,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            } : {
+              id: instance.prototypeId || instance.id,
+              name: instance.name,
+              role: 'assistant',
+              systemPrompt: instance.systemInstruction || '',
+              llmProvider: (instance.provider as LLMProvider) || LLMProvider.Gemini,
+              model: instance.model || 'gemini-2.0-flash',
+              capabilities: [],
+              tools: [],
+              creator_id: RobotId.Archi,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            };
+            
+            return {
+              id: instance.id,
+              prototypeId: instance.prototypeId || agent.id,
+              name: instance.name,
+              position: instance.position || { x: 0, y: 0 },
+              isMinimized: false,
+              isMaximized: false,
+              workflowId: instance.workflowId || workspace.workflow?.id,
+              configuration_json: {
+                role: agent.role,
+                model: agent.model,
+                llmProvider: agent.llmProvider,
+                systemPrompt: agent.systemPrompt,
+                tools: agent.tools || [],
+                position: instance.position || { x: 0, y: 0 }
+              }
+            } as AgentInstance;
           });
           
-          console.log('[App] ✅ Agent prototypes hydrated:', hydratedPrototypes.length);
+          // Atomic hydration: single call with agents and instances together
+          // Prevents race conditions from partial state updates
+          hydrateFromServer({
+            agents: hydratedPrototypes,
+            agentInstances: hydratedInstancesForStore
+          });
+          
+          console.log('[App] ✅ ÉTAPE 1 - ATOMIC HYDRATION COMPLETE:', {
+            agents: hydratedPrototypes.length,
+            instances: hydratedInstancesForStore.length,
+            workflowId: workspace.workflow?.id,
+            message: 'Single atomic call - no partial states'
+          });
         }
 
         // ⭐ CRITICAL: Build V2WorkflowNodes from instances and hydrate to store
         // This ensures nodes are properly linked to instances for WorkflowCanvas resolution
-        if (workspace.agentInstances && workspace.agentInstances.length > 0) {
-          // First pass: transform all instances to frontend format
-          const hydratedInstances: AgentInstance[] = [];
-          
-          const v2Nodes: V2WorkflowNode[] = workspace.agentInstances.map((instance: any) => {
+        if (validMergedInstances.length > 0) {
+          const v2Nodes: V2WorkflowNode[] = validMergedInstances.map((instance: any) => {
             // Find the agent prototype for this instance
             const agentProto = workspace.agentPrototypes?.find((proto: any) => proto.id === instance.prototypeId);
             
@@ -367,38 +482,33 @@ function AppContent() {
               }
             };
             
-            // Collect hydrated instances for store
-            hydratedInstances.push(hydratedInstance);
-            
             return {
-              id: `node-${instance.id}`, // Generate consistent V2 node ID
+              id: `node-${instance.id}`,
               type: 'agent',
               position: instance.position || { x: 0, y: 0 },
               data: {
-                robotId: RobotId.Archi, // Agents are created by Archi
+                robotId: RobotId.Archi,
                 label: instance.name,
-                agent, // ⭐ FIX: Now includes the agent prototype
-                agentInstance: hydratedInstance, // ⭐ FIX: Properly structured instance
-                workflowId: workspace.workflow?.id, // ⭐ FIX: Pass workflowId for journal
+                agent,
+                agentInstance: hydratedInstance,
+                workflowId: workspace.workflow?.id,
                 isMinimized: false,
                 isMaximized: false
               }
             };
           });
           
-          // ⭐ FIX: Hydrate store with properly formatted instances AFTER transformation
-          hydrateFromServer({
-            agentInstances: hydratedInstances
-          });
-          
+          // Build and store visual nodes
           setNodes(v2Nodes);
-          console.log('[App] ✅ V2WorkflowNodes hydrated from instances:', v2Nodes.length, 
-            'with workflowId:', workspace.workflow?.id,
-            'instances:', hydratedInstances.map(i => ({ id: i.id, workflowId: i.workflowId })));
+          console.log('[App] ✅ V2WorkflowNodes built from instances:', v2Nodes.length);
         } else {
-          // Fall back to storing backend nodes if available
-          if (workspace.nodes) {
+          // Fall back to storing backend nodes if available (legacy nodes without instances)
+          console.log('[App] ℹ️ No merged instances found, checking for legacy workspace.nodes');
+          if (workspace.nodes && workspace.nodes.length > 0) {
             setNodes(workspace.nodes);
+            console.log('[App] ✅ Using legacy workspace.nodes:', workspace.nodes.length);
+          } else {
+            console.warn('[App] ⚠️ No nodes or instances available');
           }
         }
 
@@ -438,16 +548,16 @@ function AppContent() {
           setWorkflowNodes(hydrationNodes);
         }
 
-        setHydrationProgress(100);
+        // ⭐ ÉTAPE 4: Diagnostic logging - verify hydration success
+        
         console.log('[App] Workspace hydration complete:', {
           workflowId: workspace.workflow?.id,
           nodes: workspace.nodes?.length || 0,
           instances: workspace.agentInstances?.length || 0
         });
 
-        // ⭐ NEW: Load persisted journals for each agent instance (lazy-load)
+        // Load persisted journals for each agent instance
         if (workspace.agentInstances && workspace.agentInstances.length > 0 && workspace.workflow?.id) {
-          console.log('[App] Loading persisted journals for instances...');
           try {
             for (const instance of workspace.agentInstances) {
               const journalsResponse = await fetch(
@@ -679,20 +789,82 @@ function AppContent() {
 
   const handleSaveAgent = async (agentData: Omit<Agent, 'id'>, agentId?: string) => {
     try {
+      let backendId: string;
+      let savedAgent: any;
+
       if (agentId) {
-        // Update existing agent
-        // TODO: Implement API call to update agent
-        console.log('Updating agent:', agentId, agentData);
+        // ⭐ ÉTAPE 3: Update existing agent prototype
+        console.log('[App] 📤 Updating agent prototype:', agentId);
+        const response = await fetch(`${API_BASE_URL}/api/agent-prototypes/${agentId}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(agentData)
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Update failed: ${response.status} - ${error}`);
+        }
+
+        savedAgent = await response.json();
+        backendId = savedAgent._id || agentId;
+        console.log('[App] ✅ Agent prototype updated:', backendId);
       } else {
-        // Create new agent
-        // TODO: Implement API call to create agent
-        console.log('Creating new agent:', agentData);
+        // ⭐ ÉTAPE 3: Create new agent prototype
+        console.log('[App] 📤 Creating new agent prototype:', agentData.name);
+
+        // For authenticated users, we need the real MongoDB user ID (from context)
+        // For guests, this won't be called (protected by isAuthenticated check above)
+        const response = await fetch(`${API_BASE_URL}/api/agent-prototypes`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(agentData)
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Create failed: ${response.status} - ${error}`);
+        }
+
+        savedAgent = await response.json();
+        backendId = savedAgent._id;
+        console.log('[App] ✅ Agent prototype created with backendId:', backendId);
+
+        // ⭐ ÉTAPE 3 CRITICAL: Convert tempId → backendId for NEW agents
+        // Find which agent in the store has the same name/role and convert its ID
+        if (!agentId && backendId) {
+          const storeState = useDesignStore.getState();
+          // Look for agent with matching name and role (since we just created it with tempId)
+          const tempAgent = storeState.agents.find(
+            a => a.name === agentData.name && a.role === agentData.role
+          );
+
+          if (tempAgent && tempAgent.id !== backendId) {
+            console.log('[App] ⭐ Converting tempId → backendId:', {
+              tempId: tempAgent.id,
+              backendId: backendId
+            });
+            // This also updates all instances referencing this prototype
+            useDesignStore.getState().updateAgentId(tempAgent.id, backendId);
+          }
+        }
       }
+
       // Close the modal
       setAgentModalOpen(false);
       setEditingAgent(null);
+
+      // Show success notification
+      console.log('[App] ✅ Agent saved successfully:', backendId);
     } catch (error) {
-      console.error('Error saving agent:', error);
+      console.error('[App] ❌ Error saving agent:', error);
+      // TODO: Show error notification to user
     }
   };
 
@@ -842,15 +1014,48 @@ function AppContent() {
       let finalInstanceId = instanceId;
       
       if (result.success) {
-        console.log('[App] ✅ Agent instance persisted to DB:', result.backendId);
-        // ⭐ CRITICAL FIX: Update instance ID in store with backend-generated ID
-        if (result.backendId && result.backendId !== instanceId) {
-          console.log('[App] Updating instance ID:', {
-            tempId: instanceId,
-            backendId: result.backendId
-          });
-          updateInstanceId(instanceId, result.backendId);
-          finalInstanceId = result.backendId; // ⭐ Utiliser le vrai ID backend
+        console.log('[App] ✅ Agent instance persisted to DB with backendId:', result.backendId);
+        
+        // ✅ ÉTAPE 2: Synchroniser l'instance complète du backend avec Zustand
+        // Le backend retourne l'instance avec configuration_json enrichie (llmProvider, llmModel, etc.)
+        if (result.backendId && result.instance) {
+          
+          // ✅ Remplacer l'instance temporaire par l'instance backend complète
+          // Incluant la configuration_json qui sera utilisée dans AgentConfigurationModal
+          const backendInstance: AgentInstance = {
+            id: result.backendId,
+            prototypeId: agent.id,
+            name: instanceName,
+            role: agent.role,
+            position,
+            workflowId,
+            llmProvider: result.instance.configuration_json?.llmProvider || agent.llmProvider,
+            llmModel: result.instance.configuration_json?.llmModel || agent.model,
+            systemPrompt: result.instance.configuration_json?.systemPrompt || agent.systemPrompt,
+            tools: result.instance.configuration_json?.tools || agent.tools || [],
+            capabilities: result.instance.configuration_json?.capabilities || [],
+            status: result.instance.status || 'running',
+            persistenceConfig: result.instance.persistenceConfig || agent.persistenceConfig,
+            configuration_json: result.instance.configuration_json, // ✅ Inclure la config complète du backend
+            content: [],
+            metrics: {
+              executionCount: 0,
+              totalTokensUsed: 0,
+              averageResponseTime: 0,
+              lastExecutionTime: new Date(),
+              errorCount: 0
+            },
+            created_at: new Date().toISOString()
+          };
+          
+          // ✅ CRITICAL: Update instance ID AND content in Zustand store
+          if (result.backendId !== instanceId) {
+            updateInstanceId(instanceId, result.backendId);
+          }
+          // ✅ Ensuite mettre à jour la configuration complète
+          // Use getState() for stable reference (avoid dependency on updateAgentInstance)
+          useDesignStore.getState().updateAgentInstance(result.backendId, backendInstance);
+          finalInstanceId = result.backendId;
         }
       } else {
         console.error('[App] ❌ Failed to persist agent instance:', result.error);
@@ -860,6 +1065,7 @@ function AppContent() {
       // ⭐ CRITICAL: Create V2WorkflowNode in Zustand store AFTER ID resolution
       // ⭐ FIX: Utiliser getState() pour obtenir la valeur actuelle du store (pas la closure stale)
       const currentAgentInstances = useDesignStore.getState().agentInstances;
+      
       const updatedInstance = currentAgentInstances.find(inst => 
         inst.id === finalInstanceId || inst.id === instanceId
       );
@@ -885,7 +1091,6 @@ function AppContent() {
             isMaximized: false
           }
         });
-        console.log('[App] ✅ V2WorkflowNode added with final instance ID:', finalInstanceId);
       } else {
         console.warn('[App] ⚠️ Instance not found after creation, creating node anyway');
         // Créer le node avec les données disponibles
