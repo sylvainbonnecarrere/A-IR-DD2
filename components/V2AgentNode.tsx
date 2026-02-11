@@ -71,18 +71,23 @@ export interface V2AgentNodeData {
   label: string;
   agent: Agent; // The prototype
   agentInstance?: AgentInstance; // The instance data
-  workflowId?: string; // ⭐ NOUVEAU: Pour persistance journal
-  // ⭐ REMOVED: isMinimized - now stored in useRuntimeStore (transient UI state)
+  workflowId?: string; // For journal persistence
 }
 
 export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, selected }) => {
   const { t } = useLocalization();
-  const { agent, agentInstance } = data;
+  const { agent, agentInstance: agentInstanceProp } = data;
   
-  // ⭐ ARCHITECTURE FIX: Read minimize state from useRuntimeStore (transient UI state)
+  // Read minimize state from store
   const isMinimized = useRuntimeStore((state) => state.getIsNodeMinimized(id));
 
-  // Protection critique : si agent est null, afficher un fallback
+  // Read agentInstance from store to get fresh config when updated via settings modal
+  const agentInstances = useDesignStore((state) => state.agentInstances);
+  const agentInstance = agentInstanceProp?.id
+    ? agentInstances.find(inst => inst.id === agentInstanceProp.id)
+    : agentInstanceProp;
+
+  // Protection: if agent is null, show error state
   if (!agent) {
     return (
       <div className="min-w-80 bg-red-900/50 border-2 border-red-500 rounded-lg p-4">
@@ -171,8 +176,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   }, [messages, isMinimized]);
 
   const handleToggleMinimize = () => {
-    // ⭐ SOLID FIX: Logging immédiat pour confirmer l'action
-    console.log('[V2AgentNode] Minimize toggle request for node:', id, 'Current isMinimized:', isMinimized);
     if (onToggleNodeMinimize) {
       onToggleNodeMinimize(id);
     }
@@ -214,7 +217,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     const instanceByNodeId = storeState.agentInstances.find(inst => inst.id === nodeIdPattern);
     
     if (instanceByNodeId && instanceByNodeId.id) {
-      console.warn('[V2AgentNode] ⭐ ÉTAPE 4: Found instance by node ID pattern:', nodeIdPattern);
       const { setConfigModalInstanceId } = useRuntimeStore.getState();
       setConfigModalInstanceId(instanceByNodeId.id);
       return;
@@ -224,7 +226,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     if (agent?.name) {
       const instanceByName = storeState.agentInstances.find(inst => inst.name === agent.name);
       if (instanceByName && instanceByName.id) {
-        console.warn('[V2AgentNode] ⭐ ÉTAPE 4: Found instance by agent name:', agent.name);
         const { setConfigModalInstanceId } = useRuntimeStore.getState();
         setConfigModalInstanceId(instanceByName.id);
         return;
@@ -235,7 +236,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     if (agent?.id) {
       const instanceByPrototype = storeState.agentInstances.find(inst => inst.prototypeId === agent.id);
       if (instanceByPrototype && instanceByPrototype.id) {
-        console.warn('[V2AgentNode] ⭐ ÉTAPE 4: Found instance by prototype ID:', agent.id);
         const { setConfigModalInstanceId } = useRuntimeStore.getState();
         setConfigModalInstanceId(instanceByPrototype.id);
         return;
@@ -271,12 +271,10 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   };
 
   const handleFullscreen = () => {
-    // ⭐ FIX: Pass agent AND instance data directly to store
-    // The nodeId is not an instanceId, so getResolvedInstance() doesn't work
     const { setFullscreenChatNodeId, setFullscreenChatAgent, setFullscreenChatAgentInstance } = useRuntimeStore.getState();
     setFullscreenChatNodeId(id);
-    setFullscreenChatAgent(agent); // ⭐ Pass the actual agent prototype
-    setFullscreenChatAgentInstance(agentInstance); // ⭐ Pass the instance for instanceId access
+    setFullscreenChatAgent(agent);
+    setFullscreenChatAgentInstance(agentInstance);
   };
 
 
@@ -318,7 +316,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   const { enqueueEntry } = useJournalQueue();
 
   const persistJournalEntry = useCallback((entryType: 'chat' | 'error' | 'media', payload: any) => {
-    // ⭐ FALLBACK: Essayer d'abord data.workflowId (du contexte), puis agentInstance.workflowId
+    // Try data.workflowId first, fallback to instance.workflowId
     const effectiveWorkflowId = data.workflowId || agentInstance?.workflowId;
     
     if (!agentInstance?.id || !effectiveWorkflowId) {
@@ -379,7 +377,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     setUserInput('');
     setAttachedFile(null);
 
-    // ⭐ Phase 3: Persister le message utilisateur (non-bloquant)
+    // Persist user message to journal (non-blocking)
     persistJournalEntry('chat', {
       role: 'user',
       content: trimmedInput,
@@ -388,7 +386,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     });
 
     // Get LLM config
-    // llmConfigs now from hook above
     const agentConfig = llmConfigs?.find(c => c.provider === effectiveAgent.llmProvider);
 
     if (!agentConfig?.enabled || !agentConfig.apiKey) {
@@ -532,7 +529,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         }
       }
 
-      // ⭐ Phase 3: Persister la réponse agent si elle existe et n'est pas une erreur
+      // Persist agent response if successful
       if (currentResponse.trim() && !toolCalls.length) {
         persistJournalEntry('chat', {
           role: 'agent',
@@ -670,7 +667,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       };
       addNodeMessage(id, errorMessage);
 
-      // ⭐ Phase 3: Persister l'erreur
+      // Persist error to journal
       persistJournalEntry('error', {
         errorCode: 'AGENT_ERROR',
         message: error instanceof Error ? error.message : String(error),
@@ -1095,7 +1092,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       </div>
 
       {/* Content - Chat area without drag handle to allow text selection */}
-      {/* ⭐ FIX: Transition fluide avec max-height pour réduction/agrandissement */}
       <div className={`transition-all duration-300 ease-in-out overflow-hidden ${
         isMinimized ? 'max-h-0 opacity-0 pointer-events-none' : ''
       }`}>

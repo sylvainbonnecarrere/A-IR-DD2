@@ -56,21 +56,17 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
 
     const [editedConfig, setEditedConfig] = useState(config);
 
-    // Synchroniser editedConfig et editedName quand l'instance change
+    // Synchronise editedConfig and editedName when instance changes
     useEffect(() => {
         if (!configModalInstanceId) return;
 
-        // Récupérer l'instance à l'intérieur du useEffect pour éviter la boucle
         const currentResolved = getResolvedInstance(configModalInstanceId);
         if (!currentResolved) return;
 
-        // ✅ ÉTAPE 2: Utiliser configuration_json du backend en priorité (enrichie depuis ÉTAPE 1)
-        // Fallback vers le prototype si configuration_json n'existe pas
         const instanceConfig = currentResolved.instance.configuration_json;
         const prototypeConfig = currentResolved.prototype;
         
-        // ⭐ FIX #2.5: Initialize historyConfig with intelligent defaults (never undefined)
-        // Get available providers for smart defaults
+        // Initialize historyConfig with smart defaults
         const enabledProviders = Array.from(new Set([
           instanceConfig?.llmProvider || prototypeConfig.llmProvider,
           prototypeConfig.llmProvider,
@@ -95,7 +91,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
             capabilities: instanceConfig?.capabilities 
                 ? [...instanceConfig.capabilities]
                 : (prototypeConfig.capabilities ? [...prototypeConfig.capabilities] : []),
-            // ⭐ FIX #2.5: historyConfig now ALWAYS initialized (never undefined)
+            // historyConfig always initialized with smart defaults
             historyConfig: historyConfigValue,
             position: currentResolved.instance.position,
             links: instanceConfig?.links || [],
@@ -131,35 +127,27 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
             updateAgentInstance(configModalInstanceId, { name: editedName });
         }
 
-        // 2. CRITIQUE : Préserver les données runtime (logs, errors, tasks, links)
-        // ⭐ FIX #2.5: Ensure historyConfig is properly validated before save
-        // ⭐ PHASE 5: Pass enabled providers to ensure provider flex
+        // Prepare configuration to save (preserve runtime data and validate history settings)
         const enabledProvidersList = llmConfigs
           .filter(c => c.enabled)
           .map(c => c.provider) as any[];
         
         const configToSave = {
             ...editedConfig,
-            // ⭐ FIX #2.5 + PHASE 5: Repair historyConfig with provider validation
             historyConfig: prepareHistoryConfigForSave(editedConfig.historyConfig || {}, enabledProvidersList),
-            // Garantir que les données runtime ne sont jamais écrasées
+            // Preserve runtime data (logs, errors, tasks, links)
             logs: instance.configuration_json?.logs || [],
             errors: instance.configuration_json?.errors || [],
             tasks: instance.configuration_json?.tasks || [],
             links: instance.configuration_json?.links || [],
         };
         
-        // ✅ LOCAL UPDATE
+        // Update local store
         updateInstanceConfig(configModalInstanceId, configToSave);
         
-        // ⭐ PHASE 4: Sync changes to backend
+        // Sync changes to backend
         if (user && instance.id && accessToken) {
             try {
-                console.log('[AgentConfigurationModal] 🔐 Sending PUT request:', {
-                    instanceId: instance.id,
-                    hasToken: !!accessToken,
-                    url: `${API_BASE_URL}/api/agent-instances/${instance.id}`
-                });
                 const response = await fetch(`${API_BASE_URL}/api/agent-instances/${instance.id}`, {
                     method: 'PUT',
                     headers: {
@@ -179,14 +167,18 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
                         title: 'Erreur de sauvegarde',
                         message: error.error || 'Impossible de synchroniser avec le serveur'
                     });
-                    console.error('[AgentConfigurationModal] Backend sync error:', error);
                 } else {
+                    // Read backend response and sync store with validated data
+                    const updatedInstance = await response.json();
+                    if (updatedInstance?.configuration_json) {
+                        updateInstanceConfig(configModalInstanceId, updatedInstance.configuration_json);
+                    }
+                    
                     addNotification({
                         type: 'success',
                         title: 'Configuration sauvegardée',
                         message: 'Les changements ont été synchronisés avec le serveur'
                     });
-                    console.log('[AgentConfigurationModal] ✅ Configuration synced to backend');
                 }
             } catch (err) {
                 const errorMsg = err instanceof Error ? err.message : 'Unknown error';
@@ -584,7 +576,7 @@ const ConfigurationTab: React.FC<{
     };
 
     const toggleCapability = (cap: LLMCapability) => {
-        // ⭐ PHASE 6: Chat MANDATORY - never toggle Chat
+        // Chat is mandatory and cannot be disabled
         if (cap === LLMCapability.Chat) return;
         
         const current = config.capabilities || [];
@@ -594,7 +586,7 @@ const ConfigurationTab: React.FC<{
         onChange('capabilities', updated);
     };
 
-    // ⭐ PHASE 6: Ensure Chat always present in displayed list
+    // Ensure Chat is always present in displayed capability list
     const displayCapabilities = useMemo(() => {
         const caps = [...modelCapabilities];
         if (!caps.includes(LLMCapability.Chat)) {
@@ -965,9 +957,9 @@ const HistoryTab: React.FC<{
         }
 
         const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
-        // ⭐ FIX #2.5: Preserve all existing fields when changing provider (don't lose limits, role, etc.)
+        // Preserve existing history config when changing LLM provider
         onChange('historyConfig', {
-            ...config.historyConfig,  // Preserve existing config (limits, role, systemPrompt, etc.)
+            ...config.historyConfig,
             llmProvider: provider,
             model: modelIds[0] || ''
         });

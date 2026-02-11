@@ -73,9 +73,8 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     isNodeExecuting
   } = useRuntimeStore();
 
-  const { getResolvedInstance, agents } = useDesignStore();
+  const { agents, agentInstances } = useDesignStore();
   const { t } = useLocalization();
-  // ⭐ AUTO-SAVE: Get auth context for persisting chat messages
   const { isAuthenticated, accessToken } = useAuth();
 
   const [userInput, setUserInput] = useState('');
@@ -88,51 +87,41 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Appeler getResolvedInstance AVEC L'INSTANCE ID (pas nodeId) pour récupérer la config enrichie
-  // fullscreenChatAgentInstance contient l'instance MongoDB avec configuration_json mise à jour
-  const resolvedInstance = fullscreenChatAgentInstance?.id 
-    ? getResolvedInstance(fullscreenChatAgentInstance.id)
-    : null;
+  // Read agentInstance from store (triggers re-render when config is updated)
+  const agentInstance = fullscreenChatAgentInstance?.id
+    ? agentInstances.find(inst => inst.id === fullscreenChatAgentInstance.id)
+    : fullscreenChatAgentInstance;
   
   const messages = fullscreenChatNodeId ? getNodeMessages(fullscreenChatNodeId) : [];
   const isLoading = fullscreenChatNodeId ? isNodeExecuting(fullscreenChatNodeId) : false;
 
-  // Récupérer llmConfigs depuis le store
   const llmConfigs = useRuntimeStore(state => state.llmConfigs);
 
-  // ⭐ FIX #3: Construire l'agent enrichi depuis l'instance (pas une référence stale du prototype)
-  // Fusionne le prototype (invariant) avec configuration_json de l'instance (configuration changeable)
-  // CRITIQUE pour histoire: agent.historyConfig provient maintenant de l'instance mise à jour
-  const agent: Agent | null = resolvedInstance 
+  // Build effective agent config from instance and prototype
+  const agent: Agent | null = agentInstance && fullscreenChatAgent
     ? {
-        // Copier tous les champs du prototype (invariants)
-        ...resolvedInstance.prototype,
-        // Overlay avec configuration_json de l'instance (dynamique, mis à jour par Configure modal)
-        ...(resolvedInstance.instance.configuration_json as any),
-        // CRITICAL: Explicitly use instance historyConfig (not prototype's stale version)
-        historyConfig: resolvedInstance.instance.configuration_json?.historyConfig 
-          || resolvedInstance.prototype.historyConfig
+        ...fullscreenChatAgent,
+        ...(agentInstance.configuration_json as any),
+        historyConfig: agentInstance.configuration_json?.historyConfig 
+          || fullscreenChatAgent.historyConfig
       }
-    : fullscreenChatAgent || null;  // Fallback au prototype si pas de resolved
+    : fullscreenChatAgent || null;
   
-  // ⭐ AUTO-SAVE: Get instanceId from agentInstance passed from V2AgentNode
-  const instanceId = fullscreenChatAgentInstance?.id;
+  const instanceId = agentInstance?.id;
 
-  // Hook pour gérer l'envoi de messages (logique partagée avec V2AgentNode)
   const { handleSendMessage: sendMessageToLLM, loadingMessage } = useAgentChat({
     nodeId: fullscreenChatNodeId || '',
     agent,
     llmConfigs,
     t,
     nativeToolsConfig: { webFetch: webFetchEnabled, webSearch: webSearchEnabled },
-    // ⭐ AUTO-SAVE: Pass auth context for immediate message persistence
     instanceId,
     isAuthenticated,
     accessToken
   });
 
-  // ⭐ TEST #2 FIX: Load chat history from backend when modal opens
-  // This ensures history is available even if runtime store was cleared (e.g., after logout/login)
+  // Load chat history from backend when modal opens
+  // This ensures history is available even if runtime store was cleared
   useEffect(() => {
     const loadChatHistoryFromBackend = async () => {
       if (!fullscreenChatAgentInstance?.id || !isAuthenticated || !accessToken || !fullscreenChatNodeId) {
@@ -140,8 +129,6 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
       }
 
       try {
-        console.log('[FullscreenChatModal] 📥 Loading chat history from backend:', fullscreenChatAgentInstance.id);
-        
         // Fetch instance with all its content
         const response = await fetch(
           `http://localhost:3001/api/agent-instances/${fullscreenChatAgentInstance.id}`,
@@ -153,15 +140,12 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
         );
 
         if (!response.ok) {
-          console.warn('[FullscreenChatModal] ⚠️ Failed to fetch chat history:', response.status);
           return;
         }
 
         const instance = await response.json();
         
         // Transform backend content array to ChatMessage format
-        // Backend stores: { type, role, message, timestamp, metadata }
-        // Frontend needs: { id, sender, text, image?, filename?, isError, toolCalls?, timestamp }
         if (instance.content && Array.isArray(instance.content)) {
           const backendMessages = instance.content.map((item: any, idx: number) => {
             // Transform role to sender
@@ -182,7 +166,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
             };
           });
 
-          // Get existing messages from runtime store (might have new messages from this session)
+          // Get existing messages from runtime store
           const existingMessages = getNodeMessages(fullscreenChatNodeId) || [];
           
           // Merge: keep existing (local) messages, prepend backend messages that aren't duplicates
@@ -194,12 +178,10 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
           // Only update if we loaded messages from backend
           if (newBackendMessages.length > 0) {
             setNodeMessages(fullscreenChatNodeId, mergedMessages);
-            console.log('[FullscreenChatModal] ✅ Loaded', newBackendMessages.length, 'messages from backend');
           }
         }
       } catch (err) {
-        console.warn('[FullscreenChatModal] ⚠️ Error loading chat history:', err);
-        // Don't block UI - continue without history
+        // Don't block UI - continue without history if load fails
       }
     };
 
@@ -222,11 +204,9 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const agentModel = agent?.model || 'Unknown Model';
   const agentProvider = agent?.llmProvider || 'Unknown Provider';
   
-  // ⭐ NOUVEAU: Support de la version du LLM - lookup dans llmConfigs
   const llmConfigForProvider = llmConfigs?.find(c => c.provider === agent?.llmProvider);
   const agentLLMVersion = llmConfigForProvider?.llmVersion || llmConfigForProvider?.model || '';
   
-  // Construire le display string pour le LLM: "Provider vX.X" ou "Provider • Model"
   const llmDisplayString = agentLLMVersion 
     ? `${agentProvider} v${agentLLMVersion}`
     : `${agentProvider} • ${agentModel}`;
@@ -234,8 +214,8 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const handleClose = () => {
     const { setFullscreenChatAgent, setFullscreenChatAgentInstance } = useRuntimeStore.getState();
     setFullscreenChatNodeId(null);
-    setFullscreenChatAgent(null); // Nettoyer l'agent au moment de fermer
-    setFullscreenChatAgentInstance(null); // ⭐ Aussi nettoyer l'instance
+    setFullscreenChatAgent(null);
+    setFullscreenChatAgentInstance(null);
   };
 
   const handleDelete = () => {
@@ -358,11 +338,9 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
           <div className="flex items-center space-x-3">
             <div className={`w-3 h-3 rounded-full shadow-lg transition-all duration-200 ${isLoading ? 'bg-yellow-400 animate-pulse shadow-yellow-400/60' : 'bg-green-400 shadow-green-400/60'}`}></div>
             <div>
-              {/* ⭐ FIX: Afficher le nom réel de l'agent (sans icône) */}
               <h2 className="text-xl font-semibold text-white">
                 {agentName}
               </h2>
-              {/* ⭐ FIX: Afficher LLM avec version si disponible */}
               <span className="text-xs text-gray-400">
                 {llmDisplayString}
               </span>
