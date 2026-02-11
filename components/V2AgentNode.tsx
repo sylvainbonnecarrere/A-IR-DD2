@@ -72,12 +72,15 @@ export interface V2AgentNodeData {
   agent: Agent; // The prototype
   agentInstance?: AgentInstance; // The instance data
   workflowId?: string; // ⭐ NOUVEAU: Pour persistance journal
-  isMinimized?: boolean;
+  // ⭐ REMOVED: isMinimized - now stored in useRuntimeStore (transient UI state)
 }
 
 export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, selected }) => {
   const { t } = useLocalization();
-  const { agent, agentInstance, isMinimized = false } = data;
+  const { agent, agentInstance } = data;
+  
+  // ⭐ ARCHITECTURE FIX: Read minimize state from useRuntimeStore (transient UI state)
+  const isMinimized = useRuntimeStore((state) => state.getIsNodeMinimized(id));
 
   // Protection critique : si agent est null, afficher un fallback
   if (!agent) {
@@ -168,6 +171,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   }, [messages, isMinimized]);
 
   const handleToggleMinimize = () => {
+    // ⭐ SOLID FIX: Logging immédiat pour confirmer l'action
+    console.log('[V2AgentNode] Minimize toggle request for node:', id, 'Current isMinimized:', isMinimized);
     if (onToggleNodeMinimize) {
       onToggleNodeMinimize(id);
     }
@@ -266,10 +271,12 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   };
 
   const handleFullscreen = () => {
-    // Open fullscreen chat modal for this node
-    // Use the ReactFlow node id (same key used for storing messages in nodeMessages)
-    // NOT agentInstance.id which is different and would cause messages to be lost
+    // ⭐ FIX: Pass agent AND instance data directly to store
+    // The nodeId is not an instanceId, so getResolvedInstance() doesn't work
+    const { setFullscreenChatNodeId, setFullscreenChatAgent, setFullscreenChatAgentInstance } = useRuntimeStore.getState();
     setFullscreenChatNodeId(id);
+    setFullscreenChatAgent(agent); // ⭐ Pass the actual agent prototype
+    setFullscreenChatAgentInstance(agentInstance); // ⭐ Pass the instance for instanceId access
   };
 
 
@@ -1088,7 +1095,10 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       </div>
 
       {/* Content - Chat area without drag handle to allow text selection */}
-      {!isMinimized && (
+      {/* ⭐ FIX: Transition fluide avec max-height pour réduction/agrandissement */}
+      <div className={`transition-all duration-300 ease-in-out overflow-hidden ${
+        isMinimized ? 'max-h-0 opacity-0 pointer-events-none' : ''
+      }`}>
         <div className="flex flex-col h-96 relative z-10">
           {/* Agent Info - NOT draggable with enhanced styling */}
           <div className="p-3 border-b border-gray-700/50 
@@ -1339,7 +1349,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             />
           </div>
         </div>
-      )}
+      </div>
 
       {/* Output Handle with laser styling */}
       <Handle

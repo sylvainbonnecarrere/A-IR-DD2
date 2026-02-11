@@ -64,6 +64,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const {
     fullscreenChatNodeId,
     fullscreenChatAgent,
+    fullscreenChatAgentInstance,
     setFullscreenChatNodeId,
     getNodeMessages,
     addNodeMessage,
@@ -94,11 +95,11 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   // Récupérer llmConfigs depuis le store
   const llmConfigs = useRuntimeStore(state => state.llmConfigs);
 
-  // Récupérer l'agent complet (priorité: fullscreenChatAgent du store, sinon V2 resolvedInstance)
-  const agent: Agent | null = fullscreenChatAgent || (resolvedInstance ? resolvedInstance.prototype : null);
+  // Récupérer l'agent complet (fullscreenChatAgent est passé directement depuis V2AgentNode)
+  const agent: Agent | null = fullscreenChatAgent || null;
   
-  // ⭐ AUTO-SAVE: Get instanceId for persisting chat to correct agent instance
-  const instanceId = resolvedInstance?.instance.id;
+  // ⭐ AUTO-SAVE: Get instanceId from agentInstance passed from V2AgentNode
+  const instanceId = fullscreenChatAgentInstance?.id;
 
   // Hook pour gérer l'envoi de messages (logique partagée avec V2AgentNode)
   const { handleSendMessage: sendMessageToLLM, loadingMessage } = useAgentChat({
@@ -121,18 +122,28 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   // Si pas de node sélectionné, ne pas afficher la modal (APRÈS tous les hooks)
   if (!fullscreenChatNodeId) return null;
 
-  // Déterminer le nom et les infos de l'agent
-  const agentName = resolvedInstance
-    ? (resolvedInstance.instance.name || resolvedInstance.prototype.name)
-    : (agent?.name || 'Agent'); // Fallback: utiliser agent.name si disponible
+  // ⭐ SOLID FIX B: Déterminer le nom et infos de l'agent correctement
+  // Maintenant que on passe fullscreenChatAgent depuis V2AgentNode, on peut utiliser directement agent
+  const agentName = agent?.name || 'Unknown Agent';
 
-  const agentModel = agent?.model || 'Unknown';
-  const agentProvider = agent?.llmProvider || 'Unknown';
+  // ⭐ FIX: Récupérer model et provider depuis l'agent passé
+  const agentModel = agent?.model || 'Unknown Model';
+  const agentProvider = agent?.llmProvider || 'Unknown Provider';
+  
+  // ⭐ NOUVEAU: Support de la version du LLM - lookup dans llmConfigs
+  const llmConfigForProvider = llmConfigs?.find(c => c.provider === agent?.llmProvider);
+  const agentLLMVersion = llmConfigForProvider?.llmVersion || llmConfigForProvider?.model || '';
+  
+  // Construire le display string pour le LLM: "Provider vX.X" ou "Provider • Model"
+  const llmDisplayString = agentLLMVersion 
+    ? `${agentProvider} v${agentLLMVersion}`
+    : `${agentProvider} • ${agentModel}`;
 
   const handleClose = () => {
-    const { setFullscreenChatAgent } = useRuntimeStore.getState();
+    const { setFullscreenChatAgent, setFullscreenChatAgentInstance } = useRuntimeStore.getState();
     setFullscreenChatNodeId(null);
     setFullscreenChatAgent(null); // Nettoyer l'agent au moment de fermer
+    setFullscreenChatAgentInstance(null); // ⭐ Aussi nettoyer l'instance
   };
 
   const handleDelete = () => {
@@ -255,11 +266,13 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
           <div className="flex items-center space-x-3">
             <div className={`w-3 h-3 rounded-full shadow-lg transition-all duration-200 ${isLoading ? 'bg-yellow-400 animate-pulse shadow-yellow-400/60' : 'bg-green-400 shadow-green-400/60'}`}></div>
             <div>
+              {/* ⭐ FIX: Afficher le nom réel de l'agent (sans icône) */}
               <h2 className="text-xl font-semibold text-white">
-                💬 {agentName}
+                {agentName}
               </h2>
+              {/* ⭐ FIX: Afficher LLM avec version si disponible */}
               <span className="text-xs text-gray-400">
-                {agentModel} • {agentProvider}
+                {llmDisplayString}
               </span>
             </div>
           </div>

@@ -24,9 +24,13 @@ interface RuntimeStore {
   // Fullscreen Chat State
   fullscreenChatNodeId: string | null; // nodeId for fullscreen chat mode
   fullscreenChatAgent: any | null; // Agent object for fullscreen chat (V1 or V2)
+  fullscreenChatAgentInstance?: any | null; // ⭐ AgentInstance for accessing instanceId
 
   // Configuration Modal State
   configModalInstanceId: string | null; // instanceId for configuration modal
+
+  // ⭐ NOUVEAU: Node Minimize State (UI/Visual only, not persisted)
+  minimizedNodeIds: Set<string>; // nodeIds currently in minimized state
 
   // Navigation state (for V2AgentNode edit functionality)
   navigationHandler: ((robotId: string, path: string) => void) | null;
@@ -48,12 +52,17 @@ interface RuntimeStore {
   setFullscreenImage: (image: { src: string; mimeType: string } | null) => void;
   setFullscreenChatNodeId: (nodeId: string | null) => void;
   setFullscreenChatAgent: (agent: any | null) => void;
+  setFullscreenChatAgentInstance?: (agentInstance: any | null) => void; // ⭐ setter for instanceId
   setConfigModalInstanceId: (instanceId: string | null) => void;
   setNavigationHandler: (handler: ((robotId: string, path: string) => void) | null) => void;
+
+  // ⭐ NOUVEAU: Node Minimize Actions
+  toggleNodeMinimized: (nodeId: string) => void;
 
   // Utility
   getNodeMessages: (nodeId: string) => ChatMessage[];
   isNodeExecuting: (nodeId: string) => boolean;
+  getIsNodeMinimized: (nodeId: string) => boolean;
   
   // ⭐ ÉTAPE 2.2: Reset complet pour wipe à la connexion
   resetAll: () => void;
@@ -72,6 +81,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   fullscreenChatNodeId: null,
   fullscreenChatAgent: null,
   configModalInstanceId: null,
+  minimizedNodeIds: new Set(), // ⭐ NOUVEAU: État initial vide
   navigationHandler: null,
 
   // Message actions
@@ -138,12 +148,27 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     fullscreenChatAgent: agent
   }),
 
+  setFullscreenChatAgentInstance: (agentInstance) => set({
+    fullscreenChatAgentInstance: agentInstance
+  }),
+
   setConfigModalInstanceId: (instanceId) => set({
     configModalInstanceId: instanceId
   }),
 
   setNavigationHandler: (handler) => set({
     navigationHandler: handler
+  }),
+
+  // ⭐ NOUVEAU: Node Minimize Actions (UI state only, not persisted)
+  toggleNodeMinimized: (nodeId) => set((state) => {
+    const newMinimizedNodeIds = new Set(state.minimizedNodeIds);
+    if (newMinimizedNodeIds.has(nodeId)) {
+      newMinimizedNodeIds.delete(nodeId); // Restore to normal
+    } else {
+      newMinimizedNodeIds.add(nodeId); // Minimize
+    }
+    return { minimizedNodeIds: newMinimizedNodeIds };
   }),
 
   // Utility functions
@@ -157,6 +182,11 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     return state.executingNodes.has(nodeId);
   },
 
+  getIsNodeMinimized: (nodeId) => {
+    const state = get();
+    return state.minimizedNodeIds.has(nodeId);
+  },
+
   /**
    * ⭐ ÉTAPE 2.2: Reset complet du store runtime pour wipe à la connexion
    * Nettoie tous les messages et états d'exécution
@@ -164,6 +194,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   resetAll: () => set({
     nodeMessages: {},
     executingNodes: new Set(),
+    minimizedNodeIds: new Set(), // ⭐ RESET: Restore à normal
     llmConfigs: [],
     isImagePanelOpen: false,
     isImageModificationPanelOpen: false,
@@ -172,6 +203,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     fullscreenImage: null,
     fullscreenChatNodeId: null,
     fullscreenChatAgent: null,
+    fullscreenChatAgentInstance: null, // ⭐ New
     configModalInstanceId: null
     // Note: navigationHandler conservé car c'est une fonction
   })

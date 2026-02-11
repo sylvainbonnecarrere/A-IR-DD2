@@ -156,22 +156,22 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     }
   }, [onNodesChangeInternal]);
 
-  // ⭐ FIX: Utiliser les nodes V2 du store Zustand comme source principale
-  // Cela garantit la cohérence entre les instances et les nodes
+  // ⭐ FIX SOLID: Utiliser la source unique de vérité pour les nodes
+  // Priorité: storeNodes (source officielle) > nodes props > fallback
+  // REVERT: Revenir à storeNodes comme priorité 1 pour éviter perte des journaux et recentrage
   const { nodes: storeNodes } = useDesignStore();
   
-  // Calculer actualNodes de manière stable - priorité: store > props.nodes > legacy workflowNodes
+  // Calculer actualNodes de manière stable
   const actualNodes = useMemo(() => {
-    // Priorité 1: V2 nodes du store Zustand (source de vérité)
+    // ⭐ PRIORITÉ 1: storeNodes (source officielle - garantit persistance des journaux)
     if (storeNodes && storeNodes.length > 0) {
-      console.log('[WorkflowCanvas] Using V2 nodes from store:', storeNodes.length);
       return storeNodes;
     }
     // Priorité 2: nodes passés en props
     if (nodes && nodes.length > 0) {
       return nodes;
     }
-    // Priorité 3: legacy workflowNodes
+    // Fallback: workflowNodes legacy
     return workflowNodes;
   }, [storeNodes, nodes, workflowNodes]);
 
@@ -220,8 +220,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         let agent = null;
         let robotId = 'unknown';
         let position = { x: 100 + index * 200, y: 100 + index * 150 };
-        let isMinimized = false;
-        let isMaximized = false;
         let nodeWorkflowId = workflowId;
         
         // Check if it's a V2WorkflowNode (has data property)
@@ -231,8 +229,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           agent = wfNode.data.agent || null;
           robotId = wfNode.data.robotId || 'unknown';
           position = wfNode.position || position;
-          isMinimized = wfNode.data.isMinimized || false;
-          isMaximized = wfNode.data.isMaximized || false;
           nodeWorkflowId = wfNode.data.workflowId || workflowId;
           
           // ⭐ FIX: Si agentInstance existe mais n'a pas de workflowId, l'ajouter
@@ -261,8 +257,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           agent = wfNode.agent || null;
           robotId = wfNode.agent?.id || 'unknown';
           position = wfNode.position || position;
-          isMinimized = wfNode.isMinimized || false;
-          isMaximized = wfNode.isMaximized || false;
         }
 
         return {
@@ -275,8 +269,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             agent: agent || wfNode.agent, // ⭐ FIX: Utiliser agent résolu ou celui du legacy node
             agentInstance, // Instance mise à jour depuis le store (peut être null)
             workflowId: nodeWorkflowId, // ⭐ FIX: Utiliser le workflowId du node
-            isMinimized,
-            isMaximized
+            // ⭐ REMOVED: isMinimized, isMaximized - now managed by useRuntimeStore (transient UI state)
           },
         };
       });
@@ -310,35 +303,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           return newReactFlowNodes;
         }
 
-        // Détecter si un node a changé son état isMinimized pour le centrer
-        const minimizeChangedNode = newReactFlowNodes.find((newNode, index) => {
-          const currentNode = currentNodes[index];
-          return currentNode &&
-            currentNode.id === newNode.id &&
-            currentNode.data.isMinimized !== newNode.data.isMinimized;
-        });
-
-        // Si un node a changé son état minimize, centrer la vue sur lui
-        if (minimizeChangedNode && reactFlowInstance) {
-          setTimeout(() => {
-            const rfNode = reactFlowInstance.getNode(minimizeChangedNode.id);
-            if (rfNode) {
-              // Calculer les dimensions selon l'état minimisé ou non
-              const nodeWidth = rfNode.width || 400;
-              // Hauteur réduite : ~60px, hauteur normale : ~550px
-              const nodeHeight = minimizeChangedNode.data.isMinimized ? 60 : (rfNode.height || 550);
-
-              const centerX = rfNode.position.x + (nodeWidth / 2);
-              const centerY = rfNode.position.y + (nodeHeight / 2);
-
-              reactFlowInstance.setCenter(centerX, centerY, {
-                zoom: 0.7,
-                duration: 600, // Animation fluide pour le toggle
-              });
-            }
-          }, 150); // Petit délai pour que le DOM se mette à jour
-        }
-
         const hasChanged = newReactFlowNodes.some((newNode, index) => {
           const currentNode = currentNodes[index];
           return !currentNode ||
@@ -347,8 +311,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             currentNode.position.y !== newNode.position.y ||
             currentNode.data.robotId !== newNode.data.robotId ||
             currentNode.data.label !== newNode.data.label ||
-            currentNode.data.isMinimized !== newNode.data.isMinimized ||
-            currentNode.data.isMaximized !== newNode.data.isMaximized ||
+            // ⭐ REMOVED: isMinimized, isMaximized checks - managed by useRuntimeStore
             // Détecter les changements dans l'instance (nom, config)
             currentNode.data.agentInstance?.name !== newNode.data.agentInstance?.name ||
             (currentNode.data.agentInstance?.configuration_json && newNode.data.agentInstance?.configuration_json &&
@@ -531,17 +494,13 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               height={140}
               position="bottom-right"
               nodeStrokeColor={(node) => {
-                // Couleur adaptée au thème jour/nuit
-                const isMinimized = node.data?.isMinimized;
-                if (isMinimized) return '#666666';
+                // ⭐ REMOVED: isMinimized check - now managed by useRuntimeStore
                 // Utiliser la couleur primaire du thème actuel
                 return theme.particleColors[0] || '#00ffff';
               }}
               nodeColor={(node) => {
-                const isMinimized = node.data?.isMinimized;
+                // ⭐ REMOVED: isMinimized check - now managed by useRuntimeStore
                 const agentId = node.data?.robotId || '';
-
-                if (isMinimized) return '#2a2a2a';
 
                 // Couleurs adaptées au thème
                 if (theme.timeOfDay === 'morning') {

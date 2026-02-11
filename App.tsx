@@ -1330,10 +1330,11 @@ function AppContent() {
   };
 
   const handleToggleNodeMinimize = (nodeId: string) => {
-    setWorkflowNodes(prev => prev.map(node =>
-      node.id === nodeId ? { ...node, isMinimized: !node.isMinimized } : node
-    ));
-    // Note: Le centrage sera géré par WorkflowCanvas via centerNodeRef
+    // ⭐ ARCHITECTURE FIX: Store minimize state in useRuntimeStore (transient UI state, not persisted)
+    // This approach separates concerns: coordinates in Design Store, UI state in Runtime Store
+    const { toggleNodeMinimized } = useRuntimeStore.getState();
+    toggleNodeMinimized(nodeId);
+    console.log('[App] Toggled minimize for node:', nodeId);
   };
 
   const handleUpdateNodeMessages = (nodeId: string, messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
