@@ -4,9 +4,13 @@ import { CloseIcon, PlusIcon } from '../Icons';
 import { useDesignStore } from '../../stores/useDesignStore';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useLocalization } from '../../hooks/useLocalization';
+import { useAuth } from '../../hooks/useAuth';
+import { useNotifications } from '../../contexts/NotificationContext';
 import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, LMStudioModelDetection } from '../../types';
 import { LLM_MODELS, LLM_MODELS_DETAILED, getModelCapabilities, getLMStudioMergedModels } from '../../llmModels';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
+import { initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
+import { API_BASE_URL } from '../../config/api.config';
 
 type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'links' | 'tasks' | 'logs' | 'errors';
 
@@ -24,6 +28,8 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
     const { t } = useLocalization();
     const { getResolvedInstance, updateInstanceConfig, updateAgentInstance } = useDesignStore();
     const { configModalInstanceId, setConfigModalInstanceId } = useRuntimeStore();
+    const { user, accessToken } = useAuth();
+    const { addNotification } = useNotifications();
 
     // Tous les hooks DOIVENT être appelés avant les early returns
     const [activeTab, setActiveTab] = useState<TabId>('config');
@@ -63,6 +69,20 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
         const instanceConfig = currentResolved.instance.configuration_json;
         const prototypeConfig = currentResolved.prototype;
         
+        // ⭐ FIX #2.5: Initialize historyConfig with intelligent defaults (never undefined)
+        // Get available providers for smart defaults
+        const enabledProviders = Array.from(new Set([
+          instanceConfig?.llmProvider || prototypeConfig.llmProvider,
+          prototypeConfig.llmProvider,
+          LLMProvider.Gemini
+        ])).filter(Boolean) as LLMProvider[];
+        
+        const historyConfigValue = instanceConfig?.historyConfig 
+          ? validateAndRepairHistoryConfig(instanceConfig.historyConfig, enabledProviders)
+          : (prototypeConfig.historyConfig 
+            ? validateAndRepairHistoryConfig(prototypeConfig.historyConfig, enabledProviders)
+            : initializeHistoryConfig(undefined, enabledProviders));
+        
         const currentConfig = {
             role: instanceConfig?.role || prototypeConfig.role || '',
             model: instanceConfig?.model || prototypeConfig.model || '',
@@ -75,9 +95,8 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
             capabilities: instanceConfig?.capabilities 
                 ? [...instanceConfig.capabilities]
                 : (prototypeConfig.capabilities ? [...prototypeConfig.capabilities] : []),
-            historyConfig: instanceConfig?.historyConfig
-                ? JSON.parse(JSON.stringify(instanceConfig.historyConfig))
-                : (prototypeConfig.historyConfig ? JSON.parse(JSON.stringify(prototypeConfig.historyConfig)) : undefined),
+            // ⭐ FIX #2.5: historyConfig now ALWAYS initialized (never undefined)
+            historyConfig: historyConfigValue,
             position: currentResolved.instance.position,
             links: instanceConfig?.links || [],
             tasks: instanceConfig?.tasks || [],
@@ -106,22 +125,80 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
 
     const { instance, prototype } = resolved;
 
-    const handleSave = () => {
+    const handleSave = async () => {
         // 1. Sauvegarder le nom de l'agent (niveau instance, pas config)
         if (editedName !== instance.name) {
             updateAgentInstance(configModalInstanceId, { name: editedName });
         }
 
         // 2. CRITIQUE : Préserver les données runtime (logs, errors, tasks, links)
+        // ⭐ FIX #2.5: Ensure historyConfig is properly validated before save
+        // ⭐ PHASE 5: Pass enabled providers to ensure provider flex
+        const enabledProvidersList = llmConfigs
+          .filter(c => c.enabled)
+          .map(c => c.provider) as any[];
+        
         const configToSave = {
             ...editedConfig,
+            // ⭐ FIX #2.5 + PHASE 5: Repair historyConfig with provider validation
+            historyConfig: prepareHistoryConfigForSave(editedConfig.historyConfig || {}, enabledProvidersList),
             // Garantir que les données runtime ne sont jamais écrasées
             logs: instance.configuration_json?.logs || [],
             errors: instance.configuration_json?.errors || [],
             tasks: instance.configuration_json?.tasks || [],
             links: instance.configuration_json?.links || [],
         };
+        
+        // ✅ LOCAL UPDATE
         updateInstanceConfig(configModalInstanceId, configToSave);
+        
+        // ⭐ PHASE 4: Sync changes to backend
+        if (user && instance.id && accessToken) {
+            try {
+                console.log('[AgentConfigurationModal] 🔐 Sending PUT request:', {
+                    instanceId: instance.id,
+                    hasToken: !!accessToken,
+                    url: `${API_BASE_URL}/api/agent-instances/${instance.id}`
+                });
+                const response = await fetch(`${API_BASE_URL}/api/agent-instances/${instance.id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${accessToken}`
+                    },
+                    body: JSON.stringify({
+                        configuration_json: configToSave,
+                        name: editedName
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+                    addNotification({
+                        type: 'error',
+                        title: 'Erreur de sauvegarde',
+                        message: error.error || 'Impossible de synchroniser avec le serveur'
+                    });
+                    console.error('[AgentConfigurationModal] Backend sync error:', error);
+                } else {
+                    addNotification({
+                        type: 'success',
+                        title: 'Configuration sauvegardée',
+                        message: 'Les changements ont été synchronisés avec le serveur'
+                    });
+                    console.log('[AgentConfigurationModal] ✅ Configuration synced to backend');
+                }
+            } catch (err) {
+                const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+                addNotification({
+                    type: 'error',
+                    title: 'Erreur réseau',
+                    message: `Impossible de joindre le serveur: ${errorMsg}`
+                });
+                console.error('[AgentConfigurationModal] Sync error:', err);
+            }
+        }
+        
         setHasChanges(false);
         setConfigModalInstanceId(null); // Fermer le modal
     };
@@ -507,12 +584,24 @@ const ConfigurationTab: React.FC<{
     };
 
     const toggleCapability = (cap: LLMCapability) => {
+        // ⭐ PHASE 6: Chat MANDATORY - never toggle Chat
+        if (cap === LLMCapability.Chat) return;
+        
         const current = config.capabilities || [];
         const updated = current.includes(cap)
             ? current.filter((c: LLMCapability) => c !== cap)
             : [...current, cap];
         onChange('capabilities', updated);
     };
+
+    // ⭐ PHASE 6: Ensure Chat always present in displayed list
+    const displayCapabilities = useMemo(() => {
+        const caps = [...modelCapabilities];
+        if (!caps.includes(LLMCapability.Chat)) {
+            caps.unshift(LLMCapability.Chat); // Add Chat at start
+        }
+        return caps;
+    }, [modelCapabilities]);
 
     return (
         <div className="space-y-6">
@@ -788,19 +877,35 @@ const ConfigurationTab: React.FC<{
                 <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
                     <h3 className="text-lg font-semibold text-white mb-4">{t('agentConfig_capabilities_title')}</h3>
                     <div className="grid grid-cols-2 gap-3">
-                        {modelCapabilities.map((cap) => (
-                            <label key={cap} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-800 p-2 rounded">
+                        {displayCapabilities.map((cap) => (
+                            <label key={cap} className={`flex items-center space-x-2 p-2 rounded ${
+                                cap === LLMCapability.Chat 
+                                    ? 'cursor-not-allowed bg-gray-800/30' 
+                                    : 'cursor-pointer hover:bg-gray-800'
+                            }`}>
                                 <input
                                     type="checkbox"
-                                    checked={config.capabilities?.includes(cap) || false}
+                                    checked={config.capabilities?.includes(cap) || cap === LLMCapability.Chat || false}
                                     onChange={() => toggleCapability(cap)}
-                                    className="w-4 h-4 text-cyan-600 border-gray-600 rounded focus:ring-cyan-500"
+                                    disabled={cap === LLMCapability.Chat}
+                                    className={`w-4 h-4 rounded focus:ring-cyan-500 ${
+                                        cap === LLMCapability.Chat
+                                            ? 'text-green-600 border-green-600 cursor-not-allowed'
+                                            : 'text-cyan-600 border-gray-600'
+                                    }`}
                                 />
-                                <span className="text-sm text-gray-300">{cap}</span>
+                                <span className={`text-sm ${
+                                    cap === LLMCapability.Chat
+                                        ? 'text-green-400 font-semibold'
+                                        : 'text-gray-300'
+                                }`}>
+                                    {cap}
+                                    {cap === LLMCapability.Chat && ' (obligatoire)'}
+                                </span>
                             </label>
                         ))}
                     </div>
-                    {modelCapabilities.length === 0 && (
+                    {displayCapabilities.length === 0 && (
                         <p className="text-sm text-gray-500">{t('agentConfig_capabilities_empty')}</p>
                     )}
                 </div>
@@ -860,8 +965,9 @@ const HistoryTab: React.FC<{
         }
 
         const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
+        // ⭐ FIX #2.5: Preserve all existing fields when changing provider (don't lose limits, role, etc.)
         onChange('historyConfig', {
-            ...config.historyConfig,
+            ...config.historyConfig,  // Preserve existing config (limits, role, systemPrompt, etc.)
             llmProvider: provider,
             model: modelIds[0] || ''
         });

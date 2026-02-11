@@ -105,7 +105,27 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
     const availableModels = getAvailableModels(enabledLLMProvider);
     return availableModels.length > 0 ? availableModels[0] : '';
   });
-  const [selectedCapabilities, setSelectedCapabilities] = useState<LLMCapability[]>([]);
+  // ⭐ PHASE 1 FIX: Initialize selectedCapabilities with template or model defaults
+  // PRIORITÉ 1: Si edit mode et template a des capabilities, les charger
+  // PRIORITÉ 2: Sinon, load capabilities from the selected model
+  // Chat est TOUJOURS inclus par défaut
+  const [selectedCapabilities, setSelectedCapabilities] = useState<LLMCapability[]>(() => {
+    // PRIORITÉ 1: If editing existing agent, load template's capabilities
+    if (existingAgent?.capabilities && existingAgent.capabilities.length > 0) {
+      // Ensure Chat is always included (primary capability)
+      const caps = new Set<LLMCapability>([LLMCapability.Chat, ...existingAgent.capabilities]);
+      return Array.from(caps);
+    }
+    
+    // PRIORITÉ 2: For new agents, load capabilities from the selected model
+    const availableModels = getAvailableModels(enabledLLMProvider);
+    const firstModel = availableModels.length > 0 ? availableModels[0] : '';
+    const modelCaps = getModelCapabilities(enabledLLMProvider, firstModel);
+    
+    // Always include Chat as the primary capability, plus model-specific capabilities
+    const defaultCaps = [LLMCapability.Chat, ...modelCaps];
+    return [...new Set(defaultCaps)];
+  });
   const [tools, setTools] = useState<Tool[]>([]);
   const [outputConfig, setOutputConfig] = useState<OutputConfig>(defaultOutputConfig);
   const [historyConfig, setHistoryConfig] = useState<HistoryConfig>(() => {
@@ -306,6 +326,9 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
   };
 
   const handleCapabilityToggle = (capability: LLMCapability) => {
+    // ⭐ PHASE 6: Chat MANDATORY - never toggle Chat
+    if (capability === LLMCapability.Chat) return;
+    
     const isCurrentlySelected = selectedCapabilities.includes(capability);
 
     if (capability === LLMCapability.FunctionCalling) {
@@ -381,13 +404,18 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
       return;
     }
 
+    // ⭐ PHASE 6: Always ensure Chat is included
+    const capabilitiesForSave = selectedCapabilities.includes(LLMCapability.Chat)
+      ? selectedCapabilities
+      : [LLMCapability.Chat, ...selectedCapabilities];
+
     onSave({
       name,
       role,
       systemPrompt,
       llmProvider,
       model,
-      capabilities: selectedCapabilities,
+      capabilities: capabilitiesForSave,
       historyConfig,
       tools,
       outputConfig,
@@ -695,18 +723,33 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentForm_capabilitiesLabel')}</label>
                   <div className="space-y-2 p-3 bg-gray-900/50 rounded-md max-h-32 overflow-y-auto">
+                    {/* ⭐ PHASE 6: Always include Chat first */}
+                    <label className="flex items-center cursor-not-allowed bg-gray-800/30 p-2 rounded">
+                      <input
+                        type="checkbox"
+                        checked={true}
+                        disabled={true}
+                        className="h-4 w-4 rounded border-green-600 bg-gray-700 text-green-600 focus:ring-green-500"
+                      />
+                      <span className="ml-3 text-sm text-green-400 font-semibold">
+                        💬 Chat (obligatoire)
+                      </span>
+                    </label>
+                    
                     {availableCapabilities.map(cap => (
-                      <label key={cap} className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={selectedCapabilities.includes(cap)}
-                          onChange={() => handleCapabilityToggle(cap)}
-                          className="h-4 w-4 rounded border-gray-500 bg-gray-700 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="ml-3 text-sm text-gray-300">
-                          {typeof cap === 'string' ? getCapabilityLabel(cap) : LLMCapability[cap]}
-                        </span>
-                      </label>
+                      cap !== LLMCapability.Chat && (
+                        <label key={cap} className="flex items-center cursor-pointer hover:bg-gray-800 p-2 rounded">
+                          <input
+                            type="checkbox"
+                            checked={selectedCapabilities.includes(cap)}
+                            onChange={() => handleCapabilityToggle(cap)}
+                            className="h-4 w-4 rounded border-gray-500 bg-gray-700 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="ml-3 text-sm text-gray-300">
+                            {typeof cap === 'string' ? getCapabilityLabel(cap) : LLMCapability[cap]}
+                          </span>
+                        </label>
+                      )
                     ))}
                   </div>
                 </div>

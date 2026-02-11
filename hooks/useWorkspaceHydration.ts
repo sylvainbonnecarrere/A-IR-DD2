@@ -296,24 +296,30 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
                 setSource('api');
                 
                 // ⭐ ÉTAPE 2.3: Hydrate design store with server data
-                // Note: We map the response format to store format
+                // Note: Backend now returns configuration_json ALREADY reconstructed via transformAgentInstanceForFrontend
                 designStoreHydrate({
                     // Agents instances deviennent les nodes du store
                     agentInstances: data.agentInstances.map((inst: any) => ({
                         id: inst.id,
-                        prototypeId: inst.agentId || inst.id,
+                        prototypeId: inst.prototypeId || inst.agentId || inst.id,
                         name: inst.name,
                         position: inst.position,
                         // Propriétés UI obligatoires
                         isMinimized: inst.isMinimized ?? false,
                         isMaximized: inst.isMaximized ?? false,
-                        configuration_json: inst.configuration_json ?? {
-                            role: '',
-                            model: inst.model || '',
-                            llmProvider: inst.provider,
-                            systemPrompt: inst.systemInstruction || '',
+                        // ⭐ CRITICAL FIX #5: Use configuration_json from backend (NO reconstruction needed!)
+                        // Backend now returns BOTH individual fields AND reconstructed configuration_json object
+                        // This includes all capabilities, historyConfig, outputConfig, etc.
+                        configuration_json: inst.configuration_json || {
+                            role: 'assistant',
+                            model: 'gpt-4o-mini',
+                            llmProvider: 'openai',
+                            systemPrompt: '',
+                            capabilities: [],
                             tools: [],
-                            position: inst.position
+                            historyConfig: {},
+                            outputConfig: {},
+                            position: inst.position || { x: 0, y: 0 }
                         },
                         // ⭐ NOUVEAU ÉTAPE 1.6 (champs optionnels pour le runtime)
                         executionId: inst.executionId,

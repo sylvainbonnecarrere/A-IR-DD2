@@ -228,6 +228,32 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
                 : 'Agent de conversation simple (aucun outil)'
               }
             </p>
+            {/* DEBUG: Show hint if no tools configured but capabilities suggest function calling */}
+            {!hasTools && agent.capabilities?.includes('FunctionCalling') && (
+              <p className="text-xs text-yellow-300 mt-1">💡 Ajoutez des outils dans l'onglet 'Fonctions' du template pour utiliser les appels de fonction</p>
+            )}
+          </div>
+        </div>
+
+        {/* Capacités */}
+        <div className="flex items-start space-x-3">
+          <CheckIcon className="w-5 h-5 text-purple-400 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-medium text-purple-400">Capacités du template</p>
+            {agent.capabilities && agent.capabilities.length > 0 ? (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {agent.capabilities.map((cap) => (
+                  <span
+                    key={cap}
+                    className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-900/40 text-purple-300 border border-purple-700/50"
+                  >
+                    {cap}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-400 text-sm">Chat uniquement (aucune capacité supplémentaire)</p>
+            )}
           </div>
         </div>
       </div>

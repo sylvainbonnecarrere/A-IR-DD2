@@ -10,11 +10,17 @@
 export const getBackendUrl = (): string => {
   // process.env.VITE_BACKEND_URL is replaced by Vite in browser builds
   // In tests/Node, it falls back to localhost
-  return process.env.VITE_BACKEND_URL || 'http://localhost:3001';
+  return (process.env.VITE_BACKEND_URL as string) || 'http://localhost:3001';
 };
 
 // Deprecated: Use getBackendUrl() instead. Kept for backward compatibility in some edge cases.
 export const BACKEND_URL = 'http://localhost:3001';
+
+/**
+ * ⭐ API_BASE_URL: Simple constant for backward compatibility
+ * For dynamic behavior, use getBackendUrl() instead
+ */
+export const API_BASE_URL = 'http://localhost:3001';
 
 /**
  * Endpoints du backend proxy

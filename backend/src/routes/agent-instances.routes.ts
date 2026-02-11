@@ -9,6 +9,53 @@ import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middlewar
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 
+// ⭐ HELPER: Transform MongoDB AgentInstance document for frontend consumption
+// Maps _id → id and reconstructs configuration_json from individual fields
+function transformAgentInstanceForFrontend(instance: any) {
+    const instanceObj = instance.toObject?.() || instance;
+    const {
+        _id,
+        role,
+        llmProvider,
+        llmModel,
+        systemPrompt,
+        capabilities,
+        tools,
+        historyConfig,
+        outputConfig,
+        robotId,
+        position,
+        ...rest
+    } = instanceObj;
+
+    return {
+        id: _id?.toString(),
+        role,
+        llmProvider,
+        llmModel,
+        systemPrompt,
+        capabilities: capabilities || [],
+        tools: tools || [],
+        historyConfig: historyConfig || {},
+        outputConfig: outputConfig || {},
+        robotId,
+        position,
+        // ⭐ CRITICAL: Reconstruct configuration_json for frontend
+        configuration_json: {
+            role: role || 'assistant',
+            model: llmModel || 'gpt-4o-mini',
+            llmProvider: llmProvider || 'openai',
+            systemPrompt: systemPrompt || '',
+            capabilities: Array.isArray(capabilities) ? capabilities : [],
+            tools: Array.isArray(tools) ? tools : [],
+            historyConfig: historyConfig || {},
+            outputConfig: outputConfig || {},
+            position: position || { x: 0, y: 0 }
+        },
+        ...rest
+    };
+}
+
 // Type pour les paramètres de route hérités (via mergeParams)
 interface WorkflowParams {
     workflowId: string;
@@ -64,7 +111,8 @@ router.get('/', requireAuth, async (req: Request<WorkflowParams>, res: Response)
         }
 
         const instances = await AgentInstance.find({ workflowId });
-        res.json(instances);
+        // ⭐ FIX: Transform all instances for frontend consumption
+        res.json(instances.map(transformAgentInstanceForFrontend));
     } catch (error) {
         console.error('[AgentInstances] GET error:', error);
         res.status(500).json({ error: 'Erreur récupération instances' });
@@ -86,7 +134,8 @@ router.get('/:id',
                 return res.status(404).json({ error: 'Instance introuvable' });
             }
 
-            res.json(instance);
+            // ⭐ FIX: Transform instance for frontend consumption
+            res.json(transformAgentInstanceForFrontend(instance));
         } catch (error) {
             console.error('[AgentInstances] GET/:id error:', error);
             res.status(500).json({ error: 'Erreur récupération instance' });
@@ -149,7 +198,7 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
     try {
         const user = req.user as IUser;
         const { workflowId } = req.params;
-        const { prototypeId, position, name, persistenceConfig } = req.body;
+        const { prototypeId, position, name, persistenceConfig, configuration_json } = req.body;
 
         if (!workflowId || !mongoose.Types.ObjectId.isValid(workflowId)) {
             return res.status(400).json({ error: 'workflowId invalide' });
@@ -176,22 +225,39 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
         // ⭐ GÉNÉRER executionId unique (UUID format)
         const executionId = `run-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
-        // ⭐ MERGE STRATEGY: prototype comme base + overrides frontend + FALLBACKS
+        // ⭐ MERGE STRATEGY: configuration_json (from frontend) + prototype (fallback)
+        // Frontend sends configuration_json with capabilities + historyConfig explicitly
+        // This ensures template capabilities are persisted to the instance
+        
         // 1. Name: utiliser override si fourni, sinon prototype.name, sinon fallback
         const finalName = name?.trim() || prototype.name || 'Agent sans nom';
         
         // 2. Champs requis avec fallbacks robustes (évite ValidationError)
-        const finalRole = prototype.role?.trim() || 'Assistant généraliste';
-        const finalSystemPrompt = prototype.systemPrompt?.trim() || 'Tu es un assistant IA utile et professionnel.';
-        const finalLlmProvider = prototype.llmProvider || 'openai';
-        const finalLlmModel = prototype.llmModel || 'gpt-4o-mini';
+        // PHASE 2: Prioritize configuration_json if provided (from frontend form)
+        const finalRole = configuration_json?.role?.trim() || prototype.role?.trim() || 'Assistant généraliste';
+        const finalSystemPrompt = configuration_json?.systemPrompt?.trim() || prototype.systemPrompt?.trim() || 'Tu es un assistant IA utile et professionnel.';
+        const finalLlmProvider = configuration_json?.llmProvider || prototype.llmProvider || 'openai';
+        const finalLlmModel = configuration_json?.model || prototype.llmModel || 'gpt-4o-mini';
         const finalRobotId = prototype.robotId || 'AR_001';
         
-        // 3. Tableaux: s'assurer qu'ils ne sont jamais undefined
-        const finalCapabilities = Array.isArray(prototype.capabilities) ? prototype.capabilities : [];
+        // 3. Tableaux: PHASE 2 - Use frontend capabilities if provided, else prototype
+        // Chat is ALWAYS included (minimum capability)
+        const frontendCapabilities = configuration_json?.capabilities || [];
+        const prototypeCapabilities = Array.isArray(prototype.capabilities) ? prototype.capabilities : [];
+        const capabilitiesToUse = frontendCapabilities.length > 0 ? frontendCapabilities : prototypeCapabilities;
+        
+        // Ensure Chat is always present
+        const finalCapabilities = Array.isArray(capabilitiesToUse) 
+          ? Array.from(new Set(['Chat', ...capabilitiesToUse]))  // Dedupe and ensure Chat
+          : ['Chat'];
+        
         const finalTools = Array.isArray(prototype.tools) ? prototype.tools : [];
         
-        // 4. PersistenceConfig: merge prototype config avec overrides
+        // 4. PHASE 2 - HistoryConfig: Use frontend config if provided
+        const finalHistoryConfig = configuration_json?.historyConfig || prototype.historyConfig || {};
+        const finalOutputConfig = configuration_json?.outputConfig || prototype.outputConfig || {};
+        
+        // 5. PersistenceConfig: merge prototype config avec overrides
         const prototypePersistenceConfig = prototype.persistenceConfig || {
             saveChat: true,
             saveErrors: true,
@@ -206,17 +272,18 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
             : prototypePersistenceConfig;
 
         // Log des valeurs finales pour debugging
-        console.log('[AgentInstances] 📋 Instance data prepared:', {
+        console.log('[AgentInstances] 📋 Instance data prepared (PHASE 2):', {
             name: finalName,
             role: finalRole,
             llmProvider: finalLlmProvider,
             llmModel: finalLlmModel,
             robotId: finalRobotId,
             hasTools: finalTools.length,
-            hasCapabilities: finalCapabilities.length
+            capabilities: finalCapabilities,
+            hasHistoryConfig: Object.keys(finalHistoryConfig).length > 0
         });
 
-        // Créer instance avec snapshot du prototype + overrides + fallbacks
+        // Créer instance avec snapshot du prototype + overrides frontend + fallbacks
         const instance = new AgentInstance({
             workflowId,
             userId: user.id,
@@ -226,16 +293,16 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
             executionId,
             status: 'running',
 
-            // Snapshot config avec fallbacks robustes
+            // Snapshot config avec overrides frontend
             name: finalName,
             role: finalRole,
             systemPrompt: finalSystemPrompt,
             llmProvider: finalLlmProvider,
             llmModel: finalLlmModel,
-            capabilities: finalCapabilities,
-            historyConfig: prototype.historyConfig || {},
+            capabilities: finalCapabilities,  // ⭐ PHASE 2: From frontend configuration_json
+            historyConfig: finalHistoryConfig,  // ⭐ PHASE 2: From frontend configuration_json
+            outputConfig: finalOutputConfig,  // ⭐ PHASE 2: From frontend configuration_json
             tools: finalTools,
-            outputConfig: prototype.outputConfig || {},
             robotId: finalRobotId,
 
             // Canvas properties
@@ -264,14 +331,20 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
         workflow.isDirty = true;
         await workflow.save();
 
-        console.log('[AgentInstances] ✅ Instance créée depuis prototype:', {
+        console.log('[AgentInstances] ✅ Instance créée depuis prototype (PHASE 2):', {
             instanceId: instance._id,
             executionId,
             prototypeId: prototype.id,
-            name: finalName
+            name: finalName,
+            capabilitiesCount: finalCapabilities.length
         });
 
-        res.status(201).json(instance);
+        // ⭐ FIX: Map MongoDB _id → id for frontend compatibility
+        // AND reconstruct configuration_json from individual fields
+        // Use the helper function to ensure consistency across all endpoints
+        const mappedInstance = transformAgentInstanceForFrontend(instance);
+
+        res.status(201).json(mappedInstance);
     } catch (error: any) {
         // ⭐ LOGGING AMÉLIORÉ: afficher les détails de l'erreur de validation
         console.error('[AgentInstances] ❌ POST/from-prototype error:', {
@@ -317,9 +390,22 @@ router.put('/:id',
     async (req, res) => {
         try {
             const user = req.user as IUser;
-            const instance = await AgentInstance.findOne({ _id: req.params.id, userId: user.id });
+            const instanceId = req.params.id;
+            
+            console.log('[AgentInstances] 🔧 PUT /:id called:', {
+                instanceId,
+                userId: user.id,
+                bodyKeys: Object.keys(req.body),
+                hasConfigurationJson: !!req.body.configuration_json
+            });
+            
+            const instance = await AgentInstance.findOne({ _id: instanceId, userId: user.id });
 
             if (!instance) {
+                console.log('[AgentInstances] ❌ Instance not found or user mismatch:', {
+                    instanceId,
+                    instanceFound: !!instance
+                });
                 return res.status(404).json({ error: 'Instance introuvable' });
             }
 
@@ -327,8 +413,65 @@ router.put('/:id',
             delete req.body.workflowId;
             delete req.body.userId;
 
-            Object.assign(instance, req.body);
+            // ⭐ FIX #1.1: Destructure configuration_json to individual fields
+            // Frontend sends configuration_json object, but schema has individual fields
+            const { configuration_json, ...otherUpdates } = req.body;
+            
+            if (configuration_json) {
+                // Mapping: configuration_json properties → schema fields
+                // MANDATORY: These come directly from frontend configuration
+                if (configuration_json.role !== undefined) {
+                    instance.role = configuration_json.role;
+                }
+                if (configuration_json.systemPrompt !== undefined) {
+                    instance.systemPrompt = configuration_json.systemPrompt;
+                }
+                if (configuration_json.llmProvider !== undefined) {
+                    instance.llmProvider = configuration_json.llmProvider;
+                }
+                if (configuration_json.model !== undefined) {
+                    instance.llmModel = configuration_json.model; // Note: frontend sends 'model', schema uses 'llmModel'
+                }
+                
+                // ARRAYS: Capabilities + tools
+                if (Array.isArray(configuration_json.capabilities)) {
+                    instance.capabilities = configuration_json.capabilities;
+                }
+                if (Array.isArray(configuration_json.tools)) {
+                    instance.tools = configuration_json.tools;
+                }
+                
+                // OBJECTS: HistoryConfig + OutputConfig
+                if (configuration_json.historyConfig !== undefined) {
+                    instance.historyConfig = configuration_json.historyConfig;
+                }
+                if (configuration_json.outputConfig !== undefined) {
+                    instance.outputConfig = configuration_json.outputConfig;
+                }
+                
+                // PRESERVE RUNTIME DATA: Never overwrite logs, errors, tasks, links from frontend
+                // These should only be updated by auto-save endpoints
+                // Skip: configuration_json.logs, errors, tasks, links (backend-only)
+            }
+            
+            // Apply other updates (name, position, etc.) using Object.assign
+            Object.assign(instance, otherUpdates);
             await instance.save();
+
+            // ⭐ CRITICAL: Log saved state for debugging (BREAK #2 fix)
+            const historyConfigObj = instance.historyConfig as any || {};
+            console.log('[AgentInstances] ✅ PUT endpoint saved:', {
+                instanceId: instance._id?.toString(),
+                name: instance.name,
+                role: instance.role,
+                capabilitiesCount: Array.isArray(instance.capabilities) ? instance.capabilities.length : 0,
+                capabilitiesList: Array.isArray(instance.capabilities) ? instance.capabilities : [],
+                historyConfig: {
+                    enabled: historyConfigObj.enabled || false,
+                    provider: historyConfigObj.llmProvider || 'unknown'
+                },
+                toolsCount: Array.isArray(instance.tools) ? instance.tools.length : 0
+            });
 
             // Marquer workflow comme dirty
             const workflow = await Workflow.findById(instance.workflowId);

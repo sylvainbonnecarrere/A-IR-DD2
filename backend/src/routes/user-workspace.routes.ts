@@ -217,35 +217,71 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
                 type: edge.type || 'default'
             })),
 
-            // ⭐ ÉTAPE 1.6: Ajout des propriétés polymorphes (content, metrics, status)
-            agentInstances: agentInstances.map(agent => ({
-                id: agent._id?.toString() || agent.id,
-                name: agent.name,
-                provider: agent.llmProvider || agent.provider,
-                model: agent.llmModel || agent.model,
-                position: agent.position || { x: 0, y: 0 },
-                systemInstruction: agent.systemPrompt || agent.systemInstruction,
-                executionId: agent.executionId,
-                status: agent.status,
-                content: agent.content || [],
-                metrics: agent.metrics || {
-                    totalTokens: 0,
-                    totalErrors: 0,
-                    totalMediaGenerated: 0,
-                    callCount: 0
-                },
-                // ⭐ CRITICAL FIX: Include prototypeId and workflowId for proper hydration
-                prototypeId: agent.prototypeId?.toString() || agent.prototypeId,
-                workflowId: agent.workflowId?.toString() || agent.workflowId,
-                createdAt: agent.createdAt
-            })),
+        // ⭐ ÉTAPE 1.6: Ajout des propriétés polymorphes (content, metrics, status)
+            agentInstances: agentInstances.map(agent => {
+                // ⭐ CRITICAL: Reconstruct configuration_json like transformAgentInstanceForFrontend
+                // This ensures consistency across all API endpoints (agent-instances, user-workspace, etc.)
+                return {
+                    id: agent._id?.toString() || agent.id,
+                    name: agent.name,
+                    provider: agent.llmProvider,
+                    model: agent.llmModel,
+                    position: agent.position || { x: 0, y: 0 },
+                    systemInstruction: agent.systemPrompt,
+                    executionId: agent.executionId,
+                    status: agent.status,
+                    content: agent.content || [],
+                    metrics: agent.metrics || {
+                        totalTokens: 0,
+                        totalErrors: 0,
+                        totalMediaGenerated: 0,
+                        callCount: 0
+                    },
+                    prototypeId: agent.prototypeId?.toString() || agent.prototypeId,
+                    workflowId: agent.workflowId?.toString() || agent.workflowId,
+                    createdAt: agent.createdAt,
+                    // ⭐ TOP-LEVEL fields (for backward compatibility with some code)
+                    role: agent.role,
+                    llmProvider: agent.llmProvider,
+                    llmModel: agent.llmModel,
+                    systemPrompt: agent.systemPrompt,
+                    capabilities: agent.capabilities || [],
+                    tools: agent.tools || [],
+                    historyConfig: agent.historyConfig || {},
+                    outputConfig: agent.outputConfig || {},
+                    robotId: agent.robotId,
+                    isMinimized: agent.isMinimized || false,
+                    isMaximized: agent.isMaximized || false,
+                    // ⭐ CRITICAL: Include configuration_json reconstructed from individual fields
+                    // This matches what transformAgentInstanceForFrontend returns
+                    // useWorkspaceHydration will use this directly, not reconstruct it
+                    configuration_json: {
+                        role: agent.role || 'assistant',
+                        model: agent.llmModel || 'gpt-4o-mini',
+                        llmProvider: agent.llmProvider || 'openai',
+                        systemPrompt: agent.systemPrompt || '',
+                        capabilities: Array.isArray(agent.capabilities) ? agent.capabilities : [],
+                        tools: Array.isArray(agent.tools) ? agent.tools : [],
+                        historyConfig: agent.historyConfig || {},
+                        outputConfig: agent.outputConfig || {},
+                        position: agent.position || { x: 0, y: 0 }
+                    }
+                };
+            }),
 
             agentPrototypes: agentPrototypes.map(proto => ({
                 id: proto.id,
                 name: proto.name,
                 provider: proto.llmProvider,
                 model: proto.llmModel,
-                description: proto.role // Use role as description for prototypes
+                description: proto.role, // Use role as description for prototypes
+                // ⭐ BUG FIX #1.5: Include configuration fields (were omitted from prototypes too)
+                role: proto.role,
+                capabilities: proto.capabilities || [],
+                tools: proto.tools || [],
+                historyConfig: proto.historyConfig,
+                outputConfig: proto.outputConfig,
+                robotId: proto.robotId
             })),
 
             // SECURITY: Only expose hasApiKey boolean, never the encrypted key

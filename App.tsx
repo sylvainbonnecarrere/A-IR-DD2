@@ -314,15 +314,18 @@ function AppContent() {
           hydratedPrototypes = workspace.agentPrototypes.map((proto: any) => ({
             id: proto.id,
             name: proto.name,
-            role: proto.description || 'assistant',
-            systemPrompt: proto.description || '',
+            role: proto.description || proto.role || 'assistant',
+            systemPrompt: proto.description || proto.systemPrompt || '',
             llmProvider: (proto.provider as LLMProvider) || LLMProvider.Gemini,
             model: proto.model || 'gemini-2.0-flash',
-            capabilities: [],
-            tools: [],
-            creator_id: RobotId.Archi,
-            created_at: now,
-            updated_at: now
+            // ⭐ BUG FIX: Copy capabilities + tools from backend prototype (was always empty!)
+            capabilities: Array.isArray(proto.capabilities) ? proto.capabilities : [],
+            tools: Array.isArray(proto.tools) ? proto.tools : [],
+            outputConfig: proto.outputConfig || {},
+            historyConfig: proto.historyConfig || {},
+            creator_id: proto.robotId || RobotId.Archi,
+            created_at: proto.created_at || now,
+            updated_at: proto.updated_at || now
           }));
           
           // Hydrater le state React (legacy)
@@ -367,48 +370,31 @@ function AppContent() {
         if (validMergedInstances.length > 0) {
           hydratedInstancesForStore = validMergedInstances.map((instance: any) => {
             const agentProto = workspace.agentPrototypes?.find((proto: any) => proto.id === instance.prototypeId);
-            const agent: Agent = agentProto ? {
-              id: agentProto.id,
-              name: agentProto.name,
-              role: agentProto.description || 'assistant',
-              systemPrompt: instance.systemInstruction || agentProto.description || '',
-              llmProvider: (agentProto.provider as LLMProvider) || LLMProvider.Gemini,
-              model: agentProto.model || 'gemini-2.0-flash',
-              capabilities: [],
-              tools: [],
-              creator_id: RobotId.Archi,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            } : {
-              id: instance.prototypeId || instance.id,
-              name: instance.name,
-              role: 'assistant',
-              systemPrompt: instance.systemInstruction || '',
-              llmProvider: (instance.provider as LLMProvider) || LLMProvider.Gemini,
-              model: instance.model || 'gemini-2.0-flash',
-              capabilities: [],
-              tools: [],
-              creator_id: RobotId.Archi,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
+            
+            // ⭐ CRITICAL: Use configuration_json ALREADY reconstructed by backend
+            // Backend returns it via transformAgentInstanceForFrontend()
+            // No reconstruction needed - trust the backend data
+            const configurationJson = instance.configuration_json || {
+              role: instance.role || agentProto?.description || 'assistant',
+              model: instance.llmModel || agentProto?.model || 'gemini-2.0-flash',
+              llmProvider: instance.llmProvider || agentProto?.provider || LLMProvider.Gemini,
+              systemPrompt: instance.systemPrompt || agentProto?.description || '',
+              capabilities: Array.isArray(instance.capabilities) ? instance.capabilities : (agentProto?.capabilities || []),
+              tools: Array.isArray(instance.tools) ? instance.tools : (agentProto?.tools || []),
+              outputConfig: instance.outputConfig || agentProto?.outputConfig || {},
+              historyConfig: instance.historyConfig || agentProto?.historyConfig || {},
+              position: instance.position || { x: 0, y: 0 }
             };
             
             return {
               id: instance.id,
-              prototypeId: instance.prototypeId || agent.id,
+              prototypeId: instance.prototypeId || instance.id,
               name: instance.name,
               position: instance.position || { x: 0, y: 0 },
-              isMinimized: false,
-              isMaximized: false,
+              isMinimized: instance.isMinimized || false,
+              isMaximized: instance.isMaximized || false,
               workflowId: instance.workflowId || workspace.workflow?.id,
-              configuration_json: {
-                role: agent.role,
-                model: agent.model,
-                llmProvider: agent.llmProvider,
-                systemPrompt: agent.systemPrompt,
-                tools: agent.tools || [],
-                position: instance.position || { x: 0, y: 0 }
-              }
+              configuration_json: configurationJson
             } as AgentInstance;
           });
           
@@ -423,7 +409,8 @@ function AppContent() {
             agents: hydratedPrototypes.length,
             instances: hydratedInstancesForStore.length,
             workflowId: workspace.workflow?.id,
-            message: 'Single atomic call - no partial states'
+            message: 'Single atomic call - no partial states',
+            sampleInstance: hydratedInstancesForStore[0]?.configuration_json
           });
         }
 
@@ -434,8 +421,7 @@ function AppContent() {
             // Find the agent prototype for this instance
             const agentProto = workspace.agentPrototypes?.find((proto: any) => proto.id === instance.prototypeId);
             
-            // ⭐ FIX: Build Agent object from instance data if prototype not found
-            // This ensures V2AgentNode always has an agent prop
+            // ⭐ FIX: Build Agent from prototype or instance, using capabilities from configuration_json
             const agent: Agent = agentProto ? {
               id: agentProto.id,
               name: agentProto.name,
@@ -443,8 +429,9 @@ function AppContent() {
               systemPrompt: instance.systemInstruction || agentProto.description || '',
               llmProvider: (agentProto.provider as LLMProvider) || LLMProvider.Gemini,
               model: agentProto.model || 'gemini-2.0-flash',
-              capabilities: [],
-              tools: [],
+              // Use instance capabilities if available (from configuration_json), else prototype
+              capabilities: instance.configuration_json?.capabilities || agentProto.capabilities || [],
+              tools: instance.configuration_json?.tools || agentProto.tools || [],
               creator_id: RobotId.Archi,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
@@ -456,27 +443,30 @@ function AppContent() {
               systemPrompt: instance.systemInstruction || '',
               llmProvider: (instance.provider as LLMProvider) || LLMProvider.Gemini,
               model: instance.model || 'gemini-2.0-flash',
-              capabilities: [],
-              tools: [],
+              // Use configuration_json for capabilities
+              capabilities: instance.configuration_json?.capabilities || [],
+              tools: instance.configuration_json?.tools || [],
               creator_id: RobotId.Archi,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             };
             
-            // ⭐ FIX: Ensure instance has all required properties with correct structure
+            // ⭐ FIX: Use instance data (with configuration_json that includes capabilities)
             const hydratedInstance: AgentInstance = {
-              id: instance.id, // Real MongoDB ObjectId from backend
+              id: instance.id,
               prototypeId: instance.prototypeId || agent.id,
               name: instance.name,
               position: instance.position || { x: 0, y: 0 },
               isMinimized: false,
               isMaximized: false,
-              workflowId: instance.workflowId || workspace.workflow?.id, // ⭐ CRITICAL: Pass workflowId for journal persistence
-              configuration_json: {
+              workflowId: instance.workflowId || workspace.workflow?.id,
+              // ⭐ CRITICAL: Use configuration_json from instance (includes capabilities)
+              configuration_json: instance.configuration_json || {
                 role: agent.role,
                 model: agent.model,
                 llmProvider: agent.llmProvider,
                 systemPrompt: agent.systemPrompt,
+                capabilities: agent.capabilities || [],
                 tools: agent.tools || [],
                 position: instance.position || { x: 0, y: 0 }
               }
@@ -518,19 +508,22 @@ function AppContent() {
 
         // Convert instances to WorkflowNode format for legacy React state
         if (workspace.agentInstances && workspace.agentInstances.length > 0) {
+          
           const now = new Date().toISOString();
           const hydrationNodes: WorkflowNode[] = workspace.agentInstances.map((instance: any) => ({
             id: instance.id,
             agent: {
               id: instance.id,
               name: instance.name,
-              role: instance.systemInstruction || 'assistant',
-              systemPrompt: instance.systemInstruction || '',
-              llmProvider: (instance.provider as LLMProvider) || LLMProvider.Gemini,
-              model: instance.model || 'gemini-2.0-flash',
-              capabilities: [],
-              tools: [],
-              historyConfig: { enabled: false, llmProvider: LLMProvider.Gemini, model: '', role: '', systemPrompt: '', limits: { char: 0, word: 0, token: 0, sentence: 0, message: 50 } },
+              role: instance.role || instance.systemPrompt || 'assistant',
+              systemPrompt: instance.systemPrompt || instance.systemInstruction || '',
+              llmProvider: (instance.llmProvider || instance.provider as LLMProvider) || LLMProvider.Gemini,
+              model: instance.model || instance.llmModel || 'gemini-2.0-flash',
+              // ⭐ CRITICAL FIX #1: Use capabilities from configuration_json (not hardcoded [])
+              capabilities: instance.configuration_json?.capabilities || instance.capabilities || [],
+              tools: instance.configuration_json?.tools || instance.tools || [],
+              // ⭐ CRITICAL FIX #2: Use historyConfig from configuration_json
+              historyConfig: instance.configuration_json?.historyConfig || instance.historyConfig || { enabled: false, llmProvider: LLMProvider.Gemini, model: '', role: '', systemPrompt: '', limits: { char: 0, word: 0, token: 0, sentence: 0, message: 50 } },
               creator_id: RobotId.Archi,
               created_at: instance.createdAt || now,
               updated_at: now
@@ -722,7 +715,22 @@ function AppContent() {
         return {
           ...initial,
           ...apiConfig,
-          capabilities: { ...initial.capabilities, ...apiConfig.capabilities }
+          // ⭐ PHASE 0 FIX: Conservative merge - preserve initial defaults unless explicitly overridden
+          // Only apply API capability values if they're explicitly present in the response
+          // This prevents losing capabilities (like OutputFormatting) when backend doesn't return them
+          capabilities: apiConfig.capabilities
+            ? Object.keys(initial.capabilities).reduce((acc, capKey) => {
+                const cap = capKey as LLMCapability;
+                // If API explicitly specifies this capability, use its value
+                if (cap in apiConfig.capabilities) {
+                  acc[cap] = apiConfig.capabilities[cap];
+                } else {
+                  // Otherwise preserve the initial default
+                  acc[cap] = initial.capabilities[cap];
+                }
+                return acc;
+              }, {} as { [k in LLMCapability]?: boolean })
+            : initial.capabilities
         };
       }
       return initial;
@@ -966,10 +974,15 @@ function AppContent() {
    * This ensures the agent_instances collection is populated immediately on creation.
    */
   const addAgentToWorkflow = useCallback(async (agent: Agent) => {
-    // Calculate position based on existing instances
+    // ⭐ BUG FIX: Calculate position based on STORE instances (not legacy workflowNodes)
+    // This prevents collision when reconnecting (workflowNodes is empty on load)
+    // Use getState() to get current count of instances in Zustand store
+    const storeInstances = useDesignStore.getState().agentInstances;
+    const instanceCount = storeInstances.length;
+    
     const position = {
-      x: (workflowNodes.length % 4) * 420 + 20,
-      y: Math.floor(workflowNodes.length / 4) * 540 + 20,
+      x: (instanceCount % 4) * 420 + 20,
+      y: Math.floor(instanceCount / 4) * 540 + 20,
     };
 
     // Use instanceName if provided, otherwise use agent name
@@ -1001,7 +1014,15 @@ function AppContent() {
             llmProvider: agent.llmProvider,
             systemPrompt: agent.systemPrompt,
             tools: agent.tools || [],
-            outputConfig: agent.outputConfig
+            outputConfig: agent.outputConfig,
+            // ⭐ PHASE 2: Include capabilities + historyConfig for complete persistence
+            // Ensures reconnection loads same capabilities as template
+            // Chat is ALWAYS included as the minimum capability
+            capabilities: agent.capabilities && agent.capabilities.length > 0 
+              ? agent.capabilities 
+              : [LLMCapability.Chat],  // Fallback: minimum Chat capability
+            // Include history config if template defined it
+            historyConfig: agent.historyConfig || undefined
           },
           // ⭐ Pass persistenceConfig override if provided from WorkflowValidationModal
           persistenceConfig: agent.persistenceConfig
@@ -1017,7 +1038,7 @@ function AppContent() {
         console.log('[App] ✅ Agent instance persisted to DB with backendId:', result.backendId);
         
         // ✅ ÉTAPE 2: Synchroniser l'instance complète du backend avec Zustand
-        // Le backend retourne l'instance avec configuration_json enrichie (llmProvider, llmModel, etc.)
+        // Le backend retourne l'instance avec configuration_json enrichie
         if (result.backendId && result.instance) {
           
           // ✅ Remplacer l'instance temporaire par l'instance backend complète
@@ -1026,26 +1047,22 @@ function AppContent() {
             id: result.backendId,
             prototypeId: agent.id,
             name: instanceName,
-            role: agent.role,
             position,
             workflowId,
-            llmProvider: result.instance.configuration_json?.llmProvider || agent.llmProvider,
-            llmModel: result.instance.configuration_json?.llmModel || agent.model,
-            systemPrompt: result.instance.configuration_json?.systemPrompt || agent.systemPrompt,
-            tools: result.instance.configuration_json?.tools || agent.tools || [],
-            capabilities: result.instance.configuration_json?.capabilities || [],
-            status: result.instance.status || 'running',
-            persistenceConfig: result.instance.persistenceConfig || agent.persistenceConfig,
-            configuration_json: result.instance.configuration_json, // ✅ Inclure la config complète du backend
-            content: [],
-            metrics: {
-              executionCount: 0,
-              totalTokensUsed: 0,
-              averageResponseTime: 0,
-              lastExecutionTime: new Date(),
-              errorCount: 0
-            },
-            created_at: new Date().toISOString()
+            isMinimized: false,
+            isMaximized: false,
+            // ✅ configuration_json contient TOUS les détails de config (role, model, llmProvider, etc.)
+            configuration_json: result.instance.configuration_json || {
+              role: agent.role,
+              model: agent.model,
+              llmProvider: agent.llmProvider,
+              systemPrompt: agent.systemPrompt,
+              tools: agent.tools || [],
+              outputConfig: agent.outputConfig,
+              capabilities: agent.capabilities || [],
+              historyConfig: agent.historyConfig,
+              position
+            }
           };
           
           // ✅ CRITICAL: Update instance ID AND content in Zustand store

@@ -88,6 +88,9 @@ app.use('/api/auth', authRoutes);
 // ⭐ FIX: Monter agentInstancesRoutes AVANT workflowsRoutes pour éviter le conflit /:id/*
 // Le chemin spécifique /workflows/:workflowId/instances doit être prioritaire
 app.use('/api/workflows/:workflowId/instances', agentInstancesRoutes);
+// ⭐ JALON 4.9 FIX: Mount also on /api/agent-instances for direct access (PUT, GET by ID)
+// Routes that require workflowId will return 400 if missing (see agent-instances.routes.ts)
+app.use('/api/agent-instances', agentInstancesRoutes);
 app.use('/api/workflows', workflowsRoutes);
 app.use('/api/agent-prototypes', agentPrototypesRoutes);
 

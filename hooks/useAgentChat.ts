@@ -213,12 +213,14 @@ export const useAgentChat = ({
             }
 
             // Stream LLM response
+            // ⭐ FIX #2: Use conversationHistoryForAPI which contains synthesized history (or regular messages)
+            // NOT messages.concat(userMessage) which skips history entirely
             const stream = llmService.generateContentStream(
                 agent.llmProvider,
                 agentConfig.apiKey,
                 agent.model,
                 agent.systemPrompt,
-                messages.concat(userMessage),
+                conversationHistoryForAPI,  // ← USE history with potential synthesis
                 agent.tools,
                 agent.outputConfig,
                 undefined, // endpoint (for LMStudio)

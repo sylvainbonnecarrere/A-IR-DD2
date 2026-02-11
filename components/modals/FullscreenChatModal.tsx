@@ -68,6 +68,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     setFullscreenChatNodeId,
     getNodeMessages,
     addNodeMessage,
+    setNodeMessages,
     setNodeExecuting,
     isNodeExecuting
   } = useRuntimeStore();
@@ -87,16 +88,32 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Appeler getResolvedInstance AVANT tout early return (Rules of Hooks)
-  const resolvedInstance = fullscreenChatNodeId ? getResolvedInstance(fullscreenChatNodeId) : null;
+  // Appeler getResolvedInstance AVEC L'INSTANCE ID (pas nodeId) pour récupérer la config enrichie
+  // fullscreenChatAgentInstance contient l'instance MongoDB avec configuration_json mise à jour
+  const resolvedInstance = fullscreenChatAgentInstance?.id 
+    ? getResolvedInstance(fullscreenChatAgentInstance.id)
+    : null;
+  
   const messages = fullscreenChatNodeId ? getNodeMessages(fullscreenChatNodeId) : [];
   const isLoading = fullscreenChatNodeId ? isNodeExecuting(fullscreenChatNodeId) : false;
 
   // Récupérer llmConfigs depuis le store
   const llmConfigs = useRuntimeStore(state => state.llmConfigs);
 
-  // Récupérer l'agent complet (fullscreenChatAgent est passé directement depuis V2AgentNode)
-  const agent: Agent | null = fullscreenChatAgent || null;
+  // ⭐ FIX #3: Construire l'agent enrichi depuis l'instance (pas une référence stale du prototype)
+  // Fusionne le prototype (invariant) avec configuration_json de l'instance (configuration changeable)
+  // CRITIQUE pour histoire: agent.historyConfig provient maintenant de l'instance mise à jour
+  const agent: Agent | null = resolvedInstance 
+    ? {
+        // Copier tous les champs du prototype (invariants)
+        ...resolvedInstance.prototype,
+        // Overlay avec configuration_json de l'instance (dynamique, mis à jour par Configure modal)
+        ...(resolvedInstance.instance.configuration_json as any),
+        // CRITICAL: Explicitly use instance historyConfig (not prototype's stale version)
+        historyConfig: resolvedInstance.instance.configuration_json?.historyConfig 
+          || resolvedInstance.prototype.historyConfig
+      }
+    : fullscreenChatAgent || null;  // Fallback au prototype si pas de resolved
   
   // ⭐ AUTO-SAVE: Get instanceId from agentInstance passed from V2AgentNode
   const instanceId = fullscreenChatAgentInstance?.id;
@@ -113,6 +130,81 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     isAuthenticated,
     accessToken
   });
+
+  // ⭐ TEST #2 FIX: Load chat history from backend when modal opens
+  // This ensures history is available even if runtime store was cleared (e.g., after logout/login)
+  useEffect(() => {
+    const loadChatHistoryFromBackend = async () => {
+      if (!fullscreenChatAgentInstance?.id || !isAuthenticated || !accessToken || !fullscreenChatNodeId) {
+        return; // Skip if not authenticated or missing instance
+      }
+
+      try {
+        console.log('[FullscreenChatModal] 📥 Loading chat history from backend:', fullscreenChatAgentInstance.id);
+        
+        // Fetch instance with all its content
+        const response = await fetch(
+          `http://localhost:3001/api/agent-instances/${fullscreenChatAgentInstance.id}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`
+            }
+          }
+        );
+
+        if (!response.ok) {
+          console.warn('[FullscreenChatModal] ⚠️ Failed to fetch chat history:', response.status);
+          return;
+        }
+
+        const instance = await response.json();
+        
+        // Transform backend content array to ChatMessage format
+        // Backend stores: { type, role, message, timestamp, metadata }
+        // Frontend needs: { id, sender, text, image?, filename?, isError, toolCalls?, timestamp }
+        if (instance.content && Array.isArray(instance.content)) {
+          const backendMessages = instance.content.map((item: any, idx: number) => {
+            // Transform role to sender
+            let sender: 'user' | 'agent' | 'tool' = 'agent';
+            if (item.role === 'user') sender = 'user';
+            else if (item.role === 'tool' || item.type === 'error') sender = 'tool';
+            else sender = 'agent';
+
+            return {
+              id: item.metadata?.messageId || `msg-loaded-${idx}`,
+              sender,
+              text: item.message || '',
+              image: item.metadata?.image || undefined,
+              filename: item.metadata?.filename || undefined,
+              isError: item.type === 'error',
+              toolCalls: item.metadata?.toolCalls || undefined,
+              timestamp: item.timestamp ? new Date(item.timestamp) : new Date()
+            };
+          });
+
+          // Get existing messages from runtime store (might have new messages from this session)
+          const existingMessages = getNodeMessages(fullscreenChatNodeId) || [];
+          
+          // Merge: keep existing (local) messages, prepend backend messages that aren't duplicates
+          const existingIds = new Set(existingMessages.map(m => m.id));
+          const newBackendMessages = backendMessages.filter(m => !existingIds.has(m.id));
+          
+          const mergedMessages = [...newBackendMessages, ...existingMessages];
+          
+          // Only update if we loaded messages from backend
+          if (newBackendMessages.length > 0) {
+            setNodeMessages(fullscreenChatNodeId, mergedMessages);
+            console.log('[FullscreenChatModal] ✅ Loaded', newBackendMessages.length, 'messages from backend');
+          }
+        }
+      } catch (err) {
+        console.warn('[FullscreenChatModal] ⚠️ Error loading chat history:', err);
+        // Don't block UI - continue without history
+      }
+    };
+
+    loadChatHistoryFromBackend();
+  }, [fullscreenChatAgentInstance?.id, fullscreenChatNodeId, isAuthenticated, accessToken, getNodeMessages, setNodeMessages]);
 
   // Auto-scroll vers le bas quand de nouveaux messages arrivent
   useEffect(() => {
