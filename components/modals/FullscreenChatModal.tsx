@@ -97,15 +97,21 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
 
   const llmConfigs = useRuntimeStore(state => state.llmConfigs);
 
+  // Read prototype from store to ensure it's fresh (not stale from Runtime prop)
+  // This is critical: if user edits LLM capabilities, we need the latest prototype
+  const agentPrototype = agentInstance?.prototypeId
+    ? agents.find(a => a.id === agentInstance.prototypeId)
+    : fullscreenChatAgent;
+
   // Build effective agent config from instance and prototype
-  const agent: Agent | null = agentInstance && fullscreenChatAgent
+  const agent: Agent | null = agentInstance && agentPrototype
     ? {
-        ...fullscreenChatAgent,
+        ...agentPrototype,
         ...(agentInstance.configuration_json as any),
         historyConfig: agentInstance.configuration_json?.historyConfig 
-          || fullscreenChatAgent.historyConfig
+          || agentPrototype.historyConfig
       }
-    : fullscreenChatAgent || null;
+    : agentPrototype || null;
   
   const instanceId = agentInstance?.id;
 

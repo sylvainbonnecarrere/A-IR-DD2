@@ -7,7 +7,7 @@ import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, LMStudioModelDetection } from '../../types';
-import { LLM_MODELS, LLM_MODELS_DETAILED, getModelCapabilities, getLMStudioMergedModels } from '../../llmModels';
+import { LLM_MODELS, LLM_MODELS_DETAILED, getModelCapabilities, getLMStudioMergedModels, getCapabilitiesForLLM } from '../../llmModels';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
 import { initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
 import { API_BASE_URL } from '../../config/api.config';
@@ -104,6 +104,29 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
         setEditedName(currentResolved.instance.name);
         setHasChanges(false);
     }, [configModalInstanceId, getResolvedInstance]);
+
+    // Recalculate capabilities when LLM provider or model changes
+    // This ensures buttons show/hide correctly when user changes LLM in the modal
+    useEffect(() => {
+        if (!editedConfig.llmProvider || !editedConfig.model) return;
+        
+        const newCapabilities = getCapabilitiesForLLM(
+            editedConfig.llmProvider as LLMProvider,
+            editedConfig.model
+        );
+        
+        // Only update if capabilities actually changed
+        const currentCaps = JSON.stringify(editedConfig.capabilities?.sort());
+        const newCaps = JSON.stringify(newCapabilities.sort());
+        
+        if (currentCaps !== newCaps) {
+            setEditedConfig(prev => ({
+                ...prev,
+                capabilities: newCapabilities
+            }));
+            setHasChanges(true);
+        }
+    }, [editedConfig.llmProvider, editedConfig.model]);
 
     // Early returns APRÈS tous les hooks
     if (!configModalInstanceId) return null;

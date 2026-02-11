@@ -26,6 +26,17 @@ interface DynamicModelsCache {
 let lmStudioCache: DynamicModelsCache | null = null;
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
+/**
+ * Helper: Get capabilities for a specific LLM provider and model
+ * Used when LLM provider/model changes to recalculate capabilities
+ */
+export const getCapabilitiesForLLM = (provider: LLMProvider, modelId: string): LLMCapability[] => {
+    const models = LLM_MODELS_DETAILED[provider];
+    if (!models) return [];
+    const model = models.find(m => m.id === modelId);
+    return model?.capabilities || [];
+};
+
 export const LLM_MODELS_DETAILED: Record<LLMProvider, LLMModelDefinition[]> = {
     [LLMProvider.Gemini]: [
         {
