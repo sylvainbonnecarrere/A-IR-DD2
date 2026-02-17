@@ -488,6 +488,26 @@ export default {
     archi_bibliotheque_prototypes: 'Biblioteca de Protótipos',
     archi_bibliotheque_prototypes_desc: 'Explorar agentes salvos',
     
+    // ARCHI - Button labels and notifications
+    archi_button_tasks: 'Tarefas',
+    archi_button_governance: 'Governança',
+    archi_button_template: 'Modelo',
+    archi_button_create: 'Criar',
+    template_created_title: 'Modelo criado',
+    template_created_success: 'O protótipo "{agentName}" foi adicionado com sucesso aos modelos.',
+    template_created_duplicate: 'Já existe um modelo para este protótipo.',
+    template_creation_failed: 'Não foi possível criar o modelo.',
+    template_creation_error_title: 'Falha na criação',
+    template_existing_warning_title: 'Modelo existente',
+    
+    // ARCHI - SubMenu footer
+    archi_map_tooltip: 'ARCHI no mapa do fluxo de trabalho',
+    archi_shortcut_key: 'Ctrl+Shift+A',
+    
+    // BOS - SubMenu footer
+    bos_map_tooltip: 'BOS no mapa do fluxo de trabalho',
+    bos_shortcut_key: 'Ctrl+Shift+B',
+    
     // BOS - Additional menus (BO_002.2 - BO_002.5)
     bos_monitoring_live: 'Monitoramento em Tempo Real',
     bos_monitoring_live_desc: 'Visualização de logs/desempenho em tempo real',
@@ -510,6 +530,45 @@ export default {
     com_hub_connecteurs: 'Hub de Conectores',
     com_hub_connecteurs_desc: 'Explorar integrações disponíveis',
     
+    // COM - SubMenu footer
+    com_map_tooltip: 'COM no mapa do fluxo de trabalho',
+    com_shortcut_key: 'Ctrl+Shift+C',
+    
+    // COM API - KeyValue Component & Form
+    com_api_key_placeholder: 'Chave',
+    com_api_value_placeholder: 'Valor',
+    com_api_add_button: '+ Adicionar',
+    com_api_no_items: 'Sem itens',
+    com_api_tab_params: 'Parâmetros',
+    com_api_tab_headers: 'Cabeçalhos',
+    com_api_tab_body: 'Corpo',
+    com_api_no_connections: 'Sem conexões',
+    com_api_no_connections_desc: 'crie uma para começar',
+    com_api_no_selection: 'Sem seleção',
+    com_api_select_connection: 'Selecione uma conexão ou crie uma nova',
+    com_api_config_title: 'Configuração',
+    com_api_connection_name_label: 'Nome da Conexão',
+    com_api_connection_name_placeholder: 'ex: API de Usuários',
+    com_api_url_placeholder: 'https://api.exemplo.com/v1/recurso',
+    com_api_auth_label: 'Autenticação',
+    com_api_auth_none: 'Nenhuma',
+    com_api_auth_basic: 'Auth Básica',
+    com_api_auth_bearer: 'Bearer Token',
+    com_api_auth_header: 'Auth por Cabeçalho',
+    com_api_bearer_placeholder: 'Bearer Token',
+    com_api_button_test: 'Testar',
+    com_api_button_save: 'Salvar',
+    com_api_button_test_loading: 'Teste...',
+    com_api_details_title: 'Detalhes',
+    com_api_button_edit: 'Editar',
+    com_api_result_title: 'Resultado',
+    com_api_no_result: 'Sem resultado',
+    com_api_no_result_desc: 'Teste uma solicitação para ver a resposta',
+    com_api_workflow_modal_title: 'Adicionar ao Fluxo de Trabalho',
+    com_api_node_name_label: 'Nome do Nó',
+    com_api_node_name_placeholder: 'ex: Consulta de Usuários',
+    com_api_button_confirm: 'Confirmar',
+    
     // PHIL - All menus (PH_004.1 - PH_004.5)
     phil_rag_configuration: 'Configuração RAG',
     phil_rag_configuration_desc: 'Fragmentos, incorporações e recuperação',
@@ -521,6 +580,22 @@ export default {
     phil_bibliotheques_externes_desc: 'Instalar pacotes e ferramentas',
     phil_knowledge_base: 'Base de Conhecimento',
     phil_knowledge_base_desc: 'Gerenciar documentos e contextos',
+    
+    // PHIL - SubMenu footer + description
+    phil_data_desc: 'Especialista em transformação de dados e manipulação de arquivos',
+    phil_map_tooltip: 'PHIL no mapa do fluxo de trabalho',
+    phil_shortcut_key: 'Ctrl+Shift+P',
+    
+    // PHIL - File format options
+    phil_file_format_json: 'JSON',
+    phil_file_format_csv: 'CSV',
+    phil_file_format_pdf: 'PDF',
+    phil_file_format_xml: 'XML',
+    
+    // TIM - SubMenu footer + description
+    tim_events_desc: 'Gestor de eventos, agendamento e controle de fluxo assincrónico',
+    tim_map_tooltip: 'TIM no mapa do fluxo de trabalho',
+    tim_shortcut_key: 'Ctrl+Shift+T',
     
     // TIM - All menus (TI_005.1 - TI_005.5)
     tim_triggers_webhooks: 'Acionadores e Webhooks',
@@ -542,5 +617,76 @@ export default {
     create_first_connection: 'Crie uma para começar',
     no_selection: 'Selecione uma conexão ou crie uma nova',
     select_from_list: 'Selecione da lista à esquerda ou crie uma nova',
-    connection_details_view: 'Visualização de Detalhes - em breve',
-};
+    connection_details_view: 'Visualização de Detalhes - em breve',    
+    // Additional UI Labels for remaining hardcoded text
+    json_table_index: 'Índice',
+    json_table_value: 'Valor',
+    config_tab_save: 'Salvar',
+    button_save_loading: 'Salvando...',
+    workflow_add_validation: 'Adicionar ao fluxo de trabalho',    
+    workflow_config_required: 'Configuração obrigatória',
+    test_loading: 'Teste...',
+    settings_tab_label: 'Configurações',
+
+    // ARCHI Prototyping Page - Notification Titles
+    archi_template_loaded: 'Modelo carregado',
+    archi_error: 'Erro',
+    archi_agent_added_workflow: 'Agente adicionado ao fluxo de trabalho',
+    archi_agent_created: 'Agente criado',
+    archi_creation_refused: 'Criação recusada',
+    archi_prototype_modified: 'Protótipo modificado',
+    archi_modification_refused: 'Modificação recusada',
+    archi_template_created: 'Modelo criado',
+    archi_template_existing: 'Modelo já existe',
+    archi_creation_failed: 'Falha na criação',
+
+    // COM Databases Page - Headers & Labels
+    com_databases_title: 'Bancos de Dados',
+    com_databases_your_bases: '📊 Seus Bancos de Dados',
+    com_no_database_created: 'Nenhum banco de dados criado',
+    com_create_new_connection: 'Crie uma nova conexão',
+    com_database_explorer: '🔍 Explorador',
+    com_advanced_settings: '⚙️ Configurações Avançadas',
+    com_select_database_explore: 'Selecione um banco de dados para explorar',
+
+    // Settings Modal & Header - Guest Mode & Languages
+    settings_language_title: 'Idioma da Aplicação',
+    settings_language_desc: 'Escolha o idioma para a interface de usuário.',
+    settings_language_saved: '💡 Nota: O idioma é salvo automaticamente e persistido',
+    settings_language_profile: 'em seu perfil de usuário',
+    settings_language_localstorage: 'no localStorage',
+    settings_guest_mode_warning: '⚠️ Modo Convidado: As chaves de API são armazenadas no localStorage (não criptografado). Faça login para criptografar seus dados com segurança.',
+    header_guest_mode: 'Modo Convidado',
+    header_login: 'Fazer Login',
+    header_register: 'Registrar-se',
+    header_logout: 'Sair',
+    // COM Databases Page - Form Fields & Buttons
+    com_db_form_name_label: 'Nome da Conexão',
+    com_db_form_name_placeholder: 'p.ex: PostgreSQL Produção',
+    com_db_form_host_label: 'Host',
+    com_db_form_host_placeholder: 'localhost ou endereço IP',
+    com_db_form_port_label: 'Porta',
+    com_db_form_database_label: 'Banco de dados',
+    com_db_form_database_placeholder: 'Nome do banco de dados',
+    com_db_form_username_label: 'Usuário',
+    com_db_form_username_placeholder: 'Nome de usuário',
+    com_db_form_password_label: 'Senha',
+    com_db_form_password_placeholder: 'Senha',
+    com_db_button_test: '🔗 Testar',
+    com_db_button_test_loading: 'Testando...',
+    com_db_button_update: '💾 Atualizar',
+    com_db_button_update_loading: '💾 Atualizando...',
+    com_db_button_save: '💾 Salvar',
+    com_db_button_save_loading: '💾 Salvando...',
+    com_db_form_select_provider: 'Selecione o tipo de banco de dados:',
+    com_db_form_selected_provider: 'Tipo selecionado:',
+    com_db_form_change_provider: 'Mudar tipo',
+    com_db_form_edit_title: '✏️ Editar Banco de Dados:',
+    com_db_form_new_title: '🆕 Novo Banco de Dados',
+    com_db_button_add: 'Adicionar um Banco de Dados',
+    com_db_subtitle: 'Conecte suas fontes de dados SQL, NoSQL e Vector',
+    com_db_adv_min_connections: 'Min Conexões',
+    com_db_adv_max_connections: 'Max Conexões',
+    com_db_adv_connect_timeout: 'Timeout de Conexão (ms)',
+    com_db_adv_query_timeout: 'Timeout de Consulta (ms)',
+    com_db_adv_ssh_tunneling: 'Ativar Tunelamento SSH',};

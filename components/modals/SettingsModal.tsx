@@ -300,9 +300,9 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
             {activeTab === 'language' && (
               <div className="space-y-4">
                 <div className="bg-indigo-900/20 border border-indigo-600/30 rounded-lg p-4">
-                  <h4 className="text-sm font-semibold text-indigo-400 mb-3">Langue de l'application</h4>
+                  <h4 className="text-sm font-semibold text-indigo-400 mb-3">{t('settings_language_title')}</h4>
                   <p className="text-sm text-gray-400 mb-4">
-                    Choisissez la langue pour l'interface utilisateur.
+                    {t('settings_language_desc')}
                   </p>
                   
                   <div className="grid grid-cols-1 gap-3">
@@ -343,8 +343,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
                   {/* Info supplémentaire */}
                   <div className="text-xs text-gray-500 bg-gray-800/50 rounded-lg p-3 mt-4">
-                    💡 <strong>Note :</strong> La langue est sauvegardée automatiquement et persistée 
-                    {isAuthenticated ? ' dans votre profil utilisateur' : ' en localStorage'}.
+                    {t('settings_language_saved')} {isAuthenticated ? t('settings_language_profile') : t('settings_language_localstorage')}.
                   </div>
                 </div>
               </div>
@@ -432,7 +431,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                 {!isAuthenticated && (
                   <div className="p-3 rounded-md bg-amber-900/30 border border-amber-700/50">
                     <p className="text-sm text-amber-400">
-                      ⚠️ <span className="font-semibold">Mode Invité:</span> Les clés API sont stockées en localStorage (non chiffré). Connectez-vous pour chiffrer vos données de façon sécurisée.
+                      {t('settings_guest_mode_warning')}
                     </p>
                   </div>
                 )}

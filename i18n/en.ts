@@ -522,6 +522,22 @@ export default {
     archi_bibliotheque_prototypes: 'Prototype Library',
     archi_bibliotheque_prototypes_desc: 'Explore saved agents',
     
+    // ARCHI - Button labels and notifications
+    archi_button_tasks: 'Tasks',
+    archi_button_governance: 'Governance',
+    archi_button_template: 'Template',
+    archi_button_create: 'Create',
+    template_created_title: 'Template Created',
+    template_created_success: 'The prototype "{agentName}" has been successfully added to templates.',
+    template_created_duplicate: 'A template already exists for this prototype.',
+    template_creation_failed: 'Unable to create template.',
+    template_creation_error_title: 'Creation Failed',
+    template_existing_warning_title: 'Existing Template',
+    
+    // ARCHI - SubMenu footer
+    archi_map_tooltip: 'ARCHI on the workflow map',
+    archi_shortcut_key: 'Ctrl+Shift+A',
+    
     // BOS - Additional menus (BO_002.2 - BO_002.5)
     bos_monitoring_live: 'Live Monitoring',
     bos_monitoring_live_desc: 'Real-time logs/performance view',
@@ -531,6 +547,10 @@ export default {
     bos_gouvernance_utilisateurs_desc: 'Manage permissions and access',
     bos_playground_public: 'Public Playground',
     bos_playground_public_desc: 'End-user interface for workflow',
+    
+    // BOS - SubMenu footer
+    bos_map_tooltip: 'BOS on the workflow map',
+    bos_shortcut_key: 'Ctrl+Shift+B',
     
     // COM - All menus (CO_003.1 - CO_003.5)
     com_connexions_api: 'API Connections',
@@ -544,6 +564,45 @@ export default {
     com_hub_connecteurs: 'Connectors Hub',
     com_hub_connecteurs_desc: 'Browse available integrations',
     
+    // COM - SubMenu footer
+    com_map_tooltip: 'COM on the workflow map',
+    com_shortcut_key: 'Ctrl+Shift+C',
+    
+    // COM API - KeyValue Component & Form
+    com_api_key_placeholder: 'Key',
+    com_api_value_placeholder: 'Value',
+    com_api_add_button: '+ Add',
+    com_api_no_items: 'No items',
+    com_api_tab_params: 'Parameters',
+    com_api_tab_headers: 'Headers',
+    com_api_tab_body: 'Body',
+    com_api_no_connections: 'No connections',
+    com_api_no_connections_desc: 'create one to get started',
+    com_api_no_selection: 'No selection',
+    com_api_select_connection: 'Select a connection or create one',
+    com_api_config_title: 'Configuration',
+    com_api_connection_name_label: 'Connection Name',
+    com_api_connection_name_placeholder: 'ex: API Users',
+    com_api_url_placeholder: 'https://api.example.com/v1/resource',
+    com_api_auth_label: 'Authentication',
+    com_api_auth_none: 'None',
+    com_api_auth_basic: 'Basic Auth',
+    com_api_auth_bearer: 'Bearer Token',
+    com_api_auth_header: 'Header Auth',
+    com_api_bearer_placeholder: 'Bearer Token',
+    com_api_button_test: 'Test',
+    com_api_button_save: 'Save',
+    com_api_button_test_loading: 'Test...',
+    com_api_details_title: 'Details',
+    com_api_button_edit: 'Edit',
+    com_api_result_title: 'Result',
+    com_api_no_result: 'No result',
+    com_api_no_result_desc: 'Test a request to see the response',
+    com_api_workflow_modal_title: 'Add to Workflow',
+    com_api_node_name_label: 'Node Name',
+    com_api_node_name_placeholder: 'ex: User Query',
+    com_api_button_confirm: 'Confirm',
+    
     // PHIL - All menus (PH_004.1 - PH_004.5)
     phil_rag_configuration: 'RAG Configuration',
     phil_rag_configuration_desc: 'Chunks, embeddings and retrieval',
@@ -555,6 +614,17 @@ export default {
     phil_bibliotheques_externes_desc: 'Install packages and tools',
     phil_knowledge_base: 'Knowledge Base',
     phil_knowledge_base_desc: 'Manage documents and contexts',
+    
+    // PHIL - SubMenu footer + description
+    phil_data_desc: 'Specialist in data and file transformation',
+    phil_map_tooltip: 'PHIL on the workflow map',
+    phil_shortcut_key: 'Ctrl+Shift+P',
+    
+    // PHIL - File format options
+    phil_file_format_json: 'JSON',
+    phil_file_format_csv: 'CSV',
+    phil_file_format_pdf: 'PDF',
+    phil_file_format_xml: 'XML',
     
     // TIM - All menus (TI_005.1 - TI_005.5)
     tim_triggers_webhooks: 'Triggers & Webhooks',
@@ -568,6 +638,11 @@ export default {
     tim_async_management: 'Async Management',
     tim_async_management_desc: 'Orchestrate asynchronous tasks',
     
+    // TIM - SubMenu footer + description
+    tim_events_desc: 'Event manager, scheduling and asynchronous flow control',
+    tim_map_tooltip: 'TIM on the workflow map',
+    tim_shortcut_key: 'Ctrl+Shift+T',
+    
     // COM API Page
     api_connections_title: 'API Connections',
     api_connections_description: 'Create and test your HTTP requests',
@@ -577,4 +652,78 @@ export default {
     no_selection: 'Select or create a connection',
     select_from_list: 'Choose from the list on the left or create a new one',
     connection_details_view: 'Details view - Coming soon',
+    
+    // Additional UI Labels for remaining hardcoded text
+    json_table_index: 'Index',
+    json_table_value: 'Value',
+    config_tab_save: 'Save',
+    button_save_loading: 'Saving...',
+    workflow_add_validation: 'Add to workflow',
+    workflow_config_required: 'Configuration required',
+    test_loading: 'Test...',
+    settings_tab_label: 'Settings',
+
+    // ARCHI Prototyping Page - Notification Titles
+    archi_template_loaded: 'Template Loaded',
+    archi_error: 'Error',
+    archi_agent_added_workflow: 'Agent Added to Workflow',
+    archi_agent_created: 'Agent Created',
+    archi_creation_refused: 'Creation Refused',
+    archi_prototype_modified: 'Prototype Modified',
+    archi_modification_refused: 'Modification Refused',
+    archi_template_created: 'Template Created',
+    archi_template_existing: 'Template Already Exists',
+    archi_creation_failed: 'Creation Failed',
+
+    // COM Databases Page - Headers & Labels
+    com_databases_title: 'Databases',
+    com_databases_your_bases: '📊 Your Databases',
+    com_no_database_created: 'No Database Created',
+    com_create_new_connection: 'Create a New Connection',
+    com_database_explorer: '🔍 Explorer',
+    com_advanced_settings: '⚙️ Advanced Settings',
+    com_select_database_explore: 'Select a database to explore',
+
+    // Settings Modal & Header - Guest Mode & Languages
+    settings_language_title: 'Application Language',
+    settings_language_desc: 'Choose the language for the user interface.',
+    settings_language_saved: '💡 Note: Language is automatically saved and persisted',
+    settings_language_profile: 'in your user profile',
+    settings_language_localstorage: 'in localStorage',
+    settings_guest_mode_warning: '⚠️ Guest Mode: API keys are stored in localStorage (unencrypted). Sign in to encrypt your data securely.',
+    header_guest_mode: 'Guest Mode',
+    header_login: 'Sign In',
+    header_register: 'Register',
+    header_logout: 'Sign Out',
+
+    // COM Databases Page - Form Fields & Buttons
+    com_db_form_name_label: 'Connection Name',
+    com_db_form_name_placeholder: 'e.g: Production PostgreSQL',
+    com_db_form_host_label: 'Host',
+    com_db_form_host_placeholder: 'localhost or IP address',
+    com_db_form_port_label: 'Port',
+    com_db_form_database_label: 'Database',
+    com_db_form_database_placeholder: 'Database Name',
+    com_db_form_username_label: 'Username',
+    com_db_form_username_placeholder: 'Username',
+    com_db_form_password_label: 'Password',
+    com_db_form_password_placeholder: 'Password',
+    com_db_button_test: '🔗 Test',
+    com_db_button_test_loading: 'Testing...',
+    com_db_button_update: '💾 Update',
+    com_db_button_update_loading: '💾 Updating...',
+    com_db_button_save: '💾 Save',
+    com_db_button_save_loading: '💾 Saving...',
+    com_db_form_select_provider: 'Select the database type:',
+    com_db_form_selected_provider: 'Selected type:',
+    com_db_form_change_provider: 'Change type',
+    com_db_form_edit_title: '✏️ Edit Database:',
+    com_db_form_new_title: '🆕 New Database',
+    com_db_button_add: 'Add a Database',
+    com_db_subtitle: 'Connect your SQL, NoSQL and Vector data sources',
+    com_db_adv_min_connections: 'Min Connections',
+    com_db_adv_max_connections: 'Max Connections',
+    com_db_adv_connect_timeout: 'Connect Timeout (ms)',
+    com_db_adv_query_timeout: 'Query Timeout (ms)',
+    com_db_adv_ssh_tunneling: 'Enable SSH Tunneling',
 };

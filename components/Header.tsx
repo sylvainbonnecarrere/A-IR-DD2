@@ -48,19 +48,19 @@ export const Header = ({ onOpenSettings }: HeaderProps) => {
               // GUEST MODE
               <>
                 <span className="text-gray-400 text-xs px-2 py-1 bg-gray-900 rounded">
-                  Mode Invité
+                  {t('header_guest_mode')}
                 </span>
                 <Button
                   onClick={() => setShowLoginModal(true)}
                   className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 rounded text-white text-sm transition"
                 >
-                  Connexion
+                  {t('header_login')}
                 </Button>
                 <Button
                   onClick={() => setShowRegisterModal(true)}
                   className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm transition"
                 >
-                  Inscription
+                  {t('header_register')}
                 </Button>
               </>
             ) : (
@@ -73,7 +73,7 @@ export const Header = ({ onOpenSettings }: HeaderProps) => {
                   onClick={logout}
                   className="px-3 py-2 bg-red-600 hover:bg-red-700 rounded text-white text-sm transition"
                 >
-                  Déconnexion
+                  {t('header_logout')}
                 </Button>
               </>
             )}

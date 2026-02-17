@@ -226,6 +226,7 @@ const FormField: React.FC<FormFieldProps> = ({
 );
 
 const AdvancedOptions: React.FC = () => {
+  const { t } = useLocalization();
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -234,7 +235,7 @@ const AdvancedOptions: React.FC = () => {
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center justify-between w-full p-4 bg-gray-700/50 rounded-lg hover:bg-gray-700 transition-colors"
       >
-        <span className="font-semibold text-gray-200">⚙️ Paramètres Avancés</span>
+        <span className="font-semibold text-gray-200">{t('com_advanced_settings')}</span>
         <div className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>
           <ChevronDownIcon className="w-5 h-5 text-gray-400" />
         </div>
@@ -244,7 +245,7 @@ const AdvancedOptions: React.FC = () => {
         <div className="mt-4 p-4 bg-gray-800/50 rounded-lg space-y-4 animate-in fade-in duration-200">
           <div className="grid grid-cols-2 gap-4">
             <FormField
-              label="Min Connections"
+              label={t('com_db_adv_min_connections')}
               name="poolMinSize"
               type="number"
               placeholder="5"
@@ -252,7 +253,7 @@ const AdvancedOptions: React.FC = () => {
               onChange={() => {}}
             />
             <FormField
-              label="Max Connections"
+              label={t('com_db_adv_max_connections')}
               name="poolMaxSize"
               type="number"
               placeholder="20"
@@ -260,7 +261,7 @@ const AdvancedOptions: React.FC = () => {
               onChange={() => {}}
             />
             <FormField
-              label="Connect Timeout (ms)"
+              label={t('com_db_adv_connect_timeout')}
               name="connectTimeout"
               type="number"
               placeholder="5000"
@@ -268,7 +269,7 @@ const AdvancedOptions: React.FC = () => {
               onChange={() => {}}
             />
             <FormField
-              label="Query Timeout (ms)"
+              label={t('com_db_adv_query_timeout')}
               name="queryTimeout"
               type="number"
               placeholder="30000"
@@ -280,7 +281,7 @@ const AdvancedOptions: React.FC = () => {
           <div className="border-t border-gray-700 pt-4">
             <label className="flex items-center space-x-3 cursor-pointer">
               <input type="checkbox" className="w-4 h-4 accent-green-500" />
-              <span className="text-sm text-gray-300">Activer SSH Tunneling</span>
+              <span className="text-sm text-gray-300">{t('com_db_adv_ssh_tunneling')}</span>
             </label>
           </div>
         </div>
@@ -530,8 +531,8 @@ export const ComDatabasesPage: React.FC = () => {
                 <DatabaseIcon />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-white">Bases de Données</h1>
-                <p className="text-gray-400 text-sm">Connectez vos sources de données SQL, NoSQL et Vectorielles</p>
+                <h1 className="text-xl font-bold text-white">{t('com_databases_title')}</h1>
+                <p className="text-gray-400 text-sm">{t('com_db_subtitle')}</p>
               </div>
             </div>
 
@@ -544,7 +545,7 @@ export const ComDatabasesPage: React.FC = () => {
                 className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg font-semibold hover:from-green-500 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/50"
               >
                 <PlusIcon className="w-4 h-4" />
-                <span>Ajouter une Base de données</span>
+                <span>{t('com_db_button_add')}</span>
               </button>
 
               {/* Governance Indicator - COM Green */}
@@ -561,11 +562,11 @@ export const ComDatabasesPage: React.FC = () => {
         {/* Left Column - Database Nodes List */}
         <div className="w-72 border-r border-gray-700 bg-gray-800/20 overflow-y-auto p-4 flex flex-col">
           <div className="mb-4">
-            <h2 className="text-lg font-semibold text-gray-200 mb-3">📊 Vos Bases</h2>
+            <h2 className="text-lg font-semibold text-gray-200 mb-3">{t('com_databases_your_bases')}</h2>
             {databaseNodes.length === 0 ? (
               <div className="text-center py-8">
-                <p className="text-gray-500 text-sm">Aucune base créée</p>
-                <p className="text-gray-600 text-xs mt-1">Créez une nouvelle connexion</p>
+                <p className="text-gray-500 text-sm">{t('com_no_database_created')}</p>
+                <p className="text-gray-600 text-xs mt-1">{t('com_create_new_connection')}</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -619,8 +620,8 @@ export const ComDatabasesPage: React.FC = () => {
                 <div className="flex items-center justify-between flex-shrink-0">
                   <h2 className="text-xl font-bold text-white">
                     {editingNodeId
-                      ? `✏️ Modifier la Base de Données : ${formData.name}`
-                      : '🆕 Nouvelle Base de Données'
+                      ? `${t('com_db_form_edit_title')} ${formData.name}`
+                      : t('com_db_form_new_title')
                     }
                   </h2>
                   <button
@@ -644,7 +645,7 @@ export const ComDatabasesPage: React.FC = () => {
 
                 {/* Provider Grid - Always Visible - Single Row with Horizontal Scroll */}
                 <div className="flex-shrink-0 space-y-2">
-                  <p className="text-gray-400 text-sm font-medium">Sélectionnez le type de base de données :</p>
+                  <p className="text-gray-400 text-sm font-medium">{t('com_db_form_select_provider')}</p>
                   <div className="flex gap-2 overflow-x-auto pb-2 scroll-smooth" style={{
                     scrollbarWidth: 'thin',
                     scrollbarColor: '#4b5563 #1f2937'
@@ -686,7 +687,7 @@ export const ComDatabasesPage: React.FC = () => {
                       <div className="flex items-center justify-between mb-4">
                         <div>
                           <label className="text-sm font-semibold text-gray-300">
-                            Type sélectionné : <span className="text-green-400">{selectedProviderData?.name}</span>
+                            {t('com_db_form_selected_provider')} <span className="text-green-400">{selectedProviderData?.name}</span>
                           </label>
                         </div>
                         <button
@@ -694,23 +695,23 @@ export const ComDatabasesPage: React.FC = () => {
                           onClick={() => setSelectedProvider(null)}
                           className="text-xs px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-all"
                         >
-                          Changer de type
+                          {t('com_db_form_change_provider')}
                         </button>
                       </div>
 
                       <FormField
-                        label="Nom de la connexion"
+                        label={t('com_db_form_name_label')}
                         name="name"
-                        placeholder="ex: Production PostgreSQL"
+                        placeholder={t('com_db_form_name_placeholder')}
                         value={formData.name}
                         onChange={(val) => handleFormChange('name', val)}
                         required
                       />
 
                       <FormField
-                        label="Hôte"
+                        label={t('com_db_form_host_label')}
                         name="host"
-                        placeholder="localhost ou adresse IP"
+                        placeholder={t('com_db_form_host_placeholder')}
                         value={formData.host}
                         onChange={(val) => handleFormChange('host', val)}
                         required
@@ -718,7 +719,7 @@ export const ComDatabasesPage: React.FC = () => {
 
                       <div className="grid grid-cols-2 gap-4">
                         <FormField
-                          label="Port"
+                          label={t('com_db_form_port_label')}
                           name="port"
                           type="number"
                           placeholder={String(selectedProviderData?.defaultPort)}
@@ -726,27 +727,27 @@ export const ComDatabasesPage: React.FC = () => {
                           onChange={(val) => handleFormChange('port', val)}
                         />
                         <FormField
-                          label="Base de données"
+                          label={t('com_db_form_database_label')}
                           name="database"
-                          placeholder="Nom de la BDD"
+                          placeholder={t('com_db_form_database_placeholder')}
                           value=""
                           onChange={() => {}}
                         />
                       </div>
 
                       <FormField
-                        label="Utilisateur"
+                        label={t('com_db_form_username_label')}
                         name="username"
-                        placeholder="Nom d'utilisateur"
+                        placeholder={t('com_db_form_username_placeholder')}
                         value={formData.username}
                         onChange={(val) => handleFormChange('username', val)}
                       />
 
                       <FormField
-                        label="Mot de passe"
+                        label={t('com_db_form_password_label')}
                         name="password"
                         type="password"
-                        placeholder="Mot de passe"
+                        placeholder={t('com_db_form_password_placeholder')}
                         value={formData.password}
                         onChange={(val) => handleFormChange('password', val)}
                       />
@@ -770,7 +771,7 @@ export const ComDatabasesPage: React.FC = () => {
                           }}
                           className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold hover:bg-gray-600 transition-all"
                         >
-                          Annuler
+                          {t('cancel')}
                         </button>
                         <button
                           type="button"
@@ -782,7 +783,7 @@ export const ComDatabasesPage: React.FC = () => {
                               : 'bg-blue-600 text-white hover:bg-blue-500'
                           }`}
                         >
-                          {isTesting ? 'Test...' : '🔗 Tester'}
+                          {isTesting ? t('com_db_button_test_loading') : t('com_db_button_test')}
                         </button>
                         <button
                           type="submit"
@@ -795,11 +796,11 @@ export const ComDatabasesPage: React.FC = () => {
                         >
                           {isSaving
                             ? editingNodeId
-                              ? '💾 Mise à jour...'
-                              : '💾 Sauvegarde...'
+                              ? t('com_db_button_update_loading')
+                              : t('com_db_button_save_loading')
                             : editingNodeId
-                            ? '💾 Mettre à jour'
-                            : '💾 Sauvegarder'
+                            ? t('com_db_button_update')
+                            : t('com_db_button_save')
                           }
                         </button>
                       </div>
@@ -814,7 +815,7 @@ export const ComDatabasesPage: React.FC = () => {
                 return node ? (
                   <div className="flex flex-col h-full">
                     <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-xl font-bold text-white">🔍 Explorateur</h2>
+                      <h2 className="text-xl font-bold text-white">{t('com_database_explorer')}</h2>
                       <button
                         onClick={() => setSelectedNodeId(null)}
                         className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200"
@@ -839,7 +840,7 @@ export const ComDatabasesPage: React.FC = () => {
               <div className="text-center py-16 fade-in flex flex-col items-center justify-center">
                 <div className="text-6xl mb-4">🗄️</div>
                 <p className="text-gray-400 text-lg">
-                  Sélectionnez une base de données pour l'explorer
+                  {t('com_select_database_explore')}
                 </p>
               </div>
             )}

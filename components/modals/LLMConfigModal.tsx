@@ -11,6 +11,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useLLMConfigs } from '../../hooks/useLLMConfigs';
+import { useLocalization } from '../../hooks/useLocalization';
 import type { ILLMConfigUI } from '../../types';
 
 interface LLMConfigModalProps {
@@ -246,7 +247,7 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
               disabled={combinedLoading}
               className="flex-1 bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400"
             >
-              {combinedLoading ? 'Sauvegarde...' : 'Sauvegarder'}
+              {combinedLoading ? t('button_save_loading') : t('save')}
             </button>
 
             <button

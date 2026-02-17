@@ -150,14 +150,14 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
       addNotification({
         type: 'info',
-        title: 'Template chargé',
+        title: t('archi_template_loaded'),
         message: `Template "${template.name}" prêt à personnaliser.`,
         duration: 3000
       });
     } else {
       addNotification({
         type: 'error',
-        title: 'Erreur',
+        title: t('archi_error'),
         message: `Impossible de créer un agent depuis ce template.`,
         duration: 3000
       });
@@ -193,7 +193,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       // Show success notification
       addNotification({
         type: 'success',
-        title: 'Agent ajouté au workflow',
+        title: t('archi_agent_added_workflow'),
         message: `${instanceName || agentToAdd.name} a été ajouté au workflow global`,
         duration: 3000
       });
@@ -247,14 +247,14 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
         
         addNotification({
           type: 'success',
-          title: 'Agent créé',
+          title: t('archi_agent_created'),
           message: `"${agentData.name}" a été créé avec succès.`,
           duration: 3000
         });
       } else {
         addNotification({
           type: 'error',
-          title: 'Création refusée',
+          title: t('archi_creation_refused'),
           message: result.error || 'Erreur de gouvernance',
           duration: 5000
         });
@@ -279,14 +279,14 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       
       addNotification({
         type: 'success',
-        title: 'Prototype modifié',
+        title: t('archi_prototype_modified'),
         message: `Les modifications ont été appliquées avec succès. Seules les nouvelles instances de ce prototype seront concernées.`,
         duration: 4000
       });
     } else {
       addNotification({
         type: 'error',
-        title: 'Modification refusée',
+        title: t('archi_modification_refused'),
         message: result.error || 'Erreur de gouvernance',
         duration: 5000
       });
@@ -356,7 +356,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
     if (result) {
       addNotification({
         type: 'success',
-        title: 'Template créé',
+        title: t('archi_template_created'),
         message: `Le prototype "${agentToAddAsTemplate.name}" a été ajouté aux templates avec succès.`,
         duration: 3000
       });
@@ -367,7 +367,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
       addNotification({
         type: isDuplicate ? 'warning' : 'error',
-        title: isDuplicate ? 'Template existant' : 'Échec de la création',
+        title: isDuplicate ? t('archi_template_existing') : t('archi_creation_failed'),
         message: isDuplicate
           ? `Un template existe déjà pour ce prototype.`
           : `Impossible de créer le template.`,

@@ -109,7 +109,12 @@ const KeyValueList: React.FC<{
   label: string;
   keyPlaceholder?: string;
   valuePlaceholder?: string;
-}> = ({ items, onAdd, onRemove, onChange, label, keyPlaceholder = 'Clé', valuePlaceholder = 'Valeur' }) => (
+}> = ({ items, onAdd, onRemove, onChange, label, keyPlaceholder, valuePlaceholder }) => {
+  const { t } = useLocalization();
+  const finalKeyPlaceholder = keyPlaceholder || t('com_api_key_placeholder');
+  const finalValuePlaceholder = valuePlaceholder || t('com_api_value_placeholder');
+  
+  return (
   <div className="space-y-3">
     <div className="flex items-center justify-between">
       <label className="text-sm font-semibold text-gray-300">{label}</label>
@@ -130,14 +135,14 @@ const KeyValueList: React.FC<{
           <div key={item.id} className="flex gap-2 flex-wrap">
             <input
               type="text"
-              placeholder={keyPlaceholder}
+              placeholder={finalKeyPlaceholder}
               value={item.key}
               onChange={(e) => onChange(item.id, 'key', e.target.value)}
               className="flex-1 min-w-[80px] px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
             />
             <input
               type="text"
-              placeholder={valuePlaceholder}
+              placeholder={finalValuePlaceholder}
               value={item.value}
               onChange={(e) => onChange(item.id, 'value', e.target.value)}
               className="flex-1 min-w-[80px] px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
@@ -154,7 +159,8 @@ const KeyValueList: React.FC<{
       )}
     </div>
   </div>
-);
+  );
+};
 
 const TabButton: React.FC<{
   active: boolean;
@@ -667,7 +673,7 @@ export const ComApiPage: React.FC = () => {
                   }`}
                 >
                   {isLoading ? <LoaderIcon className="w-4 h-4 animate-spin" /> : '▶'}
-                  {isLoading ? 'Test...' : 'Tester'}
+                  {isLoading ? t('test_loading') : t('com_api_button_test')}
                 </button>
                 <button
                   onClick={handleSaveConnection}

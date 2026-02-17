@@ -15,6 +15,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { HyperspaceReveal } from './HyperspaceReveal';
+import { useLocalization } from '../hooks/useLocalization';
 
 // ============================================
 // TYPES
@@ -70,7 +71,7 @@ const NAV_ITEMS: NavItem[] = [
     {
         id: 'settings',
         icon: '⚙️',
-        label: 'Paramètres',
+        label: t('settings_tab_label'),
         description: 'Personnalisez votre expérience'
     }
 ];

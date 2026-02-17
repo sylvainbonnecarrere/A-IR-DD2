@@ -1,10 +1,12 @@
 import React, { useMemo } from 'react';
+import { useLocalization } from '../hooks/useLocalization';
 
 interface JsonTableViewerProps {
   data: any;
 }
 
 export const JsonTableViewer: React.FC<JsonTableViewerProps> = ({ data }) => {
+  const { t } = useLocalization();
   const { isArray, rows, columns } = useMemo(() => {
     try {
       const parsed = typeof data === 'string' ? JSON.parse(data) : data;
@@ -20,7 +22,7 @@ export const JsonTableViewer: React.FC<JsonTableViewerProps> = ({ data }) => {
       // Assume first element is object to infer columns
       const firstRow = parsed[0];
       if (typeof firstRow !== 'object' || firstRow === null) {
-        return { isArray: true, rows: parsed.map((v, i) => ({ index: i, value: String(v) })), columns: ['Index', 'Valeur'] };
+        return { isArray: true, rows: parsed.map((v, i) => ({ index: i, value: String(v) })), columns: [t('json_table_index'), t('json_table_value')] };
       }
 
       const cols = Object.keys(firstRow);

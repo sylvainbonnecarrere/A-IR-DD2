@@ -19,6 +19,7 @@ import { Button } from '../UI';
 import { CloseIcon } from '../Icons';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
 import { useAuth } from '../../hooks/useAuth';
+import { useLocalization } from '../../hooks/useLocalization';
 
 interface WorkflowValidationModalProps {
   isOpen: boolean;
@@ -139,7 +140,7 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'general', label: 'Général', icon: <SettingsIcon className="w-4 h-4" /> },
-    ...(isAuthenticated ? [{ id: 'persistence' as const, label: 'Sauvegarde', icon: <SaveIcon className="w-4 h-4" /> }] : [])
+    ...(isAuthenticated ? [{ id: 'persistence' as const, label: t('config_tab_save'), icon: <SaveIcon className="w-4 h-4" /> }] : [])
   ];
 
   // ============================================
@@ -368,7 +369,7 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
             disabled={!isReady}
             className="flex-1"
           >
-            {isReady ? 'Ajouter au workflow' : 'Configuration requise'}
+            {isReady ? t('workflow_add_validation') : t('workflow_config_required')}
           </Button>
         </div>
       </div>

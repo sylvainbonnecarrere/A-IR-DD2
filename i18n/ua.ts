@@ -522,6 +522,26 @@ export default {
     archi_bibliotheque_prototypes: 'Бібліотека прототипів',
     archi_bibliotheque_prototypes_desc: 'Дослідити збережені агенти',
     
+    // ARCHI - Button labels and notifications
+    archi_button_tasks: 'Завдання',
+    archi_button_governance: 'Керування',
+    archi_button_template: 'Шаблон',
+    archi_button_create: 'Створити',
+    template_created_title: 'Шаблон створено',
+    template_created_success: 'Прототип "{agentName}" успішно додано до шаблонів.',
+    template_created_duplicate: 'Шаблон для цього прототипу вже існує.',
+    template_creation_failed: 'Не вдалося створити шаблон.',
+    template_creation_error_title: 'Помилка створення',
+    template_existing_warning_title: 'Існуючий шаблон',
+    
+    // ARCHI - SubMenu footer
+    archi_map_tooltip: 'ARCHI на карті workflow',
+    archi_shortcut_key: 'Ctrl+Shift+A',
+    
+    // BOS - SubMenu footer
+    bos_map_tooltip: 'BOS на карті workflow',
+    bos_shortcut_key: 'Ctrl+Shift+B',
+    
     // BOS - Additional menus (BO_002.2 - BO_002.5)
     bos_monitoring_live: 'Реальний моніторинг',
     bos_monitoring_live_desc: 'Перегляд логів/продуктивності в реальному часі',
@@ -544,6 +564,45 @@ export default {
     com_hub_connecteurs: 'Центр конекторів',
     com_hub_connecteurs_desc: 'Переглянути доступні інтеграції',
     
+    // COM - SubMenu footer
+    com_map_tooltip: 'COM на карті workflow',
+    com_shortcut_key: 'Ctrl+Shift+C',
+    
+    // COM API - KeyValue Component & Form
+    com_api_key_placeholder: 'Ключ',
+    com_api_value_placeholder: 'Значення',
+    com_api_add_button: '+ Додати',
+    com_api_no_items: 'Немає елементів',
+    com_api_tab_params: 'Параметри',
+    com_api_tab_headers: 'Заголовки',
+    com_api_tab_body: 'Тіло',
+    com_api_no_connections: 'Немає з\'єднань',
+    com_api_no_connections_desc: 'створіть одне для початку',
+    com_api_no_selection: 'Нема виділення',
+    com_api_select_connection: 'Виберіть з\'єднання або створіть нове',
+    com_api_config_title: 'Конфігурація',
+    com_api_connection_name_label: 'Назва з\'єднання',
+    com_api_connection_name_placeholder: 'напр: API користувачів',
+    com_api_url_placeholder: 'https://api.приклад.com/v1/ресурс',
+    com_api_auth_label: 'Аутентифікація',
+    com_api_auth_none: 'Немає',
+    com_api_auth_basic: 'Basic Auth',
+    com_api_auth_bearer: 'Bearer Token',
+    com_api_auth_header: 'Header Auth',
+    com_api_bearer_placeholder: 'Bearer Token',
+    com_api_button_test: 'Тест',
+    com_api_button_save: 'Зберегти',
+    com_api_button_test_loading: 'Тест...',
+    com_api_details_title: 'Деталі',
+    com_api_button_edit: 'Редагувати',
+    com_api_result_title: 'Результат',
+    com_api_no_result: 'Без результату',
+    com_api_no_result_desc: 'Перевірте запит, щоб побачити відповідь',
+    com_api_workflow_modal_title: 'Додати до Workflow',
+    com_api_node_name_label: 'Назва вузла',
+    com_api_node_name_placeholder: 'напр: Запит користувачів',
+    com_api_button_confirm: 'Підтвердити',
+    
     // PHIL - All menus (PH_004.1 - PH_004.5)
     phil_rag_configuration: 'Конфігурація RAG',
     phil_rag_configuration_desc: 'Чанки, вбудовування та пошук',
@@ -555,6 +614,17 @@ export default {
     phil_bibliotheques_externes_desc: 'Встановлювати пакети та інструменти',
     phil_knowledge_base: 'База знань',
     phil_knowledge_base_desc: 'Управління документами та контекстами',
+    
+    // PHIL - SubMenu footer + description
+    phil_data_desc: 'Фахівець у трансформації даних та обробці файлів',
+    phil_map_tooltip: 'PHIL на карті workflow',
+    phil_shortcut_key: 'Ctrl+Shift+P',
+    
+    // PHIL - File format options
+    phil_file_format_json: 'JSON',
+    phil_file_format_csv: 'CSV',
+    phil_file_format_pdf: 'PDF',
+    phil_file_format_xml: 'XML',
     
     // TIM - All menus (TI_005.1 - TI_005.5)
     tim_triggers_webhooks: 'Тригери та Webhooks',
@@ -568,6 +638,11 @@ export default {
     tim_async_management: 'Асинхронне управління',
     tim_async_management_desc: 'Оркестрування асинхронних завдань',
     
+    // TIM - SubMenu footer + description
+    tim_events_desc: 'Менеджер подій, планування та управління асинхронними потоками',
+    tim_map_tooltip: 'TIM на карті workflow',
+    tim_shortcut_key: 'Ctrl+Shift+T',
+    
     // COM API Page
     api_connections_title: 'З\'єднання API',
     api_connections_description: 'Створення та тестування ваших HTTP запитів',
@@ -577,4 +652,78 @@ export default {
     no_selection: 'Виберіть або створіть з\'єднання',
     select_from_list: 'Виберіть зі списку ліворуч або створіть нове',
     connection_details_view: 'Перегляд деталей - скоро',
+    
+    // Additional UI Labels for remaining hardcoded text
+    json_table_index: 'Індекс',
+    json_table_value: 'Значення',
+    config_tab_save: 'Зберегти',
+    button_save_loading: 'Збереження...',
+    workflow_add_validation: 'Додати до workflow',
+    workflow_config_required: 'Конфігурація необхідна',
+    test_loading: 'Тест...',
+    settings_tab_label: 'Параметри',
+
+    // ARCHI Prototyping Page - Notification Titles
+    archi_template_loaded: 'Шаблон завантажений',
+    archi_error: 'Помилка',
+    archi_agent_added_workflow: 'Агент додано до workflow',
+    archi_agent_created: 'Агент створено',
+    archi_creation_refused: 'Création відхилено',
+    archi_prototype_modified: 'Прототип змінено',
+    archi_modification_refused: 'Modification відхилено',
+    archi_template_created: 'Шаблон створено',
+    archi_template_existing: 'Шаблон вже існує',
+    archi_creation_failed: 'Помилка створення',
+
+    // COM Databases Page - Headers & Labels
+    com_databases_title: 'Бази Даних',
+    com_databases_your_bases: '📊 Ваші Бази Даних',
+    com_no_database_created: 'Жодна база даних не створена',
+    com_create_new_connection: 'Створіть нове з\'єднання',
+    com_database_explorer: '🔍 Експлорер',
+    com_advanced_settings: '⚙️ Розширені параметри',
+    com_select_database_explore: 'Виберіть базу даних для дослідження',
+
+    // Settings Modal & Header - Guest Mode & Languages
+    settings_language_title: 'Мова Додатка',
+    settings_language_desc: 'Виберіть мову для користувацького інтерфейсу.',
+    settings_language_saved: '💡 Примітка: Мова автоматично зберігається та зберігається',
+    settings_language_profile: 'у вашому профілі користувача',
+    settings_language_localstorage: 'у localStorage',
+    settings_guest_mode_warning: '⚠️ Режим Гостя: Ключі API зберігаються в localStorage (незашифровано). Увійдіть, щоб безпечно зашифрувати свої дані.',
+    header_guest_mode: 'Режим Гостя',
+    header_login: 'Увійти',
+    header_register: 'Зареєструватися',
+    header_logout: 'Вийти',
+
+    // COM Databases Page - Form Fields & Buttons
+    com_db_form_name_label: "Назва З'єднання",
+    com_db_form_name_placeholder: 'напр.: Production PostgreSQL',
+    com_db_form_host_label: 'Хост',
+    com_db_form_host_placeholder: 'localhost або IP-адреса',
+    com_db_form_port_label: 'Порт',
+    com_db_form_database_label: 'База даних',
+    com_db_form_database_placeholder: 'Назва бази даних',
+    com_db_form_username_label: "Ім'я користувача",
+    com_db_form_username_placeholder: "Ім'я користувача",
+    com_db_form_password_label: 'Пароль',
+    com_db_form_password_placeholder: 'Пароль',
+    com_db_button_test: '🔗 Тест',
+    com_db_button_test_loading: 'Тестування...',
+    com_db_button_update: '💾 Оновити',
+    com_db_button_update_loading: '💾 Оновлення...',
+    com_db_button_save: '💾 Зберегти',
+    com_db_button_save_loading: '💾 Збереження...',
+    com_db_form_select_provider: 'Виберіть тип бази даних:',
+    com_db_form_selected_provider: 'Вибраний тип:',
+    com_db_form_change_provider: 'Змінити тип',
+    com_db_form_edit_title: '✏️ Редагування Бази Даних:',
+    com_db_form_new_title: '🆕 Нова База Даних',
+    com_db_button_add: 'Додати Базу Даних',
+    com_db_subtitle: 'Підключіть свої джерела даних SQL, NoSQL та Vector',
+    com_db_adv_min_connections: "Мін З'єднання",
+    com_db_adv_max_connections: "Макс З'єднання",
+    com_db_adv_connect_timeout: "Тайм-ауту З'єднання (мс)",
+    com_db_adv_query_timeout: 'Тайм-ауту Запиту (мс)',
+    com_db_adv_ssh_tunneling: 'Активувати SSH-тунелювання',
 };
