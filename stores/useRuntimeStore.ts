@@ -35,6 +35,9 @@ interface RuntimeStore {
   // Navigation state (for V2AgentNode edit functionality)
   navigationHandler: ((robotId: string, path: string) => void) | null;
 
+  // ⭐ ÉTAPE 3: Persistence & Deduplication
+  lastSavedAt: Record<string, Date | null>; // nodeId -> timestamp of last successful save
+
   // Actions - Messages & Execution
   setNodeMessages: (nodeId: string, messages: ChatMessage[]) => void;
   addNodeMessage: (nodeId: string, message: ChatMessage) => void;
@@ -58,6 +61,11 @@ interface RuntimeStore {
 
   // ⭐ NOUVEAU: Node Minimize Actions
   toggleNodeMinimized: (nodeId: string) => void;
+
+  // ⭐ ÉTAPE 3: Persistence & Deduplication - New Actions
+  setLastSavedAt: (nodeId: string, timestamp: Date) => void;
+  clearLastSavedAt: (nodeId: string) => void;
+  getNewMessages: (nodeId: string) => ChatMessage[]; // Returns only messages after lastSavedAt
 
   // Utility
   getNodeMessages: (nodeId: string) => ChatMessage[];
@@ -83,6 +91,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   configModalInstanceId: null,
   minimizedNodeIds: new Set(), // ⭐ NOUVEAU: État initial vide
   navigationHandler: null,
+  lastSavedAt: {}, // ⭐ ÉTAPE 3: Track last save timestamp per node
 
   // Message actions
   setNodeMessages: (nodeId, messages) => set((state) => ({
@@ -188,6 +197,58 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   },
 
   /**
+   * ⭐ ÉTAPE 3: Set last saved timestamp for a node
+   * Called after successful journal persist
+   * Used to filter out already-saved messages on next save
+   */
+  setLastSavedAt: (nodeId, timestamp) => set((state) => ({
+    lastSavedAt: { ...state.lastSavedAt, [nodeId]: timestamp }
+  })),
+
+  /**
+   * ⭐ ÉTAPE 3: Clear last saved timestamp for a node
+   * Rarely needed, but useful for testing or manual reset
+   */
+  clearLastSavedAt: (nodeId) => set((state) => ({
+    lastSavedAt: { ...state.lastSavedAt, [nodeId]: null }
+  })),
+
+  /**
+   * ⭐ ÉTAPE 3: Get only NEW messages since last save
+   * Filters messages by timestamp > lastSavedAt (second-level precision)
+   * 
+   * LOGIC:
+   * - If lastSavedAt[nodeId] is null: return ALL messages (first save)
+   * - Otherwise: return only messages newer than lastSavedAt timestamp
+   * - Timestamp precision: SECOND-level (more reliable than milliseconds)
+   * 
+   * @returns Array of messages created after the last save
+   */
+  getNewMessages: (nodeId) => {
+    const state = get();
+    const messages = state.nodeMessages[nodeId] || [];
+    const lastSaved = state.lastSavedAt[nodeId];
+
+    // First save: return all messages
+    if (!lastSaved) {
+      console.log(`[useRuntimeStore] getNewMessages(${nodeId}): First save - returning all ${messages.length} messages`);
+      return messages;
+    }
+
+    // Filter by timestamp > lastSaved (second-level precision to avoid millisecond drift)
+    const lastSavedSeconds = Math.floor(lastSaved.getTime() / 1000);
+    const newMessages = messages.filter(msg => {
+      // Parse message timestamp - default to epoch if missing
+      const msgTime = msg.timestamp ? new Date(msg.timestamp).getTime() : 0;
+      const msgSeconds = Math.floor(msgTime / 1000);
+      return msgSeconds > lastSavedSeconds;
+    });
+
+    console.log(`[useRuntimeStore] getNewMessages(${nodeId}): ${newMessages.length} new messages (out of ${messages.length} total). Last saved: ${lastSaved.toISOString()}`);
+    return newMessages;
+  },
+
+  /**
    * ⭐ ÉTAPE 2.2: Reset complet du store runtime pour wipe à la connexion
    * Nettoie tous les messages et états d'exécution
    */
@@ -195,6 +256,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     nodeMessages: {},
     executingNodes: new Set(),
     minimizedNodeIds: new Set(), // ⭐ RESET: Restore à normal
+    lastSavedAt: {}, // ⭐ ÉTAPE 3: Reset save timestamps on logout
     llmConfigs: [],
     isImagePanelOpen: false,
     isImageModificationPanelOpen: false,

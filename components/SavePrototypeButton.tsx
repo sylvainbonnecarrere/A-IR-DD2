@@ -66,7 +66,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     const [buttonState, setButtonState] = useState<ButtonState>('idle');
     const { isAuthenticated, accessToken } = useAuth();
     const { nodes, edges } = useDesignStore();
-    const { nodeMessages } = useRuntimeStore();
+    const { nodeMessages, getNewMessages, setLastSavedAt } = useRuntimeStore();
     const { isManualSave } = useSaveMode();
 
     // ⚠️ VISIBILITY GATE: Only render for authenticated users with manual save mode
@@ -75,6 +75,9 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     /**
      * ⭐ PHASE 3: Persister les journaux (messages de chat) pour tous les nodes
      * Appelé en mode manuel quand l'utilisateur clique sur Save
+     * 
+     * ⭐ ÉTAPE 3: Utilise getNewMessages() pour filtrer les messages déjà sauvegardés
+     * et appelle setLastSavedAt() après chaque save réussi
      */
     const persistJournals = useCallback(async (): Promise<{ saved: number; errors: number }> => {
         let saved = 0;
@@ -85,6 +88,13 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
         for (const [nodeId, messages] of Object.entries(nodeMessages)) {
             if (!messages || messages.length === 0) continue;
 
+            // ⭐ ÉTAPE 3: Récupérer seulement les nouveaux messages depuis le dernier save
+            const newMessages = getNewMessages(nodeId);
+            if (newMessages.length === 0) {
+                console.log(`[SavePrototypeButton] No new messages for node ${nodeId}`);
+                continue;
+            }
+
             // Trouver le node correspondant pour obtenir l'agentInstance
             const node = nodes.find(n => n.id === nodeId) as V2WorkflowNode | undefined;
             const agentInstance = node?.data?.agentInstance;
@@ -92,13 +102,14 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
 
             if (!agentInstance?.id || !effectiveWorkflowId) {
                 console.warn(`[SavePrototypeButton] Skipping node ${nodeId} - no agentInstance or workflowId`);
+                errors += newMessages.length;
                 continue;
             }
 
-            console.log(`[SavePrototypeButton] 📤 Persisting ${messages.length} messages for instance ${agentInstance.id}`);
+            console.log(`[SavePrototypeButton] 📤 Persisting ${newMessages.length} NEW messages for instance ${agentInstance.id}`);
 
             // Envoyer chaque message au backend
-            for (const message of messages) {
+            for (const message of newMessages) {
                 try {
                     const response = await fetch(
                         `${backendUrl}/api/workflows/${effectiveWorkflowId}/instances/${agentInstance.id}/journal`,
@@ -137,11 +148,15 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                     errors++;
                 }
             }
+
+            // ⭐ ÉTAPE 3: Marquer le checkpoint après avoir sauvegardé les messages du nœud
+            setLastSavedAt(nodeId, new Date());
+            console.log(`[SavePrototypeButton] ✅ Last saved checkpoint set for node ${nodeId}`);
         }
 
         console.log(`[SavePrototypeButton] ✅ Journals persisted: ${saved} saved, ${errors} errors`);
         return { saved, errors };
-    }, [nodeMessages, nodes, workflowId, accessToken]);
+    }, [nodeMessages, nodes, workflowId, accessToken, getNewMessages, setLastSavedAt]);
 
     /**
      * Handle save action

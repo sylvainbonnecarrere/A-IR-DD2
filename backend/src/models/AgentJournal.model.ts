@@ -52,6 +52,13 @@ export interface IAgentJournal extends Document {
     
     // Groupement optionnel
     sessionId?: string;
+
+    // ⭐ ÉTAPE 2: Déduplication safeguard
+    // Hash unique pour détecter les doublons au niveau base de données
+    _deduplicationKey?: string;
+    
+    // ⭐ ÉTAPE 2: Création timestamp avec défaut
+    _createdAt: Date;
 }
 
 // ============================================
@@ -195,6 +202,22 @@ const AgentJournalSchema = new Schema<IAgentJournal>({
     // Groupement
     sessionId: {
         type: String
+    },
+
+    // ⭐ ÉTAPE 2: Déduplication safeguard
+    // Hash unique: hash(agentInstanceId + timestamp + payload.substring(0,100))
+    // Utilisé pour détecter les doublons au niveau base de données
+    _deduplicationKey: {
+        type: String,
+        sparse: true,
+        // Note: index UNIQUE créé séparément
+    },
+
+    // ⭐ ÉTAPE 2: Création timestamp avec défaut
+    // Piste d'audit pour tracer quand l'entrée a été créée
+    _createdAt: {
+        type: Date,
+        default: Date.now
     }
 }, {
     timestamps: false, // On utilise notre propre timestamp
@@ -251,6 +274,16 @@ AgentJournalSchema.index(
 AgentJournalSchema.index(
     { sessionId: 1, timestamp: 1 },
     { name: 'idx_session', sparse: true }
+);
+
+/**
+ * ⭐ ÉTAPE 2: Index UNIQUE et SPARSE pour déduplication
+ * Prévient les doublons au niveau base de données
+ * SPARSE car certaines entrées (non-chat) n'auront pas de dedup key
+ */
+AgentJournalSchema.index(
+    { _deduplicationKey: 1 },
+    { name: 'idx_deduplicationKey_unique', unique: true, sparse: true }
 );
 
 // ============================================
