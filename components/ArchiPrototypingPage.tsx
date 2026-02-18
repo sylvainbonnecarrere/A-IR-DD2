@@ -14,7 +14,7 @@ import { useNotifications } from '../contexts/NotificationContext';
 import { AgentTemplate, createAgentFromTemplate, createAgentFromTemplateObject } from '../data/agentTemplates';
 import { GovernanceTestModal } from './modals/GovernanceTestModal';
 import { TodoModal } from './modals/TodoModal';
-import { addPrototypeToTemplates, loadCustomTemplates } from '../services/templateService';
+import { savePrototypeAsTemplateHybrid, loadAllTemplatesHybrid } from '../services/templateService';
 import { createAgentPrototype, updateAgentPrototype, fetchAgentPrototypes, mapAPIResponseToAgent } from '../services/agentPrototypeAPI';
 
 interface ArchiPrototypingPageProps {
@@ -344,33 +344,44 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
     setAddToTemplatesOpen(true);
   };
 
-  const confirmAddToTemplates = () => {
+  const confirmAddToTemplates = async () => {
     if (!agentToAddAsTemplate) return;
 
-    const result = addPrototypeToTemplates(
-      agentToAddAsTemplate,
-      undefined, // Utiliser le nom par défaut
-      undefined  // Utiliser la description par défaut
-    );
+    try {
+      const result = await savePrototypeAsTemplateHybrid(
+        agentToAddAsTemplate,
+        accessToken,
+        undefined, // Utiliser le nom par défaut
+        undefined  // Utiliser la description par défaut
+      );
 
-    if (result) {
+      if (result) {
+        addNotification({
+          type: 'success',
+          title: t('archi_template_created'),
+          message: `Le prototype "${agentToAddAsTemplate.name}" a été ajouté aux templates avec succès.`,
+          duration: 3000
+        });
+      } else {
+        addNotification({
+          type: 'error',
+          title: t('archi_creation_failed'),
+          message: `Impossible de créer le template.`,
+          duration: 4000
+        });
+      }
+    } catch (error) {
+      console.error('[confirmAddToTemplates] Error:', error);
+      
+      // Vérifier si c'est un problème de doublon ou autre
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
       addNotification({
-        type: 'success',
-        title: t('archi_template_created'),
-        message: `Le prototype "${agentToAddAsTemplate.name}" a été ajouté aux templates avec succès.`,
-        duration: 3000
-      });
-    } else {
-      // Vérifier si c'est un doublon
-      const existingTemplates = loadCustomTemplates();
-      const isDuplicate = existingTemplates.some(t => t.sourcePrototypeId === agentToAddAsTemplate.id);
-
-      addNotification({
-        type: isDuplicate ? 'warning' : 'error',
-        title: isDuplicate ? t('archi_template_existing') : t('archi_creation_failed'),
-        message: isDuplicate
-          ? `Un template existe déjà pour ce prototype.`
-          : `Impossible de créer le template.`,
+        type: 'warning',
+        title: t('archi_error'),
+        message: errorMessage.includes('doublon') || errorMessage.includes('duplicate')
+          ? 'Un template existe déjà pour ce prototype.'
+          : 'Impossible de créer le template.',
         duration: 4000
       });
     }

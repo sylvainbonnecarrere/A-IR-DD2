@@ -83,6 +83,7 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
   onCancel
 }) => {
   const { user } = useAuth();
+  const { t } = useLocalization();
   const isAuthenticated = user !== null;
   const [activeTab, setActiveTab] = useState<TabId>('general');
   const [instanceName, setInstanceName] = useState('');

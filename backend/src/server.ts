@@ -14,6 +14,7 @@ import localLLMRoutes from './routes/local-llm.routes';
 import authRoutes from './routes/auth.routes';
 import workflowsRoutes from './routes/workflows.routes';
 import agentPrototypesRoutes from './routes/agent-prototypes.routes';
+import agentTemplatesRoutes from './routes/agent-templates.routes';
 import agentInstancesRoutes from './routes/agent-instances.routes';
 import llmConfigsRoutes from './routes/llm-configs.routes';
 import llmProxyRoutes from './routes/llm-proxy.routes';
@@ -93,6 +94,7 @@ app.use('/api/workflows/:workflowId/instances', agentInstancesRoutes);
 app.use('/api/agent-instances', agentInstancesRoutes);
 app.use('/api/workflows', workflowsRoutes);
 app.use('/api/agent-prototypes', agentPrototypesRoutes);
+app.use('/api/agent-templates', agentTemplatesRoutes);
 
 // LLM routes (Jalon 3 - Phase 2)
 app.use('/api/llm-configs', llmConfigsRoutes);

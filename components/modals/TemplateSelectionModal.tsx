@@ -3,7 +3,8 @@ import { AgentTemplate, AGENT_TEMPLATES, getTemplatesByRobot, getCompatibleTempl
 import { RobotId, LLMConfig } from '../../types';
 import { Button } from '../UI';
 import { CloseIcon } from '../Icons';
-import { getAllTemplates, CustomTemplate, deleteCustomTemplate } from '../../services/templateService';
+import { loadAllTemplatesHybrid, deleteTemplateHybrid, CustomTemplate } from '../../services/templateService';
+import { useAuth } from '../../hooks/useAuth';
 import { ConfirmationModal } from './ConfirmationModal';
 
 interface TemplateSelectionModalProps {
@@ -21,29 +22,44 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
   onSelectTemplate,
   onCancel
 }) => {
+  const { accessToken } = useAuth();
+  
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplate | null>(null);
-  const [templatesRefreshKey, setTemplatesRefreshKey] = useState(0);
+  
+  // State pour charger les templates hybrides
+  const [allTemplates, setAllTemplates] = useState<AgentTemplate[]>(AGENT_TEMPLATES);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
 
   // État pour la modale de confirmation de suppression
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  // Charger tous les templates (prédéfinis + personnalisés)
-  // IMPORTANT: useMemo doit être appelé AVANT le return conditionnel
-  const allTemplates = useMemo(() => getAllTemplates(AGENT_TEMPLATES), [templatesRefreshKey]);
-
-  // Réinitialiser l'état quand le modal s'ouvre
+  // Charger tous les templates (prédéfinis + personnalisés) au démarrage et quand accessToken change
   useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        setIsLoadingTemplates(true);
+        const templates = await loadAllTemplatesHybrid(accessToken, AGENT_TEMPLATES);
+        setAllTemplates(templates);
+      } catch (error) {
+        console.error('[TemplateSelectionModal] Error loading templates:', error);
+        // Fallback to predefined templates
+        setAllTemplates(AGENT_TEMPLATES);
+      } finally {
+        setIsLoadingTemplates(false);
+      }
+    };
+
     if (isOpen) {
+      loadTemplates();
       setSelectedTemplate(null);
       setSelectedCategory('all');
       setSearchQuery('');
-      // Recharger les templates à chaque ouverture pour être sûr d'avoir les dernières données
-      setTemplatesRefreshKey(prev => prev + 1);
     }
-  }, [isOpen]);
+  }, [isOpen, accessToken]);
 
   if (!isOpen) return null;
 
@@ -53,8 +69,25 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
       .filter(c => c.enabled)
       .map(c => c.provider);
 
+    // Si aucun provider n'est activé, afficher tous les templates
+    if (enabledProviders.length === 0) {
+      return allTemplates;
+    }
+
     return allTemplates.filter(template => {
-      // Check if any enabled provider can support the template's capabilities  
+      // Si le template n'a pas de capabilities, l'accepter (compatible)
+      if (!template.template.capabilities || template.template.capabilities.length === 0) {
+        return true;
+      }
+
+      // Check if the template's LLM provider matches an enabled provider
+      const templateProvider = template.template.llmProvider;
+      if (templateProvider && enabledProviders.includes(templateProvider)) {
+        // Template uses a specific enabled provider, accept it
+        return true;
+      }
+
+      // Fallback: Check if ANY enabled provider can support the template's capabilities
       return enabledProviders.some(provider => {
         const config = llmConfigs.find(c => c.provider === provider);
         if (!config) return false;
@@ -63,6 +96,7 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
           .filter(cap => config.capabilities[cap as any])
           .map(cap => cap as any);
 
+        // Template is compatible if it has no capabilities or all its capabilities are supported
         return template.template.capabilities.every(cap =>
           providerCapabilities.includes(cap)
         );
@@ -123,28 +157,37 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
     setDeleteConfirmOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!templateToDelete) return;
 
-    const success = deleteCustomTemplate(templateToDelete.id);
+    try {
+      setIsDeleting(true);
+      const success = await deleteTemplateHybrid(templateToDelete.id, accessToken);
 
-    if (success) {
-      // Désélectionner si c'était le template sélectionné
-      if (selectedTemplate?.id === templateToDelete.id) {
-        setSelectedTemplate(null);
+      if (success) {
+        // Désélectionner si c'était le template sélectionné
+        if (selectedTemplate?.id === templateToDelete.id) {
+          setSelectedTemplate(null);
+        }
+
+        // Recharger les templates après suppression
+        const updatedTemplates = await loadAllTemplatesHybrid(accessToken, AGENT_TEMPLATES);
+        setAllTemplates(updatedTemplates);
+
+        // Fermer la modale
+        setDeleteConfirmOpen(false);
+        setTemplateToDelete(null);
+      } else {
+        console.error(`Échec de la suppression du template ${templateToDelete.id}`);
+        setDeleteConfirmOpen(false);
+        setTemplateToDelete(null);
       }
-
-      // Forcer le rechargement immédiat
-      setTemplatesRefreshKey(prev => prev + 1);
-
-      // Fermer la modale
+    } catch (error) {
+      console.error('[handleConfirmDelete] Error:', error);
       setDeleteConfirmOpen(false);
       setTemplateToDelete(null);
-    } else {
-      console.error(`Échec de la suppression du template ${templateToDelete.id}`);
-      // On pourrait afficher une notification d'erreur ici
-      setDeleteConfirmOpen(false);
-      setTemplateToDelete(null);
+    } finally {
+      setIsDeleting(false);
     }
   };
 

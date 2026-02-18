@@ -2,6 +2,9 @@
  * TemplateService - Gestion des templates d'agents
  * 
  * Responsabilités :
+ * - Mode GUEST (localStorage): Templates persistés localement (session-based)
+ * - Mode AUTH (MongoDB + React Query): Templates persistés au serveur (cross-session)
+ * - Routing automatique: Guest mode par défaut, MongoDB si authentifié
  * - Ajout de prototypes existants aux templates
  * - Sauvegarde/chargement des templates personnalisés
  * - Suppression de templates personnalisés
@@ -10,6 +13,8 @@
 
 import { Agent, RobotId } from '../types';
 import { AgentTemplate } from '../data/agentTemplates';
+import type { AgentTemplateDTO, CreateTemplatePayload, UpdateTemplatePayload } from './templateAPI';
+import * as templateAPI from './templateAPI';
 
 const CUSTOM_TEMPLATES_STORAGE_KEY = 'custom_agent_templates';
 
@@ -17,6 +22,10 @@ export interface CustomTemplate extends AgentTemplate {
     isCustom: true;
     sourcePrototypeId?: string; // ID du prototype d'origine si créé depuis un prototype
 }
+
+// ============================================
+// GUEST MODE (localStorage)
+// ============================================
 
 /**
  * Charger les templates personnalisés depuis le localStorage
@@ -48,7 +57,7 @@ const saveCustomTemplates = (templates: CustomTemplate[]): boolean => {
 };
 
 /**
- * Ajouter un prototype existant aux templates
+ * Ajouter un prototype existant aux templates (GUEST MODE - localStorage)
  * 
  * PRINCIPE: Clone complet du prototype (valeurs, pas référence)
  * Le template est une COPIE INDÉPENDANTE du prototype
@@ -288,3 +297,281 @@ export const importCustomTemplates = (jsonString: string): number => {
         return 0;
     }
 };
+
+// ============================================
+// HYBRID MODE (Auto-routing: Guest vs Auth)
+// ============================================
+
+/**
+ * Convertir une CustomTemplate (guest mode) en AgentTemplateDTO (auth mode)
+ * Pour synchroniser les templates du localStorage vers MongoDB après login
+ */
+const convertCustomTemplateToDTO = (
+    custom: CustomTemplate,
+    userId: string
+): CreateTemplatePayload => {
+    // Extraire le modèle LLM (custom.model → custom.template.llmModel)
+    const llmModel = (custom as any).model || 'gpt-4o';
+    const llmProvider = (custom as any).llmProvider || 'openai';
+
+    return {
+        name: custom.name,
+        description: custom.description,
+        category: custom.category,
+        robotId: custom.robotId,
+        icon: custom.icon,
+        sourcePrototypeId: custom.sourcePrototypeId,
+        tags: [],
+        template: {
+            name: custom.template.name,
+            role: custom.template.role,
+            systemPrompt: custom.template.systemPrompt,
+            llmProvider: llmProvider,
+            llmModel: llmModel,
+            capabilities: custom.template.capabilities,
+            tools: custom.template.tools,
+            outputConfig: custom.template.outputConfig,
+            historyConfig: custom.template.historyConfig,
+        },
+    };
+};
+
+/**
+ * Convertir une AgentTemplateDTO (auth mode) en CustomTemplate (guest mode structure)
+ * Pour charger les templates MongoDB dans le contexte guest
+ */
+const convertDTOToCustomTemplate = (dto: AgentTemplateDTO): CustomTemplate => {
+    return {
+        id: dto._id,
+        name: dto.name,
+        description: dto.description,
+        category: dto.category,
+        robotId: dto.robotId,
+        icon: dto.icon,
+        isCustom: true,
+        sourcePrototypeId: dto.sourcePrototypeId,
+        template: {
+            name: dto.template.name,
+            role: dto.template.role,
+            systemPrompt: dto.template.systemPrompt,
+            llmProvider: dto.template.llmProvider,
+            capabilities: dto.template.capabilities,
+            tools: dto.template.tools,
+            outputConfig: dto.template.outputConfig,
+            historyConfig: dto.template.historyConfig,
+        },
+    } as CustomTemplate & { llmProvider?: string; model?: string };
+};
+
+/**
+ * HYBRID GETTER: Récupérer les templates (guest localStorage ou auth MongoDB)
+ * 
+ * Routing automatique:
+ * - Si accessToken fourni: utilise MongoDB via templateAPI
+ * - Sinon: utilise localStorage
+ * 
+ * @param accessToken JWT token optionnel
+ * @param predefinedTemplates Templates prédéfinis depuis agentTemplates.ts
+ * @returns Promise<AgentTemplate[]> - Tous les templates (prédéfinis + personnalisés)
+ */
+export const loadAllTemplatesHybrid = async (
+    accessToken: string | null | undefined,
+    predefinedTemplates: AgentTemplate[]
+): Promise<AgentTemplate[]> => {
+    try {
+        if (accessToken) {
+            // MODE AUTH: Récupérer du serveur
+            const serverTemplates = await templateAPI.fetchTemplates(accessToken);
+            // Convertir en CustomTemplate pour compatibilité
+            const customFromServer = serverTemplates.map(convertDTOToCustomTemplate);
+            return [...predefinedTemplates, ...customFromServer];
+        } else {
+            // MODE GUEST: Récupérer du localStorage
+            const customTemplates = loadCustomTemplates();
+            return [...predefinedTemplates, ...customTemplates];
+        }
+    } catch (error) {
+        console.error('[loadAllTemplatesHybrid] Error:', error);
+        // Fallback à localStorage
+        const customTemplates = loadCustomTemplates();
+        return [...predefinedTemplates, ...customTemplates];
+    }
+};
+
+/**
+ * HYBRID ACTION: Sauvegarder un prototype comme template
+ * 
+ * @param prototype Agent à convertir en template
+ * @param accessToken JWT token optionnel
+ * @param customName Nom personnalisé optionnel
+ * @param customDescription Description personnalisée optionnelle
+ * @returns Promise<AgentTemplate | null> - Le template créé ou null
+ */
+export const savePrototypeAsTemplateHybrid = async (
+    prototype: Agent,
+    accessToken: string | null | undefined,
+    customName?: string,
+    customDescription?: string
+): Promise<AgentTemplate | null> => {
+    try {
+        if (accessToken) {
+            // MODE AUTH: Créer sur le serveur
+            const payload: CreateTemplatePayload = {
+                name: customName || `Template: ${prototype.name}`,
+                description: customDescription || `Template créé depuis le prototype "${prototype.name}"`,
+                category: determineCategory(prototype.role, prototype.systemPrompt),
+                robotId: prototype.creator_id || RobotId.Archi,
+                icon: determineIcon(prototype.name, prototype.role),
+                sourcePrototypeId: prototype.id,
+                tags: [],
+                template: {
+                    name: prototype.name,
+                    role: prototype.role,
+                    systemPrompt: prototype.systemPrompt,
+                    llmProvider: prototype.llmProvider,
+                    llmModel: prototype.model,
+                    capabilities: [...prototype.capabilities],
+                    tools: prototype.tools.map(tool => ({
+                        name: tool.name,
+                        description: tool.description,
+                        parameters: JSON.parse(JSON.stringify(tool.parameters)),
+                    })),
+                    outputConfig: { ...prototype.outputConfig },
+                    historyConfig: prototype.historyConfig
+                        ? { ...prototype.historyConfig }
+                        : undefined,
+                },
+            };
+
+            const created = await templateAPI.createTemplate(payload, accessToken);
+            return convertDTOToCustomTemplate(created);
+        } else {
+            // MODE GUEST: Créer localement
+            return addPrototypeToTemplates(prototype, customName, customDescription);
+        }
+    } catch (error) {
+        console.error('[savePrototypeAsTemplateHybrid] Error:', error);
+        // Fallback à localStorage
+        return addPrototypeToTemplates(prototype, customName, customDescription);
+    }
+};
+
+/**
+ * HYBRID ACTION: Supprimer un template
+ * 
+ * @param templateId ID du template à supprimer
+ * @param accessToken JWT token optionnel
+ * @returns Promise<boolean> - Success/failure
+ */
+export const deleteTemplateHybrid = async (
+    templateId: string,
+    accessToken: string | null | undefined
+): Promise<boolean> => {
+    try {
+        if (accessToken) {
+            // MODE AUTH: Supprimer du serveur
+            await templateAPI.deleteTemplate(templateId, accessToken);
+            return true;
+        } else {
+            // MODE GUEST: Supprimer localement
+            return deleteCustomTemplate(templateId);
+        }
+    } catch (error) {
+        console.error('[deleteTemplateHybrid] Error:', error);
+        return false;
+    }
+};
+
+/**
+ * HYBRID ACTION: Mettre à jour un template
+ * 
+ * @param templateId ID du template à mettre à jour
+ * @param updates Champs à mettre à jour
+ * @param accessToken JWT token optionnel
+ * @returns Promise<boolean> - Success/failure
+ */
+export const updateTemplateHybrid = async (
+    templateId: string,
+    updates: Partial<Pick<CustomTemplate, 'name' | 'description' | 'category' | 'icon'>>,
+    accessToken: string | null | undefined
+): Promise<boolean> => {
+    try {
+        if (accessToken) {
+            // MODE AUTH: Mettre à jour sur le serveur
+            const updatePayload: UpdateTemplatePayload = {
+                name: updates.name,
+                description: updates.description,
+                category: updates.category,
+                icon: updates.icon,
+            };
+            await templateAPI.updateTemplate(templateId, updatePayload, accessToken);
+            return true;
+        } else {
+            // MODE GUEST: Mettre à jour localement
+            return updateCustomTemplate(templateId, updates);
+        }
+    } catch (error) {
+        console.error('[updateTemplateHybrid] Error:', error);
+        return false;
+    }
+};
+
+/**
+ * HYBRID ACTION: Toggle favorite (star) d'un template
+ * 
+ * @param templateId ID du template
+ * @param accessToken JWT token optionnel
+ * @returns Promise<boolean> - Success/failure
+ */
+export const toggleTemplateStarHybrid = async (
+    templateId: string,
+    accessToken: string | null | undefined
+): Promise<boolean> => {
+    try {
+        if (accessToken) {
+            // MODE AUTH: Toggle sur le serveur
+            await templateAPI.toggleTemplateStar(templateId, accessToken);
+            return true;
+        } else {
+            // MODE GUEST: Toggle localement (simplement toggle isStarred)
+            const templates = loadCustomTemplates();
+            const index = templates.findIndex(t => t.id === templateId);
+            if (index === -1) return false;
+
+            // En mode guest, on n'a pas isStarred sur CustomTemplate
+            // C'est une note sur les limitations du mode guest
+            console.warn('[toggleTemplateStarHybrid] Star/favorite non supporté en mode guest');
+            return false;
+        }
+    } catch (error) {
+        console.error('[toggleTemplateStarHybrid] Error:', error);
+        return false;
+    }
+};
+
+/**
+ * HYBRID ACTION: Enregistrer l'utilisation d'un template
+ * 
+ * @param templateId ID du template
+ * @param accessToken JWT token optionnel
+ * @returns Promise<boolean> - Success/failure
+ */
+export const recordTemplateUsageHybrid = async (
+    templateId: string,
+    accessToken: string | null | undefined
+): Promise<boolean> => {
+    try {
+        if (accessToken) {
+            // MODE AUTH: Enregistrer sur le serveur
+            await templateAPI.recordTemplateUsage(templateId, accessToken);
+            return true;
+        } else {
+            // MODE GUEST: Rien à faire (pas de tracking en localStorage)
+            return true;
+        }
+    } catch (error) {
+        console.error('[recordTemplateUsageHybrid] Error:', error);
+        return false;
+    }
+};
+

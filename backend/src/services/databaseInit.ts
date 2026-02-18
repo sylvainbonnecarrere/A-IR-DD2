@@ -191,6 +191,31 @@ const COLLECTION_SCHEMAS = {
         }
       }
     }
+  },
+
+  agent_templates: {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        additionalProperties: true,
+        properties: {
+          _id: { bsonType: 'objectId' },
+          userId: { bsonType: 'objectId' },
+          name: { bsonType: 'string' },
+          description: { bsonType: 'string' },
+          category: { bsonType: 'string' },
+          robotId: { bsonType: 'string' },
+          icon: { bsonType: 'string' },
+          template: { bsonType: 'object' },
+          sourcePrototypeId: { bsonType: 'objectId' },
+          usageCount: { bsonType: 'int' },
+          isStarred: { bsonType: 'bool' },
+          tags: { bsonType: 'array' },
+          createdAt: { bsonType: 'date' },
+          updatedAt: { bsonType: 'date' }
+        }
+      }
+    }
   }
 };
 
@@ -228,6 +253,11 @@ const INDEX_DEFINITIONS = {
   agent_instances: [
     { spec: { agentId: 1, createdAt: 1 }, options: {} },
     { spec: { workflowId: 1 }, options: {} }
+  ],
+  agent_templates: [
+    { spec: { userId: 1, createdAt: -1 }, options: {} },
+    { spec: { userId: 1, category: 1 }, options: {} },
+    { spec: { userId: 1, isStarred: 1 }, options: {} }
   ]
 };
 
@@ -282,6 +312,17 @@ export async function initializeDatabase(): Promise<void> {
     } else {
       // Existing collections found
       console.info(`✅ Database already initialized (${existingCollectionNames.size} collections found)`);
+      
+      // CRITICAL FIX: Detect NEW collections added to COLLECTION_SCHEMAS
+      // This allows adding new collections after database initialization
+      const newCollectionNames = Object.keys(COLLECTION_SCHEMAS)
+        .filter(name => !existingCollectionNames.has(name));
+
+      if (newCollectionNames.length > 0) {
+        console.info(`🆕 Detected ${newCollectionNames.length} new collection(s) not in database`);
+        await createNewCollections(db, existingCollectionNames);
+        await createIndexesForNewCollections(db, newCollectionNames);
+      }
       
       // Self-healing: Update schemas to ensure they match current code
       console.info('🔄 Ensuring collection schemas are up to date...');
@@ -438,6 +479,74 @@ async function createTestUser(db: any): Promise<void> {
       throw error;
     }
   }
+}
+
+/**
+ * Detect and create NEW collections (not present in database)
+ * This allows adding new collections after the initial database setup
+ * without requiring a database reset or manual schema creation
+ */
+async function createNewCollections(db: any, existingNames: Set<string>): Promise<void> {
+  const newCollections = Object.keys(COLLECTION_SCHEMAS)
+    .filter(name => !existingNames.has(name));
+
+  if (newCollections.length === 0) {
+    console.debug('  No new collections to create');
+    return;
+  }
+
+  console.info(`📋 Creating ${newCollections.length} new collection(s) with schema validation...`);
+  
+  for (const collectionName of newCollections) {
+    try {
+      const schema = (COLLECTION_SCHEMAS as any)[collectionName];
+      if (schema.validator) {
+        await db.createCollection(collectionName, { validator: schema.validator });
+      } else {
+        await db.createCollection(collectionName);
+      }
+      console.debug(`  ✓ ${collectionName}`);
+    } catch (error: any) {
+      throw error;  // Treat as error - should not happen for new collections
+    }
+  }
+  
+  console.info('✅ New collections created');
+}
+
+/**
+ * Create indexes for NEW collections only
+ * Existing collections' indexes are handled separately by verifyIndexes
+ * This ensures indexes are created immediately when new collections are added
+ */
+async function createIndexesForNewCollections(
+  db: any,
+  newCollectionNames: string[]
+): Promise<void> {
+  if (newCollectionNames.length === 0) {
+    return;
+  }
+
+  console.info('🗂️  Creating indexes for new collection(s)...');
+  
+  for (const collectionName of newCollectionNames) {
+    const indexes = (INDEX_DEFINITIONS as any)[collectionName];
+    if (!indexes) continue;
+
+    const collection = db.collection(collectionName);
+    for (const index of indexes as any[]) {
+      try {
+        await collection.createIndex(index.spec, index.options);
+        console.debug(`  ✓ ${collectionName}: ${JSON.stringify(index.spec)}`);
+      } catch (error: any) {
+        if (error.code !== 85) {  // 85 = index already exists
+          throw error;
+        }
+      }
+    }
+  }
+  
+  console.info('✅ Indexes created for new collections');
 }
 
 export default { initializeDatabase };

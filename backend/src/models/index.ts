@@ -69,6 +69,7 @@ export { AgentJournal, IAgentJournal } from './AgentJournal.model';
 // ============================================
 
 export { AgentPrototype, IAgentPrototype } from './AgentPrototype.model';
+export { AgentTemplate, IAgentTemplate, ITemplate } from './AgentTemplate.model';
 
 // ============================================
 // MODÈLES CONFIGURATION LLM
