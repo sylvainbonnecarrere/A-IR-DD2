@@ -54,7 +54,7 @@ describe('useDesignStore - updateAgent()', () => {
                 outputConfig: { format: 'text', temperature: 0.9 }, // Température personnalisée
                 historyConfig: { enabled: false },
                 position: { x: 100, y: 100 },
-                messages: [{ sender: 'user', text: 'Message historique' }],
+                messages: [{ id: 'msg-hist-1', sender: 'user', text: 'Message historique', timestamp: new Date() }],
                 created_at: new Date().toISOString()
             };
 
@@ -139,7 +139,7 @@ describe('useDesignStore - updateAgent()', () => {
             expect(inst1After?.name).toBe('Expert Marketing V1 - Instance Custom'); // Nom non modifié
             expect(inst1After?.systemPrompt).toBe('Configuration personnalisée instance 1.'); // Prompt non modifié
             expect(inst1After?.outputConfig.temperature).toBe(0.9); // Température personnalisée préservée
-            expect(inst1After?.messages).toEqual([{ sender: 'user', text: 'Message historique' }]); // Historique préservé
+            expect(inst1After?.messages).toEqual([expect.objectContaining({ id: 'msg-hist-1', sender: 'user', text: 'Message historique' })]); // Historique préservé (avec timestamp)
 
             // Instance 2 : configurations personnalisées préservées
             expect(inst2After?.name).toBe('Expert Marketing V1'); // Nom non modifié même s'il correspondait au prototype

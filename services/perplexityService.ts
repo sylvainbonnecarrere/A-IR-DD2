@@ -129,7 +129,7 @@ export const generateContentWithSearch = async (
 ): Promise<{ text: string; citations: { title: string; uri: string }[] }> => {
     // For Perplexity, web search is implicitly enabled by using an 'online' model.
     // The API does not return structured citation data like Gemini, so we return an empty array.
-    const history: ChatMessage[] = [{ id: 'search-prompt', sender: 'user', text: prompt }];
+    const history: ChatMessage[] = [{ id: 'search-prompt', sender: 'user', text: prompt, timestamp: new Date() }];
     const result = await generateContent(apiKey, model, systemInstruction, history);
     return { text: result.text, citations: [] };
 };

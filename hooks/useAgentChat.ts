@@ -115,6 +115,7 @@ export const useAgentChat = ({
             id: generateMessageId('user'),
             sender: 'user',
             text: trimmedInput,
+            timestamp: new Date(),
         };
 
         // Handle file attachment
@@ -144,7 +145,8 @@ export const useAgentChat = ({
                 id: generateMessageId('error'),
                 sender: 'agent',
                 text: `Erreur: ${agent.llmProvider} n'est pas configuré ou activé.`,
-                isError: true
+                isError: true,
+                timestamp: new Date()
             };
             await addAndPersistMessage(nodeId, errorMessage);
             setNodeExecuting(nodeId, false);
@@ -199,7 +201,8 @@ export const useAgentChat = ({
                     const summaryMessage: ChatMessage = {
                         id: generateMessageId('summary'),
                         sender: 'agent',
-                        text: `(Résumé de l'historique): ${summary}`
+                        text: `(Résumé de l'historique): ${summary}`,
+                        timestamp: new Date()
                     };
 
                     conversationHistoryForAPI = [summaryMessage, userMessage];
@@ -237,7 +240,8 @@ export const useAgentChat = ({
                         id: agentMessageId,
                         sender: 'agent',
                         text: chunk.error,
-                        isError: true
+                        isError: true,
+                        timestamp: new Date()
                     };
                     addNodeMessage(nodeId, errorMessage);
                     break;
@@ -258,7 +262,8 @@ export const useAgentChat = ({
                         const newMessage: ChatMessage = {
                             id: agentMessageId,
                             sender: 'agent',
-                            text: currentResponse
+                            text: currentResponse,
+                            timestamp: new Date()
                         };
                         addNodeMessage(nodeId, newMessage);
                     }
@@ -272,7 +277,8 @@ export const useAgentChat = ({
                         sender: 'agent',
                         text: currentResponse,
                         toolCalls,
-                        status: 'executing_tool'
+                        status: 'executing_tool',
+                        timestamp: new Date()
                     };
 
                     const existingMessages = getNodeMessages(nodeId);
@@ -292,7 +298,8 @@ export const useAgentChat = ({
                             sender: 'tool_result',
                             text: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
                             toolCallId: toolCall.id,
-                            toolName: toolCall.name
+                            toolName: toolCall.name,
+                            timestamp: new Date()
                         };
                         addNodeMessage(nodeId, toolResultMessage);
                     } catch (error) {
@@ -302,7 +309,8 @@ export const useAgentChat = ({
                             text: `Erreur: ${error instanceof Error ? error.message : String(error)}`,
                             toolCallId: toolCall.id,
                             toolName: toolCall.name,
-                            isError: true
+                            isError: true,
+                            timestamp: new Date()
                         };
                         addNodeMessage(nodeId, errorMessage);
                     }
@@ -336,7 +344,8 @@ export const useAgentChat = ({
                         const contextMessage: ChatMessage = {
                             id: generateMessageId('tool-context'),
                             sender: 'user',
-                            text: `${t('tool_results_context')}:\n\n${toolResultsSummary}\n\n${t('analyze_results_request')}`
+                            text: `${t('tool_results_context')}:\n\n${toolResultsSummary}\n\n${t('analyze_results_request')}`,
+                            timestamp: new Date()
                         };
 
                         messagesWithoutToolResults.push(contextMessage);
@@ -364,7 +373,8 @@ export const useAgentChat = ({
                                 id: followUpMessageId,
                                 sender: 'agent',
                                 text: chunk.error,
-                                isError: true
+                                isError: true,
+                                timestamp: new Date()
                             };
                             addNodeMessage(nodeId, errorMessage);
                             break;
@@ -384,7 +394,8 @@ export const useAgentChat = ({
                                 const newFollowUpMessage: ChatMessage = {
                                     id: followUpMessageId,
                                     sender: 'agent',
-                                    text: followUpResponse
+                                    text: followUpResponse,
+                                    timestamp: new Date()
                                 };
                                 addNodeMessage(nodeId, newFollowUpMessage);
                             }
@@ -398,7 +409,8 @@ export const useAgentChat = ({
                 id: generateMessageId('error'),
                 sender: 'agent',
                 text: `Erreur: ${error instanceof Error ? error.message : String(error)}`,
-                isError: true
+                isError: true,
+                timestamp: new Date()
             };
             // ⭐ AUTO-SAVE: Persist error message
             await addAndPersistMessage(nodeId, errorMessage);

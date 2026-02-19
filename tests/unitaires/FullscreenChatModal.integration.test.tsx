@@ -70,11 +70,13 @@ const mockChatHistory: ChatMessage[] = [
     id: '1',
     sender: 'user',
     text: 'Hello, can you help?',
+    timestamp: new Date(),
   },
   {
     id: '2',
     sender: 'agent',
     text: 'Of course! How can I assist?',
+    timestamp: new Date(),
   },
 ];
 

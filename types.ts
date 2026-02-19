@@ -238,6 +238,7 @@ export interface ChatMessage {
   id: string;
   sender: 'user' | 'agent' | 'tool' | 'tool_result';
   text: string;
+  timestamp: Date;  // ⭐ ÉTAPE 3: Pour la persistence et la déduplication
   image?: string; // base64 encoded image
   mimeType?: string;
   filename?: string;

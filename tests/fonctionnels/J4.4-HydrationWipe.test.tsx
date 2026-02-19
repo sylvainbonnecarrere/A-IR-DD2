@@ -96,7 +96,8 @@ describe('J4.4 ÉTAPE 2 - Store Reset (Wipe)', () => {
             result.current.setNodeMessages('node-1', [{
                 id: 'msg-1',
                 sender: 'user',
-                text: 'Hello'
+                text: 'Hello',
+                timestamp: new Date()
             }]);
             result.current.setNodeExecuting('node-1', true);
             result.current.setImagePanelOpen(true, 'node-1');
@@ -253,7 +254,8 @@ describe('J4.4 ÉTAPE 2 - Auth State Change Flow', () => {
         useRuntimeStore.getState().setNodeMessages('guest-node', [{
             id: 'msg-guest',
             sender: 'user',
-            text: 'Guest message'
+            text: 'Guest message',
+            timestamp: new Date()
         }]);
 
         expect(useDesignStore.getState().agentInstances.length).toBe(1);

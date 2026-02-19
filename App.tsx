@@ -532,7 +532,8 @@ function AppContent() {
             messages: instance.content?.filter((c: any) => c.type === 'chat').map((c: any) => ({
               id: c.id || `msg-${Date.now()}`,
               sender: c.role || 'agent',
-              text: c.message || ''
+              text: c.message || '',
+              timestamp: new Date(c.timestamp || Date.now())
             })) || [],
             isMinimized: false,
             isMaximized: false,
@@ -588,7 +589,7 @@ function AppContent() {
                              role === 'tool' ? 'tool' :
                              role === 'tool_result' ? 'tool_result' : 'agent',
                       text: content,
-                      timestamp: new Date(j.createdAt || j.timestamp).getTime()
+                      timestamp: new Date(j.createdAt || j.timestamp)
                     } as ChatMessage;
                   });
 
@@ -1313,6 +1314,7 @@ function AppContent() {
       text: t('app_generatedImageText'),
       image: imageBase64,
       mimeType: 'image/png',
+      timestamp: new Date()
     };
     handleUpdateNodeMessages(nodeId, prev => [...prev, imageMessage]);
     addNodeMessage(nodeId, imageMessage);
@@ -1341,6 +1343,7 @@ function AppContent() {
       text: text,
       image: newImage,
       mimeType: 'image/png',
+      timestamp: new Date()
     };
     handleUpdateNodeMessages(nodeId, prev => [...prev, message]);
     addNodeMessage(nodeId, message);

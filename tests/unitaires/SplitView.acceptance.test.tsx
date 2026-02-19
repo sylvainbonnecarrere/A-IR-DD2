@@ -63,8 +63,8 @@ const mockLLMConfig: LLMConfig = {
 };
 
 const mockChatHistory: ChatMessage[] = [
-  { id: '1', sender: 'user', text: 'Hello, I need some creative content' },
-  { id: '2', sender: 'agent', text: 'I can help you with images, videos, and location research.' },
+  { id: '1', sender: 'user', text: 'Hello, I need some creative content', timestamp: new Date() },
+  { id: '2', sender: 'agent', text: 'I can help you with images, videos, and location research.', timestamp: new Date() },
 ];
 
 describe('Split-View User Acceptance Tests (UAT)', () => {

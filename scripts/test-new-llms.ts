@@ -19,7 +19,7 @@ async function testDeepSeek() {
             'test-api-key',
             'deepseek-chat',
             TEST_SYSTEM_INSTRUCTION,
-            [{ sender: 'user', text: TEST_PROMPT, id: '1' }]
+            [{ sender: 'user', text: TEST_PROMPT, id: '1', timestamp: new Date() }]
         );
         console.log('✅ DeepSeek Service: Structure OK');
         console.log('📝 Réponse simulée:', result.text?.substring(0, 100) + '...');
@@ -53,7 +53,7 @@ async function testLMStudio() {
                 health.endpoint!,
                 'gemma3-2b-instruct',
                 TEST_SYSTEM_INSTRUCTION,
-                [{ sender: 'user', text: TEST_PROMPT, id: '1' }]
+                [{ sender: 'user', text: TEST_PROMPT, id: '1', timestamp: new Date() }]
             );
             console.log('✅ LMStudio Service: Communication OK');
             console.log('📝 Réponse:', result.text?.substring(0, 100) + '...');
