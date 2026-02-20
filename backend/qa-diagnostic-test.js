@@ -15,7 +15,7 @@ async function diagnosticTest() {
         // Create a fresh test account
         // ========================================
         const testEmail = `diag-${Date.now()}@test.fr`;
-        const testPassword = 'DiagTest123!';
+        const testPassword = '';
         
         console.log(`\n[DIAG] Creating fresh user: ${testEmail}`);
         const registerRes = await fetch(`${API_BASE}/api/auth/register`, {
