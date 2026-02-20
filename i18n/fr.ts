@@ -772,4 +772,62 @@ export default {
     com_db_adv_connect_timeout: 'Connect Timeout (ms)',
     com_db_adv_query_timeout: 'Query Timeout (ms)',
     com_db_adv_ssh_tunneling: 'Activer SSH Tunneling',
+
+    // ============ MULTIPLE WORKFLOWS - PHASE 2 ============
+    // BOS Menu Items
+    bos_manage_workflows: 'Gérer ses workflows',
+    bos_manage_workflows_desc: 'Créer, sélectionner et gérer multiples workflows',
+
+    // Pages
+    page_bos_manage_workflows_title: 'Gérer vos workflows',
+    page_bos_manage_workflows_description: 'Créez et basculez entre plusieurs workflows',
+
+    // Buttons & Navigation
+    nav_create_workflow: 'Créer nouveau workflow',
+    nav_guest_message: 'Utilisateur invité, workflow de démonstration',
+    nav_connect_for_workflows: 'Connectez-vous pour gérer plusieurs workflows',
+    loading: 'Chargement',
+    optional: 'optionnel',
+    no_workflows_found: 'Aucun workflow trouvé. Cliquez sur "Créer nouveau workflow" pour commencer.',
+    click_create_to_start: 'Aucun workflow. Créez-en un pour démarrer.',
+
+    // WorkflowCard
+    workflow_card_created: 'Créé',
+    workflow_card_modified: 'Modifié',
+    workflow_card_agents: 'Agents',
+    workflow_card_nodes: 'Nœuds',
+    workflow_card_select: 'Sélectionner',
+    workflow_card_delete: 'Supprimer',
+    workflow_card_active: 'Workflow actif',
+    workflow_card_default: 'Workflow par défaut',
+    workflow_card_confirm_delete: 'Êtes-vous sûr? Cette action supprimera le workflow et TOUS ses contenus (agents, notes, journaux). Cette action est irréversible.',
+    workflow_card_edit_tooltip: 'Modifier ce workflow (nom et description)',
+
+    // CreerWorkflowDialog
+    dialog_create_workflow_title: 'Créer un nouveau workflow',
+    dialog_workflow_name: 'Nom du workflow',
+    dialog_workflow_name_required: 'Le nom du workflow est requis',
+    dialog_workflow_name_placeholder: 'Mon workflow...',
+    dialog_workflow_description: 'Description',
+    dialog_workflow_description_placeholder: 'Décrivez votre workflow...',
+    dialog_workflow_create_button: 'Créer',
+    dialog_workflow_cancel_button: 'Annuler',
+    dialog_workflow_creating: 'Création...',
+
+    // EditWorkflowDialog
+    dialog_edit_workflow_title: 'Modifier le workflow',
+    dialog_workflow_save_button: 'Enregistrer les modifications',
+    dialog_workflow_saving: 'Enregistrement...',
+
+    // Notifications
+    notification_workflow_created: 'Workflow créé avec succès',
+    notification_workflow_selected: 'Workflow sélectionné',
+    notification_workflow_deleted: 'Workflow supprimé',
+    notification_workflow_error: 'Erreur lors de l\'opération sur le workflow',
+
+    // Errors
+    error_cannot_delete_last_workflow: 'Le dernier workflow ne peut pas être supprimé',
+    error_cannot_delete_active_workflow: 'Impossible de supprimer le workflow actuellement actif. Sélectionnez-en un autre d\'abord.',
+    error_workflow_not_found: 'Workflow non trouvé',
+    error_load_workflows: 'Erreur lors du chargement des workflows',
 };

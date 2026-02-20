@@ -3,11 +3,26 @@ import { Agent, V2WorkflowNode, V2WorkflowEdge, RobotId, AgentInstance, Resolved
 import { GovernanceService } from '../services/governanceService';
 
 /**
+ * Workflow Interface for Multiple Workflows Feature (Phase 2)
+ */
+interface Workflow {
+  _id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  isDefault: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
  * Design Domain Store - Gère les prototypes et définitions statiques
  * Responsabilité : CRUD des agents, configuration des workflows, 
  * données persistantes et sérialisables
  * 
  * PHASE 1A: Séparation Prototype vs Instance
+ * PHASE 2: Multiple Workflows Management
  */
 interface DesignStore {
   // Current robot context for governance
@@ -23,6 +38,12 @@ interface DesignStore {
   // V2 Workflow Design
   nodes: V2WorkflowNode[];
   edges: V2WorkflowEdge[];
+  
+  // ⭐ PHASE 2: Multiple Workflows
+  workflows: Workflow[];
+  currentWorkflowId: string | null;
+  isLoadingWorkflows: boolean;
+  workflowLoadError: string | null;
 
   // Actions - Robot Context
   setCurrentRobot: (robotId: RobotId) => void;
@@ -87,6 +108,17 @@ interface DesignStore {
   setAgentInstances: (instances: AgentInstance[]) => void;
   setNodes: (nodes: V2WorkflowNode[]) => void;
   setEdges: (edges: V2WorkflowEdge[]) => void;
+  
+  // ⭐ PHASE 2: Multiple Workflows Actions
+  setWorkflows: (workflows: Workflow[]) => void;
+  setCurrentWorkflowId: (id: string | null) => void;
+  loadUserWorkflows: () => Promise<void>;
+  selectWorkflow: (workflowId: string) => Promise<void>;
+  createWorkflow: (name: string, description?: string) => Promise<Workflow>;
+  updateWorkflow: (id: string, name: string, description?: string) => Promise<void>;
+  deleteWorkflow: (id: string) => Promise<void>;
+  getActiveWorkflow: () => Workflow | undefined;
+  getWorkflowStats: (id: string) => Promise<{ agentInstanceCount: number; nodeCount: number } | null>;
 }
 
 export const useDesignStore = create<DesignStore>((set, get) => ({
@@ -97,6 +129,12 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   agentInstances: [],
   nodes: [],
   edges: [],
+  
+  // ⭐ PHASE 2: Multiple Workflows - Initial state
+  workflows: [],
+  currentWorkflowId: null,
+  isLoadingWorkflows: false,
+  workflowLoadError: null,
 
   // Robot context actions
   setCurrentRobot: (robotId) => set({ currentRobotId: robotId }),
@@ -557,6 +595,286 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     edges: []
   }),
 
+  // ⭐ PHASE 2: Multiple Workflows Actions
+  setWorkflows: (workflows) => set({ workflows }),
+  
+  setCurrentWorkflowId: (id) => set({ currentWorkflowId: id }),
+  
+  /**
+   * Load all workflows for the current user
+   */
+  loadUserWorkflows: async () => {
+    set({ isLoadingWorkflows: true, workflowLoadError: null });
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) throw new Error('Not authenticated');
+      
+      console.log('[Workflows] Attempting GET /api/workflows');
+      
+      const response = await fetch('/api/workflows', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      console.log(`[Workflows] GET /api/workflows response status: ${response.status}`);
+      
+      // ⭐ PHASE 2.3 - ROBUST FALLBACK: Always fallback to workspace endpoint if primary fails
+      if (!response.ok) {
+        console.warn(`[Workflows] Primary endpoint failed (${response.status}), attempting fallback to /api/user/workspace`);
+        
+        const workspaceResponse = await fetch('/api/user/workspace', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (!workspaceResponse.ok) {
+          throw new Error(`Both endpoints failed: /api/workflows (${response.status}) and /api/user/workspace (${workspaceResponse.status})`);
+        }
+        
+        const workspaceData = await workspaceResponse.json();
+        console.log('[Workflows] Fallback endpoint succeeded, extracting workflows');
+        
+        // ⭐ EXTRACT WORKFLOWS: Convert workspace response to workflows array
+        const currentWorkflow = workspaceData.workflow;
+        if (!currentWorkflow) {
+          throw new Error('No workflow in workspace response');
+        }
+        
+        const workflows: Workflow[] = [currentWorkflow];
+        
+        set({
+          workflows,
+          currentWorkflowId: currentWorkflow._id || currentWorkflow.id,
+          isLoadingWorkflows: false,
+          workflowLoadError: null
+        });
+        
+        console.log('[Workflows] Successfully loaded 1 workflow via fallback endpoint');
+        return;
+      }
+      
+      // ⭐ SUCCESS: Primary endpoint worked
+      const data = await response.json();
+      const workflows: Workflow[] = data.workflows || data;
+      
+      console.log(`[Workflows] Primary endpoint returned ${workflows.length} workflows`);
+      
+      // Auto-select active workflow
+      const activeWorkflow = workflows.find(w => w.isActive);
+      
+      set({
+        workflows,
+        currentWorkflowId: activeWorkflow?._id || (workflows.length > 0 ? workflows[0]._id : null),
+        isLoadingWorkflows: false,
+        workflowLoadError: null
+      });
+      
+      console.log('[Workflows] State updated successfully');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error loading workflows';
+      console.error('[Workflows] Fatal error:', errorMsg);
+      set({ workflowLoadError: errorMsg, isLoadingWorkflows: false });
+      throw error;
+    }
+  },
+  
+  /**
+   * Select a workflow by ID - atomically updates agents/nodes/edges
+   */
+  selectWorkflow: async (workflowId: string) => {
+    set({ isLoadingWorkflows: true, workflowLoadError: null });
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) throw new Error('Not authenticated');
+      
+      const response = await fetch(`/api/workflows/${workflowId}/select`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Cannot select workflow: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      // Update both workflow reference and loaded data
+      set({
+        currentWorkflowId: workflowId,
+        agentInstances: data.reloadedData?.agents || [],
+        nodes: data.reloadedData?.nodes || [],
+        edges: data.reloadedData?.edges || [],
+        isLoadingWorkflows: false
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      set({ workflowLoadError: msg, isLoadingWorkflows: false });
+      throw error;
+    }
+  },
+  
+  /**
+   * Create new workflow
+   */
+  createWorkflow: async (name: string, description?: string): Promise<Workflow> => {
+    set({ isLoadingWorkflows: true, workflowLoadError: null });
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) throw new Error('Not authenticated');
+      
+      const response = await fetch('/api/workflows', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name, description })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to create workflow: ${response.statusText}`);
+      }
+      
+      const newWorkflow: Workflow = await response.json();
+      
+      set((state) => ({
+        workflows: [...state.workflows, newWorkflow],
+        isLoadingWorkflows: false
+      }));
+      
+      return newWorkflow;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      set({ workflowLoadError: msg, isLoadingWorkflows: false });
+      throw error;
+    }
+  },
+  
+  /**
+   * Update workflow (name/description)
+   */
+  updateWorkflow: async (id: string, name: string, description?: string) => {
+    set({ isLoadingWorkflows: true, workflowLoadError: null });
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) throw new Error('Not authenticated');
+      
+      const response = await fetch(`/api/workflows/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name, description })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to update workflow: ${response.statusText}`);
+      }
+      
+      const updatedWorkflow: Workflow = await response.json();
+      
+      set((state) => ({
+        workflows: state.workflows.map(w => w._id === id ? updatedWorkflow : w),
+        isLoadingWorkflows: false
+      }));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      set({ workflowLoadError: msg, isLoadingWorkflows: false });
+      throw error;
+    }
+  },
+  
+  /**
+   * Delete workflow - with cascade handling
+   */
+  deleteWorkflow: async (id: string) => {
+    set({ isLoadingWorkflows: true, workflowLoadError: null });
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) throw new Error('Not authenticated');
+      
+      const response = await fetch(`/api/workflows/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        // Check for specific error codes from backend
+        const errorData = await response.json().catch(() => ({}));
+        const errorCode = errorData.code || response.statusText;
+        
+        if (errorCode === 'LAST_WORKFLOW') {
+          throw new Error('error_cannot_delete_last_workflow');
+        }
+        throw new Error(`Failed to delete workflow: ${response.statusText}`);
+      }
+      
+      set((state) => {
+        const remaining = state.workflows.filter(w => w._id !== id);
+        
+        // If current workflow was deleted, auto-select another
+        let nextWorkflowId = state.currentWorkflowId;
+        if (state.currentWorkflowId === id && remaining.length > 0) {
+          nextWorkflowId = remaining[0]._id;
+        }
+        
+        return {
+          workflows: remaining,
+          currentWorkflowId: nextWorkflowId,
+          isLoadingWorkflows: false
+        };
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      set({ workflowLoadError: msg, isLoadingWorkflows: false });
+      throw error;
+    }
+  },
+  
+  /**
+   * Get currently active workflow
+   */
+  getActiveWorkflow: () => {
+    const state = get();
+    if (!state.currentWorkflowId) return undefined;
+    return state.workflows.find(w => w._id === state.currentWorkflowId);
+  },
+  
+  /**
+   * Get workflow statistics (agent/node counts)
+   */
+  getWorkflowStats: async (id: string) => {
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) return null;
+      
+      const response = await fetch(`/api/workflows/${id}/stats`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) return null;
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Failed to fetch workflow stats:', error);
+      return null;
+    }
+  },
+
   /**
    * ⭐ ÉTAPE 2.2: Reset complet du store pour wipe à la connexion
    * Appelé lors du login/logout pour éviter la fuite de données guest → auth
@@ -567,7 +885,11 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     selectedAgentId: null,
     agentInstances: [],
     nodes: [],
-    edges: []
+    edges: [],
+    workflows: [],
+    currentWorkflowId: null,
+    isLoadingWorkflows: false,
+    workflowLoadError: null
   }),
 
   /**

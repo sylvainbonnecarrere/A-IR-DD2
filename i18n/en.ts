@@ -726,4 +726,60 @@ export default {
     com_db_adv_connect_timeout: 'Connect Timeout (ms)',
     com_db_adv_query_timeout: 'Query Timeout (ms)',
     com_db_adv_ssh_tunneling: 'Enable SSH Tunneling',
+
+    // ============ MULTIPLE WORKFLOWS - PHASE 2 ============
+    // BOS Menu Items
+    bos_manage_workflows: 'Manage Workflows',
+    bos_manage_workflows_desc: 'Create, select and manage multiple workflows',
+
+    // Pages
+    page_bos_manage_workflows_title: 'Manage Your Workflows',
+    page_bos_manage_workflows_description: 'Create and switch between multiple workflows',
+
+    // Buttons & Navigation
+    nav_create_workflow: 'Create New Workflow',
+    nav_guest_message: 'Guest user, demonstration workflow',
+    nav_connect_for_workflows: 'Log in to manage multiple workflows',
+    loading: 'Loading',
+    optional: 'optional',
+    no_workflows_found: 'No workflows found. Click on "Create New Workflow" to start.',
+    click_create_to_start: 'No workflows. Create one to start.',
+
+    // WorkflowCard
+    workflow_card_created: 'Created',
+    workflow_card_modified: 'Modified',
+    workflow_card_agents: 'Agents',
+    workflow_card_nodes: 'Nodes',
+    workflow_card_select: 'Select',
+    workflow_card_delete: 'Delete',
+    workflow_card_active: 'Active Workflow',
+    workflow_card_default: 'Default Workflow',
+    workflow_card_confirm_delete: 'Are you sure? This action will delete the workflow and ALL its contents (agents, notes, logs). This action is irreversible.',
+    workflow_card_edit_tooltip: 'Edit this workflow (name and description)',
+
+    // CreerWorkflowDialog
+    dialog_create_workflow_title: 'Create a New Workflow',
+    dialog_workflow_name: 'Workflow Name',
+    dialog_workflow_name_required: 'Workflow name is required',
+    dialog_workflow_name_placeholder: 'My workflow...',
+    dialog_workflow_description: 'Description',
+    dialog_workflow_description_placeholder: 'Describe your workflow...',
+    dialog_workflow_create_button: 'Create',
+    dialog_workflow_cancel_button: 'Cancel',
+    dialog_workflow_creating: 'Creating...',
+
+    // EditWorkflowDialog
+    dialog_edit_workflow_title: 'Edit Workflow',
+    dialog_workflow_save_button: 'Save Changes',
+    dialog_workflow_saving: 'Saving...',
+
+    // Notifications
+    notification_workflow_created: 'Workflow created successfully',
+    notification_workflow_selected: 'Workflow selected',
+    notification_workflow_deleted: 'Workflow deleted',
+    notification_workflow_error: 'Error during workflow operation',
+
+    // Errors
+    error_cannot_delete_last_workflow: 'Cannot delete the only workflow',    error_cannot_delete_active_workflow: 'Cannot delete the currently active workflow. Please select another one first.',    error_workflow_not_found: 'Workflow not found',
+    error_load_workflows: 'Error loading workflows',
 };

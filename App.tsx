@@ -748,6 +748,54 @@ function AppContent() {
     console.log('[App] 🔍 updateLLMConfigs called for Zustand store');
   }, [isAuthenticated, llmApiKeys, updateLLMConfigs]);
 
+  // ⭐ PHASE 2: Load workflows on authentication
+  useEffect(() => {
+    if (isAuthenticated && accessToken) {
+      const loadWorkflows = async () => {
+        try {
+          const designStore = useDesignStore.getState();
+          await designStore.loadUserWorkflows();
+          console.log('[App] ✅ Workflows loaded successfully');
+        } catch (error) {
+          console.error('[App] ❌ Failed to load workflows:', error);
+          // Error is already in store.workflowLoadError
+        }
+      };
+
+      // Load after hydration settles (small delay)
+      const timer = setTimeout(() => {
+        loadWorkflows();
+      }, 100);
+
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated, accessToken]);
+
+  // ⭐ PHASE 2: Reset runtime store when workflow changes
+  useEffect(() => {
+    // Subscribe to workflow changes - simpler approach with watcher pattern
+    let previousWorkflowId: string | null = null;
+    
+    const unsubscribe = useDesignStore.subscribe(
+      (state) => {
+        const currentId = state.currentWorkflowId;
+        
+        // Only trigger if workflow ID actually changed
+        if (currentId !== previousWorkflowId && currentId) {
+          previousWorkflowId = currentId;
+          // Clear runtime state when switching workflows
+          const runtimeStore = useRuntimeStore.getState();
+          if (runtimeStore.resetAll) {
+            runtimeStore.resetAll();
+          }
+          console.log('[App] 🔄 Workflow changed to', currentId, '- runtime store reset');
+        }
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
   // Configure navigation handler for agent nodes
   useEffect(() => {
     setNavigationHandler(handleRobotNavigation);
