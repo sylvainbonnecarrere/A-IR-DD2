@@ -25,7 +25,7 @@ async function realBrowserTest() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 email: 'test@test.fr', 
-                password: 'Test123!@#'  // Try documented password
+                password: ''  // Try documented password
             })
         });
 
