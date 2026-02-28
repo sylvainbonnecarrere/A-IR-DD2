@@ -10,7 +10,7 @@ const crypto = require('crypto');
 
 const API_BASE = 'http://localhost:3001';
 const TEST_EMAIL = `qa-real-${crypto.randomBytes(4).toString('hex')}@test.fr`;
-const TEST_PASSWORD = 'QATest123!@#';
+const TEST_PASSWORD = '';
 
 const results = [];
 
