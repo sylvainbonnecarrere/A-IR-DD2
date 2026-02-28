@@ -25,8 +25,7 @@ import { useAuth } from './useAuth';
 import { useSaveModeStore } from '../stores/useSaveModeStore';
 import { useDesignStore } from '../stores/useDesignStore';
 import { PersistenceService } from '../services/persistenceService';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { API_BASE_URL } from '../config/api.config';
 
 // ============================================
 // CONFIGURATION

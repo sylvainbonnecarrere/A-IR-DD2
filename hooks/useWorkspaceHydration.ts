@@ -28,8 +28,7 @@ import { GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import type { AgentInstance, V2WorkflowNode, V2WorkflowEdge } from '../types';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { API_BASE_URL } from '../config/api.config';
 
 /**
  * Canvas state for visual reconstruction (ÉTAPE 1.6)

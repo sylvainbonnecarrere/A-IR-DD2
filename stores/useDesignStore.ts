@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Agent, V2WorkflowNode, V2WorkflowEdge, RobotId, AgentInstance, ResolvedAgentInstance } from '../types';
 import { GovernanceService } from '../services/governanceService';
+import apiClient from '../utils/apiClient';
 
 /**
  * Workflow Interface for Multiple Workflows Feature (Phase 2)
@@ -113,9 +114,8 @@ interface DesignStore {
   setWorkflows: (workflows: Workflow[]) => void;
   setCurrentWorkflowId: (id: string | null) => void;
   loadUserWorkflows: () => Promise<void>;
-  selectWorkflow: (workflowId: string) => Promise<void>;
   createWorkflow: (name: string, description?: string) => Promise<Workflow>;
-  updateWorkflow: (id: string, name: string, description?: string) => Promise<void>;
+  updateWorkflow: (id: string, name: string, description?: string, isDefault?: boolean) => Promise<void>;
   deleteWorkflow: (id: string) => Promise<void>;
   getActiveWorkflow: () => Workflow | undefined;
   getWorkflowStats: (id: string) => Promise<{ agentInstanceCount: number; nodeCount: number } | null>;
@@ -602,69 +602,20 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   
   /**
    * Load all workflows for the current user
+   * ⭐ V2: Utilise apiClient (auth + baseURL automatiques)
    */
   loadUserWorkflows: async () => {
     set({ isLoadingWorkflows: true, workflowLoadError: null });
     try {
-      const token = localStorage.getItem('authToken');
-      if (!token) throw new Error('Not authenticated');
+      console.log('[Workflows] Attempting GET /api/workflows via apiClient');
       
-      console.log('[Workflows] Attempting GET /api/workflows');
-      
-      const response = await fetch('/api/workflows', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      console.log(`[Workflows] GET /api/workflows response status: ${response.status}`);
-      
-      // ⭐ PHASE 2.3 - ROBUST FALLBACK: Always fallback to workspace endpoint if primary fails
-      if (!response.ok) {
-        console.warn(`[Workflows] Primary endpoint failed (${response.status}), attempting fallback to /api/user/workspace`);
-        
-        const workspaceResponse = await fetch('/api/user/workspace', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        if (!workspaceResponse.ok) {
-          throw new Error(`Both endpoints failed: /api/workflows (${response.status}) and /api/user/workspace (${workspaceResponse.status})`);
-        }
-        
-        const workspaceData = await workspaceResponse.json();
-        console.log('[Workflows] Fallback endpoint succeeded, extracting workflows');
-        
-        // ⭐ EXTRACT WORKFLOWS: Convert workspace response to workflows array
-        const currentWorkflow = workspaceData.workflow;
-        if (!currentWorkflow) {
-          throw new Error('No workflow in workspace response');
-        }
-        
-        const workflows: Workflow[] = [currentWorkflow];
-        
-        set({
-          workflows,
-          currentWorkflowId: currentWorkflow._id || currentWorkflow.id,
-          isLoadingWorkflows: false,
-          workflowLoadError: null
-        });
-        
-        console.log('[Workflows] Successfully loaded 1 workflow via fallback endpoint');
-        return;
-      }
-      
-      // ⭐ SUCCESS: Primary endpoint worked
-      const data = await response.json();
+      const { data } = await apiClient.get('/api/workflows');
       const workflows: Workflow[] = data.workflows || data;
       
       console.log(`[Workflows] Primary endpoint returned ${workflows.length} workflows`);
       
       // Auto-select active workflow
-      const activeWorkflow = workflows.find(w => w.isActive);
+      const activeWorkflow = workflows.find((w: Workflow) => w.isActive);
       
       set({
         workflows,
@@ -674,75 +625,51 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       });
       
       console.log('[Workflows] State updated successfully');
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error loading workflows';
-      console.error('[Workflows] Fatal error:', errorMsg);
-      set({ workflowLoadError: errorMsg, isLoadingWorkflows: false });
-      throw error;
-    }
-  },
-  
-  /**
-   * Select a workflow by ID - atomically updates agents/nodes/edges
-   */
-  selectWorkflow: async (workflowId: string) => {
-    set({ isLoadingWorkflows: true, workflowLoadError: null });
-    try {
-      const token = localStorage.getItem('authToken');
-      if (!token) throw new Error('Not authenticated');
-      
-      const response = await fetch(`/api/workflows/${workflowId}/select`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+    } catch (primaryError) {
+      // ⭐ ROBUST FALLBACK: Try workspace endpoint if primary fails
+      console.warn('[Workflows] Primary endpoint failed, attempting fallback to /api/user/workspace');
+      try {
+        const { data: workspaceData } = await apiClient.get('/api/user/workspace');
+        const currentWorkflow = workspaceData.workflow;
+        if (!currentWorkflow) {
+          throw new Error('No workflow in workspace response');
         }
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Cannot select workflow: ${response.statusText}`);
+        
+        const workflows: Workflow[] = [{
+          _id: currentWorkflow._id || currentWorkflow.id,
+          userId: workspaceData.metadata?.userId || '',
+          name: currentWorkflow.name,
+          description: currentWorkflow.description || '',
+          isActive: currentWorkflow.isActive,
+          isDefault: currentWorkflow.isDefault || false,
+          createdAt: currentWorkflow.createdAt,
+          updatedAt: currentWorkflow.updatedAt
+        }];
+        
+        set({
+          workflows,
+          currentWorkflowId: workflows[0]._id,
+          isLoadingWorkflows: false,
+          workflowLoadError: null
+        });
+        console.log('[Workflows] Successfully loaded 1 workflow via fallback endpoint');
+      } catch (fallbackError) {
+        const errorMsg = fallbackError instanceof Error ? fallbackError.message : 'Unknown error loading workflows';
+        console.error('[Workflows] Fatal error:', errorMsg);
+      set({ workflowLoadError: errorMsg, isLoadingWorkflows: false });
+        throw fallbackError;
       }
-      
-      const data = await response.json();
-      
-      // Update both workflow reference and loaded data
-      set({
-        currentWorkflowId: workflowId,
-        agentInstances: data.reloadedData?.agents || [],
-        nodes: data.reloadedData?.nodes || [],
-        edges: data.reloadedData?.edges || [],
-        isLoadingWorkflows: false
-      });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Unknown error';
-      set({ workflowLoadError: msg, isLoadingWorkflows: false });
-      throw error;
     }
   },
   
   /**
    * Create new workflow
+   * ⭐ V2: Utilise apiClient
    */
   createWorkflow: async (name: string, description?: string): Promise<Workflow> => {
     set({ isLoadingWorkflows: true, workflowLoadError: null });
     try {
-      const token = localStorage.getItem('authToken');
-      if (!token) throw new Error('Not authenticated');
-      
-      const response = await fetch('/api/workflows', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ name, description })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to create workflow: ${response.statusText}`);
-      }
-      
-      const newWorkflow: Workflow = await response.json();
+      const { data: newWorkflow } = await apiClient.post('/api/workflows', { name, description });
       
       set((state) => ({
         workflows: [...state.workflows, newWorkflow],
@@ -758,33 +685,33 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   },
   
   /**
-   * Update workflow (name/description)
+   * Update workflow (name/description/isDefault)
+   * ⭐ V4: Accepte isDefault optionnel pour changer le workflow par défaut
    */
-  updateWorkflow: async (id: string, name: string, description?: string) => {
+  updateWorkflow: async (id: string, name: string, description?: string, isDefault?: boolean) => {
     set({ isLoadingWorkflows: true, workflowLoadError: null });
     try {
-      const token = localStorage.getItem('authToken');
-      if (!token) throw new Error('Not authenticated');
-      
-      const response = await fetch(`/api/workflows/${id}`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ name, description })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to update workflow: ${response.statusText}`);
+      const body: Record<string, unknown> = { name, description };
+      if (isDefault !== undefined) {
+        body.isDefault = isDefault;
       }
+      const { data: updatedWorkflow } = await apiClient.put(`/api/workflows/${id}`, body);
       
-      const updatedWorkflow: Workflow = await response.json();
-      
-      set((state) => ({
-        workflows: state.workflows.map(w => w._id === id ? updatedWorkflow : w),
-        isLoadingWorkflows: false
-      }));
+      set((state) => {
+        let updatedWorkflows = state.workflows.map(w => w._id === id ? updatedWorkflow : w);
+        
+        // ⭐ V4: Si isDefault=true, retirer isDefault des autres workflows localement
+        if (isDefault === true) {
+          updatedWorkflows = updatedWorkflows.map(w => 
+            w._id === id ? { ...w, ...updatedWorkflow, isDefault: true } : { ...w, isDefault: false }
+          );
+        }
+        
+        return {
+          workflows: updatedWorkflows,
+          isLoadingWorkflows: false
+        };
+      });
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unknown error';
       set({ workflowLoadError: msg, isLoadingWorkflows: false });
@@ -794,31 +721,12 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   
   /**
    * Delete workflow - with cascade handling
+   * ⭐ V2: Utilise apiClient
    */
   deleteWorkflow: async (id: string) => {
     set({ isLoadingWorkflows: true, workflowLoadError: null });
     try {
-      const token = localStorage.getItem('authToken');
-      if (!token) throw new Error('Not authenticated');
-      
-      const response = await fetch(`/api/workflows/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) {
-        // Check for specific error codes from backend
-        const errorData = await response.json().catch(() => ({}));
-        const errorCode = errorData.code || response.statusText;
-        
-        if (errorCode === 'LAST_WORKFLOW') {
-          throw new Error('error_cannot_delete_last_workflow');
-        }
-        throw new Error(`Failed to delete workflow: ${response.statusText}`);
-      }
+      await apiClient.delete(`/api/workflows/${id}`);
       
       set((state) => {
         const remaining = state.workflows.filter(w => w._id !== id);
@@ -853,22 +761,12 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   
   /**
    * Get workflow statistics (agent/node counts)
+   * ⭐ V2: Utilise apiClient
    */
   getWorkflowStats: async (id: string) => {
     try {
-      const token = localStorage.getItem('authToken');
-      if (!token) return null;
-      
-      const response = await fetch(`/api/workflows/${id}/stats`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) return null;
-      
-      return await response.json();
+      const { data } = await apiClient.get(`/api/workflows/${id}/stats`);
+      return data;
     } catch (error) {
       console.error('Failed to fetch workflow stats:', error);
       return null;

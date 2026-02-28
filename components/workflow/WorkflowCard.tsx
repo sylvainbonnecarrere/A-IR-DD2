@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useDesignStore } from '@/stores/useDesignStore';
 import { useLocalization } from '@/hooks/useLocalization';
+import { Button, Card } from '@/components/UI';
+import { EditIcon, TrashIcon } from '@/components/Icons';
 
 /**
  * Workflow Interface for type safety
@@ -28,6 +30,11 @@ interface WorkflowCardProps {
   onDelete: () => void;
 }
 
+/**
+ * WorkflowCard — Aligned with ArchiPrototypingPage card UX pattern.
+ * Uses <Card>, <Button variant="ghost">, <EditIcon>, <TrashIcon> from design system.
+ * Edit/Delete icons positioned top-right (absolute), same as Archi prototype cards.
+ */
 const WorkflowCard: React.FC<WorkflowCardProps> = ({
   workflow,
   isActive,
@@ -66,37 +73,66 @@ const WorkflowCard: React.FC<WorkflowCardProps> = ({
   const formatDate = (date: Date | string) => {
     return new Date(date).toLocaleDateString('fr-FR');
   };
+
+  const isDeleteDisabled = isDeleting || !canDelete || isLastWorkflow;
   
   return (
-    <div className={`
-      p-5 rounded-lg border-2 transition-all transform hover:scale-105
-      ${isActive
-        ? 'bg-yellow-500/20 border-yellow-400 shadow-[0 0 15px rgba(234,179,8,0.4)]'
-        : 'bg-gray-800/50 border-gray-600 hover:border-yellow-400/50'
-      }
-    `}>
-      {/* Header with Edit Icon */}
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div className="flex-1">
-          <h3 className={`text-lg font-semibold ${isActive ? 'text-yellow-300' : 'text-white'}`}>
-            {workflow.name}
-          </h3>
-          {workflow.description && (
-            <p className="text-sm text-gray-400 mt-1 line-clamp-2">
-              {workflow.description}
-            </p>
-          )}
-        </div>
-        {/* Edit Icon - Discrete pencil next to name */}
+    <Card
+      className={`p-4 relative transition-colors ${
+        isActive
+          ? 'border-yellow-500 bg-yellow-900/20'
+          : 'hover:border-yellow-500/50'
+      }`}
+    >
+      {/* ⭐ Action Icons — top-right, same pattern as ArchiPrototypingPage */}
+      <div className="absolute top-2 right-2 flex space-x-1">
         {!isEditing && (
-          <button
+          <Button
+            variant="ghost"
+            className="p-1 h-6 w-6 text-gray-400 hover:text-yellow-400"
             onClick={onEdit}
-            className="text-gray-500 hover:text-yellow-400 transition-colors flex-shrink-0 opacity-60 hover:opacity-100"
             title={t('workflow_card_edit_tooltip')}
             aria-label={t('workflow_card_edit_tooltip')}
           >
-            ✎
-          </button>
+            <EditIcon width={14} height={14} />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          className={`p-1 h-6 w-6 ${
+            isDeleteDisabled
+              ? 'text-gray-600 cursor-not-allowed opacity-50'
+              : 'text-gray-400 hover:text-red-400'
+          }`}
+          onClick={onDelete}
+          disabled={isDeleteDisabled}
+          title={
+            isLastWorkflow
+              ? t('error_cannot_delete_last_workflow')
+              : isActive
+                ? t('error_cannot_delete_active_workflow')
+                : t('workflow_card_delete')
+          }
+          aria-label={t('workflow_card_delete')}
+        >
+          {isDeleting
+            ? <span className="animate-spin text-xs">⏳</span>
+            : <TrashIcon width={14} height={14} />
+          }
+        </Button>
+      </div>
+
+      {/* Content — right padding to avoid icon overlap, same as Archi */}
+      <div className="pr-12">
+        <h3 className={`font-semibold text-lg mb-1 truncate ${
+          isActive ? 'text-yellow-300' : 'text-white'
+        }`}>
+          {workflow.name}
+        </h3>
+        {workflow.description && (
+          <p className="text-xs text-gray-400 mb-3 truncate">
+            {workflow.description}
+          </p>
         )}
       </div>
       
@@ -120,52 +156,19 @@ const WorkflowCard: React.FC<WorkflowCardProps> = ({
         </div>
       </div>
       
-      {/* Buttons */}
-      <div className="flex gap-2">
-        <button
-          onClick={onSelect}
-          disabled={isActive}
-          className={`flex-1 px-3 py-2 rounded font-medium transition-all ${
-            isActive
-              ? 'bg-yellow-500 text-black cursor-default'
-              : 'bg-yellow-500 text-black hover:bg-yellow-400'
-          }`}
-        >
-          {isActive ? t('workflow_card_active') : t('workflow_card_select')}
-        </button>
-        
-        {/* Edit Button */}
-        <button
-          onClick={onEdit}
-          disabled={isDeleting || isEditing}
-          className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          title={t('workflow_card_edit_tooltip')}
-        >
-          ✏️
-        </button>
-        
-        {/* Delete Button - RÈGLE MÉTIER: Can't delete last or active */}
-        {!workflow.isDefault && (
-          <button
-            onClick={onDelete}
-            disabled={isDeleting || !canDelete || isLastWorkflow}
-            className={`px-3 py-2 rounded text-white transition-all ${
-              !canDelete || isLastWorkflow
-                ? 'bg-red-900 opacity-50 cursor-not-allowed'
-                : 'bg-red-600 hover:bg-red-700'
-            }`}
-            title={
-              isLastWorkflow
-                ? t('error_cannot_delete_last_workflow')
-                : isActive
-                  ? t('error_cannot_delete_active_workflow')
-                  : t('workflow_card_delete')
-            }
-          >
-            {isDeleting ? '⏳' : '🗑️'}
-          </button>
-        )}
-      </div>
+      {/* Select / Active Button — full width */}
+      <Button
+        variant={isActive ? 'secondary' : 'primary'}
+        className={`w-full text-sm ${
+          isActive
+            ? 'bg-yellow-500 text-black cursor-default hover:bg-yellow-500'
+            : 'bg-yellow-500 text-black hover:bg-yellow-400'
+        }`}
+        onClick={onSelect}
+        disabled={isActive}
+      >
+        {isActive ? t('workflow_card_active') : t('workflow_card_select')}
+      </Button>
       
       {/* Default Badge */}
       {workflow.isDefault && (
@@ -175,7 +178,7 @@ const WorkflowCard: React.FC<WorkflowCardProps> = ({
           </span>
         </div>
       )}
-    </div>
+    </Card>
   );
 };
 

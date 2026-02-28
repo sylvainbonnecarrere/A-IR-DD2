@@ -17,6 +17,7 @@
 
 import { useEffect, useCallback } from 'react';
 import { useAuth } from './useAuth';
+import { API_BASE_URL } from '../config/api.config';
 import { 
     useSaveModeStore, 
     SaveMode, 
@@ -56,7 +57,7 @@ export function useSaveMode(): UseSaveModeReturn {
                 setLoading(true);
                 try {
                     const response = await fetch(
-                        `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/user-settings`,
+                        `${API_BASE_URL}/api/user-settings`,
                         {
                             headers: {
                                 'Authorization': `Bearer ${accessToken}`,
@@ -95,7 +96,7 @@ export function useSaveMode(): UseSaveModeReturn {
             setLoading(true);
             try {
                 const response = await fetch(
-                    `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/user-settings`,
+                    `${API_BASE_URL}/api/user-settings`,
                     {
                         method: 'PUT',
                         headers: {

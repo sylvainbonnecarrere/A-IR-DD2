@@ -20,20 +20,38 @@ const createAgentPrototypeSchema = z.object({
     historyConfig: z.object({}).passthrough().optional(),
     tools: z.array(z.object({}).passthrough()).optional(),
     outputConfig: z.object({}).passthrough().optional(),
-    robotId: z.enum(['AR_001', 'BO_002', 'CO_003', 'PH_004', 'TI_005'])
+    robotId: z.enum(['AR_001', 'BO_002', 'CO_003', 'PH_004', 'TI_005']),
+    workflowId: z.string().optional() // \u2b50 V2: Optional workflow scope
 });
 
 const updateAgentPrototypeSchema = createAgentPrototypeSchema.partial();
 
-// GET /api/agent-prototypes - Liste des prototypes (GLOBAL à tous workflows)
+// ⭐ SECURITY: Query parameter validation schemas
+const queryParamsSchema = z.object({
+    robotId: z.enum(['AR_001', 'BO_002', 'CO_003', 'PH_004', 'TI_005']).optional(),
+    workflowId: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid ObjectId format').optional()
+});
+
+// GET /api/agent-prototypes - Liste des prototypes (filtrés par workflow si workflowId fourni)
 router.get('/', requireAuth, async (req, res) => {
     try {
         const user = req.user as IUser;
-        const { robotId } = req.query;
+        
+        // ⭐ SECURITY: Validate and sanitize query params
+        const queryValidation = queryParamsSchema.safeParse(req.query);
+        if (!queryValidation.success) {
+            return res.status(400).json({ error: 'Invalid query parameters', details: queryValidation.error.issues });
+        }
+        
+        const { robotId, workflowId } = queryValidation.data;
 
-        const query: any = { userId: user.id };
+        const query: { userId: string; robotId?: string; workflowId?: string } = { userId: user.id };
         if (robotId) {
             query.robotId = robotId;
+        }
+        // ⭐ V2: Filter by workflowId if provided
+        if (workflowId) {
+            query.workflowId = workflowId;
         }
 
         const prototypes = await AgentPrototype.find(query).sort({ createdAt: -1 });
@@ -107,10 +125,22 @@ router.put('/:id',
                 return res.status(404).json({ error: 'Prototype introuvable' });
             }
 
-            // Empêcher modification userId
-            delete req.body.userId;
+            // ⭐ SECURITY FIX: Whitelist allowed fields to prevent mass assignment
+            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, tools, outputConfig, robotId, workflowId } = req.body;
+            
+            // Update only whitelisted fields (userId never modifiable)
+            if (name !== undefined) prototype.name = name;
+            if (role !== undefined) prototype.role = role;
+            if (systemPrompt !== undefined) prototype.systemPrompt = systemPrompt;
+            if (llmProvider !== undefined) prototype.llmProvider = llmProvider;
+            if (llmModel !== undefined) prototype.llmModel = llmModel;
+            if (capabilities !== undefined) prototype.capabilities = capabilities;
+            if (historyConfig !== undefined) prototype.historyConfig = historyConfig;
+            if (tools !== undefined) prototype.tools = tools;
+            if (outputConfig !== undefined) prototype.outputConfig = outputConfig;
+            if (robotId !== undefined) prototype.robotId = robotId;
+            if (workflowId !== undefined) prototype.workflowId = workflowId;
 
-            Object.assign(prototype, req.body);
             await prototype.save();
 
             res.json(prototype);

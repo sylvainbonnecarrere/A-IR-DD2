@@ -5,14 +5,12 @@ import { Workflow } from '../models/Workflow.model';
 import { AgentInstance } from '../models/AgentInstance.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
 import { User, IUser } from '../models/User.model';
+import { AgentPrototype } from '../models/AgentPrototype.model';
+import { WorkflowNodeV2 } from '../models/WorkflowNodeV2.model'; // ⭐ PERF: Top-level import instead of dynamic require
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { WorkflowSelfHealingService } from '../services/workflowSelfHealing.service';
-
-// SOLID Architecture - Service Layer + Repository Pattern
-import { WorkflowMigrationService } from '../services/WorkflowMigrationService';
-import { UserRepository } from '../repositories/UserRepository';
-import { WorkflowRepository } from '../repositories/WorkflowRepository';
+import { transformAgentInstanceForFrontend } from '../utils/transforms';
 
 // ⭐ V2 IMPORTS - Nouvelle architecture de persistance (Jalon 1-2)
 import {
@@ -24,11 +22,6 @@ import {
 
 const router = Router();
 
-// ⭐ DEPENDENCY INJECTION - Instancer repositories et services
-const userRepository = new UserRepository();
-const workflowRepository = new WorkflowRepository();
-const migrationService = new WorkflowMigrationService(userRepository, workflowRepository);
-
 // Schema validation
 const createWorkflowSchema = z.object({
     name: z.string().min(1).max(100),
@@ -38,7 +31,8 @@ const createWorkflowSchema = z.object({
 const updateWorkflowSchema = z.object({
     name: z.string().min(1).max(100).optional(),
     description: z.string().max(500).optional(),
-    isActive: z.boolean().optional()
+    isActive: z.boolean().optional(),
+    isDefault: z.boolean().optional()   // ⭐ V4: Permet de changer le workflow par défaut via édition
 });
 
 // GET /api/workflows - Liste des workflows + SYNCHRONOUS IDEMPOTENT MIGRATION
@@ -159,21 +153,20 @@ router.get('/:id',
 );
 
 // POST /api/workflows - Créer nouveau workflow
+// ⭐ V4 FIX: Transactions retirées (MongoDB standalone ne supporte pas les transactions)
+// Opérations séquentielles suffisantes — self-healing corrige les incohérences éventuelles
 router.post('/', requireAuth, validateRequest(createWorkflowSchema), async (req, res) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    
     try {
         const user = req.user as IUser;
         const userId = user._id.toString();
 
         console.log(`[Workflows POST] Creating workflow for user: ${userId}`);
 
-        // ⭐ Use repository to count existing workflows (SOLID)
-        const existingCount = await Workflow.countDocuments({ userId }).session(session);
+        // ⭐ Count existing workflows
+        const existingCount = await Workflow.countDocuments({ userId });
         const isFirstWorkflow = existingCount === 0;
 
-        // ⭐ Create workflow via repository
+        // ⭐ Create workflow
         const newWorkflow = new Workflow({
             userId,
             name: req.body.name,
@@ -188,7 +181,7 @@ router.post('/', requireAuth, validateRequest(createWorkflowSchema), async (req,
             }
         });
 
-        await newWorkflow.save({ session });
+        await newWorkflow.save();
         console.log(`[Workflows POST] Created workflow: ${newWorkflow._id}`);
 
         // ⭐ Sync User record - if first workflow, set as default
@@ -202,27 +195,22 @@ router.post('/', requireAuth, validateRequest(createWorkflowSchema), async (req,
                         lastActiveWorkflowId: newWorkflow._id
                     }
                 },
-                { session, new: true }
+                { new: true }
             );
             console.log(`[Workflows POST] First workflow - User updated with defaultWorkflowId`);
         } else {
             // Just increment count
             await User.findByIdAndUpdate(
                 userId,
-                { $inc: { workflowCount: 1 } },
-                { session }
+                { $inc: { workflowCount: 1 } }
             );
         }
 
-        await session.commitTransaction();
         res.status(201).json(newWorkflow);
         
     } catch (error) {
-        await session.abortTransaction();
         console.error('[Workflows POST] Error:', error);
         res.status(500).json({ error: 'Erreur création workflow', details: error instanceof Error ? error.message : String(error) });
-    } finally {
-        await session.endSession();
     }
 });
 
@@ -276,6 +264,19 @@ router.put('/:id',
                 );
             }
 
+            // ⭐ V4: Si on définit ce workflow comme default, retirer isDefault des autres
+            if (req.body.isDefault === true) {
+                await Workflow.updateMany(
+                    { userId: user.id, _id: { $ne: workflow.id } },
+                    { isDefault: false }
+                );
+                // Sync User.defaultWorkflowId
+                await User.findByIdAndUpdate(
+                    user.id,
+                    { defaultWorkflowId: workflow._id }
+                );
+            }
+
             Object.assign(workflow, req.body);
             workflow.lastSavedAt = new Date();
             workflow.isDirty = false;
@@ -297,32 +298,27 @@ router.delete('/:id',
         const workflow = await Workflow.findById(req.params.id);
         return workflow ? workflow.userId.toString() : null;
     }),
+    // ⭐ V4 FIX: Transactions retirées (MongoDB standalone)
     async (req, res) => {
-        const session = await mongoose.startSession();
-        session.startTransaction();
-        
         try {
             const user = req.user as IUser;
             
-            // ⭐ PHASE 1: Fetch workflow within transaction
             const workflow = await Workflow.findOne({ 
                 _id: req.params.id, 
                 userId: user.id 
-            }).session(session);
+            });
 
             if (!workflow) {
-                await session.abortTransaction();
                 return res.status(404).json({ error: 'Workflow introuvable' });
             }
 
-            // ⭐ PHASE 1: Check if this is the last workflow
+            // ⭐ Check if this is the last workflow
             const otherWorkflowCount = await Workflow.countDocuments({
                 userId: user.id,
                 _id: { $ne: workflow.id }
-            }).session(session);
+            });
 
             if (otherWorkflowCount === 0) {
-                await session.abortTransaction();
                 return res.status(400).json({
                     error: 'Impossible de supprimer le seul workflow',
                     code: 'LAST_WORKFLOW',
@@ -330,37 +326,30 @@ router.delete('/:id',
                 });
             }
 
-            // ⭐ PHASE 1: ATOMIC CASCADE DELETE
+            // ⭐ CASCADE DELETE (séquentiel, sans transaction)
             const WorkflowNodeV2 = require('../models/WorkflowNodeV2.model').WorkflowNodeV2;
             const AgentJournal = require('../models/AgentJournal.model').AgentJournal;
             
             const deletionResults = await Promise.all([
-                // Delete related data
-                AgentInstance.deleteMany({ workflowId: workflow.id }, { session }),
-                WorkflowEdge.deleteMany({ workflowId: workflow.id }, { session }),
-                WorkflowNodeV2.deleteMany({ workflowId: workflow.id }, { session }),
-                AgentJournal.deleteMany({ workflowId: workflow.id }, { session }),
-                // Delete workflow itself
-                Workflow.deleteOne({ _id: workflow.id }, { session })
+                AgentInstance.deleteMany({ workflowId: workflow.id }),
+                WorkflowEdge.deleteMany({ workflowId: workflow.id }),
+                WorkflowNodeV2.deleteMany({ workflowId: workflow.id }),
+                AgentJournal.deleteMany({ workflowId: workflow.id }),
+                Workflow.deleteOne({ _id: workflow.id })
             ]);
 
-            // ⭐ PHASE 1: If this was defaultWorkflowId, reassign to another
-            const { User } = require('../models/User.model');
-            const userDoc = await User.findById(user.id).session(session);
+            // ⭐ If this was defaultWorkflowId, reassign to another
+            const userDoc = await User.findById(user.id);
             
             if (userDoc?.defaultWorkflowId?.equals(workflow.id)) {
-                // Find next oldest workflow to assign as default
                 const nextWorkflow = await Workflow
                     .findOne({ userId: user.id })
-                    .sort({ createdAt: 1 })
-                    .session(session);
+                    .sort({ createdAt: 1 });
 
                 if (nextWorkflow) {
-                    // ⭐ PHASE 1: Update defaultWorkflowId AND mark as default
                     await Workflow.updateOne(
                         { _id: nextWorkflow.id },
-                        { isDefault: true },
-                        { session }
+                        { isDefault: true }
                     );
                     
                     await User.findByIdAndUpdate(
@@ -369,7 +358,7 @@ router.delete('/:id',
                             defaultWorkflowId: nextWorkflow._id,
                             $inc: { workflowCount: -1 }
                         },
-                        { session, new: true }
+                        { new: true }
                     );
                     
                     console.log('[Workflows] DELETE - Reassigned defaultWorkflowId:', {
@@ -379,15 +368,11 @@ router.delete('/:id',
                     });
                 }
             } else {
-                // Just decrement workflowCount
                 await User.findByIdAndUpdate(
                     user.id,
-                    { $inc: { workflowCount: -1 } },
-                    { session }
+                    { $inc: { workflowCount: -1 } }
                 );
             }
-
-            await session.commitTransaction();
 
             res.json({
                 success: true,
@@ -401,14 +386,11 @@ router.delete('/:id',
                 }
             });
         } catch (error) {
-            await session.abortTransaction();
             console.error('[Workflows] DELETE error:', error);
             res.status(500).json({ 
                 error: 'Erreur suppression workflow',
                 details: error instanceof Error ? error.message : String(error)
             });
-        } finally {
-            await session.endSession();
         }
     }
 );
@@ -420,89 +402,77 @@ router.post('/:id/select',
         const workflow = await Workflow.findById(req.params.id);
         return workflow ? workflow.userId.toString() : null;
     }),
+    // ⭐ V4 FIX: Transactions retirées (MongoDB standalone)
     async (req, res) => {
-        const session = await mongoose.startSession();
-        session.startTransaction();
-        
         try {
             const user = req.user as IUser;
             const workflowId = req.params.id;
             
-            // Validate workflow exists and belongs to user
             const workflow = await Workflow.findOne({
                 _id: workflowId,
                 userId: user.id
-            }).session(session);
+            });
             
             if (!workflow) {
-                await session.abortTransaction();
                 return res.status(404).json({ error: 'Workflow introuvable' });
             }
             
-            // ⭐ PHASE 1: Update all workflows atomically
-            // Disable others, enable this one
+            // ⭐ Disable others, enable this one + set isDefault
             await Workflow.updateMany(
                 { userId: user.id, _id: { $ne: workflowId } },
-                { isActive: false },
-                { session }
+                { isActive: false, isDefault: false }
             );
             
             await Workflow.updateOne(
                 { _id: workflowId },
                 { 
                     isActive: true,
+                    isDefault: true,
                     lastSavedAt: new Date()
-                },
-                { session }
+                }
             );
             
-            // ⭐ PHASE 1: Update User lastActiveWorkflowId
-            const { User } = require('../models/User.model');
+            // ⭐ Update User lastActiveWorkflowId + defaultWorkflowId
             await User.findByIdAndUpdate(
                 user.id,
-                { lastActiveWorkflowId: workflow._id },
-                { session }
+                { lastActiveWorkflowId: workflow._id, defaultWorkflowId: workflow._id }
             );
             
-            // ⭐ PHASE 1: Fetch related data for this workflow
-            const WorkflowNodeV2 = require('../models/WorkflowNodeV2.model').WorkflowNodeV2;
-            const [agents, nodes, edges] = await Promise.all([
-                AgentInstance.find({ workflowId }).session(session),
-                WorkflowNodeV2.find({ workflowId }).session(session),
-                WorkflowEdge.find({ workflowId }).session(session)
+            // ⭐ J7: Fetch agents + edges + prototypes (V2: scoped by workflowId)
+            const [agents, edges, agentPrototypes] = await Promise.all([
+                AgentInstance.find({ workflowId }),
+                WorkflowEdge.find({ workflowId }),
+                AgentPrototype.find({ userId: user.id, workflowId }).sort({ name: 1 })
             ]);
-            
-            await session.commitTransaction();
             
             const updatedWorkflow = await Workflow.findById(workflowId);
             
-            console.log('[Workflows] SELECT - Workflow activated:', {
-                userId: user.id,
+            // ⭐ Production-safe: Only log in development
+            if (process.env.NODE_ENV === 'development') {
+              console.log('[Workflows] SELECT - Workflow activated:', {
                 workflowId: workflowId,
-                agentsCount: agents?.length || 0,
-                nodesCount: nodes?.length || 0
-            });
+                agentsCount: agents?.length || 0
+              });
+            }
             
             res.json({
                 success: true,
                 workflow: updatedWorkflow,
                 reloadedData: {
-                    agents: agents || [],
-                    nodes: nodes || [],
+                    agents: (agents || []).map(transformAgentInstanceForFrontend),
+                    nodes: [],  // ⭐ J7: Positions in AgentInstance, not WorkflowNodeV2
                     edges: edges || [],
+                    agentPrototypes: agentPrototypes || [],  // ⭐ V2: Prototypes for switch hydration
                     canvasState: workflow.canvasState
                 }
             });
             
         } catch (error) {
-            await session.abortTransaction();
             console.error('[Workflows] SELECT error:', error);
             res.status(500).json({ 
                 error: 'Erreur lors de l\'activation du workflow',
                 details: error instanceof Error ? error.message : String(error)
             });
-        } finally {
-            await session.endSession();
         }
     }
 );
@@ -522,8 +492,7 @@ router.get('/:id/stats',
                 return res.status(404).json({ error: 'Workflow introuvable' });
             }
             
-            // ⭐ PHASE 1: Count related entities
-            const WorkflowNodeV2 = require('../models/WorkflowNodeV2.model').WorkflowNodeV2;
+            // ⭐ PHASE 1: Count related entities (using top-level import)
             const [agentCount, nodeCount] = await Promise.all([
                 AgentInstance.countDocuments({ workflowId: workflow._id }),
                 WorkflowNodeV2.countDocuments({ workflowId: workflow._id })
@@ -683,10 +652,11 @@ router.patch('/:id/patch',
 );
 
 /**
- * ⭐ ÉTAPE 4: PATCH /api/workflows/:id/nodes/:nodeId/position
+ * @deprecated V1 LEGACY — Ce endpoint opère sur Workflow.nodes[] qui n'existe pas dans le schéma.
+ * Les positions sont gérées dans WorkflowNodeV2 (V2) ou AgentInstance.
+ * TODO: Supprimer lors du cleanup V3.
  * 
- * Optimized endpoint for node position updates only
- * Avoids sending full workflow on every drag
+ * ⭐ ÉTAPE 4: PATCH /api/workflows/:id/nodes/:nodeId/position
  */
 router.patch('/:id/nodes/:nodeId/position',
     requireAuth,
@@ -741,9 +711,11 @@ router.patch('/:id/nodes/:nodeId/position',
 );
 
 /**
+ * @deprecated V1 LEGACY — Ce endpoint utilise $push sur Workflow.edges[] qui n'existe pas dans le schéma.
+ * Les edges sont dans la collection WorkflowEdge (modèle séparé).
+ * TODO: Supprimer lors du cleanup V3.
+ *
  * ⭐ ÉTAPE 4: POST /api/workflows/:id/edges - Add edge with $push
- * 
- * RÈGLE 4.5.3: Utilise $push pour ajout sans écraser le document
  */
 router.post('/:id/edges',
     requireAuth,
@@ -797,6 +769,9 @@ router.post('/:id/edges',
 );
 
 /**
+ * @deprecated V1 LEGACY — Ce endpoint utilise $pull sur Workflow.edges[] qui n'existe pas dans le schéma.
+ * TODO: Supprimer lors du cleanup V3.
+ *
  * ⭐ ÉTAPE 4: DELETE /api/workflows/:id/edges/:edgeId - Remove edge with $pull
  */
 router.delete('/:id/edges/:edgeId',

@@ -796,7 +796,7 @@ export default {
     workflow_card_modified: 'Modifié',
     workflow_card_agents: 'Agents',
     workflow_card_nodes: 'Nœuds',
-    workflow_card_select: 'Sélectionner',
+    workflow_card_select: 'Sélectionner par défaut',
     workflow_card_delete: 'Supprimer',
     workflow_card_active: 'Workflow actif',
     workflow_card_default: 'Workflow par défaut',
@@ -818,6 +818,8 @@ export default {
     dialog_edit_workflow_title: 'Modifier le workflow',
     dialog_workflow_save_button: 'Enregistrer les modifications',
     dialog_workflow_saving: 'Enregistrement...',
+    dialog_workflow_is_default: 'Workflow par défaut',
+    dialog_workflow_already_default: 'Déjà par défaut',
 
     // Notifications
     notification_workflow_created: 'Workflow créé avec succès',
@@ -830,4 +832,19 @@ export default {
     error_cannot_delete_active_workflow: 'Impossible de supprimer le workflow actuellement actif. Sélectionnez-en un autre d\'abord.',
     error_workflow_not_found: 'Workflow non trouvé',
     error_load_workflows: 'Erreur lors du chargement des workflows',
+
+    // Workflow Switch Overlay (V2)
+    workflow_switch_loading: 'Chargement du workflow',
+    workflow_switch_syncing: 'Synchronisation des données en cours',
+    workflow_switch_success_title: 'Workflow chargé',
+    workflow_switch_success_message: 'Le workflow « {name} » est maintenant actif',
+    workflow_switch_error_title: 'Erreur de chargement',
+    workflow_switch_error_message: 'Impossible de charger le workflow « {name} »',
+    workflow_switch_in_progress: 'Changement en cours...',
+    workflow_delete_confirm: 'Êtes-vous sûr de vouloir supprimer ce workflow ?',
+    workflow_delete_last_error: 'Impossible de supprimer le dernier workflow',
+
+    // Clés manquantes existantes
+    retry: 'Réessayer',
+    bos_supervision_desc: 'Supervision, debugging et monitoring des coûts',
 };

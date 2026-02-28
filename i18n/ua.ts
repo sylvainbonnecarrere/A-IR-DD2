@@ -739,7 +739,7 @@ export default {
     workflow_card_modified: 'Змінено',
     workflow_card_agents: 'Агенти',
     workflow_card_nodes: 'Вузли',
-    workflow_card_select: 'Вибрати',
+    workflow_card_select: 'Вибрати за замовчуванням',
     workflow_card_delete: 'Видалити',
     workflow_card_active: 'Активний',
     workflow_card_default: 'За замовчуванням',
@@ -757,6 +757,8 @@ export default {
     dialog_edit_workflow_title: 'Редагувати робочий процес',
     dialog_workflow_save_button: 'Зберегти',
     dialog_workflow_saving: 'Збереження...',
+    dialog_workflow_is_default: 'Робочий процес за замовчуванням',
+    dialog_workflow_already_default: 'Вже за замовчуванням',
     notification_workflow_created: 'Робочий процес успішно створено',
     notification_workflow_selected: 'Робочий процес активовано',
     notification_workflow_deleted: 'Робочий процес видалено',
@@ -765,4 +767,19 @@ export default {
     error_cannot_delete_active_workflow: 'Неможливо видалити активний робочий процес. Спочатку виберіть інший.',
     error_workflow_not_found: 'Робочий процес не знайдено',
     error_load_workflows: 'Помилка завантаження робочих процесів',
+
+    // Workflow Switch Overlay (V2)
+    workflow_switch_loading: 'Завантаження робочого процесу',
+    workflow_switch_syncing: 'Синхронізація даних',
+    workflow_switch_success_title: 'Робочий процес завантажено',
+    workflow_switch_success_message: 'Робочий процес «{name}» тепер активний',
+    workflow_switch_error_title: 'Помилка завантаження',
+    workflow_switch_error_message: 'Не вдалося завантажити робочий процес «{name}»',
+    workflow_switch_in_progress: 'Перемикання...',
+    workflow_delete_confirm: 'Ви впевнені, що хочете видалити цей робочий процес?',
+    workflow_delete_last_error: 'Неможливо видалити останній робочий процес',
+
+    // Відсутні існуючі ключі
+    retry: 'Повторити',
+    bos_supervision_desc: 'Контроль, налагодження та моніторинг витрат',
 };

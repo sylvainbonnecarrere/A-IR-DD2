@@ -750,7 +750,7 @@ export default {
     workflow_card_modified: 'Modified',
     workflow_card_agents: 'Agents',
     workflow_card_nodes: 'Nodes',
-    workflow_card_select: 'Select',
+    workflow_card_select: 'Select as default',
     workflow_card_delete: 'Delete',
     workflow_card_active: 'Active Workflow',
     workflow_card_default: 'Default Workflow',
@@ -772,6 +772,8 @@ export default {
     dialog_edit_workflow_title: 'Edit Workflow',
     dialog_workflow_save_button: 'Save Changes',
     dialog_workflow_saving: 'Saving...',
+    dialog_workflow_is_default: 'Default workflow',
+    dialog_workflow_already_default: 'Already default',
 
     // Notifications
     notification_workflow_created: 'Workflow created successfully',
@@ -782,4 +784,19 @@ export default {
     // Errors
     error_cannot_delete_last_workflow: 'Cannot delete the only workflow',    error_cannot_delete_active_workflow: 'Cannot delete the currently active workflow. Please select another one first.',    error_workflow_not_found: 'Workflow not found',
     error_load_workflows: 'Error loading workflows',
+
+    // Workflow Switch Overlay (V2)
+    workflow_switch_loading: 'Loading workflow',
+    workflow_switch_syncing: 'Syncing data',
+    workflow_switch_success_title: 'Workflow loaded',
+    workflow_switch_success_message: 'Workflow "{name}" is now active',
+    workflow_switch_error_title: 'Loading error',
+    workflow_switch_error_message: 'Failed to load workflow "{name}"',
+    workflow_switch_in_progress: 'Switching...',
+    workflow_delete_confirm: 'Are you sure you want to delete this workflow?',
+    workflow_delete_last_error: 'Cannot delete the last workflow',
+
+    // Missing existing keys
+    retry: 'Retry',
+    bos_supervision_desc: 'Supervision, debugging and cost monitoring',
 };

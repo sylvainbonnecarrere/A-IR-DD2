@@ -1,11 +1,11 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Agent, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
 import { AgentFormModal } from './components/modals/AgentFormModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { Header } from './components/Header';
-import { GUEST_STORAGE_KEYS } from './utils/guestDataUtils';
+import { GUEST_STORAGE_KEYS, getAllGuestKeys } from './utils/guestDataUtils';
 import { LoginModal } from './components/modals/LoginModal';
 import { RegisterModal } from './components/modals/RegisterModal';
 import { ImageGenerationPanel } from './components/panels/ImageGenerationPanel';
@@ -27,10 +27,14 @@ import { QueryProvider } from './providers';
 import { getSettingsStorage } from './utils/SettingsStorage';
 // ⭐ ÉTAPE 5: Import HydrationOverlay for loading state
 import { HydrationOverlay } from './components/HydrationOverlay';
+// ⭐ V2: Import WorkflowSwitchOverlay for workflow switch (Bos amber)
+import { WorkflowSwitchOverlay } from './components/WorkflowSwitchOverlay';
 // ⭐ UX Polish: Import HyperspaceReveal for guest entry animation
 import { HyperspaceReveal } from './components/HyperspaceReveal';
 // ⭐ AUTO-SAVE: Import PersistenceService for immediate instance creation
 import { PersistenceService } from './services/persistenceService';
+// ⭐ V2: Import apiClient for workflow switch orchestration
+import apiClient from './utils/apiClient';
 
 // ⭐ J4.4: Use the key from guestDataUtils to ensure consistency with wipeGuestData()
 const LLM_CONFIGS_KEY = GUEST_STORAGE_KEYS.LLM_CONFIGS;
@@ -138,8 +142,8 @@ interface UpdateConfirmationState {
   count: number;
 }
 
-// ⭐ ÉTAPE 5: API URL for workspace hydration
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// ⭐ ÉTAPE 5: API URL — source de vérité unique
+import { API_BASE_URL } from './config/api.config';
 
 /**
  * Inner App component that uses Auth context
@@ -177,6 +181,16 @@ function AppContent() {
   // ⭐ ÉTAPE 5: Hydration state for authenticated users
   const [isHydrating, setIsHydrating] = useState(false);
   const [hydrationProgress, setHydrationProgress] = useState(0);
+  const [hydrationMessage, setHydrationMessage] = useState('Chargement de votre workspace...');
+  
+  // ⭐ V2: Flag to distinguish initial login hydration from user-initiated workflow switch
+  // isInitialHydrationRef removed (was dead code — never read)
+
+  // ⭐ V2: State dédié au switch overlay (séparé de l'hydratation login)
+  const [isSwitchingWorkflow, setIsSwitchingWorkflow] = useState(false);
+  const [switchWorkflowName, setSwitchWorkflowName] = useState('');
+  const [switchProgress, setSwitchProgress] = useState(0);
+  const isSwitchingRef = useRef(false);  // Guard anti-re-entrance (pas de useState pour éviter re-render)
 
   // ⭐ UX Polish: Hyperspace animation state for guests
   // Shows when: first load as guest OR after logout
@@ -244,41 +258,30 @@ function AppContent() {
       try {
         // CRITICAL: Hard reset on authenticated user login to prevent stale data
         useDesignStore.getState().resetAll();
-        localStorage.clear();
+        
+        // ⭐ SECURITY FIX: Wipe sélectif — préserver auth_data_v1 (JWT token)
+        // localStorage.clear() détruisait le token JWT juste après le login,
+        // causant des 401 sur toutes les requêtes suivantes via apiClient.
+        const allGuestKeys = getAllGuestKeys();
+        allGuestKeys.forEach(key => localStorage.removeItem(key));
+        
         sessionStorage.clear();
         sessionStorage.setItem('_arc_hydrating', 'true');
         
         setHydrationProgress(30);
 
-        // Parallel load: workspace and instances from API
-        const workspacePromise = fetch(`${API_BASE_URL}/api/user/workspace`, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        let instancesResponse: Response | null = null;
-
+        // Parallel load: workspace and instances from API (via apiClient — Facade)
         setHydrationProgress(60);
 
-        const workspaceResponse = await workspacePromise;
+        const { data: workspace } = await apiClient.get('/api/user/workspace');
 
-        if (!workspaceResponse.ok) {
-          throw new Error(`Hydration failed: ${workspaceResponse.status}`);
-        }
+        let instancesData: any[] | null = null;
 
-        const workspace = await workspaceResponse.json();
-        
         if (workspace.workflow?.id) {
           console.log('[App] Loading instances for workflowId:', workspace.workflow.id);
           try {
-            instancesResponse = await fetch(`${API_BASE_URL}/api/workflows/${workspace.workflow.id}/instances`, {
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json'
-              }
-            });
+            const instRes = await apiClient.get(`/api/workflows/${workspace.workflow.id}/instances`);
+            instancesData = instRes.data;
           } catch (err) {
             console.error('[App] Error loading instances:', err);
           }
@@ -336,9 +339,9 @@ function AppContent() {
           console.log('[App] ✅ Agent prototypes loaded:', hydratedPrototypes.length);
         }
 
-        // Load external instances from API
-        const externalInstances = instancesResponse && instancesResponse.ok 
-          ? await instancesResponse.json() 
+        // Load external instances from API (if fetched separately)
+        const externalInstances = Array.isArray(instancesData)
+          ? instancesData
           : [];
         
         // Merge instances from both sources, deduplicating by ID
@@ -552,36 +555,25 @@ function AppContent() {
 
         // Load persisted journals for each agent instance
         if (workspace.agentInstances && workspace.agentInstances.length > 0 && workspace.workflow?.id) {
-          try {
-            for (const instance of workspace.agentInstances) {
-              const journalsResponse = await fetch(
-                `${API_BASE_URL}/api/workflows/${workspace.workflow.id}/instances/${instance.id}/journals`,
-                {
-                  headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json'
-                  }
-                }
+          for (const instance of workspace.agentInstances) {
+            try {
+              const journalRes = await apiClient.get(
+                `/api/workflows/${workspace.workflow.id}/instances/${instance.id}/journals`
               );
-
-              if (!journalsResponse.ok) {
-                console.warn(`[App] Failed to load journals for instance ${instance.id}`);
-                continue;
-              }
-
-              const journalsData = await journalsResponse.json();
+              const journalsData = journalRes.data;
               // ⭐ FIX: Le contrôleur retourne { data: [...], meta: {...} }, pas { journals: [...] }
-              const journals = journalsData.data || journalsData.journals || [];
+              const journals = Array.isArray(journalsData)
+                ? journalsData
+                : (journalsData.data || journalsData.journals || []);
 
               if (journals.length > 0) {
                 // Convert journals to ChatMessages
                 const chatMessages: ChatMessage[] = journals
-                  .filter((j: any) => j.type === 'chat') // Only chat type for now
+                  .filter((j: any) => j.type === 'chat')
                   .map((j: any) => {
-                    const payload = j.payload || {}; // ⭐ FIX: Read from 'payload' not 'content'
+                    const payload = j.payload || {};
                     const role = payload.role || 'agent';
                     const content = payload.content || '';
-                    
                     return {
                       id: j._id || `journal-${j.timestamp}`,
                       sender: role === 'user' ? 'user' :
@@ -593,20 +585,15 @@ function AppContent() {
                     } as ChatMessage;
                   });
 
-                console.log(`[App] Raw journals:`, journals.slice(0, 2)); // Log first 2 for debugging
-                console.log(`[App] Converted messages:`, chatMessages.slice(0, 2));
-
-                // Load messages into runtime store using the node ID
-                const nodeId = `node-${instance.id}`; // Use same format as V2WorkflowNode
+                const nodeId = `node-${instance.id}`;
                 const { setNodeMessages } = useRuntimeStore.getState();
                 setNodeMessages(nodeId, chatMessages);
-
                 console.log(`[App] Loaded ${chatMessages.length} messages for instance ${nodeId}`);
               }
+            } catch (error) {
+              // Non-blocking: skip this instance's journals
+              console.warn(`[App] Failed to load journals for instance ${instance.id}:`, error);
             }
-          } catch (error) {
-            console.error('[App] Error loading journals:', error);
-            // Don't fail hydration if journal loading fails
           }
         }
 
@@ -617,12 +604,328 @@ function AppContent() {
         setTimeout(() => {
           setIsHydrating(false);
           setHydrationProgress(0);
+          // ⭐ J4: Signal fin d'hydratation — débloque BosWorkflowManagementPage
+          sessionStorage.removeItem('_arc_hydrating');
         }, 500);
       }
     };
 
     hydrateWorkspace();
   }, [isAuthenticated, accessToken, hydrateFromServer, setNodes, setEdges, hydrateWorkflowFromServer]);
+
+  /**
+   * ⭐ V2 SWITCH WORKFLOW: Fonction unifiée de réhydratation complète
+   * Orchestre le switch de workflow avec feedback UX (WorkflowSwitchOverlay jaune Bos)
+   * 
+   * ⭐ V2 RÉÉCRITURE COMPLÈTE — Corrige P0-1, P0-2, P0-3, P2-1
+   * 
+   * SÉQUENCE:
+   * 0. Guard clauses (anti-re-entrance, auth, hydration)
+   * 1. Reset runtime store → nettoyer chat/execution du workflow précédent
+   * 2. Fetch les données du workflow via POST /select (avec agentPrototypes)
+   * 3. Mapper les prototypes (copie exacte de l'hydratation initiale L310-329)
+   * 4. Hydratation atomique → hydrateFromServer + setAgents + hydrateWorkflowFromServer
+   * 5. Recharger les journals → restaurer l'historique chat
+   * 6. Reconstruire le React state legacy → workflowNodes pour le canvas
+   * 7. Refresh liste workflows
+   * 8. Succès → événement + notification
+   */
+  const switchToWorkflow = useCallback(async (workflowId: string, workflowName?: string) => {
+    // ═══ ÉTAPE 0 : GUARD CLAUSES ═══
+    if (isSwitchingRef.current) {
+      console.warn('[SwitchWorkflow] ⚠️ Switch already in progress, ignoring');
+      return;
+    }
+    if (isHydrating) {
+      console.warn('[SwitchWorkflow] ⚠️ Initial hydration in progress, ignoring');
+      return;
+    }
+    if (!accessToken) {
+      console.warn('[SwitchWorkflow] ⚠️ No accessToken — aborting switch');
+      window.dispatchEvent(new CustomEvent('workflow:switch:error', {
+        detail: { message: t('workflow_switch_error_message').replace('{name}', workflowName || '') }
+      }));
+      return;
+    }
+
+    isSwitchingRef.current = true;
+    setIsSwitchingWorkflow(true);
+    setSwitchWorkflowName(workflowName || 'Workflow');
+    setSwitchProgress(0);
+    
+    console.log('[SwitchWorkflow] ⭐ Starting full workflow switch to:', workflowId, workflowName);
+    
+    try {
+      // ═══ ÉTAPE 1 : RESET RUNTIME (progress 10%) ═══
+      // ⭐ V2 FIX: Use resetForWorkflowSwitch() to PRESERVE llmConfigs (user-level, not workflow-scoped)
+      setSwitchProgress(10);
+      useRuntimeStore.getState().resetForWorkflowSwitch();
+      
+      // ═══ ÉTAPE 2 : APPEL API (progress 30%) ═══
+      setSwitchProgress(30);
+      const { data } = await apiClient.post(`/api/workflows/${workflowId}/select`);
+      const reloadedData = data.reloadedData;
+      const workflowMeta = data.workflow;
+
+      if (!data.success) {
+        throw new Error(data.message || 'Switch failed');
+      }
+      
+      // ═══ ÉTAPE 3 : MAPPER LES PROTOTYPES (progress 50%) ═══
+      // ⭐ COPIE EXACTE du mapping de l'hydratation initiale (App.tsx L310-329)
+      setSwitchProgress(50);
+      const now = new Date().toISOString();
+      const rawPrototypes = reloadedData?.agentPrototypes || [];
+      const hydratedPrototypes: Agent[] = rawPrototypes.map((proto: any) => ({
+        id: proto.id || proto._id,
+        name: proto.name,
+        role: proto.description || proto.role || 'assistant',
+        systemPrompt: proto.description || proto.systemPrompt || '',
+        llmProvider: (proto.provider as LLMProvider) || LLMProvider.Gemini,
+        model: proto.model || 'gemini-2.0-flash',
+        capabilities: Array.isArray(proto.capabilities) ? proto.capabilities : [],
+        tools: Array.isArray(proto.tools) ? proto.tools : [],
+        outputConfig: proto.outputConfig || {},
+        historyConfig: proto.historyConfig || {},
+        creator_id: proto.robotId || RobotId.Archi,
+        created_at: proto.created_at || now,
+        updated_at: proto.updated_at || now
+      }));
+
+      // ═══ ÉTAPE 4 : HYDRATATION ATOMIQUE (progress 70%) ═══
+      setSwitchProgress(70);
+      
+      // 4a. React state prototypes (legacy) — OBLIGATOIRE (corrige P0-2)
+      setAgents(hydratedPrototypes);
+
+      // 4b. Zustand store — APPEL UNIQUE, TOUTES LES DONNÉES (corrige P0-1)
+      // ⭐ FIX: Hydrater correctement les instances (structure AgentInstance attendue par le store)
+      const rawInstances = reloadedData?.agents || [];
+      const hydratedInstances: AgentInstance[] = rawInstances.map((inst: any) => ({
+        id: inst._id || inst.id,
+        prototypeId: inst.prototypeId || inst._id || inst.id,
+        name: inst.name,
+        position: inst.configuration_json?.position || inst.position || { x: 0, y: 0 },
+        isMinimized: inst.isMinimized || false,
+        isMaximized: inst.isMaximized || false,
+        workflowId: inst.workflowId || workflowId,
+        configuration_json: inst.configuration_json || {
+          role: inst.role || 'assistant',
+          model: inst.llmModel || 'gemini-2.0-flash',
+          llmProvider: inst.llmProvider || LLMProvider.Gemini,
+          systemPrompt: inst.systemPrompt || '',
+          capabilities: Array.isArray(inst.capabilities) ? inst.capabilities : [],
+          tools: Array.isArray(inst.tools) ? inst.tools : [],
+          position: inst.position || { x: 0, y: 0 }
+        }
+      }));
+      
+      useDesignStore.getState().hydrateFromServer({
+        agents: hydratedPrototypes,
+        agentInstances: hydratedInstances,
+        nodes: reloadedData?.nodes || [],
+        edges: reloadedData?.edges || []
+      });
+
+      // 4c. Workflow store (canvas state, metadata)
+      if (workflowMeta) {
+        hydrateWorkflowFromServer({
+          id: workflowMeta._id || workflowId,
+          name: workflowMeta.name,
+          description: workflowMeta.description,
+          isDefault: workflowMeta.isDefault,
+          isActive: workflowMeta.isActive,
+          canvasState: reloadedData?.canvasState || workflowMeta.canvasState
+        });
+      }
+
+      // 4d. Set currentWorkflowId dans le design store
+      useDesignStore.getState().setCurrentWorkflowId(workflowId);
+      
+      // ═══ ÉTAPE 5 : JOURNAUX (progress 85%) ═══
+      setSwitchProgress(85);
+      const instances = reloadedData?.agents || [];
+      for (const instance of instances) {
+        const instanceId = instance._id || instance.id;
+        if (!instanceId) continue;
+        try {
+          const journalRes = await apiClient.get(
+            `/api/workflows/${workflowId}/instances/${instanceId}/journals`
+          );
+          const journals = journalRes.data?.data || journalRes.data?.journals || [];
+          
+          if (journals.length > 0) {
+            const chatMessages: ChatMessage[] = journals
+              .filter((j: any) => j.type === 'chat')
+              .map((j: any) => {
+                const payload = j.payload || {};
+                const role = payload.role || 'agent';
+                const content = payload.content || '';
+                
+                return {
+                  id: j._id || `journal-${j.timestamp}`,
+                  sender: role === 'user' ? 'user' :
+                         role === 'agent' ? 'agent' :
+                         role === 'tool' ? 'tool' :
+                         role === 'tool_result' ? 'tool_result' : 'agent',
+                  text: content,
+                  timestamp: new Date(j.createdAt || j.timestamp)
+                } as ChatMessage;
+              });
+            
+            const nodeId = `node-${instanceId}`;
+            useRuntimeStore.getState().setNodeMessages(nodeId, chatMessages);
+            console.log(`[SwitchWorkflow] Loaded ${chatMessages.length} messages for ${nodeId}`);
+          }
+        } catch {
+          console.warn(`[SwitchWorkflow] Journals load failed for instance ${instanceId}`);
+        }
+      }
+      
+      // ═══ ÉTAPE 6 : RECONSTRUIRE LES NODES LEGACY + V2 (progress 90%) ═══
+      setSwitchProgress(90);
+      if (instances.length > 0) {
+        const hydrationNodes: WorkflowNode[] = instances.map((inst: any) => ({
+          id: inst._id || inst.id,
+          agent: {
+            id: inst._id || inst.id,
+            name: inst.name,
+            role: inst.configuration_json?.role || inst.role || 'assistant',
+            systemPrompt: inst.configuration_json?.systemPrompt || inst.systemPrompt || '',
+            llmProvider: (inst.configuration_json?.llmProvider || inst.llmProvider || LLMProvider.Gemini) as LLMProvider,
+            model: inst.configuration_json?.model || inst.llmModel || 'gemini-2.0-flash',
+            capabilities: inst.configuration_json?.capabilities || inst.capabilities || [],
+            tools: inst.configuration_json?.tools || inst.tools || [],
+            historyConfig: inst.configuration_json?.historyConfig || inst.historyConfig || {},
+            creator_id: RobotId.Archi,
+            created_at: inst.createdAt || now,
+            updated_at: now
+          } as Agent,
+          position: inst.configuration_json?.position || inst.position || { x: 0, y: 0 },
+          messages: [],
+          isMinimized: false,
+          isMaximized: false,
+          instanceId: inst._id || inst.id
+        }));
+        setWorkflowNodes(hydrationNodes);
+        
+        // Also rebuild V2 nodes for the design store
+        // ⭐ FIX Bug 2: Build data.agent + structured agentInstance (matches initial hydration)
+        const v2Nodes: V2WorkflowNode[] = instances.map((inst: any) => {
+          const instanceId = inst._id || inst.id;
+          
+          // Build Agent from instance data (same fields as hydrationNodes above)
+          const agent: Agent = {
+            id: instanceId,
+            name: inst.name,
+            role: inst.configuration_json?.role || inst.role || 'assistant',
+            systemPrompt: inst.configuration_json?.systemPrompt || inst.systemPrompt || '',
+            llmProvider: (inst.configuration_json?.llmProvider || inst.llmProvider || LLMProvider.Gemini) as LLMProvider,
+            model: inst.configuration_json?.model || inst.llmModel || 'gemini-2.0-flash',
+            capabilities: inst.configuration_json?.capabilities || inst.capabilities || [],
+            tools: inst.configuration_json?.tools || inst.tools || [],
+            historyConfig: inst.configuration_json?.historyConfig || inst.historyConfig || {},
+            outputConfig: inst.configuration_json?.outputConfig || inst.outputConfig || {},
+            creator_id: RobotId.Archi,
+            created_at: inst.createdAt || now,
+            updated_at: now
+          };
+          
+          // Build properly structured AgentInstance
+          const hydratedInstance: AgentInstance = {
+            id: instanceId,
+            prototypeId: inst.prototypeId || instanceId,
+            name: inst.name,
+            position: inst.configuration_json?.position || inst.position || { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            workflowId: inst.workflowId || workflowId,
+            configuration_json: inst.configuration_json || {
+              role: agent.role,
+              model: agent.model,
+              llmProvider: agent.llmProvider,
+              systemPrompt: agent.systemPrompt,
+              capabilities: agent.capabilities || [],
+              tools: agent.tools || [],
+              position: inst.position || { x: 0, y: 0 }
+            }
+          };
+          
+          return {
+            id: `node-${instanceId}`,
+            type: 'agent' as const,
+            position: inst.configuration_json?.position || inst.position || { x: 0, y: 0 },
+            data: {
+              robotId: RobotId.Archi,
+              label: inst.name,
+              agent,
+              agentInstance: hydratedInstance,
+              workflowId,
+              isMinimized: false,
+              isMaximized: false
+            }
+          };
+        });
+        setNodes(v2Nodes);
+      } else {
+        setWorkflowNodes([]);
+        setNodes([]);
+      }
+
+      // ═══ ÉTAPE 7 : REFRESH LISTE WORKFLOWS (progress 95%) ═══
+      setSwitchProgress(95);
+      try {
+        await useDesignStore.getState().loadUserWorkflows();
+      } catch (refreshErr) {
+        console.warn('[SwitchWorkflow] Workflows list refresh failed (non-blocking):', refreshErr);
+      }
+
+      // ═══ ÉTAPE 8 : SUCCÈS (progress 100%) ═══
+      setSwitchProgress(100);
+      
+      console.log('[SwitchWorkflow] ✅ Workflow switch complete:', {
+        workflowId,
+        workflowName,
+        prototypesCount: hydratedPrototypes.length,
+        instancesCount: instances.length
+      });
+      
+      // ⭐ V2: Notify observers of successful switch
+      window.dispatchEvent(new CustomEvent('workflow:switch:success', {
+        detail: { workflowId, workflowName }
+      }));
+      
+    } catch (error: any) {
+      console.error('[SwitchWorkflow] ❌ Error:', error);
+      window.dispatchEvent(new CustomEvent('workflow:switch:error', {
+        detail: { message: error.message || 'Unknown error', workflowId }
+      }));
+    } finally {
+      // ═══ CLEANUP ═══
+      setTimeout(() => {
+        setIsSwitchingWorkflow(false);
+        setSwitchProgress(0);
+        setSwitchWorkflowName('');
+      }, 300);
+      isSwitchingRef.current = false;
+    }
+  }, [accessToken, hydrateWorkflowFromServer, setNodes, t, isHydrating]);
+
+  /**
+   * ⭐ V2: Listen for workflow:switch custom events from BosWorkflowManagementPage
+   * Pattern Observer — découplage entre la page BOS et l'orchestration App.tsx
+   */
+  useEffect(() => {
+    const handleWorkflowSwitch = (event: Event) => {
+      const { workflowId, workflowName } = (event as CustomEvent).detail;
+      if (workflowId) {
+        switchToWorkflow(workflowId, workflowName || 'Workflow');
+      }
+    };
+    
+    window.addEventListener('workflow:switch', handleWorkflowSwitch);
+    return () => window.removeEventListener('workflow:switch', handleWorkflowSwitch);
+  }, [switchToWorkflow]);
 
   /**
    * ⭐ CRITICAL J4.4: Reload LLM configs + WIPE STATE when auth state changes
@@ -749,52 +1052,41 @@ function AppContent() {
   }, [isAuthenticated, llmApiKeys, updateLLMConfigs]);
 
   // ⭐ PHASE 2: Load workflows on authentication
+  // ⭐ V4 FIX: Wait for hydration to complete before loading workflows
+  // The hydration useEffect sets _arc_hydrating flag; we wait until it's cleared.
   useEffect(() => {
-    if (isAuthenticated && accessToken) {
-      const loadWorkflows = async () => {
-        try {
-          const designStore = useDesignStore.getState();
-          await designStore.loadUserWorkflows();
-          console.log('[App] ✅ Workflows loaded successfully');
-        } catch (error) {
-          console.error('[App] ❌ Failed to load workflows:', error);
-          // Error is already in store.workflowLoadError
+    if (!isAuthenticated || !accessToken) return;
+
+    const loadWorkflows = async (retryCount = 0) => {
+      try {
+        // Wait for hydration to finish before loading workflows
+        const isHydrating = sessionStorage.getItem('_arc_hydrating') === 'true';
+        if (isHydrating && retryCount < 5) {
+          // Hydration still in progress — retry after 300ms
+          setTimeout(() => loadWorkflows(retryCount + 1), 300);
+          return;
         }
-      };
+        
+        const designStore = useDesignStore.getState();
+        await designStore.loadUserWorkflows();
+        console.log('[App] ✅ Workflows loaded successfully');
+      } catch (error) {
+        console.error('[App] ❌ Failed to load workflows:', error);
+        // Error is already in store.workflowLoadError
+      }
+    };
 
-      // Load after hydration settles (small delay)
-      const timer = setTimeout(() => {
-        loadWorkflows();
-      }, 100);
+    // Load after initial hydration settles
+    const timer = setTimeout(() => {
+      loadWorkflows();
+    }, 200);
 
-      return () => clearTimeout(timer);
-    }
+    return () => clearTimeout(timer);
   }, [isAuthenticated, accessToken]);
 
-  // ⭐ PHASE 2: Reset runtime store when workflow changes
-  useEffect(() => {
-    // Subscribe to workflow changes - simpler approach with watcher pattern
-    let previousWorkflowId: string | null = null;
-    
-    const unsubscribe = useDesignStore.subscribe(
-      (state) => {
-        const currentId = state.currentWorkflowId;
-        
-        // Only trigger if workflow ID actually changed
-        if (currentId !== previousWorkflowId && currentId) {
-          previousWorkflowId = currentId;
-          // Clear runtime state when switching workflows
-          const runtimeStore = useRuntimeStore.getState();
-          if (runtimeStore.resetAll) {
-            runtimeStore.resetAll();
-          }
-          console.log('[App] 🔄 Workflow changed to', currentId, '- runtime store reset');
-        }
-      }
-    );
-
-    return () => unsubscribe();
-  }, []);
+  // ⭐ V2: L'ancien watcher PHASE 2 (resetAll sur currentWorkflowId change) est supprimé.
+  // switchToWorkflow() orchestre désormais le reset + rechargement complet.
+  // Garder le watcher causerait un double reset du runtimeStore.
 
   // Configure navigation handler for agent nodes
   useEffect(() => {
@@ -852,44 +1144,17 @@ function AppContent() {
       if (agentId) {
         // ⭐ ÉTAPE 3: Update existing agent prototype
         console.log('[App] 📤 Updating agent prototype:', agentId);
-        const response = await fetch(`${API_BASE_URL}/api/agent-prototypes/${agentId}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(agentData)
-        });
+        const { data: updatedAgent } = await apiClient.put(`/api/agent-prototypes/${agentId}`, agentData);
 
-        if (!response.ok) {
-          const error = await response.text();
-          throw new Error(`Update failed: ${response.status} - ${error}`);
-        }
-
-        savedAgent = await response.json();
+        savedAgent = updatedAgent;
         backendId = savedAgent._id || agentId;
         console.log('[App] ✅ Agent prototype updated:', backendId);
       } else {
         // ⭐ ÉTAPE 3: Create new agent prototype
         console.log('[App] 📤 Creating new agent prototype:', agentData.name);
+        const { data: createdAgent } = await apiClient.post('/api/agent-prototypes', agentData);
 
-        // For authenticated users, we need the real MongoDB user ID (from context)
-        // For guests, this won't be called (protected by isAuthenticated check above)
-        const response = await fetch(`${API_BASE_URL}/api/agent-prototypes`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(agentData)
-        });
-
-        if (!response.ok) {
-          const error = await response.text();
-          throw new Error(`Create failed: ${response.status} - ${error}`);
-        }
-
-        savedAgent = await response.json();
+        savedAgent = createdAgent;
         backendId = savedAgent._id;
         console.log('[App] ✅ Agent prototype created with backendId:', backendId);
 
@@ -1271,24 +1536,12 @@ function AppContent() {
       deleteAgentInstance(finalInstanceId);
       
       // 6. ⭐ CRITICAL: Persister la suppression au backend
-      if (isAuthenticated && accessToken) {
+      if (isAuthenticated) {
         const workflowId = getCurrentWorkflowId();
         if (workflowId) {
           try {
-            const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
-            const response = await fetch(`${backendUrl}/api/workflows/${workflowId}/instances/${finalInstanceId}`, {
-              method: 'DELETE',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json'
-              }
-            });
-            
-            if (response.ok) {
-              console.log('[App] ✅ Agent instance deleted from backend:', finalInstanceId);
-            } else {
-              console.warn('[App] ⚠️ Backend delete failed:', response.status);
-            }
+            await apiClient.delete(`/api/workflows/${workflowId}/instances/${finalInstanceId}`);
+            console.log('[App] ✅ Agent instance deleted from backend:', finalInstanceId);
           } catch (error) {
             console.error('[App] ❌ Error deleting instance from backend:', error);
           }
@@ -1311,18 +1564,11 @@ function AppContent() {
       deleteAgentInstance(instanceId);
       
       // Persister au backend
-      if (isAuthenticated && accessToken) {
+      if (isAuthenticated) {
         const workflowId = getCurrentWorkflowId();
         if (workflowId) {
           try {
-            const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
-            await fetch(`${backendUrl}/api/workflows/${workflowId}/instances/${instanceId}`, {
-              method: 'DELETE',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json'
-              }
-            });
+            await apiClient.delete(`/api/workflows/${workflowId}/instances/${instanceId}`);
           } catch (error) {
             console.error('[App] Error deleting instance:', instanceId, error);
           }
@@ -1442,11 +1688,18 @@ function AppContent() {
           </HyperspaceReveal>
         )}
 
-        {/* ⭐ ÉTAPE 5: Hydration Overlay - Blur Racing Style (for authenticated users) */}
+        {/* ⭐ V2: Overlay dédié au switch workflow (jaune Bos) */}
+        <WorkflowSwitchOverlay
+          isLoading={isSwitchingWorkflow}
+          workflowName={switchWorkflowName}
+          progress={switchProgress}
+        />
+
+        {/* ⭐ ÉTAPE 5: Hydration Overlay - Blur Racing Style (login only) */}
         <HydrationOverlay 
           isLoading={isHydrating} 
           progress={hydrationProgress}
-          message="Chargement de votre workspace..."
+          message={hydrationMessage}
         />
         
         <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">

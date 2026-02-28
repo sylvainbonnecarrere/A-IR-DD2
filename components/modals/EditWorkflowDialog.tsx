@@ -15,8 +15,9 @@ interface Workflow {
 interface EditWorkflowDialogProps {
   isOpen: boolean;
   workflow: Workflow;
+  totalWorkflows: number;  // ⭐ V4: Pour savoir si la checkbox isDefault doit être disabled
   onClose: () => void;
-  onSave: (id: string, name: string, description?: string) => Promise<void>;
+  onSave: (id: string, name: string, description?: string, isDefault?: boolean) => Promise<void>;
 }
 
 /**
@@ -26,20 +27,26 @@ interface EditWorkflowDialogProps {
 const EditWorkflowDialog: React.FC<EditWorkflowDialogProps> = ({
   isOpen,
   workflow,
+  totalWorkflows,
   onClose,
   onSave
 }) => {
   const { t } = useLocalization();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [isDefault, setIsDefault] = useState(false);
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  
+  // ⭐ V4: isDefault checkbox disabled si seul workflow ou déjà default
+  const isDefaultLocked = totalWorkflows <= 1 || workflow.isDefault;
   
   // Initialize form when workflow changes
   useEffect(() => {
     if (workflow) {
       setName(workflow.name);
       setDescription(workflow.description || '');
+      setIsDefault(workflow.isDefault);
       setError('');
     }
   }, [workflow]);
@@ -54,7 +61,9 @@ const EditWorkflowDialog: React.FC<EditWorkflowDialogProps> = ({
     setError('');
     
     try {
-      await onSave(workflow._id, name, description);
+      // ⭐ V4: Passer isDefault seulement si changé (pour éviter les updates inutiles)
+      const defaultChanged = isDefault !== workflow.isDefault ? isDefault : undefined;
+      await onSave(workflow._id, name, description, defaultChanged);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('notification_workflow_error'));
@@ -109,6 +118,31 @@ const EditWorkflowDialog: React.FC<EditWorkflowDialogProps> = ({
               className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-yellow-400 focus:outline-none resize-none"
               disabled={isSaving}
             />
+          </div>
+          
+          {/* ⭐ V4: isDefault Checkbox */}
+          <div className="flex items-start gap-3 p-3 bg-gray-900/40 rounded border border-gray-700">
+            <input
+              type="checkbox"
+              id="edit-workflow-is-default"
+              checked={isDefault}
+              onChange={(e) => setIsDefault(e.target.checked)}
+              disabled={isSaving || isDefaultLocked}
+              className="w-4 h-4 mt-0.5 flex-shrink-0 accent-yellow-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            <div className="flex flex-col min-w-0">
+              <label
+                htmlFor="edit-workflow-is-default"
+                className={`text-sm ${isDefaultLocked ? 'text-gray-500' : 'text-yellow-300'} cursor-pointer`}
+              >
+                ⭐ {t('dialog_workflow_is_default')}
+              </label>
+              {isDefaultLocked && workflow.isDefault && (
+                <span className="text-xs text-gray-500 italic mt-1">
+                  {t('dialog_workflow_already_default')}
+                </span>
+              )}
+            </div>
           </div>
           
           {/* Error Message */}

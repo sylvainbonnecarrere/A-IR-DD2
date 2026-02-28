@@ -705,7 +705,7 @@ export default {
     workflow_card_modified: 'Geändert',
     workflow_card_agents: 'Agenten',
     workflow_card_nodes: 'Knoten',
-    workflow_card_select: 'Auswählen',
+    workflow_card_select: 'Als Standard auswählen',
     workflow_card_delete: 'Löschen',
     workflow_card_active: 'Aktiv',
     workflow_card_default: 'Standard',
@@ -723,6 +723,8 @@ export default {
     dialog_edit_workflow_title: 'Workflow bearbeiten',
     dialog_workflow_save_button: 'Speichern',
     dialog_workflow_saving: 'Speichere ...',
+    dialog_workflow_is_default: 'Standard-Workflow',
+    dialog_workflow_already_default: 'Bereits Standard',
     notification_workflow_created: 'Workflow erfolgreich erstellt',
     notification_workflow_selected: 'Workflow aktiviert',
     notification_workflow_deleted: 'Workflow gelöscht',
@@ -731,4 +733,19 @@ export default {
     error_cannot_delete_active_workflow: 'Der aktive Workflow kann nicht gelöscht werden. Bitte wählen Sie zuerst einen anderen aus.',
     error_workflow_not_found: 'Workflow nicht gefunden',
     error_load_workflows: 'Fehler beim Laden der Workflows',
+
+    // Workflow Switch Overlay (V2)
+    workflow_switch_loading: 'Workflow wird geladen',
+    workflow_switch_syncing: 'Daten werden synchronisiert',
+    workflow_switch_success_title: 'Workflow geladen',
+    workflow_switch_success_message: 'Workflow „{name}" ist jetzt aktiv',
+    workflow_switch_error_title: 'Ladefehler',
+    workflow_switch_error_message: 'Workflow „{name}" konnte nicht geladen werden',
+    workflow_switch_in_progress: 'Wechsel läuft...',
+    workflow_delete_confirm: 'Möchten Sie diesen Workflow wirklich löschen?',
+    workflow_delete_last_error: 'Der letzte Workflow kann nicht gelöscht werden',
+
+    // Fehlende bestehende Schlüssel
+    retry: 'Erneut versuchen',
+    bos_supervision_desc: 'Überwachung, Debugging und Kostenmonitoring',
 };
