@@ -21,8 +21,7 @@
  */
 
 import { GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { API_BASE_URL } from '../config/api.config';
 
 /**
  * Persistence options for all operations

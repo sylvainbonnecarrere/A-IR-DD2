@@ -8,53 +8,7 @@ import { AgentJournal } from '../models/AgentJournal.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
-
-// ⭐ HELPER: Transform MongoDB AgentInstance document for frontend consumption
-// Maps _id → id and reconstructs configuration_json from individual fields
-function transformAgentInstanceForFrontend(instance: any) {
-    const instanceObj = instance.toObject?.() || instance;
-    const {
-        _id,
-        role,
-        llmProvider,
-        llmModel,
-        systemPrompt,
-        capabilities,
-        tools,
-        historyConfig,
-        outputConfig,
-        robotId,
-        position,
-        ...rest
-    } = instanceObj;
-
-    return {
-        id: _id?.toString(),
-        role,
-        llmProvider,
-        llmModel,
-        systemPrompt,
-        capabilities: capabilities || [],
-        tools: tools || [],
-        historyConfig: historyConfig || {},
-        outputConfig: outputConfig || {},
-        robotId,
-        position,
-        // ⭐ CRITICAL: Reconstruct configuration_json for frontend
-        configuration_json: {
-            role: role || 'assistant',
-            model: llmModel || 'gpt-4o-mini',
-            llmProvider: llmProvider || 'openai',
-            systemPrompt: systemPrompt || '',
-            capabilities: Array.isArray(capabilities) ? capabilities : [],
-            tools: Array.isArray(tools) ? tools : [],
-            historyConfig: historyConfig || {},
-            outputConfig: outputConfig || {},
-            position: position || { x: 0, y: 0 }
-        },
-        ...rest
-    };
-}
+import { transformAgentInstanceForFrontend } from '../utils/transforms';
 
 // Type pour les paramètres de route hérités (via mergeParams)
 interface WorkflowParams {

@@ -1,26 +1,30 @@
 // Configuration centralisée des endpoints API
-// Le frontend appelle le backend proxy, qui appelle ensuite LMStudio
+// Source de vérité unique pour l'URL du backend.
+// Toutes les couches (apiClient, services, hooks, composants) DOIVENT importer depuis ce fichier.
 
 /**
- * URL du backend proxy
- * En production, utiliser la variable d'environnement VITE_BACKEND_URL
- * ⭐ CRITICAL: Use process.env instead of import.meta.env to avoid Jest parse errors
- * Vite handles process.env.VITE_* replacement in browser builds
+ * ⭐ API_BASE_URL — Single Source of Truth
+ *
+ * Résolution (par priorité) :
+ *   1. import.meta.env.VITE_API_URL  — définie dans .env / .env.local (Vite injecte à build-time)
+ *   2. Fallback : 'http://localhost:3001'
+ *
+ * NOTE : import.meta.env est le mécanisme natif Vite.
+ *        process.env.REACT_APP_* est un pattern CRA, non supporté par Vite.
  */
-export const getBackendUrl = (): string => {
-  // process.env.VITE_BACKEND_URL is replaced by Vite in browser builds
-  // In tests/Node, it falls back to localhost
-  return (process.env.VITE_BACKEND_URL as string) || 'http://localhost:3001';
-};
-
-// Deprecated: Use getBackendUrl() instead. Kept for backward compatibility in some edge cases.
-export const BACKEND_URL = 'http://localhost:3001';
+export const API_BASE_URL: string =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001';
 
 /**
- * ⭐ API_BASE_URL: Simple constant for backward compatibility
- * For dynamic behavior, use getBackendUrl() instead
+ * getBackendUrl() — Alias fonctionnel pour compatibilité arrière.
+ * Retourne toujours API_BASE_URL.
  */
-export const API_BASE_URL = 'http://localhost:3001';
+export const getBackendUrl = (): string => API_BASE_URL;
+
+/**
+ * @deprecated Utiliser API_BASE_URL directement.
+ */
+export const BACKEND_URL: string = API_BASE_URL;
 
 /**
  * Endpoints du backend proxy

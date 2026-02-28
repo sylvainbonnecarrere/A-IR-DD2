@@ -26,9 +26,11 @@ import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useLocalizationStore } from '../stores/useLocalizationStore';
+import apiClient from '../utils/apiClient';
+
+import { API_BASE_URL } from '../config/api.config';
 
 const AUTH_STORAGE_KEY = 'auth_data_v1';
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 /**
  * AuthContext - Singleton context for authentication state
@@ -150,54 +152,43 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
      * 
      * ⭐ J4.4: Added timeout & mount check to prevent async errors
      */
-    const fetchLLMApiKeys = useCallback(async (token: string) => {
-        // ⭐ J4.4: Check mount state before async operation
-        if (!isMounted) {
-            return;
-        }
+    const fetchLLMApiKeys = useCallback(async (token: string, retryCount = 0) => {
+        if (!isMounted) return;
 
-        // ⭐ J4.4: Add 5-second timeout to prevent hanging
+        // Timeout 5s pour éviter un hang
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/llm/get-all-api-keys`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({}),
-                signal: controller.signal // ⭐ J4.4: Allow timeout to abort
-            });
-
-            if (!response.ok) {
-                console.error('[AuthContext] Failed to fetch LLM API keys:', response.status);
-                // Non-blocking: continue without keys
-                if (isMounted) {
-                    setLlmApiKeys([]);
+            // ⭐ FIX: Pass token DIRECTLY in headers — don't rely solely on interceptor
+            const { data: keys } = await apiClient.post<LLMApiKey[]>(
+                '/api/llm/get-all-api-keys',
+                {},
+                {
+                    signal: controller.signal,
+                    headers: { Authorization: `Bearer ${token}` }
                 }
-                return;
-            }
-
-            const keys: LLMApiKey[] = await response.json();
+            );
             console.log('[AuthContext] ✅ Fetched keys count:', keys.length, 'providers:', keys.map(k => k.provider));
-            
-            // ⭐ J4.4: Only update state if component still mounted
+
             if (isMounted) {
                 setLlmApiKeys(keys);
-                console.log('[AuthContext] ✅ setLlmApiKeys called with', keys.length, 'keys');
             }
         } catch (err: any) {
-            // ⭐ J4.4: Ignore abort errors (timeout) and unmount errors
-            if (err.name === 'AbortError') {
+            if (err.name === 'AbortError' || err.code === 'ERR_CANCELED') {
                 console.warn('[AuthContext] Fetch timeout');
-                // Timeout reached
+            } else if (err.response?.status === 401 && retryCount < 2) {
+                // ⭐ FIX: Auth may not be fully propagated yet — retry after delay
+                console.warn(`[AuthContext] 401 on fetchLLMApiKeys, retrying (${retryCount + 1}/2) in 500ms...`);
+                clearTimeout(timeoutId);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                if (isMounted) {
+                    return fetchLLMApiKeys(token, retryCount + 1);
+                }
+                return;
             } else {
                 console.error('[AuthContext] Fetch error:', err.message);
             }
-            
-            // Only update state if component still mounted
             if (isMounted) {
                 setLlmApiKeys([]);
             }

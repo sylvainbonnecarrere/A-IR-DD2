@@ -21,8 +21,7 @@ import axios, {
     InternalAxiosRequestConfig,
     AxiosResponse,
 } from 'axios';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { API_BASE_URL } from '../config/api.config';
 
 /**
  * Create axios instance with base URL
@@ -70,22 +69,15 @@ axiosInstance.interceptors.response.use(
         return response;
     },
     (error: AxiosError) => {
-        // Handle 401 Unauthorized
+        // Handle 401 Unauthorized — LOG ONLY, pas de destruction de session.
+        // Le CdP a choisi la politique "Log, pas logout" pour éviter les wipe agressifs.
         if (error.response?.status === 401) {
-            console.warn('[apiClient] 401 Unauthorized - clearing auth');
-
-            // Clear auth from localStorage
-            localStorage.removeItem('auth_data_v1');
-
-            // Dispatch logout event (will be caught by AuthContext listener)
-            // Note: We dispatch a custom event so AuthContext can react
-            const logoutEvent = new CustomEvent('auth:logout', {
-                detail: { reason: 'token_expired' },
+            console.warn('[apiClient] 401 Unauthorized — le token est peut-être expiré.', {
+                url: error.config?.url,
+                method: error.config?.method,
             });
-            window.dispatchEvent(logoutEvent);
-
-            // Show user-friendly message
-            console.error('Session expirée. Veuillez vous reconnecter.');
+            // NOTE: Pas de localStorage.removeItem ni d'event auth:logout ici.
+            // C'est le composant appelant (ou un refresh-token flow) qui décide.
         }
 
         // Handle 403 Forbidden

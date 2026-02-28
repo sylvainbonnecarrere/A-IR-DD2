@@ -142,13 +142,12 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
         const user = req.user as IUser;
         const userId = user.id || user._id;
 
-        console.log('[Workspace] GET - userId:', userId);
-
         // ⭐ SELF-HEALING: Garantir qu'un workflow par défaut existe
         const { workflow: defaultWorkflow, wasCreated, healingActions } = 
             await WorkflowSelfHealingService.ensureDefaultWorkflow(userId.toString());
         
-        if (wasCreated) {
+        // Production-safe logging: only log healing events (important for debugging)
+        if (wasCreated && process.env.NODE_ENV === 'development') {
             console.log('[Workspace] Self-healing triggered:', healingActions);
         }
 
@@ -158,13 +157,35 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
             llmConfigs,
             userSettings
         ] = await Promise.all([
-            // Get all agent prototypes for user
-            AgentPrototype.find({ userId }).sort({ name: 1 }),
+            // ⭐ V2: Get agent prototypes scoped to default workflow
+            // Include legacy prototypes (no workflowId) for self-healing migration
+            AgentPrototype.find({
+                userId,
+                $or: [
+                    { workflowId: defaultWorkflow?._id },
+                    { workflowId: { $exists: false } },
+                    { workflowId: null }
+                ]
+            }).sort({ name: 1 }),
             // Get all LLM configs (without API keys)
             LLMConfig.find({ userId }),
             // Get user settings
             UserSettings.findOne({ userId })
         ]);
+
+        // ⭐ V2 SELF-HEALING: Assign orphaned prototypes (no workflowId) to default workflow
+        if (defaultWorkflow) {
+            const orphanedPrototypes = agentPrototypes.filter(
+                (p: any) => !p.workflowId
+            );
+            if (orphanedPrototypes.length > 0) {
+                await AgentPrototype.updateMany(
+                    { userId, $or: [{ workflowId: { $exists: false } }, { workflowId: null }] },
+                    { workflowId: defaultWorkflow._id }
+                );
+                console.log(`[Workspace] Self-healing: Assigned ${orphanedPrototypes.length} orphaned prototypes to workflow ${defaultWorkflow._id}`);
+            }
+        }
 
         // Le workflow par défaut est garanti par Self-Healing
         const workflow = defaultWorkflow;

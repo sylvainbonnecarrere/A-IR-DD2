@@ -34,8 +34,8 @@ interface APIResponse<T = any> {
  * Frontend: model, creator_id, capabilities (enum array)
  * Backend: llmModel, robotId, capabilities (string array)
  */
-function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string): Record<string, any> {
-  const payload = {
+function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string, workflowId?: string): Record<string, any> {
+  const payload: Record<string, any> = {
     name: agentData.name || '',
     role: agentData.role || '',
     systemPrompt: agentData.systemPrompt || '',
@@ -48,9 +48,12 @@ function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string)
     robotId: robotId // Frontend uses 'creator_id', backend expects 'robotId'
   };
   
-  // Debug log to see what we're sending
-  console.log('[agentPrototypeAPI] Payload to send:', JSON.stringify(payload, null, 2));
+  // \u2b50 V2: Include workflowId to scope prototype to a workflow
+  if (workflowId) {
+    payload.workflowId = workflowId;
+  }
   
+
   return payload;
 }
 
@@ -87,10 +90,11 @@ export function mapAPIResponseToAgent(apiData: any): Agent {
 export async function createAgentPrototype(
   agentData: AgentPrototypePayload,
   accessToken: string,
-  robotId: string
+  robotId: string,
+  workflowId?: string
 ): Promise<APIResponse<any>> {
   try {
-    const payload = mapAgentToAPIPayload(agentData, robotId);
+    const payload = mapAgentToAPIPayload(agentData, robotId, workflowId);
     
     const response = await fetch(API_BASE, {
       method: 'POST',
@@ -216,15 +220,19 @@ export async function deleteAgentPrototype(
 }
 
 /**
- * Récupérer tous les prototypes de l'utilisateur connecté
+ * R\u00e9cup\u00e9rer les prototypes de l'utilisateur connect\u00e9 (filtr\u00e9s par workflow)
  * @param accessToken - JWT token
+ * @param workflowId - Optional workflow ID to filter prototypes
  * @returns APIResponse avec la liste des prototypes
  */
 export async function fetchAgentPrototypes(
-  accessToken: string
+  accessToken: string,
+  workflowId?: string
 ): Promise<APIResponse<any[]>> {
   try {
-    const response = await fetch(API_BASE, {
+    // ⭐ SECURITY: URL-encode to prevent injection
+    const url = workflowId ? `${API_BASE}?workflowId=${encodeURIComponent(workflowId)}` : API_BASE;
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`

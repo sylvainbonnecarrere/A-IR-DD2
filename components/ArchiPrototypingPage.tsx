@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Agent, LLMConfig, RobotId, PersistenceConfig } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
+import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useAuth } from '../contexts/AuthContext';
 import { AgentFormModal } from './modals/AgentFormModal';
 import { AgentDeletionConfirmModal } from './modals/AgentDeletionConfirmModal';
@@ -35,6 +36,9 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
   
   // ⭐ Auth context pour persistence MongoDB (users connectés uniquement)
   const { isAuthenticated, accessToken } = useAuth();
+  
+  // ⭐ V2: Current workflow ID for scoping prototypes to active workflow
+  const currentWorkflowId = useWorkflowStore(state => state.getCurrentWorkflowId());
   
   const {
     agents,
@@ -110,14 +114,17 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
   // ⭐ J4.5: Charger les prototypes persistés au montage (users authentifiés uniquement)
   useEffect(() => {
+    let isMounted = true; // ⭐ PERF: Prevent state update on unmounted component
+
     const loadPersistedPrototypes = async () => {
       if (!isAuthenticated || !accessToken) {
         return;
       }
 
-      const result = await fetchAgentPrototypes(accessToken);
+      // ⭐ V2: Pass workflowId to scope prototypes to current workflow
+      const result = await fetchAgentPrototypes(accessToken, currentWorkflowId || undefined);
       
-      if (result.success && result.data) {
+      if (isMounted && result.success && result.data) {
         // Convertir format backend → frontend
         const mappedAgents = result.data.map(mapAPIResponseToAgent);
         
@@ -127,7 +134,9 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
     };
 
     loadPersistedPrototypes();
-  }, [isAuthenticated, accessToken]);
+
+    return () => { isMounted = false; }; // ⭐ Cleanup on unmount
+  }, [isAuthenticated, accessToken, currentWorkflowId]);
 
   const handleCreateAgent = () => {
     setEditingAgent(null);
@@ -229,20 +238,15 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       if (result.success && result.agentId) {
         // ⭐ PERSISTENCE: Si user connecté, sauvegarder aussi dans MongoDB
         if (isAuthenticated && accessToken) {
-          const apiResult = await createAgentPrototype(agentData, accessToken, currentRobotId);
+          const apiResult = await createAgentPrototype(agentData, accessToken, currentRobotId, currentWorkflowId || undefined);
           if (apiResult.success && apiResult.data) {
             // ⭐ CRITICAL FIX: Capture ObjectId from backend and update local store
             const backendObjectId = apiResult.data._id || apiResult.data.id;
             if (backendObjectId && backendObjectId !== result.agentId) {
-              console.log('[ArchiPrototypingPage] Updating agent ID:', {
-                tempId: result.agentId,
-                objectId: backendObjectId
-              });
               updateAgentId(result.agentId, backendObjectId);
             }
-          } else {
-            console.warn('[ArchiPrototypingPage] API creation failed, using local ID:', apiResult.error);
           }
+          // Silent fallback to local ID on API failure - error logged by agentPrototypeAPI
         }
         
         addNotification({

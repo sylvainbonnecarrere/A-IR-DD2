@@ -21,6 +21,7 @@
 
 import mongoose from 'mongoose';
 import { Workflow, IWorkflow } from '../models/Workflow.model';
+import { User } from '../models/User.model';
 
 // ============================================
 // TYPES
@@ -65,6 +66,21 @@ export class WorkflowSelfHealingService {
         });
         
         if (workflow) {
+            // ⭐ Vérifier si User.defaultWorkflowId est correct
+            const userRecord = await User.findById(userId);
+            if (!userRecord?.defaultWorkflowId || userRecord.defaultWorkflowId.toString() !== workflow._id.toString()) {
+                // Mettre à jour le User record
+                await User.findByIdAndUpdate(
+                    userId,
+                    {
+                        defaultWorkflowId: workflow._id,
+                        workflowCount: await Workflow.countDocuments({ userId }),
+                        lastActiveWorkflowId: workflow._id,
+                        updatedAt: new Date()
+                    },
+                    { new: true }
+                );
+            }
             return { workflow, wasCreated: false, healingActions };
         }
         
@@ -81,6 +97,19 @@ export class WorkflowSelfHealingService {
             workflow.isDefault = true;
             await workflow.save();
             healingActions.push(`Promoted workflow ${workflow.id} to default`);
+            
+            // ⭐ Mettre à jour le User record
+            await User.findByIdAndUpdate(
+                userId,
+                {
+                    defaultWorkflowId: workflow._id,
+                    workflowCount: await Workflow.countDocuments({ userId }),
+                    lastActiveWorkflowId: workflow._id,
+                    updatedAt: new Date()
+                },
+                { new: true }
+            );
+            
             return { workflow, wasCreated: false, healingActions };
         }
         
@@ -95,6 +124,19 @@ export class WorkflowSelfHealingService {
             workflow.isActive = true;
             await workflow.save();
             healingActions.push(`Promoted workflow ${workflow.id} to default and active`);
+            
+            // ⭐ Mettre à jour le User record
+            await User.findByIdAndUpdate(
+                userId,
+                {
+                    defaultWorkflowId: workflow._id,
+                    workflowCount: await Workflow.countDocuments({ userId }),
+                    lastActiveWorkflowId: workflow._id,
+                    updatedAt: new Date()
+                },
+                { new: true }
+            );
+            
             return { workflow, wasCreated: false, healingActions };
         }
         
@@ -119,6 +161,18 @@ export class WorkflowSelfHealingService {
         
         await workflow.save();
         healingActions.push(`Created new default workflow: ${workflow.id}`);
+        
+        // ⭐ SYNCHRONOUS UPDATE: Update User record IMMEDIATELY
+        await User.findByIdAndUpdate(
+            userId,
+            {
+                defaultWorkflowId: new mongoose.Types.ObjectId(workflow.id),
+                workflowCount: 1,
+                lastActiveWorkflowId: new mongoose.Types.ObjectId(workflow.id),
+                updatedAt: new Date()
+            },
+            { new: true }
+        );
         
         console.log(`[WorkflowSelfHealing] Created default workflow for user ${userId}:`, {
             workflowId: workflow.id,

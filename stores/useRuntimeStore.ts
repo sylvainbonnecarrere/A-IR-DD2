@@ -74,6 +74,9 @@ interface RuntimeStore {
   
   // ⭐ ÉTAPE 2.2: Reset complet pour wipe à la connexion
   resetAll: () => void;
+  
+  // ⭐ V2: Reset pour switch de workflow (préserve llmConfigs qui sont user-level)
+  resetForWorkflowSwitch: () => void;
 }
 
 export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
@@ -244,7 +247,10 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       return msgSeconds > lastSavedSeconds;
     });
 
-    console.log(`[useRuntimeStore] getNewMessages(${nodeId}): ${newMessages.length} new messages (out of ${messages.length} total). Last saved: ${lastSaved.toISOString()}`);
+    // Only log in development to avoid production noise
+    if (import.meta.env.DEV) {
+      console.log(`[useRuntimeStore] getNewMessages(${nodeId}): ${newMessages.length} new messages (out of ${messages.length} total). Last saved: ${lastSaved.toISOString()}`);
+    }
     return newMessages;
   },
 
@@ -268,5 +274,30 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     fullscreenChatAgentInstance: null, // ⭐ New
     configModalInstanceId: null
     // Note: navigationHandler conservé car c'est une fonction
-  })
+  }),
+
+  /**
+   * ⭐ V2: Reset pour switch de workflow
+   * PRÉSERVE llmConfigs car ce sont des configs user-level (pas workflow-scoped)
+   * Utilisé par switchToWorkflow() dans App.tsx
+   */
+  resetForWorkflowSwitch: () => {
+    const currentConfigs = get().llmConfigs;
+    set({
+      nodeMessages: {},
+      executingNodes: new Set(),
+      minimizedNodeIds: new Set(),
+      lastSavedAt: {},
+      llmConfigs: currentConfigs, // ⭐ PRÉSERVÉ: configs sont user-level
+      isImagePanelOpen: false,
+      isImageModificationPanelOpen: false,
+      currentImageNodeId: null,
+      editingImageInfo: null,
+      fullscreenImage: null,
+      fullscreenChatNodeId: null,
+      fullscreenChatAgent: null,
+      fullscreenChatAgentInstance: null,
+      configModalInstanceId: null
+    });
+  }
 }));
