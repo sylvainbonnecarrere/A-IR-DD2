@@ -7,6 +7,7 @@ import { ComDatabasesPage } from './ComDatabasesPage';
 import { ComApiPage } from './ComApiPage';
 import { PhilDataPage } from './PhilDataPage';
 import { TimEventsPage } from './TimEventsPage';
+import BosWorkflowManagementPage from './BosWorkflowManagementPage';
 import { useLocalization } from '../hooks/useLocalization';
 
 interface RobotPageRouterProps {
@@ -198,6 +199,15 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
         description={t('page_dashboard_description')}
         {...workflowProps}
       />
+    );
+  }
+
+  // ⭐ NEW - BOS Workflow Management Page
+  if (currentPath.startsWith('/bos/workflows/manage')) {
+    return (
+      <div className="h-full">
+        <BosWorkflowManagementPage />
+      </div>
     );
   }
 

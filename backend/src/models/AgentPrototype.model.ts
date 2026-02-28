@@ -19,6 +19,7 @@ export interface IPersistenceConfig {
 
 export interface IAgentPrototype extends Document {
     userId: mongoose.Types.ObjectId;
+    workflowId?: mongoose.Types.ObjectId; // ⭐ V2: Scope prototype to a specific workflow
     name: string;
     role: string;
     systemPrompt: string;
@@ -55,6 +56,13 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
         ref: 'User',
         required: true
         // Removed: index: true (conflicts with composite indexes below)
+    },
+    // ⭐ V2: Optional workflow scope — prototypes without workflowId are "legacy" (user-level)
+    workflowId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Workflow',
+        required: false,
+        default: undefined
     },
     name: {
         type: String,
@@ -124,5 +132,6 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
 // Index pour queries optimisées
 AgentPrototypeSchema.index({ userId: 1, createdAt: -1 });
 AgentPrototypeSchema.index({ userId: 1, robotId: 1 });
+AgentPrototypeSchema.index({ userId: 1, workflowId: 1, createdAt: -1 }); // ⭐ V2: Scope by workflow
 
 export const AgentPrototype = mongoose.model<IAgentPrototype>('AgentPrototype', AgentPrototypeSchema);

@@ -129,6 +129,13 @@ export const ROBOT_MENU_DATA: RobotMenuItem[] = [
       },
       {
         id: RobotId.Bos,
+        name: 'bos_manage_workflows',
+        iconComponent: WorkflowIcon,
+        path: '/bos/workflows/manage',
+        description: 'bos_manage_workflows_desc'
+      },
+      {
+        id: RobotId.Bos,
         name: 'bos_playground_public',
         iconComponent: GameIcon,
         path: '/bos/playground',

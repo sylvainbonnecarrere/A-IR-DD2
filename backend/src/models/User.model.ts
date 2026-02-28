@@ -11,6 +11,12 @@ export interface IUser extends Document {
     createdAt: Date;
     updatedAt: Date;
     lastLogin?: Date;
+    
+    // ⭐ PHASE 1: Multiple Workflows Support
+    defaultWorkflowId?: mongoose.Types.ObjectId;  // Workflow marqué par défaut
+    workflowCount: number;                        // Nombre total de workflows
+    lastActiveWorkflowId?: mongoose.Types.ObjectId; // Dernier workflow utilisé
+    
     comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
@@ -37,12 +43,44 @@ const UserSchema = new Schema<IUser>({
         type: Boolean,
         default: true
     },
-    lastLogin: Date
+    lastLogin: Date,
+    
+    // ⭐ PHASE 1: Multiple Workflows Support
+    defaultWorkflowId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Workflow',
+        sparse: true,
+        validate: {
+            async validator(this: any, value: any) {
+                if (!value) return true; // Optional field
+                const Workflow = mongoose.model('Workflow');
+                const workflow = await Workflow.findById(value);
+                return workflow?.userId?.equals(this._id);
+            },
+            message: 'defaultWorkflowId must belong to this user'
+        }
+    },
+    
+    workflowCount: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    
+    lastActiveWorkflowId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Workflow',
+        sparse: true
+    }
 }, {
     timestamps: true,
     collection: 'users',
     strict: false // Permettre les champs additionnels
 });
+
+// ⭐ PHASE 1: Indexes pour multi-workflows
+UserSchema.index({ email: 1, defaultWorkflowId: 1 });
+UserSchema.index({ _id: 1, defaultWorkflowId: 1 });
 
 // Middleware: Hash password avant sauvegarde
 UserSchema.pre('save', async function (next) {

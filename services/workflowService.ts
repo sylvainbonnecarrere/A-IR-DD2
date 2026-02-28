@@ -14,8 +14,7 @@
  */
 
 import type { V2WorkflowNode, V2WorkflowEdge, Workflow } from '../types';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { API_BASE_URL } from '../config/api.config';
 const GUEST_WORKFLOW_KEY = 'guest_workflow_v1';
 const GUEST_NODES_KEY = 'guest_workflow_nodes_v1';
 const GUEST_EDGES_KEY = 'guest_workflow_edges_v1';

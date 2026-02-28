@@ -9,6 +9,7 @@ import { useSaveMode } from '../../hooks/useSaveMode';
 import { locales, Locale } from '../../i18n/locales';
 import { detectLMStudioModel } from '../../services/routeDetectionService';
 import { invalidateLMStudioCache } from '../../llmModels';
+import { API_BASE_URL } from '../../config/api.config';
 
 interface SettingsModalProps {
   llmConfigs: LLMConfig[];
@@ -121,7 +122,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
       // JALON 5: Appel unique au backend proxy (Option C Hybride)
       // URL endpoint est passée en query param
-      const apiUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(lmStudioConfig.apiKey)}`;
+      const apiUrl = `${API_BASE_URL}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(lmStudioConfig.apiKey)}`;
       
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -454,7 +455,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                           */}
                           <input
                             id={`${provider}-apikey`}
-                            type={provider === LLMProvider.LMStudio ? "url" : "password"}
+                            type={provider === LLMProvider.LMStudio ? "text" : "password"}
                             value={apiKey}
                             onChange={(e) => handleApiKeyChange(provider, e.target.value)}
                             placeholder={provider === LLMProvider.LMStudio ? "http://localhost:3928" : t('settings_apiKey_placeholder')}
