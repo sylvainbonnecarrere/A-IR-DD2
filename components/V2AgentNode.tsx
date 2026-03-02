@@ -164,6 +164,17 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // ⭐ DIAGNOSTIC: Log callback availability on mount and changes
+  useEffect(() => {
+    console.log(`[V2AgentNode ${id}] Callbacks available:`, {
+      hasOnOpenImagePanel: !!onOpenImagePanel,
+      hasOnOpenImageModificationPanel: !!onOpenImageModificationPanel,
+      hasOnOpenVideoPanel: !!onOpenVideoPanel,
+      hasOnOpenMapsPanel: !!onOpenMapsPanel,
+      hasOnOpenFullscreen: !!onOpenFullscreen
+    });
+  }, [id, onOpenImagePanel, onOpenImageModificationPanel, onOpenVideoPanel, onOpenMapsPanel, onOpenFullscreen]);
+
   // Get messages from store
   const messages = getNodeMessages(id);
   const isLoading = isNodeExecuting(id);
@@ -355,6 +366,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       id: generateMessageId('user'),
       sender: 'user',
       text: trimmedInput,
+      timestamp: new Date(),
     };
 
     // Handle file attachment
@@ -378,11 +390,16 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     setAttachedFile(null);
 
     // Persist user message to journal (non-blocking)
+    // ⭐ FIX QA: Include image data for persistence if present
     persistJournalEntry('chat', {
       role: 'user',
       content: trimmedInput,
       llmProvider: effectiveAgent.llmProvider,
-      modelUsed: effectiveAgent.model
+      modelUsed: effectiveAgent.model,
+      // ⭐ FIX QA: Persist image data for reload after login
+      ...(userMessage.image && { imageBase64: userMessage.image }),
+      ...(userMessage.mimeType && { mimeType: userMessage.mimeType }),
+      ...(userMessage.filename && { fileName: userMessage.filename })
     });
 
     // Get LLM config
@@ -393,7 +410,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         id: generateMessageId('error'),
         sender: 'agent',
         text: `Erreur: ${effectiveAgent.llmProvider} n'est pas configuré ou activé.`,
-        isError: true
+        isError: true,
+        timestamp: new Date()
       };
       addNodeMessage(id, errorMessage);
       setNodeExecuting(id, false);
@@ -432,7 +450,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
           const summarizationHistory: ChatMessage[] = [{
             id: `msg-summary-prompt-${Date.now()}`,
             sender: 'user',
-            text: summarizationPrompt
+            text: summarizationPrompt,
+            timestamp: new Date()
           }];
 
           const { text: summary } = await llmService.generateContent(
@@ -449,7 +468,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
           const summaryMessage: ChatMessage = {
             id: generateMessageId('summary'),
             sender: 'agent',
-            text: `(Résumé de l'historique): ${summary}`
+            text: `(Résumé de l'historique): ${summary}`,
+            timestamp: new Date()
           };
 
           conversationHistoryForAPI = [summaryMessage, userMessage];
@@ -484,7 +504,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             id: agentMessageId,
             sender: 'agent',
             text: chunk.error,
-            isError: true
+            isError: true,
+            timestamp: new Date()
           };
           addNodeMessage(id, errorMessage);
           break;
@@ -505,7 +526,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             const newMessage: ChatMessage = {
               id: agentMessageId,
               sender: 'agent',
-              text: currentResponse
+              text: currentResponse,
+              timestamp: new Date()
             };
             addNodeMessage(id, newMessage);
           }
@@ -519,7 +541,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             sender: 'agent',
             text: currentResponse,
             toolCalls,
-            status: 'executing_tool'
+            status: 'executing_tool',
+            timestamp: new Date()
           };
 
           const existingMessages = getNodeMessages(id);
@@ -549,7 +572,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
               sender: 'tool_result',
               text: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
               toolCallId: toolCall.id,
-              toolName: toolCall.name
+              toolName: toolCall.name,
+              timestamp: new Date()
             };
             addNodeMessage(id, toolResultMessage);
           } catch (error) {
@@ -559,7 +583,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
               text: `Erreur: ${error instanceof Error ? error.message : String(error)}`,
               toolCallId: toolCall.id,
               toolName: toolCall.name,
-              isError: true
+              isError: true,
+              timestamp: new Date()
             };
             addNodeMessage(id, errorMessage);
           }
@@ -592,7 +617,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             ).join('\n\n'); const contextMessage: ChatMessage = {
               id: generateMessageId('tool-context'),
               sender: 'user',
-              text: `${t('tool_results_context')}:\n\n${toolResultsSummary}\n\n${t('analyze_results_request')}`
+              text: `${t('tool_results_context')}:\n\n${toolResultsSummary}\n\n${t('analyze_results_request')}`,
+              timestamp: new Date()
             };
 
             messagesWithoutToolResults.push(contextMessage);
@@ -619,7 +645,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                 id: followUpMessageId,
                 sender: 'agent',
                 text: chunk.error,
-                isError: true
+                isError: true,
+                timestamp: new Date()
               };
               addNodeMessage(id, errorMessage);
               break;
@@ -639,7 +666,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                 const newFollowUpMessage: ChatMessage = {
                   id: followUpMessageId,
                   sender: 'agent',
-                  text: followUpResponse
+                  text: followUpResponse,
+                  timestamp: new Date()
                 };
                 addNodeMessage(id, newFollowUpMessage);
               }
@@ -663,7 +691,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         id: generateMessageId('error'),
         sender: 'agent',
         text: `Erreur: ${error instanceof Error ? error.message : String(error)}`,
-        isError: true
+        isError: true,
+        timestamp: new Date()
       };
       addNodeMessage(id, errorMessage);
 
@@ -689,8 +718,10 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   };
 
   const handleOpenImagePanel = () => {
-    if (onOpenImagePanel) {
-      onOpenImagePanel(id);
+    if (onOpenImagePanel && agent && agentInstance) {
+      onOpenImagePanel(id, agent, agentInstance);
+    } else {
+      console.warn(`[V2AgentNode ${id}] Cannot open image panel - missing callback or agent/instance`);
     }
   };
 
@@ -707,7 +738,25 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
   const handleEditImage = (imageBase64: string, mimeType: string) => {
     if (onOpenImageModificationPanel) {
-      onOpenImageModificationPanel(id, imageBase64, mimeType);
+      onOpenImageModificationPanel(id, imageBase64, data.agent, data.agentInstance, mimeType);
+    } else {
+      console.warn(`[V2AgentNode ${id}] onOpenImageModificationPanel is not available from context`);
+    }
+  };
+
+  const handleOpenVideoPanel = () => {
+    if (onOpenVideoPanel && agent && agentInstance) {
+      onOpenVideoPanel(id, agent, agentInstance);
+    } else {
+      console.warn(`[V2AgentNode ${id}] Cannot open video panel - missing callback or agent/instance`);
+    }
+  };
+
+  const handleOpenMapsPanel = () => {
+    if (onOpenMapsPanel) {
+      onOpenMapsPanel(id);
+    } else {
+      console.warn(`[V2AgentNode ${id}] onOpenMapsPanel is not available from context`);
     }
   };
 
@@ -1242,7 +1291,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                                hover:bg-pink-500/20 hover:shadow-lg hover:shadow-pink-500/40
                                transition-all duration-200 rounded-md
                                hover:scale-110 active:scale-95"
-                      onClick={() => onOpenVideoPanel && onOpenVideoPanel(id)}
+                      onClick={handleOpenVideoPanel}
                       disabled={isLoading}
                       title="Générer une vidéo"
                     >
@@ -1259,7 +1308,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                                hover:bg-green-500/20 hover:shadow-lg hover:shadow-green-500/40
                                transition-all duration-200 rounded-md
                                hover:scale-110 active:scale-95"
-                      onClick={() => onOpenMapsPanel && onOpenMapsPanel(id)}
+                      onClick={handleOpenMapsPanel}
                       disabled={isLoading}
                       title="Recherche de lieux"
                     >

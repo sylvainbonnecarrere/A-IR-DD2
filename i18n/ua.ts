@@ -76,6 +76,7 @@ export default {
     agentConfig_tab_history: "📚 Історія",
     agentConfig_tab_functions: "🛠️ Функції",
     agentConfig_tab_formatting: "📤 Форматування",
+    agentConfig_tab_persistence: "💾 Збереження",
     agentConfig_tab_links: "🔗 Посилання",
     agentConfig_tab_tasks: "✅ Завдання",
     agentConfig_tab_logs: "📋 Логи",

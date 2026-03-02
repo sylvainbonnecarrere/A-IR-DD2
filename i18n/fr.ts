@@ -77,6 +77,7 @@ export default {
     agentConfig_tab_history: "📚 Historique",
     agentConfig_tab_functions: "🛠️ Fonctions",
     agentConfig_tab_formatting: "📤 Formatage",
+    agentConfig_tab_persistence: "💾 Persistance",
     agentConfig_tab_links: "🔗 Liens",
     agentConfig_tab_tasks: "✅ Tâches",
     agentConfig_tab_logs: "📋 Logs",

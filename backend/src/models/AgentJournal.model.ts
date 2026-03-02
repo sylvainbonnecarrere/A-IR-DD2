@@ -67,6 +67,7 @@ export interface IAgentJournal extends Document {
 
 /**
  * Schéma pour les messages de chat
+ * ⭐ FIX QA: Added imageBase64, mimeType, fileName for media in chat messages
  */
 const ChatPayloadSchema = new Schema({
     role: {
@@ -82,7 +83,11 @@ const ChatPayloadSchema = new Schema({
         id: { type: String },
         name: { type: String },
         arguments: { type: String }
-    }]
+    }],
+    // ⭐ FIX QA: Support images inline dans les messages chat
+    imageBase64: { type: String },  // Image data en base64 
+    mimeType: { type: String },     // ex: image/png, image/jpeg
+    fileName: { type: String }      // Nom original du fichier
 }, { _id: false });
 
 /**

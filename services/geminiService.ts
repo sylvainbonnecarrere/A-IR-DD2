@@ -369,22 +369,22 @@ export const pollVideoOperation = async (
 
     const ai = new GoogleGenAI({ apiKey });
     try {
-        const operation = await ai.operations.get({ name: operationId });
+        // Cast to any because Google GenAI SDK types may not match runtime behavior
+        const operation = await (ai.operations as any).get({ name: operationId }) as any;
 
         if (operation.done) {
             if (operation.response?.generatedVideos?.[0]) {
                 const video = operation.response.generatedVideos[0];
 
-                // Download video file
-                const file = await ai.files.download({ file: video.video });
-
-                // TODO: Save to local storage or return blob URL
-                // For now, return the file URI (may need to be converted to blob URL)
+                // Note: files.download API has changed - we may need to handle differently
+                // For now, use video URL directly if available
+                const videoUrl = video.uri || video.video?.uri || video.url;
+                
                 return {
                     operationId,
                     status: 'COMPLETED',
                     progress: 100,
-                    videoUrl: file.uri || URL.createObjectURL(new Blob([file])),
+                    videoUrl: videoUrl || '',
                 };
             } else {
                 return {

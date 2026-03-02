@@ -15,22 +15,27 @@
 // MODÈLES UTILISATEUR & AUTH
 // ============================================
 
-export { User, IUser } from './User.model';
-export { UserSettings, IUserSettings } from './UserSettings.model';
+export { User } from './User.model';
+export type { IUser } from './User.model';
+export { UserSettings } from './UserSettings.model';
+export type { IUserSettings } from './UserSettings.model';
 
 // ============================================
 // MODÈLES WORKFLOW
 // ============================================
 
-export { Workflow, IWorkflow, ICanvasState } from './Workflow.model';
-export { WorkflowEdge, IWorkflowEdge } from './WorkflowEdge.model';
+export { Workflow } from './Workflow.model';
+export type { IWorkflow, ICanvasState } from './Workflow.model';
+export { WorkflowEdge } from './WorkflowEdge.model';
+export type { IWorkflowEdge } from './WorkflowEdge.model';
 
 // Legacy (V1)
-export { WorkflowNode, IWorkflowNode } from './WorkflowNode.model';
+export { WorkflowNode } from './WorkflowNode.model';
+export type { IWorkflowNode } from './WorkflowNode.model';
 
 // Nouvelle architecture (V2)
-export { 
-    WorkflowNodeV2, 
+export { WorkflowNodeV2 } from './WorkflowNodeV2.model';
+export type { 
     IWorkflowNodeV2, 
     IWorkflowNodeUIConfig,
     WorkflowNodeType 
@@ -41,8 +46,8 @@ export {
 // ============================================
 
 // Legacy (V1) - Conservé pour rétrocompatibilité
-export { 
-    AgentInstance, 
+export { AgentInstance } from './AgentInstance.model';
+export type { 
     IAgentInstance,
     IAgentInstanceChatContent,
     IAgentInstanceImageContent,
@@ -62,17 +67,28 @@ export {
 } from './AgentInstanceV2.model';
 */
 
-export { AgentJournal, IAgentJournal } from './AgentJournal.model';
+export { AgentJournal } from './AgentJournal.model';
+export type { IAgentJournal } from './AgentJournal.model';
 
 // ============================================
 // MODÈLES PROTOTYPES
 // ============================================
 
-export { AgentPrototype, IAgentPrototype } from './AgentPrototype.model';
-export { AgentTemplate, IAgentTemplate, ITemplate } from './AgentTemplate.model';
+export { AgentPrototype } from './AgentPrototype.model';
+export type { IAgentPrototype } from './AgentPrototype.model';
+export { AgentTemplate } from './AgentTemplate.model';
+export type { IAgentTemplate, ITemplate } from './AgentTemplate.model';
 
 // ============================================
 // MODÈLES CONFIGURATION LLM
 // ============================================
 
-export { LLMConfig, ILLMConfig } from './LLMConfig.model';
+export { LLMConfig } from './LLMConfig.model';
+export type { ILLMConfig } from './LLMConfig.model';
+
+// ============================================
+// MODÈLES MEDIA STORAGE
+// ============================================
+
+export { MediaReference } from './MediaReference.model';
+export type { IMediaReference, IMediaReferenceCreate } from './MediaReference.model';

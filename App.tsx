@@ -35,6 +35,8 @@ import { HyperspaceReveal } from './components/HyperspaceReveal';
 import { PersistenceService } from './services/persistenceService';
 // ⭐ V2: Import apiClient for workflow switch orchestration
 import apiClient from './utils/apiClient';
+// ⭐ FIX QA: Import useJournalQueue for image persistence
+import { useJournalQueue } from './hooks/useJournalQueue';
 
 // ⭐ J4.4: Use the key from guestDataUtils to ensure consistency with wipeGuestData()
 const LLM_CONFIGS_KEY = GUEST_STORAGE_KEYS.LLM_CONFIGS;
@@ -43,6 +45,8 @@ interface EditingImageInfo {
   nodeId: string;
   sourceImage: string;
   mimeType: string;
+  agent?: Agent;
+  agentInstance?: AgentInstance;
 }
 
 // ⭐ CRITICAL FIX: ALL providers start disabled by default
@@ -161,13 +165,19 @@ function AppContent() {
   const [isMapsPanelOpen, setMapsPanelOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
 
+  // ⭐ FIX: Store current agent for media panels - receives fresh data directly from V2AgentNode
+  const [currentImageNodeId, setCurrentImageNodeId] = useState<string | null>(null);
+  const [currentImageAgent, setCurrentImageAgent] = useState<Agent | null>(null);
+  const [currentImageAgentInstance, setCurrentImageAgentInstance] = useState<AgentInstance | null>(null);
+  const [currentVideoNodeId, setCurrentVideoNodeId] = useState<string | null>(null);
+  const [currentVideoAgent, setCurrentVideoAgent] = useState<Agent | null>(null);
+  const [currentVideoAgentInstance, setCurrentVideoAgentInstance] = useState<AgentInstance | null>(null);
+  const [currentMapsNodeId, setCurrentMapsNodeId] = useState<string | null>(null);
+
   const [agents, setAgents] = useState<Agent[]>([]);
   const [workflowNodes, setWorkflowNodes] = useState<WorkflowNode[]>([]);
   // ⭐ J4.4: Start with defaults - will be reloaded on first auth change
   const [llmConfigs, setLlmConfigs] = useState<LLMConfig[]>(initialLLMConfigs);
-  const [currentImageNodeId, setCurrentImageNodeId] = useState<string | null>(null);
-  const [currentVideoNodeId, setCurrentVideoNodeId] = useState<string | null>(null);
-  const [currentMapsNodeId, setCurrentMapsNodeId] = useState<string | null>(null);
   const [editingImageInfo, setEditingImageInfo] = useState<EditingImageInfo | null>(null);
   const [mapsPreloadedResults, setMapsPreloadedResults] = useState<{
     text: string;
@@ -240,6 +250,9 @@ function AppContent() {
   
   // ⭐ SELF-HEALING: Workflow Store for hydrating workflow ID
   const { hydrateWorkflowFromServer, getCurrentWorkflowId } = useWorkflowStore();
+  
+  // ⭐ FIX QA: Journal queue for persisting generated images
+  const { enqueueEntry: enqueueJournalEntry } = useJournalQueue();
 
   /**
    * ⭐ ÉTAPE 5: Hydration for authenticated users
@@ -568,13 +581,16 @@ function AppContent() {
 
               if (journals.length > 0) {
                 // Convert journals to ChatMessages
+                // ⭐ FIX QA: Include imageBase64, mimeType, fileName for image persistence
                 const chatMessages: ChatMessage[] = journals
                   .filter((j: any) => j.type === 'chat')
                   .map((j: any) => {
                     const payload = j.payload || {};
                     const role = payload.role || 'agent';
                     const content = payload.content || '';
-                    return {
+                    
+                    // ⭐ FIX QA: Reconstruct image data from journal payload
+                    const chatMessage: ChatMessage = {
                       id: j._id || `journal-${j.timestamp}`,
                       sender: role === 'user' ? 'user' :
                              role === 'agent' ? 'agent' :
@@ -582,7 +598,20 @@ function AppContent() {
                              role === 'tool_result' ? 'tool_result' : 'agent',
                       text: content,
                       timestamp: new Date(j.createdAt || j.timestamp)
-                    } as ChatMessage;
+                    };
+                    
+                    // ⭐ FIX QA: Restore image data if present in journal
+                    if (payload.imageBase64) {
+                      chatMessage.image = payload.imageBase64;
+                    }
+                    if (payload.mimeType) {
+                      chatMessage.mimeType = payload.mimeType;
+                    }
+                    if (payload.fileName) {
+                      chatMessage.filename = payload.fileName;
+                    }
+                    
+                    return chatMessage;
                   });
 
                 const nodeId = `node-${instance.id}`;
@@ -755,6 +784,7 @@ function AppContent() {
           const journals = journalRes.data?.data || journalRes.data?.journals || [];
           
           if (journals.length > 0) {
+            // ⭐ FIX QA: Include imageBase64, mimeType, fileName for image persistence during workflow switch
             const chatMessages: ChatMessage[] = journals
               .filter((j: any) => j.type === 'chat')
               .map((j: any) => {
@@ -762,7 +792,8 @@ function AppContent() {
                 const role = payload.role || 'agent';
                 const content = payload.content || '';
                 
-                return {
+                // ⭐ FIX QA: Reconstruct chat message with image data
+                const chatMessage: ChatMessage = {
                   id: j._id || `journal-${j.timestamp}`,
                   sender: role === 'user' ? 'user' :
                          role === 'agent' ? 'agent' :
@@ -770,7 +801,20 @@ function AppContent() {
                          role === 'tool_result' ? 'tool_result' : 'agent',
                   text: content,
                   timestamp: new Date(j.createdAt || j.timestamp)
-                } as ChatMessage;
+                };
+                
+                // ⭐ FIX QA: Restore image data if present in journal
+                if (payload.imageBase64) {
+                  chatMessage.image = payload.imageBase64;
+                }
+                if (payload.mimeType) {
+                  chatMessage.mimeType = payload.mimeType;
+                }
+                if (payload.fileName) {
+                  chatMessage.filename = payload.fileName;
+                }
+                
+                return chatMessage;
               });
             
             const nodeId = `node-${instanceId}`;
@@ -952,10 +996,26 @@ function AppContent() {
     setWorkflowNodes([]);
     setAgents([]);
     
+    // ⭐ FIX J4.5: Close all open panels on auth change to prevent stale nodeId references
+    // Problem: panel states (isImagePanelOpen, etc) kept old nodeIds after reconnect
+    // Solution: Reset all panel states when authentication changes
+    setImagePanelOpen(false);
+    setCurrentImageNodeId(null);
+    setCurrentImageAgent(null);
+    setCurrentImageAgentInstance(null);
+    setImageModificationPanelOpen(false);
+    setEditingImageInfo(null);
+    setVideoPanelOpen(false);
+    setCurrentVideoNodeId(null);
+    setCurrentVideoAgent(null);
+    setCurrentVideoAgentInstance(null);
+    setMapsPanelOpen(false);
+    setCurrentMapsNodeId(null);
+    setMapsPreloadedResults(null);
+    
     // ⭐ FIX: Reset prevApiKeysRef on auth change to allow fresh hydration
     // Bug: After logout/login, same configs would be skipped due to hash match
     prevApiKeysRef.current = '';
-    console.log('[App] 🔄 Auth state changed - reset prevApiKeysRef for fresh hydration');
   }, [isAuthenticated, accessToken, updateLLMConfigs]);
 
   /**
@@ -982,13 +1042,10 @@ function AppContent() {
       return; // Still loading, wait for next trigger
     }
 
-    console.log('[App] 🔍 useEffect triggered with llmApiKeys:', llmApiKeys.length, 'keys:', llmApiKeys.map(k => k.provider));
-
     // ⭐ FIX: Prevent infinite loop by checking content equality
     // Must be done BEFORE any state updates
     const keysHash = JSON.stringify(llmApiKeys);
     if (keysHash === prevApiKeysRef.current) {
-      console.log('[App] 🔍 Hash unchanged, skipping');
       return;
     }
     prevApiKeysRef.current = keysHash;
@@ -996,7 +1053,6 @@ function AppContent() {
     // ⭐ FIX: If llmApiKeys is empty array, user has no configs in DB
     // Set all providers to disabled (initialLLMConfigs with enabled:false)
     if (llmApiKeys.length === 0) {
-      console.log('[App] 🔍 No API keys in database - setting all providers to disabled');
       setLlmConfigs(initialLLMConfigs); // All disabled by default now
       updateLLMConfigs(initialLLMConfigs);
       return;
@@ -1009,8 +1065,6 @@ function AppContent() {
       enabled: key.enabled,
       capabilities: (key.capabilities || {}) as { [k in LLMCapability]?: boolean }
     }));
-    
-    console.log('[App] 🔍 Converted to apiConfigs:', apiConfigs.length);
     
     // Merge with initial configs to keep capabilities defaults for providers not in API
     const mergedConfigs = initialLLMConfigs.map(initial => {
@@ -1040,15 +1094,8 @@ function AppContent() {
       return initial;
     });
     
-    console.log('[App] 🔍 After merge, llmConfigs will have:', mergedConfigs.filter(c => c.enabled).length, 'enabled providers');
-    
-    const enabledProviders = mergedConfigs.filter(c => c.enabled).map(c => c.provider);
-    console.log('[App] 🔍 enabledProviders:', enabledProviders);
-    
     setLlmConfigs(mergedConfigs);
-    console.log('[App] 🔍 setLlmConfigs called, should be in state now');
     updateLLMConfigs(mergedConfigs);
-    console.log('[App] 🔍 updateLLMConfigs called for Zustand store');
   }, [isAuthenticated, llmApiKeys, updateLLMConfigs]);
 
   // ⭐ PHASE 2: Load workflows on authentication
@@ -1198,11 +1245,14 @@ function AppContent() {
       const storage = getSettingsStorage({
         isAuthenticated,
         accessToken,
+        refreshToken: null,
         user: null,
         login: async () => { },
         register: async () => { },
         logout: () => { },
-        refreshToken: async () => { },
+        refreshAccessToken: async () => { },
+        clearError: () => { },
+        refreshLLMApiKeys: async () => { },
         llmApiKeys: null,
         isLoading: false,
         error: null
@@ -1365,6 +1415,16 @@ function AppContent() {
             workflowId,
             isMinimized: false,
             isMaximized: false,
+            // ⭐ FIX QA: Récupérer persistenceConfig du backend ou du prototype
+            persistenceConfig: result.instance.persistenceConfig || agent.persistenceConfig || {
+              saveChat: true,
+              saveErrors: true,
+              saveHistorySummary: false,
+              saveLinks: false,
+              saveTasks: false,
+              saveMedia: false,
+              mediaStorage: 'db'
+            },
             // ✅ configuration_json contient TOUS les détails de config (role, model, llmProvider, etc.)
             configuration_json: result.instance.configuration_json || {
               role: agent.role,
@@ -1596,8 +1656,10 @@ function AppContent() {
     );
   };
 
-  const handleOpenImagePanel = (nodeId: string) => {
+  const handleOpenImagePanel = (nodeId: string, agent: Agent, agentInstance: AgentInstance) => {
     setCurrentImageNodeId(nodeId);
+    setCurrentImageAgent(agent);
+    setCurrentImageAgentInstance(agentInstance);
     setImagePanelOpen(true);
   };
 
@@ -1612,15 +1674,29 @@ function AppContent() {
     };
     handleUpdateNodeMessages(nodeId, prev => [...prev, imageMessage]);
     addNodeMessage(nodeId, imageMessage);
+    
+    // ⭐ FIX QA: Persist generated image to journal
+    const instanceId = nodeId.replace('node-', '');
+    const workflowId = getCurrentWorkflowId();
+    if (instanceId && workflowId) {
+      enqueueJournalEntry(workflowId, instanceId, 'chat', {
+        role: 'agent',
+        content: t('app_generatedImageText'),
+        imageBase64: imageBase64,
+        mimeType: 'image/png'
+      });
+    }
   };
 
-  const handleOpenImageModificationPanel = (nodeId: string, sourceImage: string, mimeType: string = 'image/png') => {
-    setEditingImageInfo({ nodeId, sourceImage, mimeType });
+  const handleOpenImageModificationPanel = (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType: string = 'image/png') => {
+    setEditingImageInfo({ nodeId, sourceImage, mimeType, agent, agentInstance });
     setImageModificationPanelOpen(true);
   };
 
-  const handleOpenVideoPanel = (nodeId: string) => {
+  const handleOpenVideoPanel = (nodeId: string, agent: Agent, agentInstance: AgentInstance) => {
     setCurrentVideoNodeId(nodeId);
+    setCurrentVideoAgent(agent);
+    setCurrentVideoAgentInstance(agentInstance);
     setVideoPanelOpen(true);
   };
 
@@ -1641,6 +1717,18 @@ function AppContent() {
     };
     handleUpdateNodeMessages(nodeId, prev => [...prev, message]);
     addNodeMessage(nodeId, message);
+    
+    // ⭐ FIX QA: Persist modified image to journal
+    const instanceId = nodeId.replace('node-', '');
+    const workflowId = getCurrentWorkflowId();
+    if (instanceId && workflowId) {
+      enqueueJournalEntry(workflowId, instanceId, 'chat', {
+        role: 'agent',
+        content: text,
+        imageBase64: newImage,
+        mimeType: 'image/png'
+      });
+    }
   };
 
   const handleToggleNodeMinimize = (nodeId: string) => {
@@ -1701,7 +1789,7 @@ function AppContent() {
           progress={hydrationProgress}
           message={hydrationMessage}
         />
-        
+
         <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
           <Header
             onOpenSettings={() => setSettingsModalOpen(true)}
@@ -1802,15 +1890,19 @@ function AppContent() {
           )}
 
           {isImagePanelOpen && (
-            <ImageGenerationPanel
-              isOpen={isImagePanelOpen}
-              nodeId={currentImageNodeId}
-              llmConfigs={llmConfigs}
-              workflowNodes={workflowNodes}
-              onClose={() => setImagePanelOpen(false)}
-              onImageGenerated={handleImageGenerated}
-              onOpenImageModificationPanel={handleOpenImageModificationPanel}
-            />
+            <>
+              <ImageGenerationPanel
+                isOpen={isImagePanelOpen}
+                nodeId={currentImageNodeId}
+                agent={currentImageAgent}
+                agentInstance={currentImageAgentInstance}
+                llmConfigs={llmConfigs}
+                workflowNodes={workflowNodes}
+                onClose={() => setImagePanelOpen(false)}
+                onImageGenerated={handleImageGenerated}
+                onOpenImageModificationPanel={handleOpenImageModificationPanel}
+              />
+            </>
           )}
 
           {isImageModificationPanelOpen && (
@@ -1850,7 +1942,7 @@ function AppContent() {
 
           {fullscreenImage && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-sm"
+              className="fixed inset-0 z-[70] flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-sm"
               onClick={() => setFullscreenImage(null)}
             >
               <img
@@ -1876,6 +1968,9 @@ function AppContent() {
             onOpenImagePanel={handleOpenImagePanel}
             onOpenVideoPanel={handleOpenVideoPanel}
             onOpenMapsPanel={handleOpenMapsPanel}
+            onOpenFullscreen={handleOpenFullscreen}
+            onOpenImageModificationPanel={handleOpenImageModificationPanel}
+            onImageGenerated={handleImageGenerated}
           />
 
           {/* Configuration Modal */}

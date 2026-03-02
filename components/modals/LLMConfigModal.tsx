@@ -41,6 +41,7 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
   // 📌 DIRECTIVE SOLID: Utiliser le hook
   const { getConfig, updateConfig, deleteConfig, loading, error, clearError } =
     useLLMConfigs();
+  const { t } = useLocalization();
 
   // Form state
   const [formData, setFormData] = useState({

@@ -146,7 +146,7 @@ export class JournalService {
 
         return AgentInstance.findById(instanceId)
             .select('_id workflowId userId persistenceConfig state status')
-            .lean() as Promise<IAgentInstance | null>;
+            .lean() as unknown as Promise<IAgentInstance | null>;
     }
 
     /**

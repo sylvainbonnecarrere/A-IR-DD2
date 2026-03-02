@@ -40,6 +40,9 @@ export function transformAgentInstanceForFrontend(instance: any) {
         ...rest
     } = instanceObj;
 
+    // ⭐ FIX QA: Extract persistenceConfig from rest to include explicitly
+    const { persistenceConfig, ...remaining } = rest;
+    
     return {
         id: _id?.toString(),
         role,
@@ -52,6 +55,17 @@ export function transformAgentInstanceForFrontend(instance: any) {
         outputConfig: outputConfig || {},
         robotId,
         position,
+        // ⭐ FIX QA: Include persistenceConfig for media storage options
+        persistenceConfig: persistenceConfig || {
+            saveChat: true,
+            saveErrors: true,
+            saveHistorySummary: false,
+            saveLinks: false,
+            saveTasks: false,
+            saveMedia: false,
+            mediaStorage: 'db',
+            cloudStorageConfig: null
+        },
         // ⭐ CRITICAL: Reconstruct configuration_json for frontend
         configuration_json: {
             role: role || 'assistant',
@@ -64,6 +78,6 @@ export function transformAgentInstanceForFrontend(instance: any) {
             outputConfig: outputConfig || {},
             position: position || { x: 0, y: 0 }
         },
-        ...rest
+        ...remaining
     };
 }

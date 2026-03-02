@@ -187,7 +187,8 @@ export const useAgentChat = ({
                     const summarizationHistory: ChatMessage[] = [{
                         id: generateMessageId('summary-prompt'),
                         sender: 'user',
-                        text: summarizationPrompt
+                        text: summarizationPrompt,
+                        timestamp: new Date()
                     }];
 
                     const { text: summary } = await llmService.generateContent(

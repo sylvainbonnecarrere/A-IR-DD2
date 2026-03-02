@@ -119,7 +119,7 @@ type SlideOverProps = React.HTMLAttributes<HTMLDivElement> & {
 export const SlideOver = ({ title, isOpen, onClose, children, ...props }: SlideOverProps) => {
   return (
     <div
-      className={`fixed inset-0 z-50 overflow-hidden transition-all duration-500 ${isOpen ? '' : 'pointer-events-none'}`}
+      className={`fixed inset-0 z-[60] overflow-hidden transition-all duration-500 ${isOpen ? '' : 'pointer-events-none'}`}
       aria-modal="true"
       role="dialog"
       onClick={onClose}

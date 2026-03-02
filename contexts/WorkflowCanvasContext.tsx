@@ -1,4 +1,5 @@
 import React, { createContext, useContext } from 'react';
+import { Agent, AgentInstance } from '../types';
 
 interface WorkflowCanvasContextType {
   onEditPrototype?: (nodeId: string) => void;
@@ -7,9 +8,9 @@ interface WorkflowCanvasContextType {
   onToggleNodeMinimize?: (nodeId: string) => void;
   onToggleNodeMaximize?: (nodeId: string) => void;
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }) => void;
-  onOpenImagePanel?: (nodeId: string) => void;
-  onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, mimeType?: string) => void;
-  onOpenVideoPanel?: (nodeId: string) => void;
+  onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
+  onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
+  onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
 }

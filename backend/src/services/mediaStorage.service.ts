@@ -299,9 +299,63 @@ export class MediaStorageService {
     // ============================================
 
     /**
-     * Récupérer un fichier stocké localement
+     * Valide un chemin relatif contre les attaques path-traversal
+     * 
+     * @param relativePath Chemin à valider
+     * @param expectedUserId UserId attendu dans le chemin (optionnel)
+     * @returns true si le chemin est sécurisé
      */
-    async getLocalMedia(relativePath: string): Promise<Buffer> {
+    validatePath(relativePath: string, expectedUserId?: string): boolean {
+        // Normaliser le chemin
+        const normalized = path.normalize(relativePath).replace(/\\/g, '/');
+        
+        // ⚠️ SÉCURITÉ: Bloquer les remontées de directory
+        if (normalized.includes('..')) {
+            debugLog(`[MediaStorage] Path-traversal attempt blocked: ${relativePath}`);
+            return false;
+        }
+        
+        // ⚠️ SÉCURITÉ: Bloquer les chemins absolus
+        if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
+            debugLog(`[MediaStorage] Absolute path blocked: ${relativePath}`);
+            return false;
+        }
+        
+        // Vérifier la structure attendue: users/{userId}/...
+        const parts = normalized.split('/');
+        if (parts.length < 2 || parts[0] !== 'users') {
+            debugLog(`[MediaStorage] Invalid path structure: ${relativePath}`);
+            return false;
+        }
+        
+        // Si un userId est fourni, vérifier qu'il correspond
+        if (expectedUserId && parts[1] !== expectedUserId) {
+            debugLog(`[MediaStorage] UserId mismatch: expected ${expectedUserId}, got ${parts[1]}`);
+            return false;
+        }
+        
+        return true;
+    }
+
+    /**
+     * Récupérer un fichier stocké localement avec validation de sécurité
+     * 
+     * ⚠️ SÉCURITÉ: Valide le chemin contre path-traversal avant lecture
+     * 
+     * @param relativePath Chemin relatif du fichier
+     * @param expectedUserId UserId attendu pour validation (recommandé)
+     * @returns Buffer contenant le fichier
+     */
+    async getLocalMedia(relativePath: string, expectedUserId?: string): Promise<Buffer> {
+        // ⚠️ SÉCURITÉ CRITIQUE: Valider le chemin AVANT toute opération
+        if (!this.validatePath(relativePath, expectedUserId)) {
+            throw new MediaStorageError(
+                'Chemin de fichier invalide ou non autorisé',
+                'PATH_TRAVERSAL_BLOCKED',
+                { path: relativePath.substring(0, 50) + '...' } // Tronquer pour sécurité logs
+            );
+        }
+        
         const absolutePath = path.join(this.options.storageRoot!, relativePath);
         
         try {
@@ -323,6 +377,35 @@ export class MediaStorageService {
                 { path: relativePath }
             );
         }
+    }
+
+    /**
+     * Obtenir les stats d'un fichier local pour streaming
+     * 
+     * @param relativePath Chemin relatif du fichier
+     * @param expectedUserId UserId pour validation
+     * @returns Stats du fichier (taille, mtime, etc.)
+     */
+    async getLocalMediaStats(relativePath: string, expectedUserId?: string): Promise<{
+        size: number;
+        mtime: Date;
+        absolutePath: string;
+    }> {
+        if (!this.validatePath(relativePath, expectedUserId)) {
+            throw new MediaStorageError(
+                'Chemin de fichier invalide',
+                'PATH_TRAVERSAL_BLOCKED'
+            );
+        }
+        
+        const absolutePath = path.join(this.options.storageRoot!, relativePath);
+        const stats = await fs.stat(absolutePath);
+        
+        return {
+            size: stats.size,
+            mtime: stats.mtime,
+            absolutePath
+        };
     }
 
     /**

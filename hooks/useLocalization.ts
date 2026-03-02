@@ -30,7 +30,7 @@ interface UseLocalizationReturn {
   loading: boolean;
   error: string | null;
   clearError: () => void;
-  t: (key: string, params?: Record<string, string | number>) => string;
+  t: (key: string, fallbackOrParams?: string | Record<string, string | number>, params?: Record<string, string | number>) => string;
 }
 
 export function useLocalization(): UseLocalizationReturn {

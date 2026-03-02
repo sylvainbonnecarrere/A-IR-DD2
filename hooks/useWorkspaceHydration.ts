@@ -100,6 +100,26 @@ export interface WorkspaceData {
         status?: string;
         content?: AgentInstanceContent[];
         metrics?: AgentInstanceMetrics;
+        // ⭐ FIX QA: Chat messages with images for restoration
+        chatMessages?: Array<{
+            sender: string;
+            text: string;
+            timestamp?: Date;
+            image?: string;
+            mimeType?: string;
+            fileName?: string;
+            toolCalls?: any[];
+        }>;
+        // ⭐ FIX QA: Persistence config for media storage
+        persistenceConfig?: {
+            saveChat: boolean;
+            saveErrors: boolean;
+            saveHistorySummary: boolean;
+            saveLinks: boolean;
+            saveTasks: boolean;
+            saveMedia: boolean;
+            mediaStorage: 'db' | 'local' | 'cloud';
+        };
     }>;
     llmConfigs: Array<{
         id: string;
@@ -257,6 +277,8 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
     const designStoreReset = useDesignStore((state) => state.resetAll);
     const runtimeStoreReset = useRuntimeStore((state) => state.resetAll);
     const designStoreHydrate = useDesignStore((state) => state.hydrateFromServer);
+    // ⭐ FIX QA: Access setNodeMessages for chat history restoration
+    const setNodeMessages = useRuntimeStore((state) => state.setNodeMessages);
     
     const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -296,48 +318,84 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
                 
                 // ⭐ ÉTAPE 2.3: Hydrate design store with server data
                 // Note: Backend now returns configuration_json ALREADY reconstructed via transformAgentInstanceForFrontend
-                designStoreHydrate({
-                    // Agents instances deviennent les nodes du store
-                    agentInstances: data.agentInstances.map((inst: any) => ({
-                        id: inst.id,
-                        prototypeId: inst.prototypeId || inst.agentId || inst.id,
+                
+                // ⭐ FIX QA: Pre-process agentInstances to create proper objects
+                const hydratedInstances = data.agentInstances.map((inst: any) => ({
+                    id: inst.id,
+                    prototypeId: inst.prototypeId || inst.agentId || inst.id,
+                    name: inst.name,
+                    position: inst.position,
+                    workflowId: inst.workflowId,
+                    // Propriétés UI obligatoires
+                    isMinimized: inst.isMinimized ?? false,
+                    isMaximized: inst.isMaximized ?? false,
+                    // ⭐ FIX QA: Include persistenceConfig for media storage options
+                    persistenceConfig: inst.persistenceConfig || {
+                        saveChat: true,
+                        saveErrors: true,
+                        saveHistorySummary: false,
+                        saveLinks: false,
+                        saveTasks: false,
+                        saveMedia: false,
+                        mediaStorage: 'db'
+                    },
+                    // ⭐ CRITICAL FIX #5: Use configuration_json from backend (NO reconstruction needed!)
+                    // Backend now returns BOTH individual fields AND reconstructed configuration_json object
+                    // This includes all capabilities, historyConfig, outputConfig, etc.
+                    configuration_json: inst.configuration_json || {
+                        role: inst.role || 'assistant',
+                        model: inst.llmModel || inst.model || 'gpt-4o-mini',
+                        llmProvider: inst.llmProvider || 'openai',
+                        systemPrompt: inst.systemPrompt || '',
+                        capabilities: inst.capabilities || [],
+                        tools: inst.tools || [],
+                        historyConfig: inst.historyConfig || {},
+                        outputConfig: inst.outputConfig || {},
+                        position: inst.position || { x: 0, y: 0 }
+                    },
+                    // ⭐ NOUVEAU ÉTAPE 1.6 (champs optionnels pour le runtime)
+                    executionId: inst.executionId,
+                    status: inst.status,
+                    content: inst.content || [],
+                    metrics: inst.metrics
+                })) as AgentInstance[];
+                
+                // ⭐ FIX QA: Create nodes directly from agentInstances with proper data
+                // This ensures each node has agentInstance reference for media buttons to work
+                const hydratedNodes = hydratedInstances.map((inst: AgentInstance) => {
+                    // Create a minimal Agent object from instance configuration
+                    const agent: any = {
+                        id: inst.prototypeId || inst.id,
                         name: inst.name,
-                        position: inst.position,
-                        // Propriétés UI obligatoires
-                        isMinimized: inst.isMinimized ?? false,
-                        isMaximized: inst.isMaximized ?? false,
-                        // ⭐ CRITICAL FIX #5: Use configuration_json from backend (NO reconstruction needed!)
-                        // Backend now returns BOTH individual fields AND reconstructed configuration_json object
-                        // This includes all capabilities, historyConfig, outputConfig, etc.
-                        configuration_json: inst.configuration_json || {
-                            role: 'assistant',
-                            model: 'gpt-4o-mini',
-                            llmProvider: 'openai',
-                            systemPrompt: '',
-                            capabilities: [],
-                            tools: [],
-                            historyConfig: {},
-                            outputConfig: {},
-                            position: inst.position || { x: 0, y: 0 }
-                        },
-                        // ⭐ NOUVEAU ÉTAPE 1.6 (champs optionnels pour le runtime)
-                        executionId: inst.executionId,
-                        status: inst.status,
-                        content: inst.content || [],
-                        metrics: inst.metrics
-                    })) as AgentInstance[],
-                    nodes: data.nodes.map((n: any) => ({
-                        id: n.id,
-                        type: (n.type || 'agent') as 'agent' | 'connection' | 'event' | 'file',
-                        position: n.position,
-                        data: { 
-                            robotId: n.robotId || n.data?.robotId,
-                            label: n.agentName || n.data?.label || '',
-                            agentInstance: n.agentInstance,
-                            isMinimized: n.isMinimized ?? false,
-                            isMaximized: n.isMaximized ?? false
+                        role: inst.configuration_json?.role || 'assistant',
+                        systemPrompt: inst.configuration_json?.systemPrompt || '',
+                        llmProvider: inst.configuration_json?.llmProvider || 'openai',
+                        model: inst.configuration_json?.model || 'gpt-4o-mini',
+                        capabilities: inst.configuration_json?.capabilities || [],
+                        tools: inst.configuration_json?.tools || [],
+                        historyConfig: inst.configuration_json?.historyConfig,
+                        outputConfig: inst.configuration_json?.outputConfig
+                    };
+                    
+                    return {
+                        id: inst.id, // Node ID = Instance ID
+                        type: 'agent' as const,
+                        position: inst.position || { x: 0, y: 0 },
+                        data: {
+                            robotId: 'AR_001', // Default to Archi
+                            label: inst.name,
+                            agent, // Reconstructed agent from instance config
+                            agentInstance: inst, // ⭐ FIX QA: Include full instance for media buttons
+                            workflowId: inst.workflowId,
+                            isMinimized: inst.isMinimized ?? false,
+                            isMaximized: inst.isMaximized ?? false
                         }
-                    })) as V2WorkflowNode[],
+                    };
+                }) as V2WorkflowNode[];
+                
+                designStoreHydrate({
+                    agentInstances: hydratedInstances,
+                    nodes: hydratedNodes,
                     edges: data.edges.map((e: any) => ({
                         id: e.id,
                         source: e.sourceId || e.source,
@@ -345,6 +403,26 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
                         type: e.type
                     })) as V2WorkflowEdge[]
                 });
+                
+                // ⭐ FIX QA: Hydrate chat messages with images into RuntimeStore
+                // Backend now returns chatMessages for each instance
+                for (const inst of data.agentInstances) {
+                    if (inst.chatMessages && inst.chatMessages.length > 0) {
+                        const messages = inst.chatMessages.map((msg: any, index: number) => ({
+                            id: `restored-${inst.id}-${index}-${Date.now()}`,
+                            sender: (['user', 'agent', 'tool', 'tool_result'].includes(msg.sender) 
+                                ? msg.sender 
+                                : 'agent') as 'user' | 'agent' | 'tool' | 'tool_result',
+                            text: msg.text || '',
+                            timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+                            image: msg.image,
+                            mimeType: msg.mimeType,
+                            toolCalls: msg.toolCalls
+                        }));
+                        setNodeMessages(inst.id, messages);
+                        console.log(`[useWorkspaceHydration] ✅ Restored ${messages.length} chat messages for instance ${inst.id}`);
+                    }
+                }
                 
                 console.log('[useWorkspaceHydration] API hydration complete:', {
                     hasWorkflow: !!data.workflow,

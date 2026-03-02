@@ -10,13 +10,24 @@ import es from '../i18n/es';
 import pt from '../i18n/pt';
 import ua from '../i18n/ua';
 
-type Translations = Record<string, string>;
-const allTranslations: Record<Locale, Translations> = { fr, en, de, es, pt, ua };
+// Type récursif pour supporter les traductions imbriquées (ex: workflow.current)
+type TranslationValue = string | { [key: string]: TranslationValue };
+type Translations = Record<string, TranslationValue>;
+
+// Cast explicite car les fichiers i18n ont des structures mixtes
+const allTranslations: Record<Locale, Translations> = { 
+    fr: fr as unknown as Translations, 
+    en: en as unknown as Translations, 
+    de: de as unknown as Translations, 
+    es: es as unknown as Translations, 
+    pt: pt as unknown as Translations, 
+    ua: ua as unknown as Translations 
+};
 
 interface LocalizationContextType {
     locale: Locale;
     setLocale: (locale: Locale) => void;
-    t: (key: string, params?: Record<string, string | number>) => string;
+    t: (key: string, fallbackOrParams?: string | Record<string, string | number>, params?: Record<string, string | number>) => string;
 }
 
 export const LocalizationContext = createContext<LocalizationContextType>({
@@ -47,18 +58,54 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         setStoreLocale(newLocale);
     }, [setStoreLocale]);
 
-    const t = useCallback((key: string, params: Record<string, string | number> = {}) => {
+    const t = useCallback((
+        key: string, 
+        fallbackOrParams?: string | Record<string, string | number>,
+        params: Record<string, string | number> = {}
+    ) => {
         const translations = allTranslations[locale] || allTranslations[defaultLocale];
-        let translation = translations[key];
+        
+        // Déterminer fallback et params selon le type du 2e argument
+        let fallback: string | undefined;
+        let interpolationParams = params;
+        
+        if (typeof fallbackOrParams === 'string') {
+            fallback = fallbackOrParams;
+        } else if (typeof fallbackOrParams === 'object' && fallbackOrParams !== null) {
+            interpolationParams = fallbackOrParams;
+        }
+        
+        // Support pour les clés imbriquées (ex: "workflow.current")
+        const keys = key.split('.');
+        let value: TranslationValue | undefined = translations;
+        
+        for (const k of keys) {
+            if (value && typeof value === 'object' && !Array.isArray(value) && k in value) {
+                value = (value as Record<string, TranslationValue>)[k];
+            } else {
+                value = undefined;
+                break;
+            }
+        }
 
-        if (!translation) {
+        // Si la valeur n'est pas une string, tenter de chercher directement avec la clé complète
+        if (typeof value !== 'string') {
+            value = translations[key];
+        }
+
+        if (typeof value !== 'string') {
+            // Utiliser le fallback si fourni, sinon la clé
+            if (fallback) {
+                return fallback;
+            }
             console.warn(`Translation key '${key}' not found for locale '${locale}'.`);
             return key;
         }
 
-        Object.keys(params).forEach(paramKey => {
+        let translation = value;
+        Object.keys(interpolationParams).forEach(paramKey => {
             const regex = new RegExp(`{${paramKey}}`, 'g');
-            translation = translation.replace(regex, String(params[paramKey]));
+            translation = translation.replace(regex, String(interpolationParams[paramKey]));
         });
 
         return translation;
