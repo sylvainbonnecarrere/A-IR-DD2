@@ -424,4 +424,7 @@ export const useAuth = (): AuthContextType => {
     return context;
 };
 
+// Re-export types for consumers
+export type { AuthContextType } from './types/auth.types';
+
 export default AuthContext;

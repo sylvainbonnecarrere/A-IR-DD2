@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '../UI';
-import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon } from '../Icons';
+import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon } from '../Icons';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useDesignStore } from '../../stores/useDesignStore';
 import { useAgentChat } from '../../hooks/useAgentChat';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../contexts/AuthContext';
-import { ChatMessage, Agent, LLMCapability, WorkflowNode } from '../../types';
+import { ChatMessage, Agent, LLMCapability, WorkflowNode, AgentInstance } from '../../types';
 import { ConfirmationModal } from './ConfirmationModal';
 import { ImageGenerationPanel } from '../panels/ImageGenerationPanel';
 import { VideoGenerationConfigPanel } from '../panels/VideoGenerationConfigPanel';
@@ -53,13 +53,19 @@ interface FullscreenChatModalProps {
   onOpenImagePanel?: (nodeId: string) => void;
   onOpenVideoPanel?: (nodeId: string) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
+  onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
+  onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
+  onImageGenerated?: (nodeId: string, imageBase64: string) => void;
 }
 
 export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   onDeleteNode,
   onOpenImagePanel,
   onOpenVideoPanel,
-  onOpenMapsPanel
+  onOpenMapsPanel,
+  onOpenFullscreen,
+  onOpenImageModificationPanel,
+  onImageGenerated
 }) => {
   const {
     fullscreenChatNodeId,
@@ -210,12 +216,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const agentModel = agent?.model || 'Unknown Model';
   const agentProvider = agent?.llmProvider || 'Unknown Provider';
   
-  const llmConfigForProvider = llmConfigs?.find(c => c.provider === agent?.llmProvider);
-  const agentLLMVersion = llmConfigForProvider?.llmVersion || llmConfigForProvider?.model || '';
-  
-  const llmDisplayString = agentLLMVersion 
-    ? `${agentProvider} v${agentLLMVersion}`
-    : `${agentProvider} • ${agentModel}`;
+  const llmDisplayString = `${agentProvider} • ${agentModel}`;
 
   const handleClose = () => {
     const { setFullscreenChatAgent, setFullscreenChatAgentInstance } = useRuntimeStore.getState();
@@ -317,12 +318,51 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
             {message.text}
           </div>
           {message.image && (
-            <div className="mt-2">
+            <div className="mt-2 relative group">
               <img
                 src={`data:${message.mimeType};base64,${message.image}`}
                 alt="Uploaded content"
-                className="max-w-sm rounded cursor-pointer hover:opacity-80"
+                className="max-w-sm rounded cursor-pointer"
               />
+              
+              {/* Overlay buttons - appear on hover with gaming style */}
+              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 
+                            transition-opacity duration-200 rounded flex items-center justify-center gap-3">
+                {/* Fullscreen button */}
+                <button
+                  onClick={() => onOpenFullscreen?.(message.image!, message.mimeType || 'image/png')}
+                  className="p-3 bg-cyan-500/20 hover:bg-cyan-500/40 border-2 border-cyan-400/50 
+                           hover:border-cyan-400 rounded-lg transition-all duration-200 
+                           hover:scale-110 hover:shadow-lg hover:shadow-cyan-500/50
+                           text-cyan-300 hover:text-cyan-100"
+                  title={t('fullscreen')}
+                >
+                  <ExpandIcon width={20} height={20} />
+                </button>
+
+                {/* Edit button - only if agent has ImageModification capability */}
+                {agent?.capabilities?.includes(LLMCapability.ImageModification) && (
+                  <button
+                    onClick={() => {
+                      if (fullscreenChatNodeId && onOpenImageModificationPanel) {
+                        onOpenImageModificationPanel(fullscreenChatNodeId, message.image!, fullscreenChatAgent, fullscreenChatAgentInstance, message.mimeType || 'image/png');
+                      } else {
+                        console.warn('[FullscreenChatModal] Cannot call onOpenImageModificationPanel:', { 
+                          hasNodeId: !!fullscreenChatNodeId, 
+                          hasCallback: !!onOpenImageModificationPanel 
+                        });
+                      }
+                    }}
+                    className="p-3 bg-purple-500/20 hover:bg-purple-500/40 border-2 border-purple-400/50 
+                             hover:border-purple-400 rounded-lg transition-all duration-200 
+                             hover:scale-110 hover:shadow-lg hover:shadow-purple-500/50
+                             text-purple-300 hover:text-purple-100"
+                    title={t('edit_image')}
+                  >
+                    <EditIcon width={20} height={20} />
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -604,8 +644,27 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                     workflowNodes={workflowNodesForPanels as any}
                     llmConfigs={llmConfigs}
                     onClose={handleCloseSidePanel}
-                    onImageGenerated={() => {}}
-                    onOpenImageModificationPanel={() => {}}
+                    onImageGenerated={(nodeId: string, imageBase64: string) => {
+                      // Add generated image to chat messages
+                      const imageMessage: ChatMessage = {
+                        id: `msg-${Date.now()}`,
+                        sender: 'agent',
+                        text: t('app_generatedImageText'),
+                        image: imageBase64,
+                        mimeType: 'image/png',
+                        timestamp: new Date()
+                      };
+                      // Update runtime store
+                      const { setNodeMessages, getNodeMessages } = useRuntimeStore.getState();
+                      const currentMessages = getNodeMessages(nodeId) || [];
+                      setNodeMessages(nodeId, [...currentMessages, imageMessage]);
+                      
+                      // Call parent handler if provided
+                      onImageGenerated?.(nodeId, imageBase64);
+                    }}
+                    onOpenImageModificationPanel={(nodeId: string, sourceImage: string, mimeType?: string) => {
+                      onOpenImageModificationPanel?.(nodeId, sourceImage, mimeType);
+                    }}
                     hideSlideOver={true}
                   />
                 )}

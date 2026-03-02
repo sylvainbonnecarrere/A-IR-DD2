@@ -1,5 +1,5 @@
 import React from 'react';
-import { RobotId, LLMConfig, Agent, WorkflowNode } from '../types';
+import { RobotId, LLMConfig, Agent, WorkflowNode, AgentInstance } from '../types';
 import { ArchiPrototypingPage } from './ArchiPrototypingPage';
 import WorkflowCanvas from './WorkflowCanvas';
 import { ComConnectionsPage } from './ComConnectionsPage';
@@ -23,11 +23,11 @@ interface RobotPageRouterProps {
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
   onToggleNodeMaximize?: (nodeId: string) => void;
-  onOpenImagePanel?: (nodeId: string) => void;
-  onOpenImageModificationPanel?: (nodeId: string) => void;
-  onOpenVideoPanel?: (nodeId: string) => void;
-  onOpenMapsPanel?: (nodeId: string) => void;
-  onOpenFullscreen?: (nodeId: string) => void;
+  onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
+  onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
+  onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
+  onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
+  onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   onAddToWorkflow?: (agent: Agent) => void;
   // Détection panneaux actifs
   isImagePanelOpen?: boolean;
@@ -49,11 +49,11 @@ const WorkflowPage: React.FC<{
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
   onToggleNodeMaximize?: (nodeId: string) => void;
-  onOpenImagePanel?: (nodeId: string) => void;
-  onOpenImageModificationPanel?: (nodeId: string) => void;
-  onOpenVideoPanel?: (nodeId: string) => void;
+  onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
+  onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
+  onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
-  onOpenFullscreen?: (nodeId: string) => void;
+  onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   onAddToWorkflow?: (agent: Agent) => void;
   isImagePanelOpen?: boolean;
   isImageModificationPanelOpen?: boolean;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LLMConfig, WorkflowNode, ChatMessage } from '../../types';
+import { LLMConfig, WorkflowNode, ChatMessage, Agent, AgentInstance } from '../../types';
 import { Button, SlideOver } from '../UI';
 import * as llmService from '../../services/llmService';
 import { useLocalization } from '../../hooks/useLocalization';
@@ -8,6 +8,8 @@ interface EditingImageInfo {
   nodeId: string;
   sourceImage: string;
   mimeType: string;
+  agent?: Agent;
+  agentInstance?: AgentInstance;
 }
 
 interface ImageModificationPanelProps {
@@ -27,8 +29,10 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
     const [currentSourceImage, setCurrentSourceImage] = useState<string | null>(null);
     const { t } = useLocalization();
 
-    const node = workflowNodes.find(n => n.id === editingImageInfo?.nodeId);
-    const agentConfig = llmConfigs.find(c => c.provider === node?.agent.llmProvider);
+    // Use agent from editingImageInfo if available (fresh from V2AgentNode)
+    // Otherwise fallback to lookup from workflowNodes
+    const agent = editingImageInfo?.agent || workflowNodes.find(n => n.id === editingImageInfo?.nodeId)?.agent;
+    const agentConfig = llmConfigs.find(c => c.provider === agent?.llmProvider);
     
     useEffect(() => {
         if (isOpen && editingImageInfo) {
@@ -48,7 +52,7 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
 
 
     const handleModify = async () => {
-        if (!prompt.trim() || !agentConfig || !node || !currentSourceImage || !editingImageInfo) {
+        if (!prompt.trim() || !agentConfig || !agent || !currentSourceImage || !editingImageInfo) {
             setError(t('imageMod_error_missingPrompt'));
             return;
         }
@@ -94,7 +98,8 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
             const descriptionHistory: ChatMessage[] = [{
                 id: `msg-desc-prompt-${Date.now()}`,
                 sender: 'user',
-                text: descriptionPrompt
+                text: descriptionPrompt,
+                timestamp: new Date()
             }];
 
             const { text } = await llmService.generateContent(
@@ -110,10 +115,10 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
         }
     };
 
-    if (!node || !editingImageInfo || !currentSourceImage) return null;
+    if (!agent || !editingImageInfo || !currentSourceImage) return null;
 
     return (
-        <SlideOver title={t('imageMod_title', { agentName: node.agent.name })} isOpen={isOpen} onClose={onClose}>
+        <SlideOver title={t('imageMod_title', { agentName: agent.name })} isOpen={isOpen} onClose={onClose}>
             <div className="space-y-4 h-full flex flex-col">
                 <div className="p-2 bg-gray-900/50 rounded-lg">
                     <label className="block text-sm font-medium text-gray-400 mb-2 text-center">{t('imageMod_originalImage')}</label>

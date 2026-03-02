@@ -35,6 +35,18 @@ const createAgentInstanceSchema = z.object({
     tools: z.array(z.object({}).passthrough()).optional(),
     outputConfig: z.object({}).passthrough().optional(),
     robotId: z.enum(['AR_001', 'BOS_001', 'COM_001', 'PHIL_001', 'TIM_001']),
+    
+    // ⭐ FIX QA: Add persistenceConfig to validation schema for media storage
+    persistenceConfig: z.object({
+        saveChat: z.boolean().optional(),
+        saveErrors: z.boolean().optional(),
+        saveHistorySummary: z.boolean().optional(),
+        saveLinks: z.boolean().optional(),
+        saveTasks: z.boolean().optional(),
+        saveMedia: z.boolean().optional(),
+        mediaStorage: z.enum(['db', 'local', 'cloud']).optional(), // ⭐ FIX: Use 'db' not 'database'
+        cloudStorageConfig: z.object({}).passthrough().optional()
+    }).optional(),
 
     // Canvas properties
     position: z.object({
@@ -350,7 +362,9 @@ router.put('/:id',
                 instanceId,
                 userId: user.id,
                 bodyKeys: Object.keys(req.body),
-                hasConfigurationJson: !!req.body.configuration_json
+                hasConfigurationJson: !!req.body.configuration_json,
+                hasPersistenceConfig: !!req.body.persistenceConfig,
+                persistenceConfig: req.body.persistenceConfig
             });
             
             const instance = await AgentInstance.findOne({ _id: instanceId, userId: user.id });
@@ -414,6 +428,7 @@ router.put('/:id',
 
             // ⭐ CRITICAL: Log saved state for debugging (BREAK #2 fix)
             const historyConfigObj = instance.historyConfig as any || {};
+            const persistenceConfigObj = instance.persistenceConfig as any || {};
             console.log('[AgentInstances] ✅ PUT endpoint saved:', {
                 instanceId: instance._id?.toString(),
                 name: instance.name,
@@ -423,6 +438,10 @@ router.put('/:id',
                 historyConfig: {
                     enabled: historyConfigObj.enabled || false,
                     provider: historyConfigObj.llmProvider || 'unknown'
+                },
+                persistenceConfig: {
+                    saveMedia: persistenceConfigObj.saveMedia || false,
+                    mediaStorage: persistenceConfigObj.mediaStorage || 'db'
                 },
                 toolsCount: Array.isArray(instance.tools) ? instance.tools.length : 0
             });
@@ -525,6 +544,7 @@ router.post('/:id/content',
 // POST /api/workflows/:workflowId/instances/:agentInstanceId/journal
 // Persister une entrée journal pour une instance d'agent
 // Respecte la persistenceConfig granulaire
+// ⭐ DÉDUPLICATION: Vérifie si le messageId existe déjà pour éviter les doublons
 router.post(
     '/:agentInstanceId/journal',
     requireAuth,
@@ -555,6 +575,23 @@ router.post(
             // Vérifier ownership
             if (instance.userId.toString() !== user.id) {
                 return res.status(403).json({ error: 'Unauthorized - user does not own this instance' });
+            }
+
+            // ⭐ DÉDUPLICATION BACKEND: Vérifier si ce message existe déjà
+            if (payload?.messageId) {
+                const existingEntry = await AgentJournal.findOne({
+                    agentInstanceId: instance._id,
+                    'payload.messageId': payload.messageId
+                });
+                
+                if (existingEntry) {
+                    console.log(`[Journal] SKIP duplicate: messageId ${payload.messageId} already exists`);
+                    return res.status(200).json({ 
+                        skipped: true, 
+                        reason: 'Duplicate messageId - entry already exists',
+                        existingJournalId: existingEntry._id
+                    });
+                }
             }
 
             const { persistenceConfig } = instance;
@@ -619,6 +656,7 @@ router.post(
 );
 
 // DELETE /api/agent-instances/:id - Supprimer instance
+// ⭐ CASCADE DELETE: Supprime aussi les journaux et médias associés
 router.delete('/:id',
     requireAuth,
     requireOwnershipAsync(async (req) => {
@@ -628,13 +666,20 @@ router.delete('/:id',
     async (req, res) => {
         try {
             const user = req.user as IUser;
-            const instance = await AgentInstance.findOne({ _id: req.params.id, userId: user.id });
+            const instanceId = req.params.id;
+            const instance = await AgentInstance.findOne({ _id: instanceId, userId: user.id });
 
             if (!instance) {
                 return res.status(404).json({ error: 'Instance introuvable' });
             }
 
             const workflowId = instance.workflowId;
+            
+            // ⭐ CASCADE DELETE: Supprimer les journaux de l'instance (inclut les médias en base64)
+            const journalDeleteResult = await AgentJournal.deleteMany({ agentInstanceId: instanceId });
+            console.log(`[AgentInstances] CASCADE DELETE: ${journalDeleteResult.deletedCount} journals deleted for instance ${instanceId}`);
+            
+            // Supprimer l'instance elle-même
             await instance.deleteOne();
 
             // Marquer workflow comme dirty
@@ -644,7 +689,12 @@ router.delete('/:id',
                 await workflow.save();
             }
 
-            res.json({ message: 'Instance supprimée' });
+            res.json({ 
+                message: 'Instance et données associées supprimées',
+                cascadeDelete: {
+                    journalsDeleted: journalDeleteResult.deletedCount
+                }
+            });
         } catch (error) {
             console.error('[AgentInstances] DELETE error:', error);
             res.status(500).json({ error: 'Erreur suppression instance' });

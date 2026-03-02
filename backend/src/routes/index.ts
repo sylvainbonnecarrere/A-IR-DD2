@@ -4,6 +4,7 @@
  * Organisation des routes :
  * - Routes V1 (Legacy) : agent-instances, workflows (ancienne architecture)
  * - Routes V2 (Nouvelle) : instances, workflows/v2/* (architecture Instance/Journal)
+ * - Routes Media : stockage des fichiers générés par les agents
  */
 
 // ============================================
@@ -20,6 +21,12 @@ export { default as userSettingsRoutes } from './user-settings.routes';
 export { default as userWorkspaceRoutes } from './user-workspace.routes';
 export { default as lmstudioRoutes } from './lmstudio.routes';
 export { default as localLLMRoutes } from './local-llm.routes';
+
+// ============================================
+// ROUTES MEDIA (Stockage fichiers)
+// ============================================
+
+export { default as mediaRoutes } from './media.routes';
 
 // ============================================
 // ROUTES V2 (Nouvelle architecture - Jalon 2)

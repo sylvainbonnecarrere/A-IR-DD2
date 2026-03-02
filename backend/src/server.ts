@@ -20,6 +20,7 @@ import llmConfigsRoutes from './routes/llm-configs.routes';
 import llmProxyRoutes from './routes/llm-proxy.routes';
 import userSettingsRoutes from './routes/user-settings.routes';
 import userWorkspaceRoutes from './routes/user-workspace.routes';
+import mediaRoutes from './routes/media.routes';
 import { initializeDatabase } from './services/databaseInit';
 
 // SOLID: Valider la configuration au démarrage (fail-fast pattern)
@@ -71,7 +72,10 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json());
+// ⭐ FIX 413: Augmenter la limite pour les images base64 (jusqu'à 50MB)
+// Les images en base64 peuvent facilement dépasser la limite par défaut de 100KB
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // ===== PASSPORT INITIALIZATION =====
 app.use(passport.initialize());
@@ -108,6 +112,9 @@ app.use(userSettingsRoutes);
 
 // User workspace composite routes (Jalon 4 - Phase 4: Hydration)
 app.use('/api/user', userWorkspaceRoutes);
+
+// ⭐ NOUVEAU: Routes média (stockage images, fichiers générés par agents)
+app.use('/api/media', mediaRoutes);
 
 // Routes proxy LMStudio (legacy)
 app.use('/api/lmstudio', lmstudioRoutes);

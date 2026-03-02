@@ -21,7 +21,7 @@ import { AgentFormModal } from './modals/AgentFormModal';
 import { SavePrototypeButton } from './SavePrototypeButton';
 import { AutoSaveIndicator } from './AutoSaveIndicator';
 import { useAutoSave } from '../hooks/useAutoSave';
-import { Agent, WorkflowNode, LLMConfig } from '../types';
+import { Agent, WorkflowNode, LLMConfig, AgentInstance } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 
@@ -33,11 +33,11 @@ interface WorkflowCanvasProps {
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
   onToggleNodeMaximize?: (nodeId: string) => void;
-  onOpenImagePanel?: (nodeId: string) => void;
-  onOpenImageModificationPanel?: (nodeId: string) => void;
-  onOpenVideoPanel?: (nodeId: string) => void;
+  onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
+  onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
+  onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
-  onOpenFullscreen?: (nodeId: string) => void;
+  onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   agents?: Agent[];
   workflowNodes?: WorkflowNode[];
   onAddToWorkflow?: (agent: Agent) => void;
@@ -411,18 +411,18 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
   // Valeur du contexte - stable et mémorisée
   const contextValue = useMemo(() => ({
-    onEditPrototype: handleEditPrototype,
-    navigationHandler: onNavigate,
-    onDeleteNode,
-    onToggleNodeMinimize,
-    onToggleNodeMaximize,
-    onUpdateNodePosition,
-    onOpenImagePanel,
-    onOpenImageModificationPanel,
-    onOpenVideoPanel,
-    onOpenMapsPanel,
-    onOpenFullscreen,
-  }), [handleEditPrototype, onNavigate, onDeleteNode, onToggleNodeMinimize, onToggleNodeMaximize, onUpdateNodePosition, onOpenImagePanel, onOpenImageModificationPanel, onOpenVideoPanel, onOpenMapsPanel, onOpenFullscreen]);
+      onEditPrototype: handleEditPrototype,
+      navigationHandler: onNavigate,
+      onDeleteNode,
+      onToggleNodeMinimize,
+      onToggleNodeMaximize,
+      onUpdateNodePosition,
+      onOpenImagePanel,
+      onOpenImageModificationPanel,
+      onOpenVideoPanel,
+      onOpenMapsPanel,
+      onOpenFullscreen,
+    }), [handleEditPrototype, onNavigate, onDeleteNode, onToggleNodeMinimize, onToggleNodeMaximize, onUpdateNodePosition, onOpenImagePanel, onOpenImageModificationPanel, onOpenVideoPanel, onOpenMapsPanel, onOpenFullscreen]);
 
   // Calcul dynamique de la largeur maximale pour le mode maximized
   // Si un panneau média est actif, largeur = viewport - panneau (environ 600px)

@@ -32,6 +32,7 @@ import { AgentPrototype } from '../models/AgentPrototype.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
 import { LLMConfig } from '../models/LLMConfig.model';
 import UserSettings from '../models/UserSettings.model';
+import { AgentJournal } from '../models/AgentJournal.model'; // ⭐ FIX QA: For chat history restoration
 import { requireAuth } from '../middleware/auth.middleware';
 import { IUser } from '../models/User.model';
 import { WorkflowSelfHealingService } from '../services/workflowSelfHealing.service';
@@ -193,12 +194,25 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
         // Fetch workflow-specific data if workflow exists
         let agentInstances: any[] = [];
         let edges: any[] = [];
+        let journalEntries: any[] = [];
 
         if (workflow) {
-            [agentInstances, edges] = await Promise.all([
+            [agentInstances, edges, journalEntries] = await Promise.all([
                 AgentInstance.find({ workflowId: workflow.id }),
-                WorkflowEdge.find({ workflowId: workflow.id })
+                WorkflowEdge.find({ workflowId: workflow.id }),
+                // ⭐ FIX QA: Récupérer les entrées du journal (chat avec images)
+                AgentJournal.find({ workflowId: workflow.id, type: 'chat' }).sort({ timestamp: 1 })
             ]);
+        }
+
+        // ⭐ FIX QA: Grouper les entrées du journal par instanceId pour restauration rapide
+        const journalByInstance: Record<string, any[]> = {};
+        for (const entry of journalEntries) {
+            const instanceId = entry.agentInstanceId?.toString() || '';
+            if (!journalByInstance[instanceId]) {
+                journalByInstance[instanceId] = [];
+            }
+            journalByInstance[instanceId].push(entry);
         }
 
         // Build response (SECURITY: never expose apiKeyEncrypted)
@@ -242,8 +256,27 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
             agentInstances: agentInstances.map(agent => {
                 // ⭐ CRITICAL: Reconstruct configuration_json like transformAgentInstanceForFrontend
                 // This ensures consistency across all API endpoints (agent-instances, user-workspace, etc.)
+                const instanceId = agent._id?.toString() || agent.id;
+                
+                // ⭐ FIX QA: Récupérer les messages de chat avec images depuis le journal
+                const instanceJournal = journalByInstance[instanceId] || [];
+                const chatMessages = instanceJournal.map((entry: any) => ({
+                    sender: entry.payload?.role || 'agent',
+                    text: entry.payload?.content || '',
+                    timestamp: entry.timestamp,
+                    // ⭐ FIX QA: Include image data for restoration
+                    image: entry.payload?.imageBase64,
+                    mimeType: entry.payload?.mimeType,
+                    fileName: entry.payload?.fileName,
+                    // Include LLM metadata
+                    llmProvider: entry.payload?.llmProvider,
+                    modelUsed: entry.payload?.modelUsed,
+                    tokensUsed: entry.payload?.tokensUsed,
+                    toolCalls: entry.payload?.toolCalls
+                }));
+                
                 return {
-                    id: agent._id?.toString() || agent.id,
+                    id: instanceId,
                     name: agent.name,
                     provider: agent.llmProvider,
                     model: agent.llmModel,
@@ -252,6 +285,8 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
                     executionId: agent.executionId,
                     status: agent.status,
                     content: agent.content || [],
+                    // ⭐ FIX QA: Include chat messages with images
+                    chatMessages,
                     metrics: agent.metrics || {
                         totalTokens: 0,
                         totalErrors: 0,
@@ -273,6 +308,16 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
                     robotId: agent.robotId,
                     isMinimized: agent.isMinimized || false,
                     isMaximized: agent.isMaximized || false,
+                    // ⭐ FIX QA: Include persistenceConfig for media storage options
+                    persistenceConfig: agent.persistenceConfig || {
+                        saveChat: true,
+                        saveErrors: true,
+                        saveHistorySummary: false,
+                        saveLinks: false,
+                        saveTasks: false,
+                        saveMedia: false,
+                        mediaStorage: 'db'
+                    },
                     // ⭐ CRITICAL: Include configuration_json reconstructed from individual fields
                     // This matches what transformAgentInstanceForFrontend returns
                     // useWorkspaceHydration will use this directly, not reconstruct it

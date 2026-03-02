@@ -138,7 +138,7 @@ class WebSocketService {
     });
 
     // === GESTION DES ERREURS DE PORT ===
-    this.socket.on('error', (error) => {
+    (this.socket as any).on('error', (error: Error) => {
       console.warn('[WebSocket] Erreur socket:', error);
       // Ne pas propager - l'erreur est gérée
     });

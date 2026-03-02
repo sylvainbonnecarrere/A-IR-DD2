@@ -79,6 +79,8 @@ export interface OutputConfig {
   enabled: boolean;
   format: OutputFormat;
   useCodestralCompletion?: boolean;
+  // ⭐ JSON Schema validation for structured outputs (Anthropic, OpenAI)
+  schema?: object;
 }
 
 /**
@@ -87,13 +89,57 @@ export interface OutputConfig {
  */
 export type MediaStorageType = 'db' | 'local' | 'cloud';
 
+/**
+ * ⭐ CLOUD STORAGE: Types pour le stockage cloud (S3/GCS)
+ */
+export type CloudProvider = 's3' | 'gcs';
+
+/** Configuration Amazon S3 / MinIO */
+export interface S3StorageConfig {
+  accessKeyId: string;
+  secretAccessKey: string;       // Chiffré côté backend avant stockage
+  region: string;
+  bucketName: string;
+  endpoint?: string;             // Pour MinIO / LocalStack
+}
+
+/** Configuration Google Cloud Storage */
+export interface GCSStorageConfig {
+  projectId: string;
+  bucketName: string;
+  serviceAccountKey?: string;    // JSON stringifié, chiffré backend
+}
+
+/** Configuration cloud complète (discriminated union) */
+export interface CloudStorageConfig {
+  provider: CloudProvider;
+  s3?: S3StorageConfig;
+  gcs?: GCSStorageConfig;
+}
+
+/** Régions AWS S3 disponibles */
+export const S3_REGIONS = [
+  { value: 'us-east-1', label: 'US East (N. Virginia)' },
+  { value: 'us-east-2', label: 'US East (Ohio)' },
+  { value: 'us-west-1', label: 'US West (N. California)' },
+  { value: 'us-west-2', label: 'US West (Oregon)' },
+  { value: 'eu-west-1', label: 'EU (Ireland)' },
+  { value: 'eu-west-2', label: 'EU (London)' },
+  { value: 'eu-west-3', label: 'EU (Paris)' },
+  { value: 'eu-central-1', label: 'EU (Frankfurt)' },
+  { value: 'ap-northeast-1', label: 'Asia Pacific (Tokyo)' },
+  { value: 'ap-southeast-1', label: 'Asia Pacific (Singapore)' },
+] as const;
+
 export interface PersistenceConfig {
   saveChat: boolean;              // Défaut: true - Sauvegarder les messages de chat
   saveErrors: boolean;            // Défaut: true - Sauvegarder les erreurs rencontrées
   saveHistorySummary: boolean;    // Défaut: false - Générer et stocker un résumé périodique (économie tokens)
   saveLinks: boolean;             // Défaut: false - Sauvegarder les liens entre agents
   saveTasks: boolean;             // Défaut: false - Sauvegarder les tâches assignées
-  mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
+  saveMedia: boolean;             // ⭐ NOUVEAU: Défaut: false - Activer sauvegarde des médias
+  mediaStorage: MediaStorageType; // Défaut: 'db' - Mode de stockage des médias
+  cloudStorageConfig?: CloudStorageConfig;  // ⭐ NOUVEAU: Config cloud si mediaStorage === 'cloud'
 }
 
 export const defaultPersistenceConfig: PersistenceConfig = {
@@ -102,6 +148,7 @@ export const defaultPersistenceConfig: PersistenceConfig = {
   saveHistorySummary: false,
   saveLinks: false,
   saveTasks: false,
+  saveMedia: false,               // ⭐ Désactivé par défaut
   mediaStorage: 'db'
 };
 
@@ -178,6 +225,9 @@ export interface AgentInstance {
   position: { x: number; y: number };
   isMinimized: boolean;
   isMaximized: boolean; // Mode agrandissement plein écran workflow
+  
+  // ⭐ FIX QA: Configuration de persistance au niveau de l'instance
+  persistenceConfig?: PersistenceConfig;
 
   // 🆕 Configuration enrichie (clone du prototype au moment de l'instanciation)
   // null = fallback vers prototype (rétrocompatibilité)

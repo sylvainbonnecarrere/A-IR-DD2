@@ -14,6 +14,12 @@ export interface IPersistenceConfig {
     saveMedia?: boolean;           // ⭐ Activer sauvegarde des fichiers médias
     saveHistorySummary: boolean;   // Défaut: false - Générer et stocker un résumé périodique
     mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
+    cloudStorageConfig?: {         // ⭐ FIX QA: Config cloud S3/GCS
+        provider?: 'aws' | 'gcs';
+        bucket?: string;
+        region?: string;
+        endpoint?: string;
+    } | null;
     retentionDays?: number;        // Durée de conservation en jours
 }
 

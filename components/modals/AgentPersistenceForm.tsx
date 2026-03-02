@@ -19,8 +19,9 @@
  */
 
 import React from 'react';
-import { PersistenceConfig, MediaStorageType, defaultPersistenceConfig } from '../../types';
+import { PersistenceConfig, MediaStorageType, CloudStorageConfig, defaultPersistenceConfig } from '../../types';
 import { useLocalization } from '../../contexts/LocalizationContext';
+import { CloudStorageConfigForm } from './CloudStorageConfigForm';
 
 interface AgentPersistenceFormProps {
   config: PersistenceConfig;
@@ -119,7 +120,7 @@ const MediaStorageSelector: React.FC<{
     {
       value: 'cloud',
       label: 'Cloud (S3/GCS)',
-      description: 'Stockage cloud externe - À venir',
+      description: 'Stockage cloud externe - Amazon S3 ou Google Cloud',
       icon: '☁️'
     }
   ];
@@ -127,14 +128,14 @@ const MediaStorageSelector: React.FC<{
   return (
     <div className="mt-4">
       <label className="block text-sm font-medium text-gray-200 mb-3">
-        Stockage des médias (images, fichiers)
+        Mode de stockage
       </label>
       <div className="space-y-2">
         {options.map((option) => (
           <button
             key={option.value}
             type="button"
-            disabled={disabled || option.value === 'cloud'} // Cloud pas encore disponible
+            disabled={disabled}
             onClick={() => onChange(option.value)}
             className={`
               w-full flex items-center p-3 rounded-lg border-2 transition-all duration-200
@@ -142,7 +143,7 @@ const MediaStorageSelector: React.FC<{
                 ? 'border-indigo-500 bg-indigo-500/10' 
                 : 'border-gray-600 bg-gray-700/50 hover:border-gray-500'
               }
-              ${(disabled || option.value === 'cloud') ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
             `}
           >
             <span className="text-2xl mr-3">{option.icon}</span>
@@ -151,11 +152,6 @@ const MediaStorageSelector: React.FC<{
                 <span className={`text-sm font-medium ${value === option.value ? 'text-indigo-300' : 'text-gray-200'}`}>
                   {option.label}
                 </span>
-                {option.value === 'cloud' && (
-                  <span className="text-xs px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded">
-                    Bientôt
-                  </span>
-                )}
               </div>
               <p className="text-xs text-gray-400">{option.description}</p>
             </div>
@@ -280,11 +276,37 @@ export const AgentPersistenceForm: React.FC<AgentPersistenceFormProps> = ({
           Stockage des médias
         </h4>
         
-        <MediaStorageSelector
-          value={config.mediaStorage}
-          onChange={(v) => updateField('mediaStorage', v)}
+        {/* ⭐ Toggle saveMedia - Active/désactive le stockage des médias */}
+        <SwitchOption
+          id="saveMedia"
+          label="Sauvegarder les médias"
+          tooltip="Persiste les images, fichiers et autres médias générés par l'agent"
+          checked={config.saveMedia}
+          onChange={(v) => updateField('saveMedia', v)}
           disabled={disabled}
         />
+        
+        {/* Afficher le sélecteur de mode uniquement si saveMedia est activé */}
+        {config.saveMedia && (
+          <>
+            <MediaStorageSelector
+              value={config.mediaStorage}
+              onChange={(v) => updateField('mediaStorage', v)}
+              disabled={disabled}
+            />
+            
+            {/* ⭐ Formulaire de configuration cloud si mode cloud sélectionné */}
+            {config.mediaStorage === 'cloud' && (
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                <CloudStorageConfigForm
+                  config={config.cloudStorageConfig}
+                  onChange={(cloudConfig) => updateField('cloudStorageConfig', cloudConfig)}
+                  disabled={disabled}
+                />
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

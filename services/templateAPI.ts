@@ -24,7 +24,7 @@ export interface AgentTemplateDTO {
   name: string;
   description: string;
   category: 'assistant' | 'specialist' | 'automation' | 'analysis';
-  robotId: 'AR_001' | 'BOS_001' | 'COM_001' | 'PHIL_001' | 'TIM_001';
+  robotId: 'AR_001' | 'BO_002' | 'CO_003' | 'PH_004' | 'TI_005'; // ⭐ Fixed to match RobotId enum values
   icon: string;
   template: {
     name: string;

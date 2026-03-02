@@ -210,7 +210,8 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
                 id: `msg-${Date.now()}-maps`,
                 sender: 'agent',
                 text: result.text,
-                mapsGrounding: result.mapSources
+                mapsGrounding: result.mapSources,
+                timestamp: new Date()
             };
             addNodeMessage(nodeId, mapsMessage);
 
@@ -234,7 +235,8 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
             const errorMessage: ChatMessage = {
                 id: `msg-${Date.now()}-maps-error`,
                 sender: 'agent',
-                text: `❌ Erreur Maps Grounding: ${error instanceof Error ? error.message : String(error)}`
+                text: `❌ Erreur Maps Grounding: ${error instanceof Error ? error.message : String(error)}`,
+                timestamp: new Date()
             };
             addNodeMessage(nodeId, errorMessage);
         } finally {

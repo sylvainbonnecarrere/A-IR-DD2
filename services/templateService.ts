@@ -322,6 +322,7 @@ const convertCustomTemplateToDTO = (
         icon: custom.icon,
         sourcePrototypeId: custom.sourcePrototypeId,
         tags: [],
+        isStarred: false,
         template: {
             name: custom.template.name,
             role: custom.template.role,
@@ -424,6 +425,7 @@ export const savePrototypeAsTemplateHybrid = async (
                 icon: determineIcon(prototype.name, prototype.role),
                 sourcePrototypeId: prototype.id,
                 tags: [],
+                isStarred: false,
                 template: {
                     name: prototype.name,
                     role: prototype.role,

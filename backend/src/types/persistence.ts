@@ -114,6 +114,7 @@ export type JournalSeverity = 'info' | 'warn' | 'error';
 
 /**
  * Payload pour les entrées de type 'chat'
+ * ⭐ FIX QA: Added imageBase64, mimeType, fileName for media persistence in chat
  */
 export interface ChatJournalPayload {
     role: 'user' | 'agent' | 'tool' | 'tool_result';
@@ -126,6 +127,10 @@ export interface ChatJournalPayload {
         name: string;
         arguments: string;
     }[];
+    // ⭐ FIX QA: Support images inline dans les messages chat
+    imageBase64?: string;    // Image data en base64
+    mimeType?: string;       // ex: image/png, image/jpeg
+    fileName?: string;       // Nom original du fichier
 }
 
 /**

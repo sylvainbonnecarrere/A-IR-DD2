@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { LLMCapability, LLMConfig, WorkflowNode } from '../../types';
+import { Agent, AgentInstance, LLMCapability, LLMConfig, WorkflowNode } from '../../types';
 import { Button, SlideOver } from '../UI';
 import * as llmService from '../../services/llmService';
 import { useLocalization } from '../../hooks/useLocalization';
@@ -8,17 +8,21 @@ import { fileToBase64 } from '../../utils/fileUtils';
 interface ImageGenerationPanelProps {
     isOpen: boolean;
     nodeId: string | null;
+    agent?: Agent | null;
+    agentInstance?: AgentInstance | null;
     workflowNodes: WorkflowNode[];
     llmConfigs: LLMConfig[];
     onClose: () => void;
     onImageGenerated: (nodeId: string, imageBase64: string) => void;
-    onOpenImageModificationPanel: (nodeId: string, sourceImage: string, mimeType: string) => void;
+    onOpenImageModificationPanel: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
     hideSlideOver?: boolean;
 }
 
 export const ImageGenerationPanel = ({ 
     isOpen, 
     nodeId, 
+    agent: agentProp,
+    agentInstance: agentInstanceProp,
     workflowNodes, 
     llmConfigs, 
     onClose, 
@@ -33,9 +37,9 @@ export const ImageGenerationPanel = ({
     const { t } = useLocalization();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const node = workflowNodes.find(n => n.id === nodeId);
-    const agent = node?.agent;
-    const agentConfig = llmConfigs.find(c => c.provider === agent?.llmProvider);
+    // ⭐ UNIFIED DATA SOURCE: Source-agnostic (props FIRST priority, lookup fallback)
+    const agent = agentProp || workflowNodes.find(n => n.id === nodeId)?.agent;
+    const agentConfig = agent ? llmConfigs.find(c => c.provider === agent.llmProvider) : null;
 
     React.useEffect(() => {
         if (!isOpen) {
@@ -47,6 +51,13 @@ export const ImageGenerationPanel = ({
             }, 300);
         }
     }, [isOpen]);
+
+    // ⭐ EARLY RETURN: Check agent (not node) to avoid rendering null
+    if (!agent || !nodeId) {
+        return null;
+    }
+    
+    if (!hideSlideOver && !isOpen) return null;
 
     const handleGenerate = async () => {
         if (!prompt.trim() || !agentConfig || !agent) {
@@ -78,7 +89,7 @@ export const ImageGenerationPanel = ({
 
     const handleEditImage = () => {
         if (generatedImage && nodeId) {
-            onOpenImageModificationPanel(nodeId, generatedImage, 'image/png');
+            onOpenImageModificationPanel(nodeId, generatedImage, agentProp, agentInstanceProp, 'image/png');
             onClose();
         }
     };
@@ -103,12 +114,9 @@ export const ImageGenerationPanel = ({
         }
     };
 
-    if (!node) return null;
-    if (!hideSlideOver && !isOpen) return null;
-
     const formContent = (
         <div className="space-y-4">
-            {node?.agent.capabilities.includes(LLMCapability.ImageGeneration) && (
+            {agent.capabilities.includes(LLMCapability.ImageGeneration) && (
                 <div>
                     <label htmlFor="image-prompt" className="block text-sm font-medium text-gray-300 mb-1">
                         {t('imageGen_promptLabel')}
@@ -149,7 +157,7 @@ export const ImageGenerationPanel = ({
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
                 {generatedImage ? (
                     <>
-                        {node?.agent.capabilities.includes(LLMCapability.ImageModification) && (
+                        {agent.capabilities.includes(LLMCapability.ImageModification) && (
                             <Button onClick={handleEditImage} variant="secondary">
                                 {t('imageGen_editImage')}
                             </Button>
@@ -160,7 +168,7 @@ export const ImageGenerationPanel = ({
                     </>
                 ) : (
                     <>
-                        {node?.agent.capabilities.includes(LLMCapability.ImageModification) && (
+                        {agent.capabilities.includes(LLMCapability.ImageModification) && (
                             <>
                                 <Button onClick={() => fileInputRef.current?.click()} disabled={isLoading} variant="secondary">
                                     {t('imageGen_importImage')}
@@ -174,7 +182,7 @@ export const ImageGenerationPanel = ({
                                 />
                             </>
                         )}
-                        {node?.agent.capabilities.includes(LLMCapability.ImageGeneration) && (
+                        {agent.capabilities.includes(LLMCapability.ImageGeneration) && (
                             <Button onClick={handleGenerate} disabled={isLoading || !prompt.trim()} variant="primary">
                                 {isLoading ? t('imageGen_generating_button') : t('imageGen_generate')}
                             </Button>
@@ -191,7 +199,7 @@ export const ImageGenerationPanel = ({
             <div className="w-full h-full flex flex-col bg-gray-900/50 text-white overflow-y-auto">
                 <div className="sticky top-0 z-10 bg-gradient-to-r from-cyan-900/30 to-emerald-900/30 border-b border-cyan-500/20 px-6 py-4 flex items-center justify-between flex-shrink-0">
                     <h2 className="text-lg font-semibold flex items-center gap-2 text-cyan-300">
-                        🖼️ {t('imageGen_title', { agentName: node.agent.name })}
+                        🖼️ {t('imageGen_title', { agentName: agent.name })}
                     </h2>
                     <button
                         onClick={onClose}
@@ -210,7 +218,7 @@ export const ImageGenerationPanel = ({
 
     // Rendu pour SlideOver modal
     return (
-        <SlideOver title={t('imageGen_title', { agentName: node.agent.name })} isOpen={isOpen} onClose={onClose}>
+        <SlideOver title={t('imageGen_title', { agentName: agent.name })} isOpen={isOpen} onClose={onClose}>
             {formContent}
         </SlideOver>
     );

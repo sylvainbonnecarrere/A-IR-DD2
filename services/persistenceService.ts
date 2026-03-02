@@ -65,6 +65,17 @@ export interface AgentInstanceSaveData {
     status?: 'running' | 'completed' | 'failed' | 'stopped';
     userNotes?: string;
     tags?: string[];
+    // ⭐ FIX QA: Include persistenceConfig for media storage options
+    persistenceConfig?: {
+        saveChat?: boolean;
+        saveErrors?: boolean;
+        saveHistorySummary?: boolean;
+        saveLinks?: boolean;
+        saveTasks?: boolean;
+        saveMedia?: boolean;
+        mediaStorage?: 'db' | 'local' | 'cloud';
+        cloudStorageConfig?: any;
+    };
 }
 
 export interface AgentInstanceContent {

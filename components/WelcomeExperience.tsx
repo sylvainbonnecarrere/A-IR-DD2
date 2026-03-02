@@ -71,7 +71,7 @@ const NAV_ITEMS: NavItem[] = [
     {
         id: 'settings',
         icon: '⚙️',
-        label: t('settings_tab_label'),
+        label: 'Paramètres',  // Static label since this is a module-level constant
         description: 'Personnalisez votre expérience'
     }
 ];

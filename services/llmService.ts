@@ -16,7 +16,7 @@ import * as arcLLMService from './arcLLMService';
 import type { VideoGenerationOptions, VideoGenerationStatus, MapsGroundingResponse, WebSearchGroundingResponse } from '../types';
 
 
-const getServiceProvider = (provider: Exclude<LLMProvider, LLMProvider.ArcLLM>) => {
+const getServiceProvider = (provider: LLMProvider) => {
     switch (provider) {
         case LLMProvider.Gemini: return geminiService;
         case LLMProvider.OpenAI: return openAIService;
@@ -28,7 +28,10 @@ const getServiceProvider = (provider: Exclude<LLMProvider, LLMProvider.ArcLLM>) 
         case LLMProvider.Kimi: return kimiService;
         case LLMProvider.DeepSeek: return deepSeekService;
         case LLMProvider.LMStudio: return lmStudioService;
-        // Note: ArcLLM excluded via Exclude<> type - specialized service (video/maps/web)
+        case LLMProvider.ArcLLM: 
+            throw new Error('ArcLLM requires specialized methods (generateVideo, generateContentWithMaps, etc.)');
+        default:
+            throw new Error(`Unknown LLM provider: ${provider}`);
     }
 };
 

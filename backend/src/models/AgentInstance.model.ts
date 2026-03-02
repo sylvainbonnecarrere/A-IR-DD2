@@ -18,6 +18,12 @@ export interface IPersistenceConfig {
     saveMedia?: boolean;           // ⭐ Activer sauvegarde des fichiers médias
     saveHistorySummary: boolean;   // Défaut: false - Générer et stocker un résumé périodique
     mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
+    cloudStorageConfig?: {         // ⭐ FIX QA: Config cloud S3/GCS
+        provider?: 'aws' | 'gcs';
+        bucket?: string;
+        region?: string;
+        endpoint?: string;
+    } | null;
     retentionDays?: number;        // Durée de conservation en jours
 }
 
@@ -310,10 +316,17 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
             saveHistorySummary: { type: Boolean, default: false },
             saveLinks: { type: Boolean, default: false },
             saveTasks: { type: Boolean, default: false },
+            // ⭐ FIX QA: Added saveMedia field for media persistence toggle
+            saveMedia: { type: Boolean, default: false },
             mediaStorage: { 
                 type: String, 
                 enum: ['db', 'local', 'cloud'], 
                 default: 'db' 
+            },
+            // ⭐ FIX QA: Added cloudStorageConfig for S3/GCS configuration
+            cloudStorageConfig: {
+                type: Schema.Types.Mixed,
+                default: null
             }
         },
         default: {
@@ -322,7 +335,9 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
             saveHistorySummary: false,
             saveLinks: false,
             saveTasks: false,
-            mediaStorage: 'db'
+            saveMedia: false,
+            mediaStorage: 'db',
+            cloudStorageConfig: null
         }
     }
 }, {

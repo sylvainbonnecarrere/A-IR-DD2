@@ -28,14 +28,19 @@
  * - O: Open for extension (callbacks, styling)
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { PersistenceService } from '../services/persistenceService';
 import { useSaveMode } from '../hooks/useSaveMode';
 import { getBackendUrl } from '../config/api.config';
-import { V2WorkflowNode } from '../types';
+import { V2WorkflowNode, ChatMessage } from '../types';
+
+// ⭐ CONSTANTES DE CONFIGURATION - Anti-boucle infinie
+const MAX_ERRORS_BEFORE_ABORT = 3;
+const MAX_MESSAGES_PER_BATCH = 50;
+const REQUEST_TIMEOUT_MS = 10000;
 
 interface SavePrototypeButtonProps {
     /** Current workflow ID */
@@ -56,6 +61,9 @@ interface SavePrototypeButtonProps {
 
 type ButtonState = 'idle' | 'saving' | 'success' | 'error';
 
+// ⭐ MODULE-LEVEL: Set des messages déjà envoyés (persistant entre les re-renders)
+const globalSentMessageIds = new Set<string>();
+
 export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     workflowId,
     canvasState,
@@ -68,102 +76,181 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     const { nodes, edges } = useDesignStore();
     const { nodeMessages, getNewMessages, setLastSavedAt } = useRuntimeStore();
     const { isManualSave } = useSaveMode();
+    
+    // ⭐ LOCK: Éviter les appels concurrents (ref stable au niveau composant)
+    const isSavingRef = useRef(false);
+    // ⭐ ABORT: Permettre l'annulation des requêtes en cours
+    const abortControllerRef = useRef<AbortController | null>(null);
 
     // ⚠️ VISIBILITY GATE: Only render for authenticated users with manual save mode
     const shouldRender = isAuthenticated && isManualSave;
 
     /**
-     * ⭐ PHASE 3: Persister les journaux (messages de chat) pour tous les nodes
-     * Appelé en mode manuel quand l'utilisateur clique sur Save
-     * 
-     * ⭐ ÉTAPE 3: Utilise getNewMessages() pour filtrer les messages déjà sauvegardés
-     * et appelle setLastSavedAt() après chaque save réussi
+     * ⭐ REFACTORED: Persister les journaux avec protections anti-boucle infinie
+     * - Circuit breaker après MAX_ERRORS_BEFORE_ABORT erreurs
+     * - Limite de MAX_MESSAGES_PER_BATCH messages par node
+     * - Timeout de REQUEST_TIMEOUT_MS ms par requête
+     * - Déduplication via globalSentMessageIds (persistant)
      */
-    const persistJournals = useCallback(async (): Promise<{ saved: number; errors: number }> => {
+    const persistJournals = useCallback(async (): Promise<{ saved: number; errors: number; aborted: boolean }> => {
+        // ⭐ GUARD STRICT: Si déjà en cours, ne rien faire
+        if (isSavingRef.current) {
+            console.warn('[SavePrototypeButton] ⚠️ Already saving, skipping duplicate call');
+            return { saved: 0, errors: 0, aborted: true };
+        }
+        
+        isSavingRef.current = true;
+        
+        // ⭐ Créer un nouvel AbortController pour cette session
+        abortControllerRef.current = new AbortController();
+        const signal = abortControllerRef.current.signal;
+        
         let saved = 0;
-        let errors = 0;
+        let consecutiveErrors = 0;
+        let totalErrors = 0;
         const backendUrl = getBackendUrl();
 
-        // Parcourir tous les nodes avec des messages
-        for (const [nodeId, messages] of Object.entries(nodeMessages)) {
-            if (!messages || messages.length === 0) continue;
+        try {
+            // ⭐ SNAPSHOT IMMÉDIAT: Capturer l'état une seule fois
+            const nodeMessagesSnapshot = JSON.parse(JSON.stringify(nodeMessages));
+            const nodesSnapshot = [...nodes];
 
-            // ⭐ ÉTAPE 3: Récupérer seulement les nouveaux messages depuis le dernier save
-            const newMessages = getNewMessages(nodeId);
-            if (newMessages.length === 0) {
-                console.log(`[SavePrototypeButton] No new messages for node ${nodeId}`);
-                continue;
-            }
+            for (const [nodeId, messages] of Object.entries(nodeMessagesSnapshot)) {
+                // ⭐ CIRCUIT BREAKER: Arrêter si trop d'erreurs consécutives
+                if (consecutiveErrors >= MAX_ERRORS_BEFORE_ABORT) {
+                    console.error(`[SavePrototypeButton] 🛑 Aborting: ${MAX_ERRORS_BEFORE_ABORT} consecutive errors`);
+                    break;
+                }
 
-            // Trouver le node correspondant pour obtenir l'agentInstance
-            const node = nodes.find(n => n.id === nodeId) as V2WorkflowNode | undefined;
-            const agentInstance = node?.data?.agentInstance;
-            const effectiveWorkflowId = node?.data?.workflowId || workflowId;
+                if (!messages || (messages as ChatMessage[]).length === 0) continue;
 
-            if (!agentInstance?.id || !effectiveWorkflowId) {
-                console.warn(`[SavePrototypeButton] Skipping node ${nodeId} - no agentInstance or workflowId`);
-                errors += newMessages.length;
-                continue;
-            }
+                // Trouver le node pour les métadonnées
+                const node = nodesSnapshot.find(n => n.id === nodeId) as V2WorkflowNode | undefined;
+                const agentInstance = node?.data?.agentInstance;
+                const effectiveWorkflowId = node?.data?.workflowId || workflowId;
 
-            console.log(`[SavePrototypeButton] 📤 Persisting ${newMessages.length} NEW messages for instance ${agentInstance.id}`);
+                if (!agentInstance?.id || !effectiveWorkflowId) {
+                    console.warn(`[SavePrototypeButton] Skipping node ${nodeId} - missing instance/workflow`);
+                    continue;
+                }
 
-            // Envoyer chaque message au backend
-            for (const message of newMessages) {
-                try {
-                    const response = await fetch(
-                        `${backendUrl}/api/workflows/${effectiveWorkflowId}/instances/${agentInstance.id}/journal`,
-                        {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${accessToken}`
-                            },
-                            body: JSON.stringify({
-                                type: 'chat',
-                                payload: {
-                                    role: message.sender === 'user' ? 'user' : 'agent',
-                                    content: message.text || '',
-                                    // Ajouter des métadonnées si disponibles
-                                    llmProvider: node?.data?.agent?.llmProvider,
-                                    modelUsed: node?.data?.agent?.model
-                                }
-                            })
-                        }
-                    );
+                // ⭐ DÉDUPLICATION STRICTE: Filtrer via globalSentMessageIds
+                const allMessages = messages as ChatMessage[];
+                const newMessages = allMessages.filter((msg: ChatMessage) => {
+                    const msgId = msg.id || `${nodeId}-${msg.timestamp?.toString() || Date.now()}`;
+                    return !globalSentMessageIds.has(msgId);
+                });
 
-                    if (response.ok) {
-                        const result = await response.json();
-                        if (result.skipped) {
-                            console.log(`[SavePrototypeButton] Message skipped: ${result.reason}`);
-                        } else {
-                            saved++;
-                        }
-                    } else {
-                        console.warn(`[SavePrototypeButton] Failed to persist message:`, await response.text());
-                        errors++;
+                if (newMessages.length === 0) {
+                    continue;
+                }
+
+                // ⭐ LIMITE PAR BATCH: Ne pas envoyer trop de messages d'un coup
+                const messagesToSend = newMessages.slice(0, MAX_MESSAGES_PER_BATCH);
+                
+                console.log(`[SavePrototypeButton] 📤 Sending ${messagesToSend.length}/${newMessages.length} messages for instance ${agentInstance.id}`);
+
+                for (const message of messagesToSend) {
+                    // ⭐ Vérifier si l'opération a été annulée
+                    if (signal.aborted) {
+                        console.warn('[SavePrototypeButton] Operation aborted');
+                        return { saved, errors: totalErrors, aborted: true };
                     }
-                } catch (err) {
-                    console.error(`[SavePrototypeButton] Error persisting message:`, err);
-                    errors++;
+
+                    // ⭐ CIRCUIT BREAKER CHECK
+                    if (consecutiveErrors >= MAX_ERRORS_BEFORE_ABORT) {
+                        console.error(`[SavePrototypeButton] 🛑 Stopping batch: too many errors`);
+                        break;
+                    }
+
+                    const msgId = message.id || `${nodeId}-${message.timestamp?.toString() || Date.now()}`;
+                    
+                    // ⭐ DOUBLE CHECK: Éviter les doublons en vérifiant juste avant l'envoi
+                    if (globalSentMessageIds.has(msgId)) {
+                        continue;
+                    }
+
+                    // ⭐ MARQUER IMMÉDIATEMENT comme en cours (avant l'envoi)
+                    globalSentMessageIds.add(msgId);
+
+                    try {
+                        // ⭐ TIMEOUT: Requête avec délai maximum
+                        const timeoutId = setTimeout(() => {
+                            abortControllerRef.current?.abort();
+                        }, REQUEST_TIMEOUT_MS);
+
+                        const response = await fetch(
+                            `${backendUrl}/api/workflows/${effectiveWorkflowId}/instances/${agentInstance.id}/journal`,
+                            {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${accessToken}`
+                                },
+                                body: JSON.stringify({
+                                    type: 'chat',
+                                    payload: {
+                                        role: message.sender === 'user' ? 'user' : 'agent',
+                                        content: message.text || '',
+                                        imageBase64: message.image,
+                                        mimeType: message.mimeType,
+                                        fileName: message.filename,
+                                        messageId: msgId
+                                    }
+                                }),
+                                signal
+                            }
+                        );
+
+                        clearTimeout(timeoutId);
+
+                        if (response.ok) {
+                            saved++;
+                            consecutiveErrors = 0; // ⭐ Reset du circuit breaker
+                        } else {
+                            // ⭐ En cas d'erreur serveur, ne pas retirer du Set (éviter retry infini)
+                            console.warn(`[SavePrototypeButton] Server error ${response.status} for message ${msgId}`);
+                            consecutiveErrors++;
+                            totalErrors++;
+                        }
+                    } catch (err) {
+                        // ⭐ En cas d'erreur réseau, NE PAS retirer du Set pour éviter les retry infinis
+                        console.error(`[SavePrototypeButton] Network error for message ${msgId}:`, err);
+                        consecutiveErrors++;
+                        totalErrors++;
+                        
+                        // ⭐ Si c'est une erreur d'abort, arrêter proprement
+                        if (err instanceof Error && err.name === 'AbortError') {
+                            console.warn('[SavePrototypeButton] Request aborted');
+                            return { saved, errors: totalErrors, aborted: true };
+                        }
+                    }
+                }
+
+                // ⭐ Marquer le timestamp seulement si on a réussi à sauvegarder quelque chose
+                if (saved > 0) {
+                    setLastSavedAt(nodeId, new Date());
                 }
             }
 
-            // ⭐ ÉTAPE 3: Marquer le checkpoint après avoir sauvegardé les messages du nœud
-            setLastSavedAt(nodeId, new Date());
-            console.log(`[SavePrototypeButton] ✅ Last saved checkpoint set for node ${nodeId}`);
+            console.log(`[SavePrototypeButton] ✅ Complete: ${saved} saved, ${totalErrors} errors`);
+        } finally {
+            isSavingRef.current = false;
+            abortControllerRef.current = null;
         }
-
-        console.log(`[SavePrototypeButton] ✅ Journals persisted: ${saved} saved, ${errors} errors`);
-        return { saved, errors };
-    }, [nodeMessages, nodes, workflowId, accessToken, getNewMessages, setLastSavedAt]);
+        
+        return { saved, errors: totalErrors, aborted: false };
+    }, [nodeMessages, nodes, workflowId, accessToken, setLastSavedAt]);
 
     /**
-     * Handle save action
-     * ⭐ PHASE 3: Sauvegarde workflow + journaux en mode manuel
+     * Handle save action with strict single-execution guarantee
      */
     const handleSave = useCallback(async () => {
-        if (buttonState === 'saving' || !shouldRender) return;
+        // ⭐ TRIPLE GUARD: État UI + Ref + Render condition
+        if (buttonState === 'saving' || isSavingRef.current || !shouldRender) {
+            console.log('[SavePrototypeButton] Save blocked:', { buttonState, isSaving: isSavingRef.current, shouldRender });
+            return;
+        }
 
         setButtonState('saving');
 
@@ -193,16 +280,16 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                 }
             );
 
-            // 2. ⭐ PHASE 3: Sauvegarder les journaux (messages de chat)
+            // 2. Sauvegarder les journaux
             const journalResult = await persistJournals();
-            console.log(`[SavePrototypeButton] Workflow save: ${result.success}, Journals: ${journalResult.saved} saved`);
+            console.log(`[SavePrototypeButton] Workflow: ${result.success}, Journals: ${journalResult.saved} saved, ${journalResult.errors} errors`);
 
-            if (result.success) {
+            if (result.success && !journalResult.aborted) {
                 setButtonState('success');
                 setTimeout(() => setButtonState('idle'), 1500);
                 onSaveComplete?.(true);
             } else {
-                console.error('[SavePrototypeButton] Save failed:', result.error);
+                console.error('[SavePrototypeButton] Save incomplete:', result.error || 'Journal errors');
                 setButtonState('error');
                 setTimeout(() => setButtonState('idle'), 2500);
                 onSaveComplete?.(false);

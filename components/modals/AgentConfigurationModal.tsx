@@ -6,13 +6,16 @@ import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../contexts/NotificationContext';
-import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, LMStudioModelDetection } from '../../types';
+import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, LMStudioModelDetection, PersistenceConfig, defaultPersistenceConfig } from '../../types';
 import { LLM_MODELS, LLM_MODELS_DETAILED, getModelCapabilities, getLMStudioMergedModels, getCapabilitiesForLLM } from '../../llmModels';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
 import { initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
 import { API_BASE_URL } from '../../config/api.config';
+// ⭐ FIX QA: Import AgentPersistenceForm for media storage options
+import { AgentPersistenceForm } from './AgentPersistenceForm';
 
-type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'links' | 'tasks' | 'logs' | 'errors';
+// ⭐ FIX QA: Added 'persistence' tab for media storage options
+type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence' | 'links' | 'tasks' | 'logs' | 'errors';
 
 /**
  * Modal de Configuration Enrichie par Instance
@@ -55,6 +58,9 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
     };
 
     const [editedConfig, setEditedConfig] = useState(config);
+    
+    // ⭐ FIX QA: State for persistence configuration (media storage options)
+    const [editedPersistenceConfig, setEditedPersistenceConfig] = useState<PersistenceConfig>(defaultPersistenceConfig);
 
     // Synchronise editedConfig and editedName when instance changes
     useEffect(() => {
@@ -102,6 +108,16 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
 
         setEditedConfig(currentConfig);
         setEditedName(currentResolved.instance.name);
+        
+        // ⭐ FIX QA: Initialize persistence config from instance or prototype
+        const instancePersistence = currentResolved.instance.persistenceConfig;
+        const prototypePersistence = prototypeConfig.persistenceConfig;
+        setEditedPersistenceConfig({
+            ...defaultPersistenceConfig,
+            ...(prototypePersistence || {}),
+            ...(instancePersistence || {})
+        });
+        
         setHasChanges(false);
     }, [configModalInstanceId, getResolvedInstance]);
 
@@ -149,6 +165,9 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
         if (editedName !== instance.name) {
             updateAgentInstance(configModalInstanceId, { name: editedName });
         }
+        
+        // ⭐ FIX QA: Also save persistenceConfig to local store
+        updateAgentInstance(configModalInstanceId, { persistenceConfig: editedPersistenceConfig });
 
         // Prepare configuration to save (preserve runtime data and validate history settings)
         const enabledProvidersList = llmConfigs
@@ -179,7 +198,9 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
                     },
                     body: JSON.stringify({
                         configuration_json: configToSave,
-                        name: editedName
+                        name: editedName,
+                        // ⭐ FIX QA: Include persistenceConfig in backend sync
+                        persistenceConfig: editedPersistenceConfig
                     })
                 });
 
@@ -292,6 +313,13 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
                     >
                         {t('agentConfig_tab_formatting')}
                     </TabButton>
+                    {/* ⭐ FIX QA: Added Persistence tab for media storage options */}
+                    <TabButton
+                        active={activeTab === 'persistence'}
+                        onClick={() => setActiveTab('persistence')}
+                    >
+                        💾 {t('agentConfig_tab_persistence') || 'Persistance'}
+                    </TabButton>
                     <TabButton
                         active={activeTab === 'links'}
                         onClick={() => setActiveTab('links')}
@@ -361,6 +389,29 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
                             onChange={handleConfigChange}
                             t={t}
                         />
+                    )}
+                    
+                    {/* ⭐ FIX QA: Persistence tab content with AgentPersistenceForm */}
+                    {activeTab === 'persistence' && (
+                        <div className="space-y-4">
+                            <div className="bg-gray-700/50 p-3 rounded-lg mb-4">
+                                <p className="text-gray-300 text-sm">
+                                    <span className="text-cyan-400 font-medium">💾 Configuration de sauvegarde</span>
+                                    <br />
+                                    Ces paramètres contrôlent ce qui sera automatiquement sauvegardé pour cette instance d'agent,
+                                    y compris les images générées et les médias uploadés.
+                                </p>
+                            </div>
+                            
+                            <AgentPersistenceForm
+                                config={editedPersistenceConfig}
+                                onChange={(newConfig) => {
+                                    setEditedPersistenceConfig(newConfig);
+                                    setHasChanges(true);
+                                }}
+                                disabled={false}
+                            />
+                        </div>
                     )}
 
                     {activeTab === 'links' && (
