@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, Tool, OutputConfig, OutputFormat, RobotId } from '../../types';
 import { Button, Modal, ToggleSwitch } from '../UI';
 import { LLM_MODELS, LLM_MODELS_DETAILED, getModelCapabilities, getLMStudioMergedModels, invalidateLMStudioCache } from '../../llmModels';
@@ -7,6 +7,7 @@ import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { validateAgentCapabilities, type CapabilityValidationResult } from '../../utils/lmStudioCapabilityValidator';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
+import { useRuntimeStore } from '../../stores/useRuntimeStore';
 
 interface AgentFormModalProps {
   onClose: () => void;
@@ -80,22 +81,31 @@ const defaultOutputConfig: OutputConfig = {
 
 const outputFormats: OutputFormat[] = ['json', 'xml', 'yaml', 'shell', 'powershell', 'python', 'html', 'css', 'javascript', 'typescript', 'php', 'sql', 'mysql', 'mongodb'];
 
-export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: AgentFormModalProps) => {
+export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, existingAgent }: AgentFormModalProps) => {
   const { t } = useLocalization();
   const { user } = useAuth();
   const isAuthenticated = user !== null;
-  const enabledLLMProvider = llmConfigs.find(c => c.enabled)?.provider || LLMProvider.Gemini;
 
-  // Helper function to get available models for a provider (only if configured)
-  const getAvailableModels = (provider: LLMProvider): string[] => {
+  // Use store as canonical source, fallback to props
+  const storeLlmConfigs = useRuntimeStore(state => state.llmConfigs);
+  const llmConfigs = storeLlmConfigs?.length > 0 ? storeLlmConfigs : propLlmConfigs;
+
+  // Detect reconfiguration issues and usable providers
+  const hasReconfigNeeded = llmConfigs.some(c => c.enabled && c.needsReconfig);
+  const enabledAndUsable = llmConfigs.filter(c => c.enabled && !c.needsReconfig && c.apiKey);
+  const noUsableLLM = enabledAndUsable.length === 0;
+
+  const enabledLLMProvider = enabledAndUsable[0]?.provider || llmConfigs.find(c => c.enabled)?.provider || LLMProvider.Gemini;
+
+  // Get available models for a provider
+  const getAvailableModels = useCallback((provider: LLMProvider): string[] => {
     const config = llmConfigs.find(c => c.provider === provider && c.enabled);
-
     if (!config) {
-      return []; // Return empty array if provider not configured
+      return [];
     }
     const models = LLM_MODELS[provider] || [];
     return models;
-  };
+  }, [llmConfigs]);
 
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
@@ -105,14 +115,11 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
     const availableModels = getAvailableModels(enabledLLMProvider);
     return availableModels.length > 0 ? availableModels[0] : '';
   });
-  // ⭐ PHASE 1 FIX: Initialize selectedCapabilities with template or model defaults
-  // PRIORITÉ 1: Si edit mode et template a des capabilities, les charger
-  // PRIORITÉ 2: Sinon, load capabilities from the selected model
-  // Chat est TOUJOURS inclus par défaut
+
+  // Initialize capabilities: from template or model defaults
+  // Chat is always included
   const [selectedCapabilities, setSelectedCapabilities] = useState<LLMCapability[]>(() => {
-    // PRIORITÉ 1: If editing existing agent, load template's capabilities
     if (existingAgent?.capabilities && existingAgent.capabilities.length > 0) {
-      // Ensure Chat is always included (primary capability)
       const caps = new Set<LLMCapability>([LLMCapability.Chat, ...existingAgent.capabilities]);
       return Array.from(caps);
     }
@@ -260,12 +267,74 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
     }
   }, [isEditing, existingAgent]);
 
-  // LMStudio capability validation effect
+  // Synchronize llmProvider with available providers
+  // If current provider becomes disabled, switch to first enabled provider
+  useEffect(() => {
+    if (isEditing) return;
+
+    const enabledProviders = llmConfigs.filter(c => c.enabled).map(c => c.provider);
+
+    // Current provider still enabled
+    if (enabledProviders.includes(llmProvider)) {
+      return; // Stay on current provider
+    }
+
+    // CASE 2: Current provider is NO LONGER enabled → switch to first enabled provider
+    if (enabledProviders.length > 0) {
+      const newProvider = enabledProviders[0];
+      console.log('[AgentFormModal] 🔄 llmProvider sync: switching provider', {
+        old: llmProvider,
+        new: newProvider,
+        enabledProviders,
+        reason: 'Current provider no longer enabled'
+      });
+
+      setLlmProvider(newProvider);
+
+      // Auto-select first model for new provider
+      const availableModels = getAvailableModels(newProvider);
+      if (availableModels.length > 0) {
+        setModel(availableModels[0]);
+      } else {
+        setModel('');
+      }
+
+      // Reset capabilities to match new provider
+      const newCapabilities = getAvailableCapabilities(newProvider, availableModels[0] || '');
+      setSelectedCapabilities(prev => prev.filter(cap => newCapabilities.includes(cap)));
+
+      return;
+    }
+
+    // CASE 3: NO providers are enabled at all → don't change, let safety layer handle
+  }, [llmConfigs, isEditing, llmProvider, getAvailableModels, getAvailableCapabilities]);
+
+  /**
+   * ⭐ SAFETY LAYER 2: Reactive Recovery (fallback)
+   * 
+   * CONTEXT: App.tsx should now have reliable llmConfigs hydration
+   * This effect is a SAFETY NET only for edge cases:
+   * - Modal opens before hydration completes (shouldn't happen now)
+   * - Props change unexpectedly during lifecycle
+   * 
+   * Since App.tsx now has deterministic hydration, this is much simpler:
+   * Just ensure we're showing ENABLED providers, nothing more
+   */
+  useEffect(() => {
+    // ONLY runs if NO providers are enabled (safety check)
+    const hasEnabledProviders = llmConfigs.some(c => c.enabled);
+    
+    if (!isEditing && !hasEnabledProviders && llmConfigs.length > 0) {
+      // Safety check: no enabled providers (parent component should fix this)
+      return;
+    }
+  }, [llmConfigs, isEditing]);
+
+  // Validate LMStudio capability
   useEffect(() => {
     if (llmProvider === LLMProvider.LMStudio) {
       const validateLMStudio = async () => {
         try {
-          // Get endpoint from llmConfigs (stored in apiKey field for LMStudio)
           const lmStudioConfig = llmConfigs.find(c => c.provider === LLMProvider.LMStudio);
           const endpoint = lmStudioConfig?.apiKey || undefined;
 
@@ -326,19 +395,17 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
   };
 
   const handleCapabilityToggle = (capability: LLMCapability) => {
-    // ⭐ PHASE 6: Chat MANDATORY - never toggle Chat
+    // Chat capability cannot be toggled
     if (capability === LLMCapability.Chat) return;
     
     const isCurrentlySelected = selectedCapabilities.includes(capability);
 
     if (capability === LLMCapability.FunctionCalling) {
       if (!isCurrentlySelected) { // Turning it ON
-        // If no tools are defined yet, add the default weather tool as an example.
         if (tools.length === 0) {
           setTools([defaultWeatherTool]);
         }
       } else { // Turning it OFF
-        // Clear all tools when function calling is disabled
         setTools([]);
       }
     }
@@ -404,7 +471,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
       return;
     }
 
-    // ⭐ PHASE 6: Always ensure Chat is included
+    // Ensure Chat is always included
     const capabilitiesForSave = selectedCapabilities.includes(LLMCapability.Chat)
       ? selectedCapabilities
       : [LLMCapability.Chat, ...selectedCapabilities];
@@ -451,6 +518,19 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
                 <label htmlFor="agent-role" className="block text-sm font-medium text-gray-300 mb-1">{t('agentForm_roleLabel')}</label>
                 <input id="agent-role" type="text" value={role} onChange={(e) => setRole(e.target.value)} className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder={t('agentForm_rolePlaceholder')} />
               </div>
+
+              {/* ⭐ Warning: displayed ABOVE the LLM/Model row */}
+              {hasReconfigNeeded && (
+                <div className="p-2 bg-amber-900/40 border border-amber-500/50 rounded-md text-amber-200 text-xs leading-relaxed">
+                  ⚠️ Vos clés API doivent être reconfigurées (problème de chiffrement). Rendez-vous dans les paramètres LLM pour les re-saisir.
+                </div>
+              )}
+              {!hasReconfigNeeded && noUsableLLM && (
+                <div className="p-2 bg-yellow-900/40 border border-yellow-600/50 rounded-md text-yellow-300 text-xs leading-relaxed">
+                  ⚠️ Aucun LLM configuré. Veuillez configurer vos clés API dans les paramètres.
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="llm-provider" className="block text-sm font-medium text-gray-300 mb-1">{t('agentForm_llmLabel')}</label>
@@ -723,7 +803,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs, existingAgent }: A
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentForm_capabilitiesLabel')}</label>
                   <div className="space-y-2 p-3 bg-gray-900/50 rounded-md max-h-32 overflow-y-auto">
-                    {/* ⭐ PHASE 6: Always include Chat first */}
+                    {/* Chat is always enabled and required */}
                     <label className="flex items-center cursor-not-allowed bg-gray-800/30 p-2 rounded">
                       <input
                         type="checkbox"

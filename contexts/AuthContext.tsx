@@ -169,7 +169,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                     headers: { Authorization: `Bearer ${token}` }
                 }
             );
-            console.log('[AuthContext] ✅ Fetched keys count:', keys.length, 'providers:', keys.map(k => k.provider));
 
             if (isMounted) {
                 setLlmApiKeys(keys);
@@ -179,7 +178,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 console.warn('[AuthContext] Fetch timeout');
             } else if (err.response?.status === 401 && retryCount < 2) {
                 // ⭐ FIX: Auth may not be fully propagated yet — retry after delay
-                console.warn(`[AuthContext] 401 on fetchLLMApiKeys, retrying (${retryCount + 1}/2) in 500ms...`);
                 clearTimeout(timeoutId);
                 await new Promise(resolve => setTimeout(resolve, 500));
                 if (isMounted) {

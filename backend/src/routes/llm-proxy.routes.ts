@@ -135,15 +135,37 @@ router.post('/get-all-api-keys', requireAuth, async (req: Request, res: Response
             return res.json([]); // Aucune config, retourner tableau vide
         }
 
-        // Déchiffrer toutes les API keys
-        const decryptedConfigs = configs.map(config => ({
-            provider: config.provider,
-            apiKey: config.getDecryptedApiKey(),
-            capabilities: config.capabilities,
-            enabled: config.enabled
-        }));
+        // Déchiffrer toutes les API keys - AVEC gestion d'erreur gracieuse
+        // ⭐ FIX: Si une clé ne peut pas être déchiffrée (données corrompues, encryption clé changée),
+        // on retourne la config SANS la clé (apiKey vide) ET disabled rather than crashing avec 500
+        const decryptedConfigs = configs
+          .map(config => {
+            try {
+              const decryptedKey = config.getDecryptedApiKey();
+              return {
+                provider: config.provider,
+                apiKey: decryptedKey,
+                capabilities: config.capabilities,
+                enabled: config.enabled
+              };
+            } catch (decryptError: any) {
+              console.warn(`[LLMProxy] ⚠️ Could not decrypt API key for provider ${config.provider} (user ${user.id}):`, decryptError.message);
+              // ⭐ FIX: Preserve REAL enabled status from DB + signal reconfiguration needed
+              // Previous bug: forcing enabled=false hid the provider from frontend entirely
+              return {
+                provider: config.provider,
+                apiKey: '',
+                capabilities: config.capabilities,
+                enabled: config.enabled, // ← PRESERVE real DB status
+                needsReconfig: true      // ← Signal to frontend: key must be re-entered
+              };
+            }
+          });
 
-        console.log(`[LLMProxy] All API keys retrieved for user ${user.id} (${configs.length} providers)`);
+        const failedCount = decryptedConfigs.filter((c: any) => c.needsReconfig).length;
+        if (failedCount > 0) {
+          console.warn(`[LLMProxy] ⚠️ ${failedCount}/${configs.length} API keys need reconfiguration (encryption key mismatch) for user ${user.id}`);
+        }
 
         res.json(decryptedConfigs);
 

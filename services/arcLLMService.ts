@@ -204,18 +204,8 @@ export const generateVideo = async (
     }
 
     try {
-        // TODO: [Arc-LLM] Implémenter appel réel API Arc-LLM Video
-        // const response = await fetch('https://arc-llm-api.com/v1/video/generate', {
-        //   method: 'POST',
-        //   headers: {
-        //     'Authorization': `Bearer ${apiKey}`,
-        //     'Content-Type': 'application/json'
-        //   },
-        //   body: JSON.stringify(options)
-        // });
-        // const data = await response.json();
-
-        // MOCK : Simuler démarrage opération asynchrone
+        // Arc-LLM API call would go here (currently mocked)
+        // Generate unique operation ID to track async process
         const operationId = `arc-video-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
         console.log('[Arc-LLM] Video generation started:', operationId);

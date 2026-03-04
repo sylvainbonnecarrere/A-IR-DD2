@@ -24,6 +24,7 @@ export interface LLMApiKey {
     enabled: boolean;
     capabilities?: Record<string, boolean>;
     hasApiKey?: boolean;
+    needsReconfig?: boolean; // ⭐ True when decryption failed (encryption key mismatch)
 }
 
 /**
