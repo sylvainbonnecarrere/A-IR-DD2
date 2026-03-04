@@ -972,33 +972,16 @@ function AppContent() {
   }, [switchToWorkflow]);
 
   /**
-   * ⭐ CRITICAL J4.4: Reload LLM configs + WIPE STATE when auth state changes
-   * Prevents guest and authenticated sessions from contaminating each other
-   * 
-   * When user logs in/out or changes auth status:
-   * 1. Guest → Auth: configs cleared, defaults set, then real configs via llmApiKeys
-   * 2. Auth → Guest: configs cleared, guest configs from localStorage
-   * 3. Guest → Guest (new session): configs cleared
-   * 
-   * ⚠️ SECURITY: ALWAYS reload from scratch on auth change
-   * ⚠️ CRITICAL FIX: workflowNodes is React state NOT in Zustand stores
-   *    Must be explicitly cleared here to prevent agent leaks on canvas
-   * ⚠️ CRITICAL FIX J4.4.2: agents is ALSO React state NOT in Zustand
-   *    Must be cleared to prevent prototype leaks in sidebar/navigation
+   * ⭐ CRITICAL J4.4: Strong-clean state on auth change (login/logout)
+   * ONLY handles non-llmConfigs cleanup
+   * llmConfigs hydration is now handled by the unified effect below
    */
   useEffect(() => {
-    // Reload LLM configs respecting new auth state
-    const freshConfigs = loadLLMConfigs(isAuthenticated, accessToken);
-    setLlmConfigs(freshConfigs);
-    updateLLMConfigs(freshConfigs);
-    
     // ⭐ CRITICAL J4.4: Clear React state on auth change to prevent data leaks
     setWorkflowNodes([]);
     setAgents([]);
     
     // ⭐ FIX J4.5: Close all open panels on auth change to prevent stale nodeId references
-    // Problem: panel states (isImagePanelOpen, etc) kept old nodeIds after reconnect
-    // Solution: Reset all panel states when authentication changes
     setImagePanelOpen(false);
     setCurrentImageNodeId(null);
     setCurrentImageAgent(null);
@@ -1014,89 +997,120 @@ function AppContent() {
     setMapsPreloadedResults(null);
     
     // ⭐ FIX: Reset prevApiKeysRef on auth change to allow fresh hydration
-    // Bug: After logout/login, same configs would be skipped due to hash match
     prevApiKeysRef.current = '';
-  }, [isAuthenticated, accessToken, updateLLMConfigs]);
+  }, [isAuthenticated, accessToken]);
 
   /**
-   * ⭐ J4.4.3 FIX: Sync LLM configs from AuthContext's llmApiKeys for authenticated users
+   * ⭐ UNIFIED HYDRATION EFFECT v2 (FIX for reconnect race condition)
    * 
-   * Root Cause: The previous fix used useLLMConfigs() which returns ILLMConfigUI[]
-   * without the actual apiKey. AuthContext.llmApiKeys contains the decrypted keys
-   * from the backend endpoint /api/llm/get-all-api-keys.
+   * Single source of truth for llmConfigs hydration
+   * Merges authentication state + llmApiKeys to create authoritative config
    * 
-   * Architecture:
-   * - Guest mode: loadLLMConfigs() reads from localStorage (LLMConfig[] format)
-   * - Auth mode: llmApiKeys from AuthContext (fetched at login with decrypted keys)
+   * Logic flow:
+   * 1. If not authenticated → Load guest configs from localStorage
+   * 2. If authenticated but llmApiKeys still loading → Use defaults (safe wait)
+   * 3. If authenticated and llmApiKeys loaded → Merge with API keys (final state)
    * 
-   * This effect runs AFTER auth change effect, merging real API keys with defaults.
+   * This prevents the previous race condition where two competing effects
+   * (one on [isAuthenticated, accessToken] and one on [llmApiKeys])
+   * could cause stale llmConfigs to be seen by child components during reconnect
+   * 
+   * CRITICAL: This effect runs on ALL relevant changes to ensure deterministic state
    */
   useEffect(() => {
-    // ⭐ CRITICAL: Wait for llmApiKeys to be loaded (not null/undefined)
-    // When isAuthenticated but llmApiKeys is null, it means AuthContext is still fetching
+    // ══════════════════════════════════════════════════
+    // Case 1: User not authenticated → Use guest mode
+    // ══════════════════════════════════════════════════
     if (!isAuthenticated) {
-      return; // Not authenticated, nothing to do
-    }
-    
-    if (llmApiKeys === null || llmApiKeys === undefined) {
-      return; // Still loading, wait for next trigger
+      const guestConfigs = loadLLMConfigs(false, null);
+      setLlmConfigs(guestConfigs);
+      updateLLMConfigs(guestConfigs);
+      return;
     }
 
-    // ⭐ FIX: Prevent infinite loop by checking content equality
-    // Must be done BEFORE any state updates
+    // ══════════════════════════════════════════════════
+    // Case 2: Authenticated but still hydrating
+    // ══════════════════════════════════════════════════
+    // If no accessToken yet, wait for it
+    if (!accessToken) {
+      const defaults = initialLLMConfigs;
+      setLlmConfigs(defaults);
+      updateLLMConfigs(defaults);
+      return;
+    }
+
+    // If llmApiKeys is null, it means AuthContext is still fetching
+    // Use defaults while waiting
+    if (llmApiKeys === null || llmApiKeys === undefined) {
+      const defaults = initialLLMConfigs;
+      setLlmConfigs(defaults);
+      updateLLMConfigs(defaults);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════
+    // Case 3: Authenticated AND llmApiKeys loaded
+    // ══════════════════════════════════════════════════
+
+    // Prevent unnecessary re-merges of identical data (hash check)
     const keysHash = JSON.stringify(llmApiKeys);
     if (keysHash === prevApiKeysRef.current) {
       return;
     }
     prevApiKeysRef.current = keysHash;
 
-    // ⭐ FIX: If llmApiKeys is empty array, user has no configs in DB
-    // Set all providers to disabled (initialLLMConfigs with enabled:false)
+    // If user has zero LLM configs saved, set all to disabled
     if (llmApiKeys.length === 0) {
-      setLlmConfigs(initialLLMConfigs); // All disabled by default now
-      updateLLMConfigs(initialLLMConfigs);
+      const allDisabled = initialLLMConfigs;
+      setLlmConfigs(allDisabled);
+      updateLLMConfigs(allDisabled);
       return;
     }
-    
-    // Convert LLMApiKey[] to LLMConfig[]
+
+    // Convert LLMApiKey[] to LLMConfig[] and merge
     const apiConfigs: LLMConfig[] = llmApiKeys.map(key => ({
       provider: key.provider as LLMProvider,
       apiKey: key.apiKey,
       enabled: key.enabled,
-      capabilities: (key.capabilities || {}) as { [k in LLMCapability]?: boolean }
+      capabilities: (key.capabilities || {}) as { [k in LLMCapability]?: boolean },
+      needsReconfig: (key as any).needsReconfig || false
     }));
-    
-    // Merge with initial configs to keep capabilities defaults for providers not in API
+
+    // Merge: Start with initial defaults, override with API values
     const mergedConfigs = initialLLMConfigs.map(initial => {
       const apiConfig = apiConfigs.find(c => c.provider === initial.provider);
-      if (apiConfig) {
-        return {
-          ...initial,
-          ...apiConfig,
-          // ⭐ PHASE 0 FIX: Conservative merge - preserve initial defaults unless explicitly overridden
-          // Only apply API capability values if they're explicitly present in the response
-          // This prevents losing capabilities (like OutputFormatting) when backend doesn't return them
-          capabilities: apiConfig.capabilities
-            ? Object.keys(initial.capabilities).reduce((acc, capKey) => {
-                const cap = capKey as LLMCapability;
-                // If API explicitly specifies this capability, use its value
-                if (cap in apiConfig.capabilities) {
-                  acc[cap] = apiConfig.capabilities[cap];
-                } else {
-                  // Otherwise preserve the initial default
-                  acc[cap] = initial.capabilities[cap];
-                }
-                return acc;
-              }, {} as { [k in LLMCapability]?: boolean })
-            : initial.capabilities
-        };
+
+      if (!apiConfig) {
+        // Provider not in API → use initial defaults
+        return initial;
       }
-      return initial;
+
+      // Provider found in API → merge carefully
+      return {
+        ...initial,
+        ...apiConfig,
+        needsReconfig: apiConfig.needsReconfig || false,
+        // Conservative capability merge: only override if explicitly in API
+        capabilities: apiConfig.capabilities
+          ? Object.keys(initial.capabilities).reduce((acc, capKey) => {
+              const cap = capKey as LLMCapability;
+              if (cap in apiConfig.capabilities) {
+                // If API has explicit value, use it
+                acc[cap] = apiConfig.capabilities[cap];
+              } else {
+                // Otherwise preserve initial default
+                acc[cap] = initial.capabilities[cap];
+              }
+              return acc;
+            }, {} as { [k in LLMCapability]?: boolean })
+          : initial.capabilities
+      };
     });
-    
+
     setLlmConfigs(mergedConfigs);
     updateLLMConfigs(mergedConfigs);
-  }, [isAuthenticated, llmApiKeys, updateLLMConfigs]);
+
+  }, [isAuthenticated, accessToken, llmApiKeys, updateLLMConfigs]);
 
   // ⭐ PHASE 2: Load workflows on authentication
   // ⭐ V4 FIX: Wait for hydration to complete before loading workflows

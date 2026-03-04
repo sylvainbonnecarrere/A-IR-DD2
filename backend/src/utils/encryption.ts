@@ -71,13 +71,20 @@ export function encrypt(plaintext: string, userSalt: string): string {
 
 /**
  * Déchiffre une chaîne chiffrée avec AES-256-GCM
- * @param ciphertext Format "iv:salt:authTag:encryptedData"
+ * @param ciphertext Format "iv:salt:authTag:encryptedData" OU plaintext (legacy)
  * @param userSalt Salt unique par utilisateur (userId)
  * @returns Texte en clair (API key)
  */
 export function decrypt(ciphertext: string, userSalt: string): string {
     if (!process.env.ENCRYPTION_KEY) {
         throw new Error('ENCRYPTION_KEY non configurée dans .env');
+    }
+
+    // ⭐ FIX: Vérifier si c'est du plaintext non chiffré (migration legacy)
+    // Si le format n'est pas "iv:salt:authTag:data", retourner directement
+    if (!isEncrypted(ciphertext)) {
+        console.warn('[decrypt] ⚠️ Legacy plaintext API key detected (not encrypted), returning as-is');
+        return ciphertext; // ← Retourner plaintext pour backward compatibility
     }
 
     // Parser format

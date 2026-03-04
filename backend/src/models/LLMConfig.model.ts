@@ -61,6 +61,11 @@ LLMConfigSchema.index({ enabled: 1 });
 
 // Méthode: Déchiffrer API key
 LLMConfigSchema.methods.getDecryptedApiKey = function (): string {
+    // ⭐ GUARD: Si pas de clé chiffrée stockée, retourner vide
+    if (!this.apiKeyEncrypted || this.apiKeyEncrypted.trim() === '') {
+        console.warn(`[LLMConfig] ⚠️ No apiKeyEncrypted for provider ${this.provider} (user ${this.userId})`);
+        return '';
+    }
     return decrypt(this.apiKeyEncrypted, this.userId.toString());
 };
 

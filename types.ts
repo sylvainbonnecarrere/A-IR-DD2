@@ -49,6 +49,7 @@ export interface LLMConfig {
   enabled: boolean;
   apiKey: string;
   capabilities: { [key in LLMCapability]?: boolean };
+  needsReconfig?: boolean; // True when backend decryption failed (encryption key mismatch)
 }
 
 export interface HistoryConfig {
@@ -79,18 +80,18 @@ export interface OutputConfig {
   enabled: boolean;
   format: OutputFormat;
   useCodestralCompletion?: boolean;
-  // ⭐ JSON Schema validation for structured outputs (Anthropic, OpenAI)
+  // JSON Schema validation for structured outputs
   schema?: object;
 }
 
 /**
- * ⭐ PERSISTENCE CONFIG: Configuration granulaire de persistance par agent
+ * Configuration granulaire de persistance par agent
  * Définit ce qui est sauvegardé pour chaque agent individuellement
  */
 export type MediaStorageType = 'db' | 'local' | 'cloud';
 
 /**
- * ⭐ CLOUD STORAGE: Types pour le stockage cloud (S3/GCS)
+ * Types pour le stockage cloud (S3/GCS)
  */
 export type CloudProvider = 's3' | 'gcs';
 
@@ -137,9 +138,9 @@ export interface PersistenceConfig {
   saveHistorySummary: boolean;    // Défaut: false - Générer et stocker un résumé périodique (économie tokens)
   saveLinks: boolean;             // Défaut: false - Sauvegarder les liens entre agents
   saveTasks: boolean;             // Défaut: false - Sauvegarder les tâches assignées
-  saveMedia: boolean;             // ⭐ NOUVEAU: Défaut: false - Activer sauvegarde des médias
+  saveMedia: boolean;             // Default: false
   mediaStorage: MediaStorageType; // Défaut: 'db' - Mode de stockage des médias
-  cloudStorageConfig?: CloudStorageConfig;  // ⭐ NOUVEAU: Config cloud si mediaStorage === 'cloud'
+  cloudStorageConfig?: CloudStorageConfig;  // Cloud storage config
 }
 
 export const defaultPersistenceConfig: PersistenceConfig = {

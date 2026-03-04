@@ -164,17 +164,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // ⭐ DIAGNOSTIC: Log callback availability on mount and changes
-  useEffect(() => {
-    console.log(`[V2AgentNode ${id}] Callbacks available:`, {
-      hasOnOpenImagePanel: !!onOpenImagePanel,
-      hasOnOpenImageModificationPanel: !!onOpenImageModificationPanel,
-      hasOnOpenVideoPanel: !!onOpenVideoPanel,
-      hasOnOpenMapsPanel: !!onOpenMapsPanel,
-      hasOnOpenFullscreen: !!onOpenFullscreen
-    });
-  }, [id, onOpenImagePanel, onOpenImageModificationPanel, onOpenVideoPanel, onOpenMapsPanel, onOpenFullscreen]);
-
   // Get messages from store
   const messages = getNodeMessages(id);
   const isLoading = isNodeExecuting(id);
@@ -406,10 +395,14 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     const agentConfig = llmConfigs?.find(c => c.provider === effectiveAgent.llmProvider);
 
     if (!agentConfig?.enabled || !agentConfig.apiKey) {
+      const isReconfigNeeded = agentConfig?.needsReconfig;
+      const errorText = isReconfigNeeded
+        ? `⚠️ ${effectiveAgent.llmProvider} nécessite une reconfiguration de sa clé API. Rendez-vous dans les paramètres LLM pour la re-saisir.`
+        : `Erreur: ${effectiveAgent.llmProvider} n'est pas configuré ou activé. Veuillez configurer vos clés API dans les paramètres.`;
       const errorMessage: ChatMessage = {
         id: generateMessageId('error'),
         sender: 'agent',
-        text: `Erreur: ${effectiveAgent.llmProvider} n'est pas configuré ou activé.`,
+        text: errorText,
         isError: true,
         timestamp: new Date()
       };

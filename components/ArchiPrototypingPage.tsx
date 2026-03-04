@@ -34,6 +34,8 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
   const { t } = useLocalization();
   const { addNotification } = useNotifications();
   
+
+  
   // ⭐ Auth context pour persistence MongoDB (users connectés uniquement)
   const { isAuthenticated, accessToken } = useAuth();
   

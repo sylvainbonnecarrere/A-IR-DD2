@@ -30,18 +30,19 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
   const [activeTab, setActiveTab] = useState<'llms' | 'save' | 'language'>('llms');
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🔴 J4.4 CRITICAL: Load authenticated user's configs from hook on auth state change
+  // Load authenticated user's configs from hook on auth state change
   // When user logs in, hookConfigs will have their saved configs from API
-  // IMPORTANT: Must merge with defaults for missing providers!
   useEffect(() => {
     if (isAuthenticated && !hookLoading) {
-      // ⭐ MERGE: Combine API configs with defaults to show all 10 providers
       // Map API configs by provider for quick lookup
-      const apiConfigsMap = new Map(hookConfigs.map(hc => [hc.provider, hc]));
+      // Trim provider values to avoid whitespace mismatches
+      const apiConfigsMap = new Map(
+        hookConfigs.map(hc => [hc.provider?.trim() || '', hc])
+      );
       
-      // Start with defaults, then override with user's saved configs
+      // Merge API configs with defaults to show all 10 providers
       const mergedConfigs: LLMConfigWithHasKey[] = propConfigs.map(defaultConfig => {
-        const userConfig = apiConfigsMap.get(defaultConfig.provider);
+        const userConfig = apiConfigsMap.get(defaultConfig.provider?.trim() || '');
         
         if (!userConfig) {
           // Provider not in API response - use default as-is
@@ -51,10 +52,10 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
         // Provider in API - merge with user's settings
         return {
           provider: defaultConfig.provider,
-          enabled: userConfig.enabled, // User's enabled state
-          apiKey: userConfig.apiKey || '', // ⭐ J4.4: Backend returns masked apiKey (•••) if key exists
-          capabilities: userConfig.capabilities || defaultConfig.capabilities, // User's capabilities (or defaults)
-          hasApiKey: userConfig.hasApiKey // Indicator that a key exists in DB
+          enabled: userConfig.enabled,
+          apiKey: userConfig.apiKey || '',
+          capabilities: userConfig.capabilities || defaultConfig.capabilities,
+          hasApiKey: userConfig.hasApiKey
         } as LLMConfigWithHasKey;
       });
       
@@ -446,28 +447,22 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                       <div className="pl-4 mt-4 space-y-4 border-l-2 border-gray-700">
                         <div>
                           <label htmlFor={`${provider}-apikey`} className="block text-sm font-medium text-gray-400 mb-1">
-                            {provider === LLMProvider.LMStudio ? t('settings_endpoint') : t('settings_apiKey')}
+                            {provider?.trim() === LLMProvider.LMStudio?.trim() ? t('settings_endpoint') : t('settings_apiKey')}
                           </label>
-                          {/* ⭐ J4.4: apiKey can be:
-                              - Empty string (no key configured)
-                              - Points (••••••••) masked key from authenticated user
-                              - User input (being typed)
-                          */}
                           <input
                             id={`${provider}-apikey`}
-                            type={provider === LLMProvider.LMStudio ? "text" : "password"}
+                            type={provider?.trim() === LLMProvider.LMStudio?.trim() ? "text" : "password"}
                             value={apiKey}
                             onChange={(e) => handleApiKeyChange(provider, e.target.value)}
-                            placeholder={provider === LLMProvider.LMStudio ? "http://localhost:3928" : t('settings_apiKey_placeholder')}
+                            placeholder={provider?.trim() === LLMProvider.LMStudio?.trim() ? "http://localhost:3928" : t('settings_apiKey_placeholder')}
                             className="w-full p-2 text-sm bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           />
-                          {provider === LLMProvider.LMStudio && (
+                          {provider?.trim() === LLMProvider.LMStudio?.trim() && (
                             <>
                               <p className="text-xs text-gray-500 mt-1">
                                 Auto-detects Jan (3928), LM Studio (1234), Ollama (11434)
                               </p>
 
-                              {/* Bouton Détection LMStudio */}
                               <button
                                 onClick={handleDetectLMStudio}
                                 disabled={isDetecting || !apiKey}
