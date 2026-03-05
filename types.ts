@@ -12,7 +12,7 @@ export enum LLMProvider {
   Kimi = 'Kimi K2',
   DeepSeek = 'DeepSeek',
   LMStudio = 'LLM local (on premise)',
-  ArcLLM = 'Arc-LLM', // Arc-LLM provider for Video, Maps, Web Grounding
+  ArcLLM = 'Arc-LLM',
 }
 
 export enum LLMCapability {
@@ -47,8 +47,12 @@ export enum LLMCapability {
 export interface LLMConfig {
   provider: LLMProvider;
   enabled: boolean;
-  apiKey: string;
+  apiKey?: string; // For cloud providers (encrypted on backend)
+  localEndpoint?: string; // For local providers (plaintext URL, not encrypted)
   capabilities: { [key in LLMCapability]?: boolean };
+  hasApiKey?: boolean; // Flag: API key exists
+  hasLocalEndpoint?: boolean; // Flag: local endpoint exists
+  isLocalProvider?: boolean; // Flag: provider is local (not cloud)
   needsReconfig?: boolean; // True when backend decryption failed (encryption key mismatch)
 }
 
@@ -521,23 +525,29 @@ export interface WebSearchGroundingResponse {
  * Interface UI pour les configurations LLM
  * Utilisée par le hook useLLMConfigs et les composants React
  * 
+ * DUAL STORAGE MODEL:
+ * - Cloud providers: use apiKey (encrypted on backend)
+ * - Local providers: use localEndpoint (plaintext URL)
+ * 
  * NOTE: En mode authentifié, les API keys sont chiffrées côté backend
  * En mode guest (localStorage), aucun chiffrement (mode de développement)
  */
 export interface ILLMConfigUI {
   id: string;
-  provider: string; // 'OpenAI', 'Anthropic', 'Gemini', etc.
+  provider: string; // 'OpenAI', 'Anthropic', 'Gemini', 'LLM local (on premise)', etc.
   enabled: boolean;
   capabilities: Record<string, boolean>;
-  hasApiKey: boolean; // Indicateur (jamais l'API key elle-même)
+  hasApiKey: boolean; // Flag: API key exists
+  hasLocalEndpoint?: boolean; // Flag: local endpoint exists
   createdAt: string; // ISO timestamp
   updatedAt: string; // ISO timestamp
   // ⚠️ ONLY in localStorage mode (guest):
   apiKeyPlaintext?: string; // Non-sécurisé, développement uniquement
-  // ⭐ J4.4.3: Optional apiKey field for compatibility with SettingsModal state
-  // In guest mode: contains actual API key
-  // In auth mode: empty string (key stored server-side)
-  apiKey?: string;
+  // Optional fields for compatibility with SettingsModal state
+  // In guest mode: contains actual API key or endpoint
+  // In auth mode: empty/undefined (data stored server-side)
+  apiKey?: string; // API key (cloud providers)
+  localEndpoint?: string; // Endpoint URL (local providers, not encrypted)
 }
 
 /**

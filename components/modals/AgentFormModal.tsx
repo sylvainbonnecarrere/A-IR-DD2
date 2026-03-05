@@ -8,6 +8,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { validateAgentCapabilities, type CapabilityValidationResult } from '../../utils/lmStudioCapabilityValidator';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
+import { isLocalProvider, isLMStudio } from '../../utils/llmProviderUtils';
 
 interface AgentFormModalProps {
   onClose: () => void;
@@ -152,11 +153,13 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
   const [isLoadingLMStudioModels, setIsLoadingLMStudioModels] = useState(false);
   const isEditing = !!existingAgent;
 
-  // Jalon 3: Hook de détection LMStudio avec auto-refresh
-  const lmStudioEndpoint = llmConfigs.find(c => c.provider === LLMProvider.LMStudio)?.apiKey;
+  // NEW: Get LMStudio endpoint from localEndpoint field (not apiKey)
+  // Local providers store plaintext URLs, cloud providers store encrypted API keys
+  const lmStudioConfig = llmConfigs.find(c => isLMStudio(c.provider));
+  const lmStudioEndpoint = lmStudioConfig?.localEndpoint || lmStudioConfig?.apiKey; // Fallback to apiKey for backwards compatibility
   const { detection: lmStudioDetection, isDetecting: isDetectingLMStudio, redetect: redetectLMStudio } = useLMStudioDetection({
-    endpoint: llmProvider === LLMProvider.LMStudio ? lmStudioEndpoint : undefined,
-    autoDetect: llmProvider === LLMProvider.LMStudio && !!lmStudioEndpoint,
+    endpoint: isLMStudio(llmProvider) ? lmStudioEndpoint : undefined,
+    autoDetect: isLMStudio(llmProvider) && !!lmStudioEndpoint,
     onSuccess: (detection) => {
       // Auto-update capabilities when detection succeeds
       setSelectedCapabilities(prev => {
@@ -233,7 +236,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     }
 
     // PRIORITÉ 1: Pour LMStudio, utiliser les capacités détectées dynamiquement si disponibles
-    if (provider === LLMProvider.LMStudio && lmStudioDetection?.capabilities) {
+    if (isLMStudio(provider) && lmStudioDetection?.capabilities) {
       const detectedCaps = lmStudioDetection.capabilities.filter((cap): cap is LLMCapability => cap !== undefined && cap !== null);
       return detectedCaps;
     }
@@ -332,11 +335,11 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
 
   // Validate LMStudio capability
   useEffect(() => {
-    if (llmProvider === LLMProvider.LMStudio) {
+    if (isLMStudio(llmProvider)) {
       const validateLMStudio = async () => {
         try {
-          const lmStudioConfig = llmConfigs.find(c => c.provider === LLMProvider.LMStudio);
-          const endpoint = lmStudioConfig?.apiKey || undefined;
+          const lmStudioConfig = llmConfigs.find(c => isLMStudio(c.provider));
+          const endpoint = lmStudioConfig?.localEndpoint || lmStudioConfig?.apiKey || undefined;
 
           const mockAgent: Agent = {
             id: 'temp',
@@ -541,12 +544,12 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
                 <div>
                   <label htmlFor="llm-model" className="block text-sm font-medium text-gray-300 mb-1">
                     {t('agentForm_modelLabel')}
-                    {llmProvider === LLMProvider.LMStudio && isLoadingLMStudioModels && (
+                    {isLMStudio(llmProvider) && isLoadingLMStudioModels && (
                       <span className="ml-2 text-xs text-cyan-400">⌛ Chargement modèles...</span>
                     )}
                   </label>
                   <select id="llm-model" value={model} onChange={(e) => setModel(e.target.value)} className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" disabled={isLoadingLMStudioModels}>
-                    {llmProvider === LLMProvider.LMStudio && lmStudioDynamicModels.length > 0 ? (
+                    {isLMStudio(llmProvider) && lmStudioDynamicModels.length > 0 ? (
                       lmStudioDynamicModels.map((modelDef) => (
                         <option key={modelDef.id} value={modelDef.id}>
                           {modelDef.name} {modelDef.isDynamic ? '' : '(Statique)'}

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { LLMConfig } from '../models/LLMConfig.model';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
+import { isLocalProvider } from '../utils/providerUtils';
 
 const router = Router();
 
@@ -135,30 +136,47 @@ router.post('/get-all-api-keys', requireAuth, async (req: Request, res: Response
             return res.json([]); // Aucune config, retourner tableau vide
         }
 
-        // Déchiffrer toutes les API keys - AVEC gestion d'erreur gracieuse
-        // ⭐ FIX: Si une clé ne peut pas être déchiffrée (données corrompues, encryption clé changée),
-        // on retourne la config SANS la clé (apiKey vide) ET disabled rather than crashing avec 500
+        // Decrypt all API keys / retrieve all endpoints - WITH graceful error handling
+        // LOCAL PROVIDERS: Return plaintext endpoint (no decryption)
+        // CLOUD PROVIDERS: Return decrypted API key
         const decryptedConfigs = configs
           .map(config => {
-            try {
-              const decryptedKey = config.getDecryptedApiKey();
+            const isLocal = isLocalProvider(config.provider);
+            
+            if (isLocal) {
+              // LOCAL PROVIDER: Return endpoint as-is (not encrypted)
               return {
                 provider: config.provider,
-                apiKey: decryptedKey,
+                localEndpoint: config.getLocalEndpoint() || '',
+                apiKey: undefined, // Optional, for clarity
                 capabilities: config.capabilities,
-                enabled: config.enabled
+                enabled: config.enabled,
+                isLocalProvider: true
               };
-            } catch (decryptError: any) {
-              console.warn(`[LLMProxy] ⚠️ Could not decrypt API key for provider ${config.provider} (user ${user.id}):`, decryptError.message);
-              // ⭐ FIX: Preserve REAL enabled status from DB + signal reconfiguration needed
-              // Previous bug: forcing enabled=false hid the provider from frontend entirely
-              return {
-                provider: config.provider,
-                apiKey: '',
-                capabilities: config.capabilities,
-                enabled: config.enabled, // ← PRESERVE real DB status
-                needsReconfig: true      // ← Signal to frontend: key must be re-entered
-              };
+            } else {
+              // CLOUD PROVIDER: Decrypt and return API key
+              try {
+                const decryptedKey = config.getDecryptedApiKey();
+                return {
+                  provider: config.provider,
+                  apiKey: decryptedKey,
+                  localEndpoint: undefined, // Optional, for clarity
+                  capabilities: config.capabilities,
+                  enabled: config.enabled,
+                  isLocalProvider: false
+                };
+              } catch (decryptError: any) {
+                console.warn(`[LLMProxy] ⚠️  Could not decrypt API key for provider ${config.provider} (user ${user.id}):`, decryptError.message);
+                // PRESERVE real enabled status from DB + signal reconfiguration needed
+                return {
+                  provider: config.provider,
+                  apiKey: '',
+                  capabilities: config.capabilities,
+                  enabled: config.enabled, // PRESERVE real DB status
+                  needsReconfig: true, // Signal to frontend: key must be re-entered
+                  isLocalProvider: false
+                };
+              }
             }
           });
 

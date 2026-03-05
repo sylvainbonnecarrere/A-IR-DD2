@@ -10,6 +10,7 @@ import { locales, Locale } from '../../i18n/locales';
 import { detectLMStudioModel } from '../../services/routeDetectionService';
 import { invalidateLMStudioCache } from '../../llmModels';
 import { API_BASE_URL } from '../../config/api.config';
+import { isLocalProvider, getInputLabel, getInputPlaceholder, getInputType, getProviderHelperText } from '../../utils/llmProviderUtils';
 
 interface SettingsModalProps {
   llmConfigs: LLMConfig[];
@@ -19,7 +20,9 @@ interface SettingsModalProps {
 
 interface LLMConfigWithHasKey extends LLMConfig {
   hasApiKey?: boolean; // For authenticated mode - indicates if key exists without showing it
+  hasLocalEndpoint?: boolean; // For authenticated mode - indicates if endpoint exists
 }
+
 
 export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: SettingsModalProps) => {
   const [currentLLMConfigs, setCurrentLLMConfigs] = useState<LLMConfigWithHasKey[]>(JSON.parse(JSON.stringify(propConfigs)));
@@ -32,36 +35,35 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
   // Load authenticated user's configs from hook on auth state change
   // When user logs in, hookConfigs will have their saved configs from API
+  // ALSO: In guest mode, hookConfigs contains localStorage configs
+  // ⭐ NEW: Merge for BOTH authenticated AND guest mode
   useEffect(() => {
-    if (isAuthenticated && !hookLoading) {
-      // Map API configs by provider for quick lookup
-      // Trim provider values to avoid whitespace mismatches
+    if (!hookLoading) {
       const apiConfigsMap = new Map(
         hookConfigs.map(hc => [hc.provider?.trim() || '', hc])
       );
       
-      // Merge API configs with defaults to show all 10 providers
       const mergedConfigs: LLMConfigWithHasKey[] = propConfigs.map(defaultConfig => {
         const userConfig = apiConfigsMap.get(defaultConfig.provider?.trim() || '');
         
         if (!userConfig) {
-          // Provider not in API response - use default as-is
           return defaultConfig;
         }
         
-        // Provider in API - merge with user's settings
         return {
           provider: defaultConfig.provider,
           enabled: userConfig.enabled,
           apiKey: userConfig.apiKey || '',
+          localEndpoint: userConfig.localEndpoint || '',
           capabilities: userConfig.capabilities || defaultConfig.capabilities,
-          hasApiKey: userConfig.hasApiKey
+          hasApiKey: userConfig.hasApiKey,
+          hasLocalEndpoint: userConfig.hasLocalEndpoint
         } as LLMConfigWithHasKey;
       });
       
       setCurrentLLMConfigs(mergedConfigs);
     }
-  }, [isAuthenticated, hookConfigs, hookLoading, propConfigs]);
+  }, [hookLoading, hookConfigs, propConfigs]);
 
   // LMStudio Detection State
   const [lmStudioDetection, setLmStudioDetection] = useState<LMStudioModelDetection | null>(null);
@@ -104,9 +106,53 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
     );
   };
 
+  /**
+   * NEW: Handle local endpoint changes (for LMStudio, Jan, Ollama)
+   * These are NOT encrypted, just stored as plaintext URLs
+   */
+  const handleLocalEndpointChange = (provider: LLMProvider, endpoint: string) => {
+    setCurrentLLMConfigs(prev =>
+      prev.map(c => {
+        if (c.provider === provider) {
+          return { ...c, localEndpoint: endpoint };
+        }
+        return c;
+      })
+    );
+  };
+
+  /**
+   * HELPER: Récupère l'endpoint actual pour un provider (local ou cloud)
+   * Pour les providers locaux: retourne localEndpoint
+   * Pour les providers cloud: retourne apiKey
+   * Ignore les valeurs masquées (•••)
+   */
+  const getEffectiveEndpoint = (config: LLMConfigWithHasKey): string | undefined => {
+    const isLocal = isLocalProvider(config.provider);
+    
+    if (isLocal) {
+      // Local provider: use plaintext endpoint
+      const endpoint = config.localEndpoint;
+      // Ignore masked values
+      return endpoint && !endpoint.includes('•') ? endpoint : undefined;
+    } else {
+      // Cloud provider: use API key
+      const apiKey = config.apiKey;
+      // Ignore masked values
+      return apiKey && !apiKey.includes('•') ? apiKey : undefined;
+    }
+  };
+
   const handleDetectLMStudio = async () => {
     const lmStudioConfig = currentLLMConfigs.find(c => c.provider === LLMProvider.LMStudio);
-    if (!lmStudioConfig?.apiKey) {
+    if (!lmStudioConfig) {
+      setDetectionError('Configuration LMStudio non trouvée');
+      return;
+    }
+
+    // Get the actual endpoint (not masked)
+    const endpoint = getEffectiveEndpoint(lmStudioConfig);
+    if (!endpoint) {
       setDetectionError('Veuillez configurer l\'endpoint LLM local');
       return;
     }
@@ -123,7 +169,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
       // JALON 5: Appel unique au backend proxy (Option C Hybride)
       // URL endpoint est passée en query param
-      const apiUrl = `${API_BASE_URL}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(lmStudioConfig.apiKey)}`;
+      const apiUrl = `${API_BASE_URL}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(endpoint)}`;
       
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -181,71 +227,66 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
   const handleSave = async () => {
     setIsSaving(true);
+    let finalConfigs = currentLLMConfigs;
     
     try {
-      // ⭐ FIX J4.7: Save configs that EITHER have a new key OR have changed enabled state
-      // Previous bug: configs with masked keys (•••) were never saved, so toggling
-      // enabled/disabled on an existing config was ignored
-      
       // Build a map of original (API) configs for comparison
       const originalConfigsMap = new Map(hookConfigs.map(hc => [hc.provider, hc]));
       
-      const configsToSave = currentLLMConfigs.filter(config => {
-        const hasNewKey = config.apiKey 
-          && config.apiKey.trim().length > 0 
-          && !config.apiKey.includes('•');
-          
-        // Check if enabled state changed from original
+      // Track all saves to get responses
+      const savePromises: Promise<ILLMConfigUI>[] = [];
+      
+      // STEP 1: Iterate all configs and save those that changed
+      for (const config of currentLLMConfigs) {
         const originalConfig = originalConfigsMap.get(config.provider);
-        const enabledChanged = originalConfig && originalConfig.enabled !== config.enabled;
         
-        // Save if:
-        // 1. Has a NEW (non-masked) API key, OR
-        // 2. enabled state changed AND has an existing key (hasApiKey)
-        return hasNewKey || (enabledChanged && config.hasApiKey);
-      });
-      
-      // ⭐ CRITICAL: Detect deleted configs (user explicitly erased a key)
-      // A config is deleted if:
-      // - It had a key before (hasApiKey was true OR had masked key)
-      // - Now it's COMPLETELY EMPTY (user erased it)
-      const configsToDelete = currentLLMConfigs.filter(config => {
-        const hadKey = config.hasApiKey || (config.apiKey && config.apiKey.includes('•'));
-        const isNowEmpty = !config.apiKey || config.apiKey.trim().length === 0;
-        const wasErased = hadKey && isNowEmpty;
-        return wasErased;
-      });
-
-      console.log('[SettingsModal] Saving:', configsToSave.map(c => c.provider));
-      console.log('[SettingsModal] Deleting:', configsToDelete.map(c => c.provider));
-
-      // Save new/updated configs
-      for (const config of configsToSave) {
-        const hasNewKey = config.apiKey 
-          && config.apiKey.trim().length > 0 
-          && !config.apiKey.includes('•');
+        // Determine if config changed - FIXED: Don't require endpoint to be non-empty
+        const enabledChanged = !originalConfig || originalConfig.enabled !== config.enabled;
+        const apiKeyChanged = config.apiKey && !config.apiKey.includes('•') && config.apiKey !== originalConfig?.apiKey;
+        const endpointChanged = !originalConfig || (config.localEndpoint !== originalConfig?.localEndpoint && !config.localEndpoint?.includes('•'));
+        const capabilitiesChanged = JSON.stringify(config.capabilities) !== JSON.stringify(originalConfig?.capabilities);
+        
+        // Save if ANY field changed
+        if (enabledChanged || apiKeyChanged || endpointChanged || capabilitiesChanged) {
+          console.log(`[SettingsModal] Saving ${config.provider}`);
           
-        // If hasApiKey but no new key entered, send the masked key
-        // Backend will detect masked key and only update enabled/capabilities
-        const apiKeyToSend = hasNewKey ? config.apiKey : (config.hasApiKey ? '•••masked•••' : config.apiKey);
-        
-        await updateConfig(config.provider, {
-          apiKey: apiKeyToSend,
-          enabled: config.enabled,
-          capabilities: config.capabilities
-        });
-      }
-      
-      // Delete removed configs (user explicitly erased them)
-      for (const config of configsToDelete) {
-        try {
-          await deleteConfig(config.provider);
-        } catch (err) {
-          console.error(`Failed to delete config for ${config.provider}:`, err);
+          // Send both fields - backend will use the appropriate one based on provider type
+          savePromises.push(
+            updateConfig(config.provider, {
+              apiKey: config.apiKey,
+              localEndpoint: config.localEndpoint,
+              enabled: config.enabled,
+              capabilities: config.capabilities
+            })
+          );
         }
       }
       
-      // ⭐ J4.6 FIX: Refetch ALL LLM API keys from backend after saving
+      // STEP 2: Wait for all saves to complete and get responses
+      if (savePromises.length > 0) {
+        const savedConfigs = await Promise.all(savePromises);
+        
+        // STEP 3: Build final configs with server responses merged in
+        finalConfigs = currentLLMConfigs.map(config => {
+          const savedResponse = savedConfigs.find(sc => sc.provider === config.provider);
+          if (savedResponse) {
+            return {
+              ...config,
+              ...savedResponse,
+              localEndpoint: savedResponse.localEndpoint || '',
+              apiKey: savedResponse.apiKey || '',
+              hasApiKey: savedResponse.hasApiKey,
+              hasLocalEndpoint: savedResponse.hasLocalEndpoint
+            };
+          }
+          return config;
+        });
+      }
+      
+      // STEP 4: Update UI state with final configs
+      setCurrentLLMConfigs(finalConfigs);
+      
+      // J4.6 FIX: Refetch ALL LLM API keys from backend after saving
       // This ensures new/updated/deleted configs are reflected in AuthContext
       if (isAuthenticated && refreshLLMApiKeys) {
         await refreshLLMApiKeys();
@@ -259,9 +300,9 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
     // Also update local state and parent
     setIsSaving(false);
-    // ⭐ CRITICAL: Notify parent component of saved configs
-    // This ensures App.tsx updates its llmConfigs state
-    onSave(currentLLMConfigs);
+    // CRITICAL: Notify parent component of saved configs
+    // This ensures App.tsx updates its llmConfigs state with final values
+    onSave(finalConfigs);
     onClose();
   };
 
@@ -437,7 +478,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                     </p>
                   </div>
                 )}
-                {currentLLMConfigs.map(({ provider, enabled, capabilities, apiKey, hasApiKey }) => (
+                {currentLLMConfigs.map(({ provider, enabled, capabilities, apiKey, localEndpoint, hasApiKey, hasLocalEndpoint }) => (
                   <div key={provider}>
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-semibold text-gray-200">{provider}</h3>
@@ -446,59 +487,67 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                     {enabled && (
                       <div className="pl-4 mt-4 space-y-4 border-l-2 border-gray-700">
                         <div>
-                          <label htmlFor={`${provider}-apikey`} className="block text-sm font-medium text-gray-400 mb-1">
-                            {provider?.trim() === LLMProvider.LMStudio?.trim() ? t('settings_endpoint') : t('settings_apiKey')}
+                          <label htmlFor={`${provider}-credentials`} className="block text-sm font-medium text-gray-400 mb-1">
+                            {getInputLabel(provider)}
                           </label>
                           <input
-                            id={`${provider}-apikey`}
-                            type={provider?.trim() === LLMProvider.LMStudio?.trim() ? "text" : "password"}
-                            value={apiKey}
-                            onChange={(e) => handleApiKeyChange(provider, e.target.value)}
-                            placeholder={provider?.trim() === LLMProvider.LMStudio?.trim() ? "http://localhost:3928" : t('settings_apiKey_placeholder')}
+                            id={`${provider}-credentials`}
+                            type={getInputType(provider)}
+                            value={isLocalProvider(provider) ? (localEndpoint || '') : (apiKey || '')}
+                            onChange={(e) => 
+                              isLocalProvider(provider)
+                                ? handleLocalEndpointChange(provider as LLMProvider, e.target.value)
+                                : handleApiKeyChange(provider as LLMProvider, e.target.value)
+                            }
+                            placeholder={getInputPlaceholder(provider)}
                             className="w-full p-2 text-sm bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           />
-                          {provider?.trim() === LLMProvider.LMStudio?.trim() && (
-                            <>
-                              <p className="text-xs text-gray-500 mt-1">
-                                Auto-detects Jan (3928), LM Studio (1234), Ollama (11434)
-                              </p>
+                          {getProviderHelperText(provider) && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              {getProviderHelperText(provider)}
+                            </p>
+                          )}
+                        </div>
 
-                              <button
-                                onClick={handleDetectLMStudio}
-                                disabled={isDetecting || !apiKey}
-                                className="mt-3 px-4 py-2 rounded-md font-medium text-sm transition-all duration-300"
-                                style={{
-                                  background: isDetecting ? 'linear-gradient(90deg, rgba(6, 182, 212, 0.3), rgba(59, 130, 246, 0.3))' : 'linear-gradient(90deg, #06b6d4, #3b82f6)',
-                                  boxShadow: isDetecting ? 'none' : '0 0 15px rgba(6, 182, 212, 0.5)',
-                                  animation: isDetecting ? 'none' : 'laser-pulse 2s ease-in-out infinite',
-                                  cursor: isDetecting || !apiKey ? 'not-allowed' : 'pointer',
-                                  opacity: isDetecting || !apiKey ? 0.6 : 1
-                                }}
-                              >
-                                {isDetecting ? '🔍 Détection en cours...' : '🔍 Détecter les capacités'}
-                              </button>
+                        {/* AUTO-DETECT BUTTON - Only for LMStudio (local provider) */}
+                        {isLocalProvider(provider) && (
+                          <>
+                            <button
+                              onClick={handleDetectLMStudio}
+                              disabled={isDetecting || !localEndpoint}
+                              className="mt-3 px-4 py-2 rounded-md font-medium text-sm transition-all duration-300"
+                              style={{
+                                background: isDetecting ? 'linear-gradient(90deg, rgba(6, 182, 212, 0.3), rgba(59, 130, 246, 0.3))' : 'linear-gradient(90deg, #06b6d4, #3b82f6)',
+                                boxShadow: isDetecting ? 'none' : '0 0 15px rgba(6, 182, 212, 0.5)',
+                                animation: isDetecting ? 'none' : 'laser-pulse 2s ease-in-out infinite',
+                                cursor: isDetecting || !localEndpoint ? 'not-allowed' : 'pointer',
+                                opacity: isDetecting || !localEndpoint ? 0.6 : 1
+                              }}
+                            >
+                              {isDetecting ? '🔍 Détection en cours...' : '🔍 Détecter les capacités'}
+                            </button>
 
-                              {/* Progress Bar */}
-                              {isDetecting && (
-                                <div className="mt-3 relative w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                            {/* Progress Bar */}
+                            {isDetecting && (
+                              <div className="mt-3 relative w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                                <div
+                                  className="absolute h-full transition-all duration-300"
+                                  style={{
+                                    width: `${detectionProgress}%`,
+                                    background: 'linear-gradient(90deg, #06b6d4, #3b82f6, #9333ea)',
+                                    boxShadow: '0 0 10px rgba(6, 182, 212, 0.8)'
+                                  }}
+                                >
                                   <div
-                                    className="absolute h-full transition-all duration-300"
+                                    className="absolute right-0 w-5 h-full"
                                     style={{
-                                      width: `${detectionProgress}%`,
-                                      background: 'linear-gradient(90deg, #06b6d4, #3b82f6, #9333ea)',
-                                      boxShadow: '0 0 10px rgba(6, 182, 212, 0.8)'
+                                      background: 'linear-gradient(90deg, transparent, white)',
+                                      opacity: 0.6
                                     }}
-                                  >
-                                    <div
-                                      className="absolute right-0 w-5 h-full"
-                                      style={{
-                                        background: 'linear-gradient(90deg, transparent, white)',
-                                        opacity: 0.6
-                                      }}
-                                    />
-                                  </div>
+                                  />
                                 </div>
-                              )}
+                              </div>
+                            )}
 
                               {/* Success State - Routes Badges */}
                               {lmStudioDetection && !isDetecting && (
@@ -592,7 +641,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                               )}
                             </>
                           )}
-                        </div>
+
                         <div className="space-y-2 pt-2">
                           {Object.keys(capabilities).sort().map(capStr => {
                             const cap = capStr as LLMCapability;
