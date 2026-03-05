@@ -143,11 +143,13 @@ export async function getLLMConfig(
 
 /**
  * Crée ou met à jour une config LLM
+ * Supports both cloud providers (apiKey) and local providers (localEndpoint)
  */
 export async function upsertLLMConfig(
   provider: string,
   data: {
-    apiKey: string;
+    apiKey?: string; // For cloud providers
+    localEndpoint?: string; // For local providers
     enabled: boolean;
     capabilities?: Record<string, boolean>;
   },
@@ -180,14 +182,16 @@ export async function upsertLLMConfig(
       provider,
       enabled: data.enabled,
       capabilities: data.capabilities || {},
-      hasApiKey: true, // On assume l'API key est fournie
+      hasApiKey: !!data.apiKey, // Flag: has API key
       createdAt: index >= 0 ? configs[index].createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      // ⚠️ IMPORTANT: localStorage ne chiffre PAS les API keys
+      // ⚠️ IMPORTANT: localStorage ne chiffre PAS les clés/endpoints
       // C'est un mode "guest" non-sécurisé. Les vrais utilisateurs utilisent l'API.
       apiKeyPlaintext: data.apiKey,
-      // ⭐ J4.4.3: Also set apiKey for SettingsModal compatibility
-      apiKey: data.apiKey
+      apiKey: data.apiKey,
+      // NEW: Support local endpoint (plaintext URL storage)
+      localEndpoint: data.localEndpoint,
+      hasLocalEndpoint: !!data.localEndpoint
     };
 
     if (index >= 0) {

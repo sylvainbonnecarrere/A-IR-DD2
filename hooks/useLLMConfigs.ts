@@ -36,7 +36,8 @@ interface UseLLMConfigsReturn {
   updateConfig: (
     provider: string,
     data: {
-      apiKey: string;
+      apiKey?: string; // For cloud providers (encrypted server-side)
+      localEndpoint?: string; // For local providers (plaintext URL)
       enabled: boolean;
       capabilities?: Record<string, boolean>;
     }
@@ -46,6 +47,7 @@ interface UseLLMConfigsReturn {
     valid: boolean;
     enabled: boolean;
     hasApiKey: boolean;
+    hasLocalEndpoint?: boolean; // Flag for local endpoint existence
     capabilities: Record<string, boolean>;
   }>;
   
@@ -131,7 +133,8 @@ export function useLLMConfigs(): UseLLMConfigsReturn {
     async (
       provider: string,
       data: {
-        apiKey: string;
+        apiKey?: string; // For cloud providers (encrypted server-side)
+        localEndpoint?: string; // For local providers (plaintext URL)
         enabled: boolean;
         capabilities?: Record<string, boolean>;
       }

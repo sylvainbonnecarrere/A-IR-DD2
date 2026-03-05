@@ -4,11 +4,13 @@ import { LLMConfig } from '../models/LLMConfig.model';
 // NOTE J4.4: UserSettings import REMOVED - llmConfigs field no longer exists
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
+import { isLocalProvider } from '../utils/providerUtils';
 
 const router = Router();
 
 /**
  * Schema validation pour upsert config LLM
+ * Supports both cloud providers (apiKey) and local providers (localEndpoint)
  */
 const upsertConfigSchema = z.object({
     provider: z.enum([
@@ -25,7 +27,8 @@ const upsertConfigSchema = z.object({
         'Arc-LLM'
     ]),
     enabled: z.boolean(),
-    apiKey: z.string().min(1, 'API key requise'), // En clair, sera chiffrée
+    apiKey: z.string().optional(), // For cloud providers
+    localEndpoint: z.string().optional(), // For local providers (e.g., http://localhost:3928)
     capabilities: z.record(z.boolean()).optional().default({})
 });
 
@@ -62,18 +65,16 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         const configs = await LLMConfig.find(query).sort({ provider: 1 });
 
         // SÉCURITÉ CRITIQUE: Ne JAMAIS retourner les API keys
-        // ⭐ J4.4: Return masked apiKey string (points) if key exists, to preserve length info
+        // ⭐ Return actual localEndpoint (it's a public URL, not sensitive)
         const safeConfigs = configs.map(c => {
-            // If encrypted key exists, create a masked string of same length
-            // This allows frontend to show password field with correct visual length
+            // Helper: Mask apiKey only
             let maskedApiKey = '';
+            
             if (c.apiKeyEncrypted) {
-                // Decrypt to get real length, then mask
                 try {
                     const decrypted = c.getDecryptedApiKey();
                     maskedApiKey = '•'.repeat(decrypted.length);
                 } catch (err) {
-                    // Fallback if decryption fails
                     maskedApiKey = '••••••••••••••••••••'; // 20 points default
                 }
             }
@@ -82,9 +83,11 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
                 id: c._id.toString(),
                 provider: c.provider,
                 enabled: c.enabled,
-                apiKey: maskedApiKey, // ⭐ J4.4: Empty if no key, masked if key exists
+                apiKey: maskedApiKey,
+                localEndpoint: c.localEndpoint || '', // ⭐ Return actual endpoint (NOT masked)
                 capabilities: c.capabilities,
                 hasApiKey: !!c.apiKeyEncrypted,
+                hasLocalEndpoint: !!c.localEndpoint,
                 createdAt: c.createdAt,
                 updatedAt: c.updatedAt
             };
@@ -123,12 +126,27 @@ router.get('/:provider', requireAuth, async (req: Request, res: Response) => {
         }
 
         // SÉCURITÉ: Ne JAMAIS retourner l'API key
+        // ⭐ Mask apiKey but return actual localEndpoint (it's a public URL, not sensitive)
+        let maskedApiKey = '';
+        
+        if (config.apiKeyEncrypted) {
+            try {
+                const decrypted = config.getDecryptedApiKey();
+                maskedApiKey = '•'.repeat(decrypted.length);
+            } catch (err) {
+                maskedApiKey = '••••••••••••••••••••';
+            }
+        }
+        
         res.json({
             id: config._id.toString(),
             provider: config.provider,
             enabled: config.enabled,
+            apiKey: maskedApiKey,
+            localEndpoint: config.localEndpoint || '', // ⭐ Return actual endpoint (NOT masked)
             capabilities: config.capabilities,
             hasApiKey: !!config.apiKeyEncrypted,
+            hasLocalEndpoint: !!config.localEndpoint,
             createdAt: config.createdAt,
             updatedAt: config.updatedAt
         });
@@ -164,35 +182,38 @@ router.post('/', requireAuth, validateRequest(upsertConfigSchema), async (req: R
     try {
         const user = req.user as any;
         const userId = user.id || user._id;
-        const { provider, apiKey, enabled, capabilities } = req.body;
+        const { provider, apiKey, localEndpoint, enabled, capabilities } = req.body;
 
-        // ⭐ J4.5 FIX: Detect masked API key (•••) and skip update if masked
-        // When frontend loads settings, it receives masked keys for display
-        // If user saves without changing the key, we receive the masked string
-        // We must NOT store the masked string - keep the original encrypted key
+        // Check for masked values (user didn't change the field)
         const isMaskedKey = apiKey && apiKey.includes('•');
+        const isMaskedEndpoint = localEndpoint && localEndpoint.includes('•');
+        const isLocal = isLocalProvider(provider);
 
-        // Upsert: chercher config existante
+        // Upsert: find existing config
         let config = await LLMConfig.findOne({ userId, provider });
 
         if (config) {
-            // Update existant
+            // CASE: Update existing config
             config.enabled = enabled;
             config.capabilities = capabilities;
             
-            // ⭐ J4.5 FIX: Only update API key if it's a real key, not masked
-            if (!isMaskedKey) {
-                config.setApiKey(apiKey); // Chiffrement automatique
-                console.log(`[LLMConfig] Updated config for user ${userId}, provider ${provider} (with new API key)`);
+            if (isLocal) {
+                if (!isMaskedEndpoint) {
+                    config.setLocalEndpoint(localEndpoint || '');
+                    console.log(`[LLMConfig] Updated local endpoint for user ${userId}, provider ${provider}`);
+                }
             } else {
-                console.log(`[LLMConfig] Updated config for user ${userId}, provider ${provider} (API key unchanged - masked)`);
+                if (!isMaskedKey) {
+                    config.setApiKey(apiKey || '');
+                    console.log(`[LLMConfig] Updated API key for user ${userId}, provider ${provider}`);
+                }
             }
             
             await config.save();
         } else {
-            // Nouveau - masked key not allowed for new configs
-            if (isMaskedKey) {
-                return res.status(400).json({ error: 'API key invalide (clé masquée détectée)' });
+            // Create new config - masked values not allowed
+            if ((isLocal && isMaskedEndpoint) || (!isLocal && isMaskedKey)) {
+                return res.status(400).json({ error: 'Cannot create config with masked/empty value' });
             }
             
             config = new LLMConfig({
@@ -201,35 +222,49 @@ router.post('/', requireAuth, validateRequest(upsertConfigSchema), async (req: R
                 enabled,
                 capabilities
             });
-            config.setApiKey(apiKey); // Chiffrement automatique
-            await config.save();
 
-            console.log(`[LLMConfig] Created config for user ${userId}, provider ${provider}`);
+            if (isLocal) {
+                config.setLocalEndpoint(localEndpoint || '');
+            } else {
+                config.setApiKey(apiKey || '');
+            }
+            await config.save();
+            console.log(`[LLMConfig] Created ${isLocal ? 'local' : 'cloud'} config for user ${userId}, provider ${provider}`);
         }
 
-        // NOTE J4.4: UserSettings.llmConfigs sync REMOVED 
-        // llm_configs collection is now the SINGLE source of truth
-        // UserSettings only contains preferences (language, theme)
-
-        // Response sécurisée (sans API key)
+        // Build response (mask API key but NOT endpoint - it's public)
+        let maskedApiKey = '';
+        if (config.apiKeyEncrypted) {
+            try {
+                const decrypted = config.getDecryptedApiKey();
+                maskedApiKey = '•'.repeat(decrypted.length);
+            } catch (err) {
+                maskedApiKey = '••••••••••••••••••••';
+            }
+        }
+        
         res.json({
             id: config._id.toString(),
             provider: config.provider,
             enabled: config.enabled,
+            apiKey: maskedApiKey,
+            localEndpoint: config.localEndpoint || '',
             capabilities: config.capabilities,
-            hasApiKey: true,
+            hasApiKey: config.hasApiKey(),
+            hasLocalEndpoint: config.hasLocalEndpoint(),
+            isLocalProvider: isLocal,
             createdAt: config.createdAt,
             updatedAt: config.updatedAt
         });
     } catch (error) {
         console.error('[LLMConfig] POST error:', error);
 
-        // Erreur unique constraint
+        // Unique constraint error
         if ((error as any).code === 11000) {
-            return res.status(409).json({ error: 'Config déjà existante pour ce provider' });
+            return res.status(409).json({ error: 'Config already exists for this provider' });
         }
 
-        res.status(500).json({ error: 'Erreur sauvegarde config LLM' });
+        res.status(500).json({ error: 'Error saving LLM config' });
     }
 });
 

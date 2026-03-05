@@ -13,6 +13,7 @@ import * as llmService from '../services/llmService';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
 import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
+import { isLLMConfigured, getEffectiveCredential } from '../utils/llmProviderUtils';
 import { useLocalization } from '../hooks/useLocalization';
 import { useJournalQueue } from '../hooks/useJournalQueue';
 
@@ -91,9 +92,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   if (!agent) {
     return (
       <div className="min-w-80 bg-red-900/50 border-2 border-red-500 rounded-lg p-4">
-        return (
         <div className="text-red-300 font-medium">{t('agent_not_found')}</div>
-        );
         <div className="text-red-400 text-sm mt-2">
           ID Node: {id}
         </div>
@@ -283,7 +282,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     if (!agent || !userInput.trim()) return;
 
     const agentConfig = llmConfigs?.find(c => c.provider === agent.llmProvider);
-    if (!agentConfig?.enabled || !agentConfig.apiKey) {
+    // ⭐ SOLID: Use centralized validation function
+    if (!isLLMConfigured(agentConfig, agent.llmProvider)) {
       console.error('LLM not configured for web search grounding');
       return;
     }
@@ -291,9 +291,10 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     setLoadingMessage('Recherche web...');
 
     try {
+      const credential = getEffectiveCredential(agentConfig, agent.llmProvider);
       const result = await llmService.generateContentWithWebSearchGrounding(
         agent.llmProvider,
-        agentConfig.apiKey,
+        credential,
         agent.model,
         userInput,
         agent.systemInstruction
@@ -394,7 +395,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     // Get LLM config
     const agentConfig = llmConfigs?.find(c => c.provider === effectiveAgent.llmProvider);
 
-    if (!agentConfig?.enabled || !agentConfig.apiKey) {
+    // ⭐ SOLID: Use centralized validation function (works for both local and cloud)
+    if (!isLLMConfigured(agentConfig, effectiveAgent.llmProvider)) {
       const isReconfigNeeded = agentConfig?.needsReconfig;
       const errorText = isReconfigNeeded
         ? `⚠️ ${effectiveAgent.llmProvider} nécessite une reconfiguration de sa clé API. Rendez-vous dans les paramètres LLM pour la re-saisir.`
@@ -475,15 +477,16 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         conversationHistoryForAPI = historyConfig?.enabled ? currentFullHistory : [userMessage];
       }
       // Stream LLM response
+      const credential = getEffectiveCredential(agentConfig, effectiveAgent.llmProvider);
       const stream = llmService.generateContentStream(
         effectiveAgent.llmProvider,
-        agentConfig.apiKey,
+        credential, // Use getEffectiveCredential (works for both apiKey and localEndpoint)
         effectiveAgent.model,
         effectiveAgent.systemPrompt,
         conversationHistoryForAPI, // Use computed history based on config
         effectiveAgent.tools,
         effectiveAgent.outputConfig,
-        agentConfig.apiKey, // For LMStudio: endpoint is stored in apiKey field
+        credential, // For endpoints (will be used for LMStudio, ignored for cloud)
         { webFetch: webFetchEnabled, webSearch: webSearchEnabled } // Native tools config
       );
 

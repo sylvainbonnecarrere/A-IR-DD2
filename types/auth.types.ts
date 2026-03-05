@@ -93,20 +93,29 @@ export interface RegisterCredentials {
 }
 
 /**
- * Représente une clé API LLM déchiffrée du serveur
- * Stockée UNIQUEMENT en mémoire (pas localStorage)
+ * Represents a decrypted LLM API key/endpoint from the server
+ * Stored ONLY in memory (no localStorage)
+ * 
+ * DUAL STORAGE MODEL:
+ * - Cloud providers (OpenAI, Anthropic, etc): Use apiKey (encrypted on server)
+ * - Local providers (LMStudio, Jan, Ollama): Use localEndpoint (plaintext URL)
  */
 export interface LLMApiKey {
     provider: string;
-    apiKey: string;
+    apiKey?: string; // For cloud providers (encrypted server-side)
+    localEndpoint?: string; // For local providers (e.g., http://localhost:3928)
     capabilities?: {
         [key: string]: boolean;
     };
     enabled: boolean;
+    hasApiKey?: boolean; // Flag: config has API key stored
+    hasLocalEndpoint?: boolean; // Flag: config has local endpoint stored
+    isLocalProvider?: boolean; // Flag: provider is local (not cloud)
+    needsReconfig?: boolean; // Flag: encryption mismatch, key needs re-entry
 }
 
 /**
- * Réponse du serveur pour les clés API LLM
+ * Response from server for LLM API keys
  */
 export interface LLMApiKeysResponse {
     keys: LLMApiKey[];

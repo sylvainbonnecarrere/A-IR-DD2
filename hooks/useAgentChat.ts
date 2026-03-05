@@ -5,6 +5,7 @@ import * as llmService from '../services/llmService';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
 import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
+import { isLLMConfigured, getEffectiveCredential } from '../utils/llmProviderUtils';
 // ⭐ AUTO-SAVE: Import persistence service for chat content
 import { PersistenceService } from '../services/persistenceService';
 
@@ -134,13 +135,11 @@ export const useAgentChat = ({
             }
         }
 
-        // ⭐ AUTO-SAVE: Use wrapper to add and persist user message
         await addAndPersistMessage(nodeId, userMessage);
 
-        // Get LLM config
         const agentConfig = llmConfigs?.find(c => c.provider === agent.llmProvider);
 
-        if (!agentConfig?.enabled || !agentConfig.apiKey) {
+        if (!isLLMConfigured(agentConfig, agent.llmProvider)) {
             const errorMessage: ChatMessage = {
                 id: generateMessageId('error'),
                 sender: 'agent',
@@ -217,18 +216,17 @@ export const useAgentChat = ({
             }
 
             // Stream LLM response
-            // ⭐ FIX #2: Use conversationHistoryForAPI which contains synthesized history (or regular messages)
-            // NOT messages.concat(userMessage) which skips history entirely
+            const credential = getEffectiveCredential(agentConfig, agent.llmProvider);
             const stream = llmService.generateContentStream(
                 agent.llmProvider,
-                agentConfig.apiKey,
+                credential,
                 agent.model,
                 agent.systemPrompt,
-                conversationHistoryForAPI,  // ← USE history with potential synthesis
+                conversationHistoryForAPI,
                 agent.tools,
                 agent.outputConfig,
-                undefined, // endpoint (for LMStudio)
-                nativeToolsConfig // native tools config (for Anthropic)
+                credential,
+                nativeToolsConfig
             );
 
             let currentResponse = '';
@@ -353,16 +351,17 @@ export const useAgentChat = ({
                     }
 
                     // Generate a follow-up response using the tool results as context
+                    const credential = getEffectiveCredential(agentConfig, agent.llmProvider);
                     const followUpStream = llmService.generateContentStream(
                         agent.llmProvider,
-                        agentConfig.apiKey,
+                        credential,
                         agent.model,
                         agent.systemPrompt,
                         messagesWithoutToolResults,
                         agent.tools,
                         agent.outputConfig,
-                        undefined, // endpoint (for LMStudio)
-                        nativeToolsConfig // native tools config (for Anthropic)
+                        credential,
+                        nativeToolsConfig
                     );
 
                     let followUpResponse = '';

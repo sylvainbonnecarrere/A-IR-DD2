@@ -18,6 +18,7 @@ import { ConfirmationModal } from './components/modals/ConfirmationModal';
 import { FullscreenChatModal } from './components/modals/FullscreenChatModal';
 import { AgentConfigurationModal } from './components/modals/AgentConfigurationModal';
 import { useRuntimeStore } from './stores/useRuntimeStore';
+import { isLMStudio } from './utils/llmProviderUtils';
 import { useDesignStore } from './stores/useDesignStore';
 import { useWorkflowStore } from './stores/useWorkflowStore';
 import { NotificationProvider } from './contexts';
@@ -62,7 +63,8 @@ const initialLLMConfigs: LLMConfig[] = [
   { provider: LLMProvider.Qwen, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true } },
   { provider: LLMProvider.Kimi, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true } },
   { provider: LLMProvider.DeepSeek, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true, [LLMCapability.Reasoning]: true, [LLMCapability.CacheOptimization]: true } },
-  { provider: LLMProvider.LMStudio, enabled: false, apiKey: 'http://localhost:3928', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true, [LLMCapability.Embedding]: false, [LLMCapability.CodeSpecialization]: false } },
+  // LLM local (on premise): Generic local provider for any local LLM (LMStudio, Ollama, Jan, etc)
+  { provider: LLMProvider.LMStudio, enabled: false, localEndpoint: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true, [LLMCapability.Embedding]: false, [LLMCapability.CodeSpecialization]: false } },
 ];
 
 const loadLLMConfigs = (isAuthenticated: boolean = false, accessToken: string | null = null): LLMConfig[] => {
@@ -1067,40 +1069,30 @@ function AppContent() {
       return;
     }
 
-    // Convert LLMApiKey[] to LLMConfig[] and merge
+    // Convert LLMApiKey[] to LLMConfig[] with local endpoint support
     const apiConfigs: LLMConfig[] = llmApiKeys.map(key => ({
       provider: key.provider as LLMProvider,
       apiKey: key.apiKey,
+      localEndpoint: (key as any).localEndpoint,
       enabled: key.enabled,
       capabilities: (key.capabilities || {}) as { [k in LLMCapability]?: boolean },
       needsReconfig: (key as any).needsReconfig || false
     }));
 
-    // Merge: Start with initial defaults, override with API values
+    // Merge defaults with API configs, preserving local endpoint
     const mergedConfigs = initialLLMConfigs.map(initial => {
       const apiConfig = apiConfigs.find(c => c.provider === initial.provider);
+      if (!apiConfig) return initial;
 
-      if (!apiConfig) {
-        // Provider not in API → use initial defaults
-        return initial;
-      }
-
-      // Provider found in API → merge carefully
       return {
         ...initial,
         ...apiConfig,
+        localEndpoint: apiConfig.localEndpoint !== undefined ? apiConfig.localEndpoint : initial.localEndpoint,
         needsReconfig: apiConfig.needsReconfig || false,
-        // Conservative capability merge: only override if explicitly in API
         capabilities: apiConfig.capabilities
           ? Object.keys(initial.capabilities).reduce((acc, capKey) => {
               const cap = capKey as LLMCapability;
-              if (cap in apiConfig.capabilities) {
-                // If API has explicit value, use it
-                acc[cap] = apiConfig.capabilities[cap];
-              } else {
-                // Otherwise preserve initial default
-                acc[cap] = initial.capabilities[cap];
-              }
+              acc[cap] = cap in apiConfig.capabilities ? apiConfig.capabilities[cap] : initial.capabilities[cap];
               return acc;
             }, {} as { [k in LLMCapability]?: boolean })
           : initial.capabilities
@@ -1253,7 +1245,7 @@ function AppContent() {
 
   const handleSaveSettings = async (newLLMConfigs: LLMConfig[]) => {
     try {
-      const lmStudioConfig = newLLMConfigs.find(c => c.provider === LLMProvider.LMStudio);
+      const lmStudioConfig = newLLMConfigs.find(c => isLMStudio(c.provider));
 
       // Get appropriate storage based on auth state
       const storage = getSettingsStorage({

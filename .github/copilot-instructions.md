@@ -16,7 +16,7 @@ Vous fonctionnez en duo sous les instructions du Chef de Projet (l'Utilisateur).
 
 **Phase 1 : Initialisation du Projet (Objectif Principal)**
 * Lorsque l'Utilisateur vous donne un **Objectif d'évolution majeur**, vous devez d'abord :
-    1.  Rechercher le **dossier `documentation/` à la racine** et le **Plan d'implémentation (jalons)** que l'Utilisateur y a déposé.
+    1.  Rechercher le **dossier `documentation/` à la racine** et le **dossier `Guides/`** que l'Utilisateur y a déposé.
     2.  Confirmer que vous vous êtes **imprégné** de la documentation initiale et du plan.
     3.  Demander à l'Utilisateur de vous fournir le **détail du premier jalon** à accomplir.
 

@@ -15,16 +15,21 @@ export interface User {
 }
 
 /**
- * LLM API Key data structure (J4.2)
- * ⚠️ J4.4.3 FIX: Added apiKey field - backend returns decrypted key
+ * LLM API Key data structure (J4.2 - NOW WITH LOCAL PROVIDER SUPPORT)
+ * DUAL MODEL:
+ * - Cloud providers (OpenAI, Anthropic): Use apiKey (encrypted on backend)
+ * - Local providers (LMStudio, Jan, Ollama): Use localEndpoint (plaintext URL)
  */
 export interface LLMApiKey {
     provider: string;
-    apiKey: string;  // ⭐ Decrypted API key from backend
+    apiKey?: string; // Decrypted API key from backend (cloud providers)
+    localEndpoint?: string; // Plaintext endpoint URL (local providers)
     enabled: boolean;
     capabilities?: Record<string, boolean>;
-    hasApiKey?: boolean;
-    needsReconfig?: boolean; // ⭐ True when decryption failed (encryption key mismatch)
+    hasApiKey?: boolean; // Flag: has API key configured
+    hasLocalEndpoint?: boolean; // Flag: has local endpoint configured
+    isLocalProvider?: boolean; // Flag: provider is local (not cloud)
+    needsReconfig?: boolean; // True when decryption failed (encryption key mismatch)
 }
 
 /**
