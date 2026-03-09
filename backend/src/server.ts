@@ -17,6 +17,7 @@ import agentPrototypesRoutes from './routes/agent-prototypes.routes';
 import agentTemplatesRoutes from './routes/agent-templates.routes';
 import agentInstancesRoutes from './routes/agent-instances.routes';
 import llmConfigsRoutes from './routes/llm-configs.routes';
+import localLLMProfilesRoutes from './routes/local-llm-profiles.routes';
 import llmProxyRoutes from './routes/llm-proxy.routes';
 import userSettingsRoutes from './routes/user-settings.routes';
 import userWorkspaceRoutes from './routes/user-workspace.routes';
@@ -102,6 +103,7 @@ app.use('/api/agent-templates', agentTemplatesRoutes);
 
 // LLM routes (Jalon 3 - Phase 2)
 app.use('/api/llm-configs', llmConfigsRoutes);
+app.use('/api/local-llm-profiles', localLLMProfilesRoutes);
 app.use('/api/llm', llmProxyRoutes);
 
 // Local LLM detection routes (new architecture - Option C Hybrid)

@@ -169,12 +169,27 @@ export interface Agent {
   tools?: Tool[];
   outputConfig?: OutputConfig;
   persistenceConfig?: PersistenceConfig; // ⭐ NEW: Configuration de persistance
+  localLLMProfileId?: string;            // ⭐ NEW: Only set when llmProvider === LLMProvider.LMStudio
   // V2 Governance: Robot creator validation
   creator_id: RobotId;
   created_at: string; // ISO timestamp
   updated_at: string; // ISO timestamp
   // V2 Workflow: Optional custom instance name when added to workflow
   instanceName?: string;
+}
+
+/**
+ * Local LLM Profile - represents one local LLM server instance
+ * (Ollama, LMStudio, Jan, etc.)
+ */
+export interface LocalLLMProfile {
+  id: string;
+  name: string;
+  endpoint: string;
+  capabilities: { [key in LLMCapability]?: boolean };
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // V2 Governance: Other prototype types by robot specialization

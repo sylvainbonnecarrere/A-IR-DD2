@@ -193,6 +193,29 @@ db.createCollection('agent_instances');
 db.agent_instances.createIndex({ agentId: 1, createdAt: 1 });
 console.log('Ô£ô Created agent_instances collection');
 
+// Create local_llm_profiles collection (for multiple local LLM server profiles)
+db.createCollection('local_llm_profiles', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['userId', 'name', 'endpoint', 'createdAt'],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        userId: { bsonType: 'objectId', description: 'Reference to user' },
+        name: { bsonType: 'string', description: 'Profile display name' },
+        endpoint: { bsonType: 'string', description: 'Local LLM server URL' },
+        capabilities: { bsonType: 'object' },
+        enabled: { bsonType: 'bool' },
+        createdAt: { bsonType: 'date' },
+        updatedAt: { bsonType: 'date' }
+      }
+    }
+  }
+});
+db.local_llm_profiles.createIndex({ userId: 1, name: 1 }, { unique: true });
+db.local_llm_profiles.createIndex({ userId: 1 });
+console.log('Ô£ô Created local_llm_profiles collection with indexes');
+
 console.log('\nÔ£à All collections created successfully!');
 console.log('Ô£à Schema validation enabled on all collections');
 console.log('Ô£à Indexes created for optimal performance\n');

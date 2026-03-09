@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ChatMessage, LLMConfig, LLMProvider } from '../types';
+import { ChatMessage, LLMConfig, LLMProvider, LocalLLMProfile } from '../types';
 
 /**
  * Runtime Domain Store - Gère l'exécution et les états temps réel
@@ -13,6 +13,9 @@ interface RuntimeStore {
 
   // LLM Configuration (runtime)
   llmConfigs: LLMConfig[];
+
+  // Local LLM Profiles (runtime)
+  localLLMProfiles: LocalLLMProfile[];
 
   // UI State (runtime only)
   isImagePanelOpen: boolean;
@@ -48,6 +51,7 @@ interface RuntimeStore {
 
   // Actions - LLM Config
   updateLLMConfigs: (configs: LLMConfig[]) => void;
+  updateLocalLLMProfiles: (profiles: LocalLLMProfile[]) => void;
 
   // Actions - UI State
   setImagePanelOpen: (isOpen: boolean, nodeId?: string) => void;
@@ -84,6 +88,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   nodeMessages: {},
   executingNodes: new Set(),
   llmConfigs: [],
+  localLLMProfiles: [],
   isImagePanelOpen: false,
   isImageModificationPanelOpen: false,
   currentImageNodeId: null,
@@ -135,6 +140,10 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   // LLM Config
   updateLLMConfigs: (configs) => {
     set({ llmConfigs: configs });
+  },
+
+  updateLocalLLMProfiles: (profiles) => {
+    set({ localLLMProfiles: profiles });
   },
 
   // UI State actions
@@ -264,6 +273,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     minimizedNodeIds: new Set(), // ⭐ RESET: Restore à normal
     lastSavedAt: {}, // ⭐ ÉTAPE 3: Reset save timestamps on logout
     llmConfigs: [],
+    localLLMProfiles: [],
     isImagePanelOpen: false,
     isImageModificationPanelOpen: false,
     currentImageNodeId: null,
@@ -283,12 +293,14 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
    */
   resetForWorkflowSwitch: () => {
     const currentConfigs = get().llmConfigs;
+    const currentProfiles = get().localLLMProfiles;
     set({
       nodeMessages: {},
       executingNodes: new Set(),
       minimizedNodeIds: new Set(),
       lastSavedAt: {},
       llmConfigs: currentConfigs, // ⭐ PRÉSERVÉ: configs sont user-level
+      localLLMProfiles: currentProfiles, // ⭐ PRÉSERVÉ: profiles sont user-level
       isImagePanelOpen: false,
       isImageModificationPanelOpen: false,
       currentImageNodeId: null,
