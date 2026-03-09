@@ -216,6 +216,25 @@ const COLLECTION_SCHEMAS = {
         }
       }
     }
+  },
+
+  local_llm_profiles: {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        additionalProperties: true,
+        properties: {
+          _id: { bsonType: 'objectId' },
+          userId: { bsonType: 'objectId' },
+          name: { bsonType: 'string' },
+          endpoint: { bsonType: 'string' },
+          capabilities: { bsonType: 'object' },
+          enabled: { bsonType: 'bool' },
+          createdAt: { bsonType: 'date' },
+          updatedAt: { bsonType: 'date' }
+        }
+      }
+    }
   }
 };
 
@@ -258,6 +277,10 @@ const INDEX_DEFINITIONS = {
     { spec: { userId: 1, createdAt: -1 }, options: {} },
     { spec: { userId: 1, category: 1 }, options: {} },
     { spec: { userId: 1, isStarred: 1 }, options: {} }
+  ],
+  local_llm_profiles: [
+    { spec: { userId: 1, name: 1 }, options: { unique: true } },
+    { spec: { userId: 1 }, options: {} }
   ]
 };
 

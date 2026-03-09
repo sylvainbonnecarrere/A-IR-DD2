@@ -139,3 +139,5 @@ Before implementing any significant architectural change:
 
 ## UX and Design
 You must refer to the graphic chart `in Guides\UX/` when you work on the design.
+
+# Use comments sparingly. Only comment complex code.

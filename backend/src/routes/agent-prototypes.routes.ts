@@ -21,7 +21,8 @@ const createAgentPrototypeSchema = z.object({
     tools: z.array(z.object({}).passthrough()).optional(),
     outputConfig: z.object({}).passthrough().optional(),
     robotId: z.enum(['AR_001', 'BO_002', 'CO_003', 'PH_004', 'TI_005']),
-    workflowId: z.string().optional() // \u2b50 V2: Optional workflow scope
+    workflowId: z.string().optional(), // ⭐ V2: Optional workflow scope
+    localLLMProfileId: z.string().optional() // ⭐ NEW: Optional local LLM profile reference
 });
 
 const updateAgentPrototypeSchema = createAgentPrototypeSchema.partial();
@@ -126,8 +127,8 @@ router.put('/:id',
             }
 
             // ⭐ SECURITY FIX: Whitelist allowed fields to prevent mass assignment
-            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, tools, outputConfig, robotId, workflowId } = req.body;
-            
+            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, tools, outputConfig, robotId, workflowId, localLLMProfileId } = req.body;
+
             // Update only whitelisted fields (userId never modifiable)
             if (name !== undefined) prototype.name = name;
             if (role !== undefined) prototype.role = role;
@@ -140,6 +141,7 @@ router.put('/:id',
             if (outputConfig !== undefined) prototype.outputConfig = outputConfig;
             if (robotId !== undefined) prototype.robotId = robotId;
             if (workflowId !== undefined) prototype.workflowId = workflowId;
+            if (localLLMProfileId !== undefined) prototype.localLLMProfileId = localLLMProfileId;
 
             await prototype.save();
 

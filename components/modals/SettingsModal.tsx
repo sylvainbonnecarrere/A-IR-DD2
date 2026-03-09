@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { LLMConfig, LLMCapability, LLMProvider, LMStudioModelDetection } from '../../types';
-import { Button, Modal, ToggleSwitch } from '../UI';
-import { CloseIcon } from '../Icons';
+import { LLMConfig, LLMCapability, LLMProvider, LocalLLMProfile } from '../../types';
+import { Button, ToggleSwitch } from '../UI';
+import { CloseIcon, PlusIcon } from '../Icons';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { useLLMConfigs } from '../../hooks/useLLMConfigs';
 import { useSaveMode } from '../../hooks/useSaveMode';
+import { useLocalLLMProfiles } from '../../hooks/useLocalLLMProfiles';
 import { locales, Locale } from '../../i18n/locales';
-import { detectLMStudioModel } from '../../services/routeDetectionService';
-import { invalidateLMStudioCache } from '../../llmModels';
-import { API_BASE_URL } from '../../config/api.config';
 import { isLocalProvider, getInputLabel, getInputPlaceholder, getInputType, getProviderHelperText } from '../../utils/llmProviderUtils';
+import { LocalLLMProfileCard } from '../settings/LocalLLMProfileCard';
 
 interface SettingsModalProps {
   llmConfigs: LLMConfig[];
@@ -30,6 +29,19 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
   const { user, isAuthenticated, refreshLLMApiKeys } = useAuth();
   const { configs: hookConfigs, loading: hookLoading, updateConfig, deleteConfig } = useLLMConfigs();
   const { saveMode, setSaveMode, isLoading: saveModeLoading } = useSaveMode();
+  const {
+    profiles: hookProfiles,
+    loading: hookProfilesLoading,
+    createProfile: createLLMProfile,
+    updateProfile: updateLLMProfile,
+    deleteProfile: deleteLLMProfile
+  } = useLocalLLMProfiles();
+
+  // Draft state for local LLM profiles (edited in-modal, saved on "Enregistrer")
+  const [localProfiles, setLocalProfiles] = useState<LocalLLMProfile[]>([]);
+  // Track IDs that existed at open time, to detect deletions on save
+  const [originalProfileIds, setOriginalProfileIds] = useState<Set<string>>(new Set());
+
   const [activeTab, setActiveTab] = useState<'llms' | 'save' | 'language'>('llms');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -65,23 +77,51 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
     }
   }, [hookLoading, hookConfigs, propConfigs]);
 
-  // LMStudio Detection State
-  const [lmStudioDetection, setLmStudioDetection] = useState<LMStudioModelDetection | null>(null);
-  const [isDetecting, setIsDetecting] = useState(false);
-  const [detectionError, setDetectionError] = useState<string | null>(null);
-  const [detectionProgress, setDetectionProgress] = useState(0);
+  // Initialise/migrate local profiles draft when hook finishes loading
+  useEffect(() => {
+    if (hookProfilesLoading) return;
 
-  // Helper function to get label from capability string
-  const getCapabilityLabel = (str: string): string => {
-    const capMap: Record<string, string> = {
-      'Chat': 'Chat',
-      'Function Calling': 'Appel de Fonction',
-      'Embedding': 'Embedding',
-      'Output Formatting': 'Output Formatting',
-      'Vision': 'Vision',
-      'Thinking': 'Thinking (Réflexion)'
-    };
-    return capMap[str] || str;
+    if (hookProfiles.length > 0) {
+      // Normal case: use loaded profiles as draft
+      setLocalProfiles(hookProfiles);
+      setOriginalProfileIds(new Set(hookProfiles.map(p => p.id)));
+    } else {
+      // Cold start OR migration: check if legacy single endpoint exists
+      const localConfig = currentLLMConfigs.find(c => isLocalProvider(c.provider));
+      const legacyEndpoint = localConfig?.localEndpoint;
+      if (legacyEndpoint && !legacyEndpoint.includes('•')) {
+        // Idempotent migration: show legacy endpoint as "Premier LLM"
+        setLocalProfiles([{
+          id: '',
+          name: 'Premier LLM',
+          endpoint: legacyEndpoint,
+          capabilities: {} as LocalLLMProfile['capabilities'],
+          enabled: true
+        }]);
+      } else {
+        setLocalProfiles([]);
+      }
+      setOriginalProfileIds(new Set());
+    }
+  }, [hookProfiles, hookProfilesLoading]);
+
+  // --- Local profile handlers (draft mutations, persisted on Save) ---
+  const handleAddProfile = () => {
+    setLocalProfiles(prev => [...prev, {
+      id: '',
+      name: '',
+      endpoint: 'http://localhost:11434',
+      capabilities: {} as LocalLLMProfile['capabilities'],
+      enabled: true
+    }]);
+  };
+
+  const handleDeleteProfile = (index: number) => {
+    setLocalProfiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleProfileChange = (index: number, updated: LocalLLMProfile) => {
+    setLocalProfiles(prev => prev.map((p, i) => i === index ? updated : p));
   };
 
   const handleProviderToggle = (provider: LLMProvider, enabled: boolean) => {
@@ -104,125 +144,6 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
     setCurrentLLMConfigs(prev =>
       prev.map(c => (c.provider === provider ? { ...c, apiKey } : c))
     );
-  };
-
-  /**
-   * NEW: Handle local endpoint changes (for LMStudio, Jan, Ollama)
-   * These are NOT encrypted, just stored as plaintext URLs
-   */
-  const handleLocalEndpointChange = (provider: LLMProvider, endpoint: string) => {
-    setCurrentLLMConfigs(prev =>
-      prev.map(c => {
-        if (c.provider === provider) {
-          return { ...c, localEndpoint: endpoint };
-        }
-        return c;
-      })
-    );
-  };
-
-  /**
-   * HELPER: Récupère l'endpoint actual pour un provider (local ou cloud)
-   * Pour les providers locaux: retourne localEndpoint
-   * Pour les providers cloud: retourne apiKey
-   * Ignore les valeurs masquées (•••)
-   */
-  const getEffectiveEndpoint = (config: LLMConfigWithHasKey): string | undefined => {
-    const isLocal = isLocalProvider(config.provider);
-    
-    if (isLocal) {
-      // Local provider: use plaintext endpoint
-      const endpoint = config.localEndpoint;
-      // Ignore masked values
-      return endpoint && !endpoint.includes('•') ? endpoint : undefined;
-    } else {
-      // Cloud provider: use API key
-      const apiKey = config.apiKey;
-      // Ignore masked values
-      return apiKey && !apiKey.includes('•') ? apiKey : undefined;
-    }
-  };
-
-  const handleDetectLMStudio = async () => {
-    const lmStudioConfig = currentLLMConfigs.find(c => c.provider === LLMProvider.LMStudio);
-    if (!lmStudioConfig) {
-      setDetectionError('Configuration LMStudio non trouvée');
-      return;
-    }
-
-    // Get the actual endpoint (not masked)
-    const endpoint = getEffectiveEndpoint(lmStudioConfig);
-    if (!endpoint) {
-      setDetectionError('Veuillez configurer l\'endpoint LLM local');
-      return;
-    }
-
-    setIsDetecting(true);
-    setDetectionError(null);
-    setDetectionProgress(0);
-
-    try {
-      // Simuler progression pour UX
-      const progressInterval = setInterval(() => {
-        setDetectionProgress(prev => Math.min(prev + 15, 90));
-      }, 200);
-
-      // JALON 5: Appel unique au backend proxy (Option C Hybride)
-      // URL endpoint est passée en query param
-      const apiUrl = `${API_BASE_URL}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(endpoint)}`;
-      
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(15000)
-      });
-
-      const result = await response.json();
-
-      clearInterval(progressInterval);
-      setDetectionProgress(100);
-
-      if (!result.healthy) {
-        setDetectionError(result.error || 'Endpoint non accessible');
-        setDetectionProgress(0);
-        return;
-      }
-
-      // Stocker la détection
-      setLmStudioDetection({
-        modelId: result.modelId,
-        routes: {},
-        capabilities: (result.capabilities as string[])
-          .filter(cap => cap)
-          .map(cap => {
-            const enumValue = Object.values(LLMCapability).find(v => v === cap);
-            return enumValue as LLMCapability;
-          })
-          .filter((cap): cap is LLMCapability => cap !== undefined),
-        detectedAt: result.detectedAt
-      });
-
-      // Mettre à jour les capacités automatiquement
-      setCurrentLLMConfigs(prev =>
-        prev.map(c => {
-          if (c.provider === LLMProvider.LMStudio) {
-            const newCapabilities = { ...c.capabilities };
-            result.capabilities.forEach((cap: string) => {
-              newCapabilities[cap] = true;
-            });
-            return { ...c, capabilities: newCapabilities };
-          }
-          return c;
-        })
-      );
-
-      setTimeout(() => setDetectionProgress(0), 1000);
-    } catch (error: any) {
-      setDetectionError(error.message || 'Erreur lors de la détection');
-      setDetectionProgress(0);
-    } finally {
-      setIsDetecting(false);
-    }
   };
 
   const handleSave = async () => {
@@ -299,6 +220,37 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
     }
 
     // Also update local state and parent
+    // Save local LLM profiles: create new, update modified, delete removed
+    try {
+      // 1. Create or update profiles in draft
+      for (const profile of localProfiles) {
+        const data = {
+          name: profile.name || 'LLM local',
+          endpoint: profile.endpoint,
+          capabilities: profile.capabilities as Record<string, boolean>,
+          enabled: profile.enabled
+        };
+        if (!profile.id) {
+          // New profile (no persisted id yet) — skip if both name and endpoint are empty
+          if (profile.name.trim() || profile.endpoint.trim()) {
+            await createLLMProfile(data);
+          }
+        } else {
+          // Existing profile
+          await updateLLMProfile(profile.id, data);
+        }
+      }
+      // 2. Delete profiles that were removed during the session
+      for (const id of originalProfileIds) {
+        if (!localProfiles.some(p => p.id === id)) {
+          await deleteLLMProfile(id);
+        }
+      }
+    } catch (profileErr) {
+      console.error('[SettingsModal] Failed to save local LLM profiles:', profileErr);
+      alert(`Erreur profils LLM local: ${profileErr instanceof Error ? profileErr.message : 'Sauvegarde échouée'}`);
+    }
+
     setIsSaving(false);
     // CRITICAL: Notify parent component of saved configs
     // This ensures App.tsx updates its llmConfigs state with final values
@@ -478,7 +430,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                     </p>
                   </div>
                 )}
-                {currentLLMConfigs.map(({ provider, enabled, capabilities, apiKey, localEndpoint, hasApiKey, hasLocalEndpoint }) => (
+                {currentLLMConfigs.map(({ provider, enabled, capabilities, apiKey }) => (
                   <div key={provider}>
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-semibold text-gray-200">{provider}</h3>
@@ -486,190 +438,87 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                     </div>
                     {enabled && (
                       <div className="pl-4 mt-4 space-y-4 border-l-2 border-gray-700">
-                        <div>
-                          <label htmlFor={`${provider}-credentials`} className="block text-sm font-medium text-gray-400 mb-1">
-                            {getInputLabel(provider)}
-                          </label>
-                          <input
-                            id={`${provider}-credentials`}
-                            type={getInputType(provider)}
-                            value={isLocalProvider(provider) ? (localEndpoint || '') : (apiKey || '')}
-                            onChange={(e) => 
-                              isLocalProvider(provider)
-                                ? handleLocalEndpointChange(provider as LLMProvider, e.target.value)
-                                : handleApiKeyChange(provider as LLMProvider, e.target.value)
-                            }
-                            placeholder={getInputPlaceholder(provider)}
-                            className="w-full p-2 text-sm bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          />
-                          {getProviderHelperText(provider) && (
-                            <p className="text-xs text-gray-500 mt-1">
-                              {getProviderHelperText(provider)}
-                            </p>
-                          )}
-                        </div>
-
-                        {/* AUTO-DETECT BUTTON - Only for LMStudio (local provider) */}
-                        {isLocalProvider(provider) && (
+                        {!isLocalProvider(provider) ? (
                           <>
-                            <button
-                              onClick={handleDetectLMStudio}
-                              disabled={isDetecting || !localEndpoint}
-                              className="mt-3 px-4 py-2 rounded-md font-medium text-sm transition-all duration-300"
-                              style={{
-                                background: isDetecting ? 'linear-gradient(90deg, rgba(6, 182, 212, 0.3), rgba(59, 130, 246, 0.3))' : 'linear-gradient(90deg, #06b6d4, #3b82f6)',
-                                boxShadow: isDetecting ? 'none' : '0 0 15px rgba(6, 182, 212, 0.5)',
-                                animation: isDetecting ? 'none' : 'laser-pulse 2s ease-in-out infinite',
-                                cursor: isDetecting || !localEndpoint ? 'not-allowed' : 'pointer',
-                                opacity: isDetecting || !localEndpoint ? 0.6 : 1
-                              }}
-                            >
-                              {isDetecting ? '🔍 Détection en cours...' : '🔍 Détecter les capacités'}
-                            </button>
+                            {/* Cloud provider: credentials input */}
+                            <div>
+                              <label htmlFor={`${provider}-credentials`} className="block text-sm font-medium text-gray-400 mb-1">
+                                {getInputLabel(provider)}
+                              </label>
+                              <input
+                                id={`${provider}-credentials`}
+                                type={getInputType(provider)}
+                                value={apiKey || ''}
+                                onChange={(e) => handleApiKeyChange(provider as LLMProvider, e.target.value)}
+                                placeholder={getInputPlaceholder(provider)}
+                                className="w-full p-2 text-sm bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              />
+                              {getProviderHelperText(provider) && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {getProviderHelperText(provider)}
+                                </p>
+                              )}
+                            </div>
 
-                            {/* Progress Bar */}
-                            {isDetecting && (
-                              <div className="mt-3 relative w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                                <div
-                                  className="absolute h-full transition-all duration-300"
-                                  style={{
-                                    width: `${detectionProgress}%`,
-                                    background: 'linear-gradient(90deg, #06b6d4, #3b82f6, #9333ea)',
-                                    boxShadow: '0 0 10px rgba(6, 182, 212, 0.8)'
-                                  }}
-                                >
-                                  <div
-                                    className="absolute right-0 w-5 h-full"
-                                    style={{
-                                      background: 'linear-gradient(90deg, transparent, white)',
-                                      opacity: 0.6
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            )}
-
-                              {/* Success State - Routes Badges */}
-                              {lmStudioDetection && !isDetecting && (
-                                <div className="mt-4 p-4 rounded-lg" style={{
-                                  background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)',
-                                  border: '1px solid rgba(6, 182, 212, 0.3)'
-                                }}>
-                                  <h4 className="text-green-400 font-semibold mb-2 flex items-center gap-2">
-                                    ✅ Modèle détecté: <span className="font-bold">{lmStudioDetection.modelId}</span>
-                                  </h4>
-
-                                  <div className="grid grid-cols-2 gap-2 mt-3">
-                                    {Object.entries(lmStudioDetection.routes).map(([route, available], index) => (
-                                      <div
-                                        key={route}
-                                        className="px-3 py-2 rounded-full text-xs font-bold text-center"
-                                        style={{
-                                          border: available ? '2px solid rgba(6, 182, 212, 0.6)' : '2px solid rgba(100, 100, 100, 0.3)',
-                                          background: available ? 'rgba(6, 182, 212, 0.15)' : 'rgba(50, 50, 50, 0.2)',
-                                          color: available ? '#06b6d4' : '#666',
-                                          animation: available ? `badge-appear 0.5s ease-out ${index * 0.1}s both` : 'none',
-                                          boxShadow: available ? '0 0 10px rgba(6, 182, 212, 0.4)' : 'none'
-                                        }}
-                                      >
-                                        {route === 'chatCompletions' && '💬 Chat'}
-                                        {route === 'embeddings' && '🧮 Embeddings'}
-                                        {route === 'images' && '🎨 Images'}
-                                        {route === 'audio' && '🎵 Audio'}
-                                        {route === 'completions' && '📝 Text'}
-                                        {route === 'models' && '🤖 Models'}
-                                      </div>
-                                    ))}
-                                  </div>
-
-                                  <div className="mt-3 px-3 py-2 rounded-md" style={{
-                                    background: 'rgba(34, 197, 94, 0.15)',
-                                    border: '1px solid rgba(34, 197, 94, 0.5)',
-                                    animation: 'fade-scale-in 0.4s ease-out'
-                                  }}>
-                                    <span className="text-green-400 text-sm font-semibold">⚡ Capacités détectées:</span>
-                                    <div className="mt-2 flex flex-wrap gap-2">
-                                      {lmStudioDetection.capabilities.map((cap, index) => (
-                                        <span
-                                          key={cap}
-                                          className="px-2 py-1 rounded text-xs font-medium"
-                                          style={{
-                                            background: 'rgba(34, 197, 94, 0.2)',
-                                            border: '1px solid rgba(34, 197, 94, 0.4)',
-                                            color: '#86efac',
-                                            animation: `badge-appear 0.3s ease-out ${index * 0.05}s both`
-                                          }}
-                                        >
-                                          {getCapabilityLabel(cap)}
-                                        </span>
-                                      ))}
+                            {/* Cloud provider: capabilities toggles */}
+                            <div className="space-y-2 pt-2">
+                              {Object.keys(capabilities).sort().map(capStr => {
+                                const cap = capStr as LLMCapability;
+                                return (
+                                  <div key={cap} className="flex items-center justify-between">
+                                    <div className="flex items-center">
+                                      <span className="text-sm text-gray-400">{cap}</span>
+                                      {cap === LLMCapability.WebSearch && provider === LLMProvider.Gemini && (
+                                        <span className="ml-2 text-xs text-gray-500">{t('settings_gemini_optimized')}</span>
+                                      )}
+                                      {cap === LLMCapability.Reasoning && provider === LLMProvider.DeepSeek && (
+                                        <span className="ml-2 text-xs text-green-500">R1 Reasoning</span>
+                                      )}
+                                      {cap === LLMCapability.CacheOptimization && provider === LLMProvider.DeepSeek && (
+                                        <span className="ml-2 text-xs text-blue-500">0.014¢/1K tokens</span>
+                                      )}
                                     </div>
+                                    <ToggleSwitch
+                                      checked={capabilities[cap] || false}
+                                      onChange={(checked) => handleCapabilityToggle(provider, cap, checked)}
+                                    />
                                   </div>
-                                </div>
-                              )}
-
-                              {/* Error State */}
-                              {detectionError && (
-                                <div className="mt-3 p-3 rounded-md" style={{
-                                  background: 'rgba(239, 68, 68, 0.15)',
-                                  border: '2px solid rgba(239, 68, 68, 0.6)',
-                                  animation: 'laser-pulse-error 1.5s ease-in-out infinite'
-                                }}>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-red-400 text-xl">⚠️</span>
-                                    <span className="text-red-400 font-semibold">Erreur de détection</span>
-                                  </div>
-                                  <p className="text-red-300 text-sm mt-1">{detectionError}</p>
-                                  <button
-                                    onClick={handleDetectLMStudio}
-                                    className="mt-2 px-4 py-1.5 rounded-md text-sm transition-all duration-300"
-                                    style={{
-                                      background: 'rgba(239, 68, 68, 0.2)',
-                                      border: '1px solid rgba(239, 68, 68, 0.5)',
-                                      color: '#fca5a5'
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.currentTarget.style.boxShadow = '0 0 15px rgba(239, 68, 68, 0.6)';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.currentTarget.style.boxShadow = 'none';
-                                    }}
-                                  >
-                                    🔄 Réessayer
-                                  </button>
-                                </div>
-                              )}
-                            </>
-                          )}
-
-                        <div className="space-y-2 pt-2">
-                          {Object.keys(capabilities).sort().map(capStr => {
-                            const cap = capStr as LLMCapability;
-                            return (
-                              <div key={cap} className="flex items-center justify-between">
-                                <div className="flex items-center">
-                                  <span className="text-sm text-gray-400">{cap}</span>
-                                  {cap === LLMCapability.WebSearch && provider === LLMProvider.Gemini && (
-                                    <span className="ml-2 text-xs text-gray-500">{t('settings_gemini_optimized')}</span>
-                                  )}
-                                  {cap === LLMCapability.Reasoning && provider === LLMProvider.DeepSeek && (
-                                    <span className="ml-2 text-xs text-green-500">R1 Reasoning</span>
-                                  )}
-                                  {cap === LLMCapability.CacheOptimization && provider === LLMProvider.DeepSeek && (
-                                    <span className="ml-2 text-xs text-blue-500">0.014¢/1K tokens</span>
-                                  )}
-                                  {cap === LLMCapability.CodeSpecialization && provider === LLMProvider.LMStudio && (
-                                    <span className="ml-2 text-xs text-orange-500">Qwen2.5 Coder</span>
-                                  )}
-                                </div>
-                                <ToggleSwitch
-                                  checked={capabilities[cap] || false}
-                                  onChange={(checked) => handleCapabilityToggle(provider, cap, checked)}
-                                />
-                              </div>
-                            );
-                          })}
-                        </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        ) : (
+                          /* Local provider: profile cards */
+                          <div className="space-y-3">
+                            {hookProfilesLoading ? (
+                              <p className="text-xs text-gray-400 animate-pulse">Chargement des profils...</p>
+                            ) : (
+                              <>
+                                {localProfiles.length === 0 && (
+                                  <p className="text-xs text-gray-500 italic">
+                                    Aucun LLM local configuré.
+                                  </p>
+                                )}
+                                {localProfiles.map((profile, index) => (
+                                  <LocalLLMProfileCard
+                                    key={profile.id || `new-${index}`}
+                                    profile={profile}
+                                    onChange={(updated) => handleProfileChange(index, updated)}
+                                    onDelete={() => handleDeleteProfile(index)}
+                                  />
+                                ))}
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              onClick={handleAddProfile}
+                              className="flex items-center gap-2 px-3 py-2 text-sm text-indigo-400 hover:text-indigo-300 hover:bg-gray-700/50 rounded-md border border-dashed border-indigo-600/50 hover:border-indigo-400 transition-colors w-full justify-center"
+                            >
+                              <PlusIcon width={14} height={14} />
+                              Ajouter un LLM local
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

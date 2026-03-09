@@ -38,6 +38,7 @@ export interface IAgentPrototype extends Document {
     robotId: string;
     isPrototype: true;
     persistenceConfig: IPersistenceConfig; // ⭐ NEW: Configuration de persistance
+    localLLMProfileId?: string;            // ⭐ NEW: References local_llm_profiles._id
     createdAt: Date;
     updatedAt: Date;
 }
@@ -129,6 +130,12 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
             saveTasks: false,
             mediaStorage: 'db'
         })
+    },
+    // ⭐ NEW: Reference to a local LLM profile (for agents using local LLM servers)
+    localLLMProfileId: {
+        type: String,
+        required: false,
+        default: undefined
     }
 }, {
     timestamps: true,

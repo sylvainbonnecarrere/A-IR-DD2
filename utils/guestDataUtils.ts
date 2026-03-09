@@ -44,6 +44,9 @@ export const GUEST_STORAGE_KEYS = {
     // LLM configs (API keys in plain text for guest)
     llmConfigs: 'llm_configs_guest',
     llmConfigsLegacy: 'llmAgentWorkflow_configs', // ← J4.4: Old key from App.tsx - must also be wiped!
+
+    // Local LLM profiles (multiple local server configs)
+    localLLMProfiles: 'local_llm_profiles_v1',
     
     // User settings
     userSettings: 'user_settings_guest',
@@ -62,6 +65,7 @@ export const GUEST_STORAGE_KEYS = {
     USER_SETTINGS: 'user_settings_guest',
     LEGACY_SETTINGS: 'settings',
     LEGACY_WORKFLOW: 'workflow',
+    LOCAL_LLM_PROFILES: 'local_llm_profiles_v1',
 } as const;
 
 /**

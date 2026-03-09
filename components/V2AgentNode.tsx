@@ -13,7 +13,7 @@ import * as llmService from '../services/llmService';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
 import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
-import { isLLMConfigured, getEffectiveCredential } from '../utils/llmProviderUtils';
+import { isLLMConfigured, getEffectiveCredential, isLocalProvider } from '../utils/llmProviderUtils';
 import { useLocalization } from '../hooks/useLocalization';
 import { useJournalQueue } from '../hooks/useJournalQueue';
 
@@ -115,6 +115,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     capabilities: agentInstance.configuration_json.capabilities,
     outputConfig: agentInstance.configuration_json.outputConfig,
     historyConfig: agentInstance.configuration_json.historyConfig,
+    localLLMProfileId: (agentInstance.configuration_json as any)?.localLLMProfileId || agent.localLLMProfileId,
   } : agent;
 
   // Runtime store for messages and execution state
@@ -128,7 +129,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     setImageModificationPanelOpen,
     setFullscreenImage,
     setFullscreenChatNodeId,
-    llmConfigs
+    llmConfigs,
+    localLLMProfiles
   } = useRuntimeStore();
 
   // WorkflowCanvas context for navigation and node operations
@@ -477,7 +479,20 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         conversationHistoryForAPI = historyConfig?.enabled ? currentFullHistory : [userMessage];
       }
       // Stream LLM response
-      const credential = getEffectiveCredential(agentConfig, effectiveAgent.llmProvider);
+      // ⭐ NEW: Resolve local endpoint from profile if available, fallback to llm_configs
+      const resolveLocalEndpoint = (): string => {
+        if (effectiveAgent.localLLMProfileId) {
+          const profile = localLLMProfiles?.find(p => p.id === effectiveAgent.localLLMProfileId);
+          if (profile?.endpoint) return profile.endpoint;
+        }
+        // Fallback: legacy behavior
+        return agentConfig?.localEndpoint || agentConfig?.apiKey || '';
+      };
+
+      const credential = isLocalProvider(effectiveAgent.llmProvider)
+        ? resolveLocalEndpoint()
+        : getEffectiveCredential(agentConfig, effectiveAgent.llmProvider);
+
       const stream = llmService.generateContentStream(
         effectiveAgent.llmProvider,
         credential, // Use getEffectiveCredential (works for both apiKey and localEndpoint)

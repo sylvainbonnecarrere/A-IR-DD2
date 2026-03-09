@@ -48,11 +48,15 @@ function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string,
     robotId: robotId // Frontend uses 'creator_id', backend expects 'robotId'
   };
   
-  // \u2b50 V2: Include workflowId to scope prototype to a workflow
+  // ⭐ V2: Include workflowId to scope prototype to a workflow
   if (workflowId) {
     payload.workflowId = workflowId;
   }
-  
+
+  // ⭐ NEW: Include localLLMProfileId if set
+  if (agentData.localLLMProfileId) {
+    payload.localLLMProfileId = agentData.localLLMProfileId;
+  }
 
   return payload;
 }
@@ -76,7 +80,8 @@ export function mapAPIResponseToAgent(apiData: any): Agent {
     outputConfig: apiData.outputConfig,
     creator_id: apiData.robotId, // Backend uses 'robotId', frontend expects 'creator_id'
     created_at: apiData.createdAt || new Date().toISOString(),
-    updated_at: apiData.updatedAt || new Date().toISOString()
+    updated_at: apiData.updatedAt || new Date().toISOString(),
+    localLLMProfileId: apiData.localLLMProfileId || undefined
   };
 }
 
@@ -151,6 +156,7 @@ export async function updateAgentPrototype(
     if (agentData.historyConfig !== undefined) payload.historyConfig = agentData.historyConfig;
     if (agentData.tools !== undefined) payload.tools = agentData.tools;
     if (agentData.outputConfig !== undefined) payload.outputConfig = agentData.outputConfig;
+    if (agentData.localLLMProfileId !== undefined) payload.localLLMProfileId = agentData.localLLMProfileId;
     if (robotId) payload.robotId = robotId;
     
     const response = await fetch(`${API_BASE}/${prototypeId}`, {

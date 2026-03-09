@@ -13,6 +13,7 @@ import { ImageModificationPanel } from './components/panels/ImageModificationPan
 import { VideoGenerationConfigPanel } from './components/panels/VideoGenerationConfigPanel';
 import { MapsGroundingConfigPanel } from './components/panels/MapsGroundingConfigPanel';
 import { useLocalization } from './hooks/useLocalization';
+import { useLocalLLMProfiles } from './hooks/useLocalLLMProfiles';
 import { Button } from './components/UI';
 import { ConfirmationModal } from './components/modals/ConfirmationModal';
 import { FullscreenChatModal } from './components/modals/FullscreenChatModal';
@@ -190,6 +191,9 @@ function AppContent() {
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; mimeType: string } | null>(null);
   const { t } = useLocalization();
 
+  // ⭐ NEW: Local LLM Profiles hook
+  const { profiles: localLLMProfiles } = useLocalLLMProfiles();
+
   // ⭐ ÉTAPE 5: Hydration state for authenticated users
   const [isHydrating, setIsHydrating] = useState(false);
   const [hydrationProgress, setHydrationProgress] = useState(0);
@@ -245,7 +249,7 @@ function AppContent() {
   }, []);
 
   // Runtime Store access
-  const { updateLLMConfigs, setNavigationHandler, addNodeMessage } = useRuntimeStore();
+  const { updateLLMConfigs, updateLocalLLMProfiles, setNavigationHandler, addNodeMessage } = useRuntimeStore();
 
   // Design Store access for integrity validation  
   const { validateWorkflowIntegrity, cleanupOrphanedInstances, addAgentInstance, deleteNode, deleteAgentInstance, hydrateFromServer, setNodes, setEdges, updateInstanceId, addNode, agentInstances, nodes: storeNodes } = useDesignStore();
@@ -1104,6 +1108,11 @@ function AppContent() {
 
   }, [isAuthenticated, accessToken, llmApiKeys, updateLLMConfigs]);
 
+  // ⭐ NEW: Sync local LLM profiles into runtime store
+  useEffect(() => {
+    updateLocalLLMProfiles(localLLMProfiles);
+  }, [localLLMProfiles, updateLocalLLMProfiles]);
+
   // ⭐ PHASE 2: Load workflows on authentication
   // ⭐ V4 FIX: Wait for hydration to complete before loading workflows
   // The hydration useEffect sets _arc_hydrating flag; we wait until it's cleared.
@@ -1868,6 +1877,7 @@ function AppContent() {
               onSave={handleSaveAgent}
               llmConfigs={llmConfigs}
               existingAgent={editingAgent}
+              localLLMProfiles={localLLMProfiles}
             />
           )}
 
@@ -1980,7 +1990,7 @@ function AppContent() {
           />
 
           {/* Configuration Modal */}
-          <AgentConfigurationModal llmConfigs={llmConfigs} />
+          <AgentConfigurationModal llmConfigs={llmConfigs} localLLMProfiles={localLLMProfiles} />
 
           <NotificationDisplay />
         </div>
