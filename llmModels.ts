@@ -25,17 +25,17 @@ interface DynamicModelsCache {
 
 let lmStudioCache: DynamicModelsCache | null = null;
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+// In-flight deduplication: if multiple callers request models simultaneously before the
+// first resolves, they all share the same promise instead of each making an HTTP call.
+let lmStudioPendingFetch: Promise<LLMModelDefinition[]> | null = null;
+let lmStudioPendingEndpoint: string | null = null;
 
 /**
  * Helper: Get capabilities for a specific LLM provider and model
  * Used when LLM provider/model changes to recalculate capabilities
  */
-export const getCapabilitiesForLLM = (provider: LLMProvider, modelId: string): LLMCapability[] => {
-    const models = LLM_MODELS_DETAILED[provider];
-    if (!models) return [];
-    const model = models.find(m => m.id === modelId);
-    return model?.capabilities || [];
-};
+export const getCapabilitiesForLLM = (provider: LLMProvider, modelId: string): LLMCapability[] =>
+    getModelCapabilities(provider, modelId);
 
 export const LLM_MODELS_DETAILED: Record<LLMProvider, LLMModelDefinition[]> = {
     [LLMProvider.Gemini]: [
@@ -356,11 +356,10 @@ export const LLM_MODELS_DETAILED: Record<LLMProvider, LLMModelDefinition[]> = {
     [LLMProvider.LMStudio]: [
         {
             id: 'mistral-3:8b',
-            name: 'Mistral 3 8B (Ollama)',
+            name: 'Mistral 3 8B',
             capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling, LLMCapability.Embedding],
             recommended: true,
-            description: 'Mistral 3 8B quantized model for local deployment via Ollama',
-            isDynamic: false
+            description: 'Mistral 3 8B quantized model for local deployment',
         },
         {
             id: 'qwen2.5-coder-7b',
@@ -505,31 +504,42 @@ export const fetchLMStudioDynamicModels = async (endpoint?: string): Promise<LLM
     if (lmStudioCache &&
         lmStudioCache.endpoint === currentEndpoint &&
         Date.now() - lmStudioCache.timestamp < CACHE_TTL) {
-        console.log('[LMStudio] Using cached models');
         return lmStudioCache.models;
     }
 
-    try {
-        console.log(`[LMStudio] Fetching models from ${currentEndpoint}...`);
-        const detectedModels = await detectAvailableModels({ endpoint: currentEndpoint });
-
-        const dynamicModels = detectedModels
-            .filter(m => m.available)
-            .map(convertLMStudioModel);
-
-        // Update cache
-        lmStudioCache = {
-            models: dynamicModels,
-            timestamp: Date.now(),
-            endpoint: currentEndpoint
-        };
-
-        console.log(`[LMStudio] Fetched ${dynamicModels.length} dynamic models`);
-        return dynamicModels;
-    } catch (error) {
-        console.warn('[LMStudio] Failed to fetch dynamic models:', error);
-        return [];
+    // In-flight deduplication: return existing promise if same endpoint is already being fetched
+    // This prevents the "cache stampede" where N simultaneous callers all see cache=null and all make HTTP requests
+    if (lmStudioPendingFetch && lmStudioPendingEndpoint === currentEndpoint) {
+        return lmStudioPendingFetch;
     }
+
+    lmStudioPendingEndpoint = currentEndpoint;
+    lmStudioPendingFetch = (async () => {
+        try {
+            const detectedModels = await detectAvailableModels({ endpoint: currentEndpoint });
+
+            const dynamicModels = detectedModels
+                .filter(m => m.available)
+                .map(convertLMStudioModel);
+
+            // Update cache
+            lmStudioCache = {
+                models: dynamicModels,
+                timestamp: Date.now(),
+                endpoint: currentEndpoint
+            };
+
+            return dynamicModels;
+        } catch (error) {
+            console.warn('[LMStudio] Failed to fetch dynamic models:', error);
+            return [];
+        } finally {
+            lmStudioPendingFetch = null;
+            lmStudioPendingEndpoint = null;
+        }
+    })();
+
+    return lmStudioPendingFetch;
 };
 
 /**
@@ -537,7 +547,8 @@ export const fetchLMStudioDynamicModels = async (endpoint?: string): Promise<LLM
  */
 export const invalidateLMStudioCache = (): void => {
     lmStudioCache = null;
-    console.log('[LMStudio] Cache invalidated');
+    lmStudioPendingFetch = null;
+    lmStudioPendingEndpoint = null;
 };
 
 /**

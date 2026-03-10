@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { LocalLLMProfile, LLMCapability } from '../../types';
+import { LocalLLMProfile } from '../../types';
 import { ToggleSwitch } from '../UI';
 import { TrashIcon } from '../Icons';
 import { API_BASE_URL } from '../../config/api.config';
+import { useAuth } from '../../hooks/useAuth';
 
 interface LocalLLMProfileCardProps {
     profile: LocalLLMProfile;
@@ -15,6 +16,7 @@ export const LocalLLMProfileCard: React.FC<LocalLLMProfileCardProps> = ({
     onChange,
     onDelete
 }) => {
+    const { accessToken } = useAuth();
     const [isDetecting, setIsDetecting] = useState(false);
     const [detectionError, setDetectionError] = useState<string | null>(null);
     const [detectionProgress, setDetectionProgress] = useState(0);
@@ -40,21 +42,27 @@ export const LocalLLMProfileCard: React.FC<LocalLLMProfileCardProps> = ({
         setIsDetecting(true);
         setDetectionError(null);
         setDetectionProgress(0);
+        setDetectionResult(null); // Reset stale result before each new detection
 
+        let progressInterval: ReturnType<typeof setInterval> | null = null;
         try {
-            const progressInterval = setInterval(() => {
+            progressInterval = setInterval(() => {
                 setDetectionProgress(prev => Math.min(prev + 15, 90));
             }, 200);
 
             const apiUrl = `${API_BASE_URL}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(profile.endpoint)}`;
             const response = await fetch(apiUrl, {
                 method: 'GET',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
+                },
                 signal: AbortSignal.timeout(15000)
             });
 
             const result = await response.json();
             clearInterval(progressInterval);
+            progressInterval = null;
             setDetectionProgress(100);
 
             if (!result.healthy) {
@@ -63,13 +71,17 @@ export const LocalLLMProfileCard: React.FC<LocalLLMProfileCardProps> = ({
                 return;
             }
 
-            // Update capabilities from detection result
+            // Update capabilities AND detectedModel from detection result
             const newCapabilities: Record<string, boolean> = { ...profile.capabilities };
             (result.capabilities as string[]).forEach(cap => {
                 newCapabilities[cap] = true;
             });
 
-            onChange({ ...profile, capabilities: newCapabilities as LocalLLMProfile['capabilities'] });
+            onChange({
+                ...profile,
+                capabilities: newCapabilities as LocalLLMProfile['capabilities'],
+                detectedModel: result.modelId || undefined
+            });
 
             // Store detection result for report display
             setDetectionResult({
@@ -83,11 +95,10 @@ export const LocalLLMProfileCard: React.FC<LocalLLMProfileCardProps> = ({
             setDetectionError(error.message || 'Erreur lors de la détection');
             setDetectionProgress(0);
         } finally {
+            if (progressInterval) clearInterval(progressInterval); // Ensure cleanup on any throw
             setIsDetecting(false);
         }
     };
-
-    const allCapabilities = Object.values(LLMCapability);
 
     return (
         <div className="border border-gray-600 rounded-lg p-4 space-y-3 bg-gray-750">

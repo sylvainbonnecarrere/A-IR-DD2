@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LLMConfig, LLMCapability, LLMProvider, LocalLLMProfile } from '../../types';
+import { LLMConfig, LLMCapability, LLMProvider, LocalLLMProfile, ILLMConfigUI } from '../../types';
 import { Button, ToggleSwitch } from '../UI';
 import { CloseIcon, PlusIcon } from '../Icons';
 import { useLocalization } from '../../hooks/useLocalization';
@@ -228,7 +228,8 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
           name: profile.name || 'LLM local',
           endpoint: profile.endpoint,
           capabilities: profile.capabilities as Record<string, boolean>,
-          enabled: profile.enabled
+          enabled: profile.enabled,
+          detectedModel: profile.detectedModel ?? null
         };
         if (!profile.id) {
           // New profile (no persisted id yet) — skip if both name and endpoint are empty

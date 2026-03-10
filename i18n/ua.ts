@@ -69,6 +69,11 @@ export default {
     agentForm_alert_nameMissing: "Будь ласка, дайте ім\'я агенту.",
     agentForm_alert_invalidJson: 'Будь ласка, виправте невірні схеми JSON перед збереженням.',
     agentForm_error_jsonNotObject: "Схема JSON повинна бути дійсним об\'єктом.",
+    agentForm_alert_localModelNotDetected: "Будь ласка, визначте модель для вибраного локального LLM перед збереженням.",
+    agentForm_localModel_notDetected: "Модель не виявлено",
+    agentForm_localModel_detect: "Визначити модель",
+    agentForm_localModel_detecting: "Визначення...",
+    agentForm_localModel_redetect: "Повторно визначити модель",
 
     // Agent Configuration Modal (Instance Editing)
     agentConfig_title: "⚙️ Конфігурація агента",

@@ -69,6 +69,11 @@ export default {
     agentForm_alert_nameMissing: "Please name the agent.",
     agentForm_alert_invalidJson: 'Please fix the invalid JSON schemas before saving.',
     agentForm_error_jsonNotObject: "The JSON schema must be a valid object.",
+    agentForm_alert_localModelNotDetected: "Please detect a model for the selected local LLM before saving.",
+    agentForm_localModel_notDetected: "No model detected",
+    agentForm_localModel_detect: "Detect model",
+    agentForm_localModel_detecting: "Detecting...",
+    agentForm_localModel_redetect: "Re-detect model",
 
     // Agent Configuration Modal (Instance Editing)
     agentConfig_title: "⚙️ Agent Configuration",
