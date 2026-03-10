@@ -87,8 +87,8 @@ Le module **Phil > Fonctions Personnalisées** est le registre central et l'atel
 
 ### 1.4 Principes de Conception pour les Agents Développeurs
 
-- **Découplage** : Phil > Fonctions Personnalisées ne connaît pas les agents ; Archi > Prototypage ne stocke pas de code de fonctions
-- **Activation par flag** : une fonction existe dans le registre indépendamment de son activation ; l'activation ne concerne que sa visibilité dans le prototypage
+- **Découplage** : Phil > Fonctions Personnalisées ne connaît pas les agents ; Archi > Prototypage ne stocke pas de code de fonctions ; Bos > Carte du workflow > un agent IA ne ne stocke pas de code de fonctions ; 
+- **Activation par flag** : une fonction existe dans le registre indépendamment de son activation ; l'activation ne concerne que sa visibilité dans le prototypage ou dans la bibliothèque de fonction d'un agent instancié sur la carte du workflow
 - **Immutabilité des fonctions natives** : les fonctions livrées par défaut sont `readonly` dans l'éditeur mais peuvent être dupliquées pour être personnalisées
 - **Convention > Configuration** : le suffixe `_py` suffit à router l'exécution vers Python sans configuration supplémentaire
 

@@ -258,6 +258,15 @@ const { t, currentLanguage, changeLanguage } = useLocalization();
 ---
 
 ## 📊 Pages Spécialisées des Robots
+### Couleurs spécialisées par robot
+*   Style : **Cyberpunk/Space** (Fonds `slate-900`, Bordures Néon, Glassmorphism).
+**Identité Visuelle du Robot** : La page doit utiliser la couleur d'accentuation du robot concerné :
+*   🤖 **Archi** : Cyan (`purple-500`)
+*   📊 **Bos** : Jaune  (`yellow-500`)
+*   🔌 **Com** : Vert (`green-500`)
+*   🧠 **Phil** : Bleu (`cyan-500`)
+*   ⏱️ **Tim** : Rouge (`red-500`)
+
 
 ### TimEventsPage
 **Gestion des déclencheurs** :
