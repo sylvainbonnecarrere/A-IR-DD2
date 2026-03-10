@@ -1,16 +1,21 @@
-Tu es l'agent Aether-Arch-2026 et tu vas travailler sur l'architecture de nouvelles features pour les agents IA déployés sur la page "carte du workflow" de notre application. 
-Cette feature est à la fois très importante et va nécessiter plusieurs plans car elle regroupe plusieurs sous-features importantes. 
-Ton objectif est de préparer les zones de recherches, la découpe stratégique en plans et les structures du code actuel à remplacer que devront récupérer les architectes qui recevront ton document pour créer les plans d'implémentation de cette feature.
+Tu es l'agent Aether-Arch-2026 et tu vas travailler avec un groupe d'experts architectes logiciels sur l'architecture de nouvelles features d'appels de fonctions utilisées par les agents IA déployés sur la page "carte du workflow" de notre application. 
+Cette suite de features est à la fois très importante et va nécessiter plusieurs plans car elle regroupe plusieurs sous-features importantes. 
+Ton objectif est de préparer les zones de recherches dans le code actuel, la découpe stratégique en plans et les structures du code actuel à remplacer que devront analyser les architectes qui recevront ton document pour créer les plans d'implémentation de cette feature.
 
 ** Objectif de la Feature "Tools"
-L'application permet actuellement aux utilisateurs de créer ou modifier des prototypes d'agents et d'activer une capability "Appel de fonctions" dans les modales de création ou de modification de prototype. 
-Sur la page "Carte du workflow" du robot Bos, chaque agent créé hérite par défaut des capabilities de son prototype. L'agent devra donc pouvoir hériter par défaut des fonctions séléctionnées du prototype. L'utilisateur peut aussi modifier les capabilities d'un agent dans la page "carte du workflow", gràce au bouton "Configurer l'instance" dans l'onglet de chaque agent et dans l'onglet "Configuration". Un agent hérite donc par défaut de son prototype mais il peut également subir par la suite des modifications de configuration et différer de son prototype une fois instancié sur la carte du workflow.
-Ces fonctions sont à l'heure actuelle hardcodées. Ce sont soit des fonctions typescript, soit des fonctions python et leur emplacement selon le language est différent. Il faudra remplacer ce système par notre nouvelle feature.
+Pour rappel : dans l'architecture actuelle, l'application permet  aux utilisateurs de créer ou modifier des prototypes d'agents et d'activer une capability "Appel de fonctions" dans les modales de création ou de modification de prototype. 
+Sur la page "Carte du workflow" du robot Bos, chaque agent créé hérite par défaut des capabilities de son prototype. L'une de ces capabilities est "Appel de fonctions". L'agent devra donc toujours pouvoir hériter par défaut des fonctions séléctionnées du prototype. L'utilisateur pourra aussi toujours modifier les capabilities d'un agent dans la page "carte du workflow", gràce au bouton "Configurer l'instance" dans l'onglet de chaque agent et dans l'onglet "Configuration" qui permet d'activer ou désactiver la capacité "Appel de fonctions". Dans cette fenêtrel'onglet "fonctions" est dédié aux fonctions de l'agent.Un agent hérite donc par défaut de son prototype mais il peut également subir par la suite des modifications de configuration et différer de son prototype une fois instancié sur la carte du workflow.
+
+Ces fonctions sont à l'heure actuelle hardcodées. Ce sont soit des fonctions typescript, soit des fonctions python et leur emplacement selon le language est différent. 
+
+L'objectif de cette feature sera de  remplacer une partie de e système en le faisant évoluer avec notre nouvelle feature.
 
 1-a Le premier objectif est d'implémenter une page gérant un système de création de fonctions personnalisées pour les agents (ou Tools), beaucoup plus performant que l'utilisation des tools par les agents actuels. 
-Dans l'application, un utilisateur connecté aura la possibilité d'utiliser, importer ou créer des fonctions en typescript ou alors en python sur cette page qu'il faudra créer : ce sera la page  "Fonctions personnalisées" du robot Phil (le menu existe actuellement mais pas la page). 
+Dans la nouvelle version de l'application, un utilisateur connecté aura la possibilité de gérer ses fonctions, en importer, en créer, en modifier  (en typescript ou alors en python) et les tester sur cette page qu'il faudra créer : ce sera la page  "Fonctions personnalisées" du robot Phil (le menu existe actuellement mais pas la page). 
+
 Cette page comportera plusieurs onglets. 
-L'UX de cette page devra respecter les règles graphiques énoncées dans le dossier et s'inspirer du layout des pages "Prototypage d'Agents" d'Archi et "Gérer vos workflows" de Bos. Cette page faisant partie des pages du menu Phil, la couleur associée au robot **Phil** : Bleu (`cyan-500`).
+L'UX de cette page devra respecter les règles graphiques énoncées dans le dossier "Guides\UX" et s'inspirer du layout des pages "Prototypage d'Agents" d'Archi et "Gérer vos workflows" de Bos. 
+Cette page faisant partie des pages du menu Phil, la couleur associée au robot **Phil** est le Bleu (`cyan-500`).
 
 
 1-b Le premier onglet de cette page s'appellera "Éditeurs - Fonctions, création et modification de scripts". Il devra permettre de créer et enregistrer des fonctions pour un utilisateur sur un workflow, c'est leur périmètre d'utilisation dans l'application.
