@@ -6,15 +6,15 @@ import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../contexts/NotificationContext';
-import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, LMStudioModelDetection, PersistenceConfig, defaultPersistenceConfig } from '../../types';
-import { LLM_MODELS, LLM_MODELS_DETAILED, getModelCapabilities, getLMStudioMergedModels, getCapabilitiesForLLM } from '../../llmModels';
+import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, PersistenceConfig, defaultPersistenceConfig, LocalLLMProfile } from '../../types';
+import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels, getCapabilitiesForLLM } from '../../llmModels';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
 import { initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
 import { API_BASE_URL } from '../../config/api.config';
-// ⭐ FIX QA: Import AgentPersistenceForm for media storage options
+import { isLocalProvider, isLMStudio } from '../../utils/llmProviderUtils';
+import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
 
-// ⭐ FIX QA: Added 'persistence' tab for media storage options
 type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence' | 'links' | 'tasks' | 'logs' | 'errors';
 
 /**
@@ -27,7 +27,7 @@ type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence'
  * 
  * Rendu au niveau App.tsx pour affichage en vrai plein écran
  */
-export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({ llmConfigs }) => {
+export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localLLMProfiles?: LocalLLMProfile[] }> = ({ llmConfigs, localLLMProfiles = [] }) => {
     const { t } = useLocalization();
     const { getResolvedInstance, updateInstanceConfig, updateAgentInstance } = useDesignStore();
     const { configModalInstanceId, setConfigModalInstanceId } = useRuntimeStore();
@@ -47,7 +47,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
     const config = {
         role: '',
         model: '',
-        llmProvider: 'openai' as LLMProvider,
+        llmProvider: LLMProvider.OpenAI,
         systemPrompt: '',
         tools: [],
         position: { x: 0, y: 0 },
@@ -59,7 +59,6 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
 
     const [editedConfig, setEditedConfig] = useState(config);
     
-    // ⭐ FIX QA: State for persistence configuration (media storage options)
     const [editedPersistenceConfig, setEditedPersistenceConfig] = useState<PersistenceConfig>(defaultPersistenceConfig);
 
     // Synchronise editedConfig and editedName when instance changes
@@ -85,20 +84,35 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
             ? validateAndRepairHistoryConfig(prototypeConfig.historyConfig, enabledProviders)
             : initializeHistoryConfig(undefined, enabledProviders));
         
+        // Resolve LMStudio provider + local profile ID, with auto-assignment for legacy agents
+        const resolvedLLMProvider = (instanceConfig?.llmProvider || prototypeConfig.llmProvider || 'openai') as LLMProvider;
+        let resolvedLocalLLMProfileId = instanceConfig?.localLLMProfileId ?? prototypeConfig.localLLMProfileId ?? '';
+        // Legacy LMStudio agent (created before multi-profile feature) has no profileId → auto-assign first enabled profile
+        if (isLMStudio(resolvedLLMProvider) && !resolvedLocalLLMProfileId) {
+            const firstEnabled = localLLMProfiles.find(p => p.enabled);
+            if (firstEnabled) resolvedLocalLLMProfileId = firstEnabled.id;
+        }
+        // Fix model: if LMStudio+profile is set but model is empty, fall back to profile.detectedModel
+        const rawModel = instanceConfig?.model || prototypeConfig.model || '';
+        const resolvedModel = (!rawModel && isLMStudio(resolvedLLMProvider) && resolvedLocalLLMProfileId)
+            ? (localLLMProfiles.find(p => p.id === resolvedLocalLLMProfileId)?.detectedModel || '')
+            : rawModel;
+
         const currentConfig = {
             role: instanceConfig?.role || prototypeConfig.role || '',
-            model: instanceConfig?.model || prototypeConfig.model || '',
-            llmProvider: (instanceConfig?.llmProvider || prototypeConfig.llmProvider || 'openai') as LLMProvider,
+            model: resolvedModel,
+            llmProvider: resolvedLLMProvider,
             systemPrompt: instanceConfig?.systemPrompt || prototypeConfig.systemPrompt || '',
             tools: JSON.parse(JSON.stringify(instanceConfig?.tools || prototypeConfig.tools || [])),
-            outputConfig: instanceConfig?.outputConfig 
+            outputConfig: instanceConfig?.outputConfig
                 ? JSON.parse(JSON.stringify(instanceConfig.outputConfig))
                 : (prototypeConfig.outputConfig ? JSON.parse(JSON.stringify(prototypeConfig.outputConfig)) : undefined),
-            capabilities: instanceConfig?.capabilities 
+            capabilities: instanceConfig?.capabilities
                 ? [...instanceConfig.capabilities]
                 : (prototypeConfig.capabilities ? [...prototypeConfig.capabilities] : []),
             // historyConfig always initialized with smart defaults
             historyConfig: historyConfigValue,
+            localLLMProfileId: resolvedLocalLLMProfileId,
             position: currentResolved.instance.position,
             links: instanceConfig?.links || [],
             tasks: instanceConfig?.tasks || [],
@@ -109,7 +123,6 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
         setEditedConfig(currentConfig);
         setEditedName(currentResolved.instance.name);
         
-        // ⭐ FIX QA: Initialize persistence config from instance or prototype
         const instancePersistence = currentResolved.instance.persistenceConfig;
         const prototypePersistence = prototypeConfig.persistenceConfig;
         setEditedPersistenceConfig({
@@ -119,7 +132,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
         });
         
         setHasChanges(false);
-    }, [configModalInstanceId, getResolvedInstance]);
+    }, [configModalInstanceId, getResolvedInstance, localLLMProfiles]);
 
     // Recalculate capabilities when LLM provider or model changes
     // This ensures buttons show/hide correctly when user changes LLM in the modal
@@ -166,7 +179,6 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
             updateAgentInstance(configModalInstanceId, { name: editedName });
         }
         
-        // ⭐ FIX QA: Also save persistenceConfig to local store
         updateAgentInstance(configModalInstanceId, { persistenceConfig: editedPersistenceConfig });
 
         // Prepare configuration to save (preserve runtime data and validate history settings)
@@ -199,7 +211,6 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
                     body: JSON.stringify({
                         configuration_json: configToSave,
                         name: editedName,
-                        // ⭐ FIX QA: Include persistenceConfig in backend sync
                         persistenceConfig: editedPersistenceConfig
                     })
                 });
@@ -313,12 +324,11 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
                     >
                         {t('agentConfig_tab_formatting')}
                     </TabButton>
-                    {/* ⭐ FIX QA: Added Persistence tab for media storage options */}
                     <TabButton
                         active={activeTab === 'persistence'}
                         onClick={() => setActiveTab('persistence')}
                     >
-                        💾 {t('agentConfig_tab_persistence') || 'Persistance'}
+                        {t('agentConfig_tab_persistence')}
                     </TabButton>
                     <TabButton
                         active={activeTab === 'links'}
@@ -357,6 +367,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
                             config={editedConfig}
                             onChange={handleConfigChange}
                             llmConfigs={llmConfigs}
+                            localLLMProfiles={localLLMProfiles}
                             agentName={editedName}
                             onNameChange={(name) => {
                                 setEditedName(name);
@@ -391,7 +402,6 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
                         />
                     )}
                     
-                    {/* ⭐ FIX QA: Persistence tab content with AgentPersistenceForm */}
                     {activeTab === 'persistence' && (
                         <div className="space-y-4">
                             <div className="bg-gray-700/50 p-3 rounded-lg mb-4">
@@ -465,7 +475,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[] }> = ({
                         </Button>
                         <Button
                             onClick={handleSave}
-                            disabled={!hasChanges}
+                            disabled={!hasChanges || (isLMStudio(editedConfig.llmProvider as LLMProvider) && !!editedConfig.localLLMProfileId && !editedConfig.model)}
                             className="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {t('agentConfig_saveButton')}
@@ -534,28 +544,42 @@ const ConfigurationTab: React.FC<{
     config: any;
     onChange: (field: string, value: any) => void;
     llmConfigs: LLMConfig[];
+    localLLMProfiles: LocalLLMProfile[];
     agentName: string;
     onNameChange: (name: string) => void;
     t: (key: string) => string;
-}> = ({ config, onChange, llmConfigs, agentName, onNameChange, t }) => {
+}> = ({ config, onChange, llmConfigs, localLLMProfiles, agentName, onNameChange, t }) => {
 
-    // Obtenir les providers disponibles (configurés avec apiKey)
+    const { user, accessToken } = useAuth();
+
+    // Transient detection states for inline model detection
+    const [isDetectingLocalModel, setIsDetectingLocalModel] = useState(false);
+    const [inlineDetectionError, setInlineDetectionError] = useState<string | null>(null);
+
+    // Cloud providers only — local profiles are listed separately in the dropdown
     const availableProviders = useMemo(() =>
-        llmConfigs.filter(c => c.enabled).map(c => c.provider),
+        llmConfigs.filter(c => c.enabled && !isLocalProvider(c.provider)).map(c => c.provider),
         [llmConfigs]
     );
 
-    // Jalon 4: Détection LMStudio avec comparaison Before/After
-    const lmStudioEndpoint = llmConfigs.find(c => c.provider === LLMProvider.LMStudio)?.apiKey;
-    const [originalCapabilities] = useState<LLMCapability[]>(config.capabilities || []);
+    // Composite select value: 'local:<id>' for local profiles, provider enum for cloud
+    const providerSelectValue = isLMStudio(config.llmProvider) && config.localLLMProfileId
+        ? `local:${config.localLLMProfileId}`
+        : (config.llmProvider || '');
+
+    // LMStudio uses localEndpoint (plaintext URL); apiKey fallback for legacy records
+    const lmStudioConfig = llmConfigs.find(c => c.provider === LLMProvider.LMStudio);
+    const lmStudioEndpoint = lmStudioConfig?.localEndpoint || lmStudioConfig?.apiKey;
+    // useMemo ensures originalCapabilities tracks the current config (not stale from first mount)
+    const originalCapabilities = useMemo(() => config.capabilities || [], [config.capabilities]);
     const [endpointChanged, setEndpointChanged] = useState(false);
 
-    // Jalon 5: Modèles dynamiques LMStudio
     const [lmStudioDynamicModels, setLmStudioDynamicModels] = useState<any[]>([]);
     const [isLoadingLMStudioModels, setIsLoadingLMStudioModels] = useState(false);
 
     const { detection: lmStudioDetection, isDetecting: isDetectingLMStudio, redetect: redetectLMStudio } = useLMStudioDetection({
-        endpoint: config.llmProvider === LLMProvider.LMStudio ? lmStudioEndpoint : undefined,
+        // Legacy endpoint only when no local profile is selected — profiles use inline detection
+        endpoint: config.llmProvider === LLMProvider.LMStudio && !config.localLLMProfileId ? lmStudioEndpoint : undefined,
         autoDetect: false, // Ne pas auto-détecter au mount (agent déjà configuré)
         onSuccess: (detection) => {
             // Auto-update capabilities
@@ -564,28 +588,25 @@ const ConfigurationTab: React.FC<{
         }
     });
 
-    // Jalon 5: Fetch modèles dynamiques LMStudio
     useEffect(() => {
-        if (config.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint) {
+        if (config.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint && !config.localLLMProfileId) {
             setIsLoadingLMStudioModels(true);
             getLMStudioMergedModels(lmStudioEndpoint)
                 .then(models => {
                     setLmStudioDynamicModels(models);
-                    console.log(`[ConfigurationTab] Loaded ${models.length} LMStudio models (${models.filter(m => m.isDynamic).length} dynamic)`);
                 })
-                .catch(error => {
-                    console.warn('[ConfigurationTab] Failed to load LMStudio models:', error);
+                .catch(() => {
                     setLmStudioDynamicModels([]);
                 })
                 .finally(() => setIsLoadingLMStudioModels(false));
         } else {
             setLmStudioDynamicModels([]);
         }
-    }, [config.llmProvider, lmStudioEndpoint]);
+    }, [config.llmProvider, config.localLLMProfileId, lmStudioEndpoint]);
 
     // Détecter changement d'endpoint
     useEffect(() => {
-        if (config.llmProvider === LLMProvider.LMStudio) {
+        if (config.llmProvider === LLMProvider.LMStudio && !config.localLLMProfileId) {
             // Comparer endpoint actuel vs celui stocké dans config (si disponible)
             // Pour simplifier, on détecte si l'utilisateur change le provider vers LMStudio
             const hasDetection = !!lmStudioDetection;
@@ -595,7 +616,7 @@ const ConfigurationTab: React.FC<{
         } else {
             setEndpointChanged(false);
         }
-    }, [config.llmProvider, lmStudioEndpoint, lmStudioDetection]);
+    }, [config.llmProvider, config.localLLMProfileId, lmStudioEndpoint, lmStudioDetection]);
 
     // Comparer capabilities before/after
     const capabilityChanges = useMemo(() => {
@@ -616,7 +637,6 @@ const ConfigurationTab: React.FC<{
     const availableModels = useMemo(() => {
         if (!config.llmProvider) return [];
 
-        // Jalon 5: Utiliser modèles dynamiques pour LMStudio
         if (config.llmProvider === LLMProvider.LMStudio && lmStudioDynamicModels.length > 0) {
             return lmStudioDynamicModels;
         }
@@ -632,20 +652,71 @@ const ConfigurationTab: React.FC<{
         return getModelCapabilities(config.llmProvider as LLMProvider, config.model);
     }, [config.llmProvider, config.model]);
 
-    const handleProviderChange = (provider: LLMProvider) => {
+    const handleProviderChange = (value: string) => {
+        if (value.startsWith('local:')) {
+            const profileId = value.replace('local:', '');
+            const profile = localLLMProfiles.find(p => p.id === profileId);
+            if (profile) {
+                onChange('llmProvider', LLMProvider.LMStudio);
+                onChange('localLLMProfileId', profileId);
+                onChange('model', profile.detectedModel ?? '');
+                setInlineDetectionError(null);
+            }
+            return;
+        }
+        // Cloud provider path
+        const provider = value as LLMProvider;
+        onChange('llmProvider', provider);
+        onChange('localLLMProfileId', '');
+        setInlineDetectionError(null);
         let models: any[] = [];
-
-        // Jalon 5: Support modèles dynamiques LMStudio
         if (provider === LLMProvider.LMStudio && lmStudioDynamicModels.length > 0) {
             models = lmStudioDynamicModels;
         } else {
-            models = (LLM_MODELS[provider] || []).map(id => ({ id }));
+            models = (LLM_MODELS[provider] || []).map((id: string) => ({ id }));
         }
-
-        onChange('llmProvider', provider);
-        const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
+        const modelIds = models.map((m: any) => typeof m === 'string' ? m : m.id);
         if (models.length > 0 && !modelIds.includes(config.model)) {
-            onChange('model', modelIds[0]); // Auto-select first model
+            onChange('model', modelIds[0]);
+        }
+    };
+
+    // Inline model detection for local profiles
+    const handleInlineDetect = async () => {
+        const profile = localLLMProfiles.find(p => p.id === config.localLLMProfileId);
+        if (!profile) return;
+        setIsDetectingLocalModel(true);
+        setInlineDetectionError(null);
+        try {
+            const apiUrl = `${API_BASE_URL}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(profile.endpoint)}`;
+            const response = await fetch(apiUrl, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+                signal: AbortSignal.timeout(15000)
+            });
+            const result = await response.json();
+            if (!result.healthy || !result.modelId) {
+                setInlineDetectionError(result.error || t('agentForm_localModel_notDetected'));
+                return;
+            }
+            onChange('model', result.modelId);
+            if (accessToken) {
+                void localLLMProfileService.updateProfile(
+                    profile.id,
+                    {
+                        name: profile.name,
+                        endpoint: profile.endpoint,
+                        capabilities: profile.capabilities as Record<string, boolean>,
+                        enabled: profile.enabled,
+                        detectedModel: result.modelId
+                    },
+                    { useApi: true, token: accessToken }
+                );
+            }
+        } catch (err: any) {
+            setInlineDetectionError(err.message || t('agentForm_localModel_notDetected'));
+        } finally {
+            setIsDetectingLocalModel(false);
         }
     };
 
@@ -712,13 +783,18 @@ const ConfigurationTab: React.FC<{
                             {t('agentConfig_llm_providerLabel')}
                         </label>
                         <select
-                            value={config.llmProvider || ''}
-                            onChange={(e) => handleProviderChange(e.target.value as LLMProvider)}
+                            value={providerSelectValue}
+                            onChange={(e) => handleProviderChange(e.target.value)}
                             className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
                         >
-                            {!config.llmProvider && <option value="">{t('agentConfig_llm_providerPlaceholder')}</option>}
+                            {!providerSelectValue && <option value="">{t('agentConfig_llm_providerPlaceholder')}</option>}
+                            {/* Cloud providers */}
                             {availableProviders.map(provider => (
                                 <option key={provider} value={provider}>{provider}</option>
+                            ))}
+                            {/* Local LLM profiles */}
+                            {localLLMProfiles.filter(p => p.enabled).map(profile => (
+                                <option key={profile.id} value={`local:${profile.id}`}>{profile.name}</option>
                             ))}
                         </select>
                     </div>
@@ -726,28 +802,72 @@ const ConfigurationTab: React.FC<{
                     <div>
                         <label className="block text-sm font-medium text-gray-300 mb-2">
                             {t('agentConfig_llm_modelLabel')}
-                            {config.llmProvider === LLMProvider.LMStudio && isLoadingLMStudioModels && (
+                            {config.llmProvider === LLMProvider.LMStudio && isLoadingLMStudioModels && !config.localLLMProfileId && (
                                 <span className="ml-2 text-xs text-cyan-400">⌛ Chargement modèles...</span>
                             )}
                         </label>
-                        <select
-                            value={config.model || ''}
-                            onChange={(e) => onChange('model', e.target.value)}
-                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
-                            disabled={!config.llmProvider || availableModels.length === 0 || isLoadingLMStudioModels}
-                        >
-                            {!config.model && <option value="">{t('agentConfig_llm_modelPlaceholder')}</option>}
-                            {availableModels.map(model => {
-                                const modelId = typeof model === 'string' ? model : model.id;
-                                const modelName = typeof model === 'string' ? model : model.name;
-                                const isDynamic = typeof model === 'object' && model.isDynamic;
-                                return (
-                                    <option key={modelId} value={modelId}>
-                                        {modelName} {!isDynamic && config.llmProvider === LLMProvider.LMStudio ? '(Statique)' : ''}
-                                    </option>
-                                );
-                            })}
-                        </select>
+                        {/* Local profile selected: show detectedModel or inline detection button */}
+                        {isLMStudio(config.llmProvider) && config.localLLMProfileId ? (
+                            <div className="space-y-2">
+                                {config.model ? (
+                                    <div className="w-full px-3 py-2 bg-gray-700 border border-green-600/50 rounded text-green-400 text-sm flex items-center gap-2">
+                                        ✅ <span className="font-mono truncate">{config.model}</span>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <div className="w-full px-3 py-2 bg-gray-900/50 border border-red-500/50 rounded text-red-400 text-xs">
+                                            {t('agentForm_localModel_notDetected')}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleInlineDetect}
+                                            disabled={isDetectingLocalModel}
+                                            className="w-full px-3 py-1.5 rounded text-sm font-medium transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                                            style={{
+                                                background: isDetectingLocalModel
+                                                    ? 'linear-gradient(90deg,rgba(6,182,212,0.3),rgba(59,130,246,0.3))'
+                                                    : 'linear-gradient(90deg,#06b6d4,#3b82f6)'
+                                            }}
+                                        >
+                                            {isDetectingLocalModel ? `🔍 ${t('agentForm_localModel_detecting')}` : `🔍 ${t('agentForm_localModel_detect')}`}
+                                        </button>
+                                    </div>
+                                )}
+                                {config.model && (
+                                    <button
+                                        type="button"
+                                        onClick={handleInlineDetect}
+                                        disabled={isDetectingLocalModel}
+                                        className="text-xs text-cyan-400 hover:text-cyan-300 underline disabled:opacity-60"
+                                    >
+                                        {isDetectingLocalModel ? t('agentForm_localModel_detecting') : t('agentForm_localModel_redetect')}
+                                    </button>
+                                )}
+                                {inlineDetectionError && (
+                                    <p className="text-xs text-red-400">{inlineDetectionError}</p>
+                                )}
+                            </div>
+                        ) : (
+                            /* Cloud / legacy LMStudio path */
+                            <select
+                                value={config.model || ''}
+                                onChange={(e) => onChange('model', e.target.value)}
+                                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
+                                disabled={!config.llmProvider || availableModels.length === 0 || isLoadingLMStudioModels}
+                            >
+                                {!config.model && <option value="">{t('agentConfig_llm_modelPlaceholder')}</option>}
+                                {availableModels.map((model: any) => {
+                                    const modelId = typeof model === 'string' ? model : model.id;
+                                    const modelName = typeof model === 'string' ? model : model.name;
+                                    const isDynamic = typeof model === 'object' && model.isDynamic;
+                                    return (
+                                        <option key={modelId} value={modelId}>
+                                            {modelName} {!isDynamic && config.llmProvider === LLMProvider.LMStudio ? '(Statique)' : ''}
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                        )}
                     </div>
                 </div>
 
@@ -765,7 +885,7 @@ const ConfigurationTab: React.FC<{
                 </div>
             </div>
 
-            {/* Jalon 4: LMStudio Detection Panel pour Config Modal */}
+            {/* LMStudio Auto-Detection Panel — legacy mode only */}
             {config.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint && (
                 <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
                     <h3 className="text-lg font-semibold text-white mb-4">🤖 Détection LMStudio</h3>
@@ -900,7 +1020,7 @@ const ConfigurationTab: React.FC<{
                                         {cap === LLMCapability.OutputFormatting && '📋 JSON'}
                                         {cap === LLMCapability.Embedding && '🧮 Embed'}
                                         {cap === LLMCapability.ImageGeneration && '🎨 Images'}
-                                        {cap === LLMCapability.OCR && '🎵 Audio'}
+                                        {cap === LLMCapability.OCR && '🔍 OCR'}
                                         {!Object.values(LLMCapability).includes(cap) && cap}
                                     </span>
                                 </div>
@@ -990,10 +1110,11 @@ const HistoryTab: React.FC<{
 }> = ({ config, onChange, llmConfigs, t }) => {
     const availableProviders = llmConfigs.filter(c => c.enabled).map(c => c.provider);
 
-    // Jalon 5: State pour modèles dynamiques LMStudio dans HistoryTab
     const [lmStudioDynamicModelsHistory, setLmStudioDynamicModelsHistory] = useState<any[]>([]);
     const [isLoadingLMStudioModelsHistory, setIsLoadingLMStudioModelsHistory] = useState(false);
-    const lmStudioEndpoint = llmConfigs.find(c => c.provider === LLMProvider.LMStudio)?.apiKey;
+    // LMStudio uses localEndpoint (plaintext URL); apiKey fallback for legacy records
+    const lmStudioHistoryConfig = llmConfigs.find(c => c.provider === LLMProvider.LMStudio);
+    const lmStudioEndpoint = lmStudioHistoryConfig?.localEndpoint || lmStudioHistoryConfig?.apiKey;
 
     // Fetch modèles LMStudio si history provider est LMStudio
     useEffect(() => {
@@ -1011,7 +1132,6 @@ const HistoryTab: React.FC<{
     const availableModels = useMemo(() => {
         if (!config.historyConfig?.llmProvider) return [];
 
-        // Jalon 5: Utiliser modèles dynamiques pour LMStudio
         if (config.historyConfig.llmProvider === LLMProvider.LMStudio && lmStudioDynamicModelsHistory.length > 0) {
             return lmStudioDynamicModelsHistory;
         }
@@ -1023,7 +1143,6 @@ const HistoryTab: React.FC<{
     const handleProviderChange = (provider: LLMProvider) => {
         let models: any[] = [];
 
-        // Jalon 5: Support modèles dynamiques LMStudio
         if (provider === LLMProvider.LMStudio && lmStudioDynamicModelsHistory.length > 0) {
             models = lmStudioDynamicModelsHistory;
         } else {

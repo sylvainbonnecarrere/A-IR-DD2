@@ -153,7 +153,7 @@ export const defaultPersistenceConfig: PersistenceConfig = {
   saveHistorySummary: false,
   saveLinks: false,
   saveTasks: false,
-  saveMedia: false,               // ⭐ Désactivé par défaut
+  saveMedia: false,               // Disabled by default
   mediaStorage: 'db'
 };
 
@@ -168,8 +168,8 @@ export interface Agent {
   historyConfig?: HistoryConfig;
   tools?: Tool[];
   outputConfig?: OutputConfig;
-  persistenceConfig?: PersistenceConfig; // ⭐ NEW: Configuration de persistance
-  localLLMProfileId?: string;            // ⭐ NEW: Only set when llmProvider === LLMProvider.LMStudio
+  persistenceConfig?: PersistenceConfig;
+  localLLMProfileId?: string;            // Only set when llmProvider === LLMProvider.LMStudio
   // V2 Governance: Robot creator validation
   creator_id: RobotId;
   created_at: string; // ISO timestamp
@@ -188,6 +188,7 @@ export interface LocalLLMProfile {
   endpoint: string;
   capabilities: { [key in LLMCapability]?: boolean };
   enabled: boolean;
+  detectedModel?: string;  // Model ID returned by last successful capability detection
   createdAt?: string;
   updatedAt?: string;
 }
@@ -240,13 +241,12 @@ export interface EventPrototype {
 export interface AgentInstance {
   id: string; // ID unique de l'instance
   prototypeId: string; // Référence vers l'Agent prototype
-  workflowId?: string; // ⭐ NOUVEAU: ID du workflow contenant cette instance (pour persistance journal)
+  workflowId?: string; // Workflow ID containing this instance (for journal persistence)
   name: string; // Peut être différent du prototype (personnalisation)
   position: { x: number; y: number };
   isMinimized: boolean;
   isMaximized: boolean; // Mode agrandissement plein écran workflow
   
-  // ⭐ FIX QA: Configuration de persistance au niveau de l'instance
   persistenceConfig?: PersistenceConfig;
 
   // 🆕 Configuration enrichie (clone du prototype au moment de l'instanciation)
@@ -261,6 +261,7 @@ export interface AgentInstance {
     outputConfig?: OutputConfig;
     capabilities?: LLMCapability[];
     historyConfig?: HistoryConfig;
+    localLLMProfileId?: string;  // Which local LLM profile is used for this instance
 
     // Métadonnées d'instance
     position: { x: number; y: number };
@@ -286,7 +287,7 @@ export interface ToolCall {
 }
 
 
-// LMStudio Dynamic Route Detection (Jalon 1)
+// LMStudio Dynamic Route Detection
 export interface LMStudioRoutes {
   models: boolean;              // GET /v1/models
   chatCompletions: boolean;     // POST /v1/chat/completions
@@ -308,7 +309,7 @@ export interface ChatMessage {
   id: string;
   sender: 'user' | 'agent' | 'tool' | 'tool_result';
   text: string;
-  timestamp: Date;  // ⭐ ÉTAPE 3: Pour la persistence et la déduplication
+  timestamp: Date;  // Used for persistence and deduplication
   image?: string; // base64 encoded image
   mimeType?: string;
   filename?: string;
@@ -381,9 +382,9 @@ export interface V2WorkflowNode {
   data: {
     robotId: RobotId;
     label: string;
-    agent?: Agent; // ⭐ Prototype de l'agent (pour model, systemPrompt par défaut)
-    agentInstance?: AgentInstance; // Pour les nodes agent (référence à l'instance)
-    workflowId?: string; // ⭐ NOUVEAU: ID du workflow pour persistance journal
+    agent?: Agent; // Agent prototype (default model, systemPrompt)
+    agentInstance?: AgentInstance; // Reference to the agent instance for agent nodes
+    workflowId?: string; // Workflow ID for journal persistence
     isMinimized?: boolean;
     isMaximized?: boolean; // Mode agrandissement plein écran workflow
   };
@@ -533,7 +534,7 @@ export interface WebSearchGroundingResponse {
 }
 
 // ============================================
-// LLM Config UI Types (Phase 2 - Jalon 3)
+// LLM Config UI Types
 // ============================================
 
 /**

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { z } from 'zod';
-import { LocalLLMProfile } from '../models/LocalLLMProfile.model';
+import { LocalLLMProfile, ILocalLLMProfile } from '../models/LocalLLMProfile.model';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 
@@ -11,10 +12,28 @@ const router = Router();
  */
 const profileSchema = z.object({
     name: z.string().min(1).max(100).trim(),
-    endpoint: z.string().min(1).trim(),
+    endpoint: z.string().url().trim(),
     capabilities: z.record(z.boolean()).optional().default({}),
-    enabled: z.boolean().default(true)
+    enabled: z.boolean().default(true),
+    detectedModel: z.string().trim().nullable().optional()
 });
+
+/**
+ * Serialises a Mongoose document to the API response shape.
+ * Single source of truth — avoids the same object literal in every handler.
+ */
+function toProfileDTO(p: ILocalLLMProfile) {
+    return {
+        id: p._id.toString(),
+        name: p.name,
+        endpoint: p.endpoint,
+        capabilities: p.capabilities,
+        enabled: p.enabled,
+        detectedModel: p.detectedModel ?? null,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt
+    };
+}
 
 /**
  * GET /api/local-llm-profiles
@@ -24,18 +43,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     try {
         const user = req.user as any;
         const profiles = await LocalLLMProfile.find({ userId: user.id }).sort({ name: 1 });
-
-        const result = profiles.map(p => ({
-            id: p._id.toString(),
-            name: p.name,
-            endpoint: p.endpoint,
-            capabilities: p.capabilities,
-            enabled: p.enabled,
-            createdAt: p.createdAt,
-            updatedAt: p.updatedAt
-        }));
-
-        res.json(result);
+        res.json(profiles.map(toProfileDTO));
     } catch (error) {
         console.error('[LocalLLMProfiles] GET error:', error);
         res.status(500).json({ error: 'Erreur récupération des profils LLM local' });
@@ -49,27 +57,19 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 router.post('/', requireAuth, validateRequest(profileSchema), async (req: Request, res: Response) => {
     try {
         const user = req.user as any;
-        const { name, endpoint, capabilities, enabled } = req.body;
+        const { name, endpoint, capabilities, enabled, detectedModel } = req.body;
 
         const profile = new LocalLLMProfile({
             userId: user.id,
             name,
             endpoint,
             capabilities: capabilities || {},
-            enabled: enabled !== undefined ? enabled : true
+            enabled: enabled !== undefined ? enabled : true,
+            detectedModel: detectedModel ?? null
         });
 
         await profile.save();
-
-        res.status(201).json({
-            id: profile._id.toString(),
-            name: profile.name,
-            endpoint: profile.endpoint,
-            capabilities: profile.capabilities,
-            enabled: profile.enabled,
-            createdAt: profile.createdAt,
-            updatedAt: profile.updatedAt
-        });
+        res.status(201).json(toProfileDTO(profile));
     } catch (error: any) {
         console.error('[LocalLLMProfiles] POST error:', error);
 
@@ -83,40 +83,35 @@ router.post('/', requireAuth, validateRequest(profileSchema), async (req: Reques
 
 /**
  * PUT /api/local-llm-profiles/:id
- * Update an existing profile
+ * Update an existing profile (ownership enforced via findOne)
  */
 router.put('/:id', requireAuth, validateRequest(profileSchema), async (req: Request, res: Response) => {
     try {
         const user = req.user as any;
         const { id } = req.params;
-        const { name, endpoint, capabilities, enabled } = req.body;
 
-        const profile = await LocalLLMProfile.findById(id);
-
-        if (!profile) {
-            return res.status(404).json({ error: 'Profil introuvable' });
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de profil invalide' });
         }
 
-        if (profile.userId.toString() !== user.id.toString()) {
-            return res.status(403).json({ error: 'Accès non autorisé' });
+        const { name, endpoint, capabilities, enabled, detectedModel } = req.body;
+
+        // findOne with userId prevents unauthorized access (404 instead of 403 — information hiding)
+        const profile = await LocalLLMProfile.findOne({ _id: id, userId: user.id });
+        if (!profile) {
+            return res.status(404).json({ error: 'Profil introuvable' });
         }
 
         profile.name = name;
         profile.endpoint = endpoint;
         profile.capabilities = capabilities || {};
         profile.enabled = enabled !== undefined ? enabled : true;
+        if (detectedModel !== undefined) {
+            profile.detectedModel = detectedModel ?? null;
+        }
 
         await profile.save();
-
-        res.json({
-            id: profile._id.toString(),
-            name: profile.name,
-            endpoint: profile.endpoint,
-            capabilities: profile.capabilities,
-            enabled: profile.enabled,
-            createdAt: profile.createdAt,
-            updatedAt: profile.updatedAt
-        });
+        res.json(toProfileDTO(profile));
     } catch (error: any) {
         console.error('[LocalLLMProfiles] PUT error:', error);
 
@@ -130,25 +125,24 @@ router.put('/:id', requireAuth, validateRequest(profileSchema), async (req: Requ
 
 /**
  * DELETE /api/local-llm-profiles/:id
- * Delete a profile (ownership check)
+ * Delete a profile (ownership enforced via findOne)
  */
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     try {
         const user = req.user as any;
         const { id } = req.params;
 
-        const profile = await LocalLLMProfile.findById(id);
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de profil invalide' });
+        }
 
+        // findOne with userId prevents unauthorized access (404 instead of 403 — information hiding)
+        const profile = await LocalLLMProfile.findOne({ _id: id, userId: user.id });
         if (!profile) {
             return res.status(404).json({ error: 'Profil introuvable' });
         }
 
-        if (profile.userId.toString() !== user.id.toString()) {
-            return res.status(403).json({ error: 'Accès non autorisé' });
-        }
-
         await profile.deleteOne();
-
         res.json({ message: 'Profil supprimé' });
     } catch (error) {
         console.error('[LocalLLMProfiles] DELETE error:', error);

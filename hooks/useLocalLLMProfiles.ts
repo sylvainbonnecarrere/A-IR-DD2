@@ -19,8 +19,8 @@ interface UseLocalLLMProfilesReturn {
     loading: boolean;
     error: string | null;
     loadProfiles: () => Promise<void>;
-    createProfile: (data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean }) => Promise<LocalLLMProfile>;
-    updateProfile: (id: string, data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean }) => Promise<LocalLLMProfile>;
+    createProfile: (data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }) => Promise<LocalLLMProfile>;
+    updateProfile: (id: string, data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }) => Promise<LocalLLMProfile>;
     deleteProfile: (id: string) => Promise<void>;
     clearError: () => void;
 }
@@ -38,18 +38,6 @@ export function useLocalLLMProfiles(): UseLocalLLMProfilesReturn {
         token: accessToken || undefined
     };
 
-    // Clear profiles from memory when logout happens to prevent data bleeding
-    useEffect(() => {
-        if (!isAuthenticated && profiles.length > 0) {
-            setProfiles([]);
-        }
-    }, [isAuthenticated]);
-
-    // Load profiles when auth state changes
-    useEffect(() => {
-        void loadProfiles();
-    }, [isAuthenticated, accessToken]);
-
     const loadProfiles = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -64,8 +52,20 @@ export function useLocalLLMProfiles(): UseLocalLLMProfilesReturn {
         }
     }, [isAuthenticated, accessToken]);
 
+    // Clear profiles from memory when logout happens to prevent data bleeding
+    useEffect(() => {
+        if (!isAuthenticated && profiles.length > 0) {
+            setProfiles([]);
+        }
+    }, [isAuthenticated]);
+
+    // Load profiles when auth state changes
+    useEffect(() => {
+        void loadProfiles();
+    }, [isAuthenticated, accessToken, loadProfiles]);
+
     const createProfile = useCallback(
-        async (data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean }): Promise<LocalLLMProfile> => {
+        async (data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }): Promise<LocalLLMProfile> => {
             setLoading(true);
             setError(null);
             try {
@@ -84,7 +84,7 @@ export function useLocalLLMProfiles(): UseLocalLLMProfilesReturn {
     );
 
     const updateProfile = useCallback(
-        async (id: string, data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean }): Promise<LocalLLMProfile> => {
+        async (id: string, data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }): Promise<LocalLLMProfile> => {
             setLoading(true);
             setError(null);
             try {

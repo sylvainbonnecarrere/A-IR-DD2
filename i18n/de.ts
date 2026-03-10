@@ -69,6 +69,11 @@ export default {
     agentForm_alert_nameMissing: "Bitte geben Sie einen Namen für den Agenten an.",
     agentForm_alert_invalidJson: 'Bitte korrigieren Sie die ungültigen JSON-Schemas vor dem Speichern.',
     agentForm_error_jsonNotObject: "Das JSON-Schema muss ein gültiges Objekt sein.",
+    agentForm_alert_localModelNotDetected: "Bitte erkennen Sie ein Modell für das ausgewählte lokale LLM.",
+    agentForm_localModel_notDetected: "Kein Modell erkannt",
+    agentForm_localModel_detect: "Modell erkennen",
+    agentForm_localModel_detecting: "Erkennung...",
+    agentForm_localModel_redetect: "Modell erneut erkennen",
 
     // Agent Configuration Modal (Instance Editing)
     agentConfig_title: "⚙️ Agenten-Konfiguration",

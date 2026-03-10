@@ -101,7 +101,7 @@ export async function getAllProfiles(
  * Create a new local LLM profile
  */
 export async function createProfile(
-    data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean },
+    data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null },
     options: LocalLLMProfileServiceOptions
 ): Promise<LocalLLMProfile> {
     if (options.useApi && options.token) {
@@ -109,11 +109,12 @@ export async function createProfile(
     } else {
         const profiles = getLocalProfiles();
         const newProfile: LocalLLMProfile = {
-            id: `local_${Date.now()}`,
+            id: `local_${crypto.randomUUID()}`,
             name: data.name,
             endpoint: data.endpoint,
             capabilities: (data.capabilities || {}) as LocalLLMProfile['capabilities'],
             enabled: data.enabled !== undefined ? data.enabled : true,
+            detectedModel: data.detectedModel ?? undefined,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
@@ -134,7 +135,7 @@ export async function createProfile(
  */
 export async function updateProfile(
     id: string,
-    data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean },
+    data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null },
     options: LocalLLMProfileServiceOptions
 ): Promise<LocalLLMProfile> {
     if (options.useApi && options.token) {
@@ -153,6 +154,7 @@ export async function updateProfile(
             endpoint: data.endpoint,
             capabilities: (data.capabilities || {}) as LocalLLMProfile['capabilities'],
             enabled: data.enabled !== undefined ? data.enabled : profiles[index].enabled,
+            detectedModel: data.detectedModel !== undefined ? (data.detectedModel ?? undefined) : profiles[index].detectedModel,
             updatedAt: new Date().toISOString()
         };
 

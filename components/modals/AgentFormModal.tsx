@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, Tool, OutputConfig, OutputFormat, RobotId } from '../../types';
+import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, Tool, OutputConfig, OutputFormat, RobotId, LocalLLMProfile } from '../../types';
 import { Button, Modal, ToggleSwitch } from '../UI';
-import { LLM_MODELS, LLM_MODELS_DETAILED, getModelCapabilities, getLMStudioMergedModels, invalidateLMStudioCache } from '../../llmModels';
+import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels } from '../../llmModels';
 import { CloseIcon, PlusIcon } from '../Icons';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
@@ -9,12 +9,15 @@ import { validateAgentCapabilities, type CapabilityValidationResult } from '../.
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { isLocalProvider, isLMStudio } from '../../utils/llmProviderUtils';
+import * as localLLMProfileService from '../../services/localLLMProfileService';
+import { API_BASE_URL } from '../../config/api.config';
 
 interface AgentFormModalProps {
   onClose: () => void;
   onSave: (agent: Omit<Agent, 'id'>, agentId?: string) => void;
   llmConfigs: LLMConfig[];
   existingAgent: Agent | null;
+  localLLMProfiles?: LocalLLMProfile[];
 }
 
 const defaultHistoryConfig: Omit<HistoryConfig, 'llmProvider' | 'model'> = {
@@ -82,19 +85,26 @@ const defaultOutputConfig: OutputConfig = {
 
 const outputFormats: OutputFormat[] = ['json', 'xml', 'yaml', 'shell', 'powershell', 'python', 'html', 'css', 'javascript', 'typescript', 'php', 'sql', 'mysql', 'mongodb'];
 
-export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, existingAgent }: AgentFormModalProps) => {
+export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, existingAgent, localLLMProfiles: propLocalLLMProfiles = [] }: AgentFormModalProps) => {
   const { t } = useLocalization();
-  const { user } = useAuth();
+  const { user, accessToken } = useAuth();
   const isAuthenticated = user !== null;
 
   // Use store as canonical source, fallback to props
+  // This prevents T0 blank dropdown: if store already has data (previous navigation), use it immediately
   const storeLlmConfigs = useRuntimeStore(state => state.llmConfigs);
   const llmConfigs = storeLlmConfigs?.length > 0 ? storeLlmConfigs : propLlmConfigs;
+
+  // Store-first: reads from Zustand so profiles are available at modal mount
+  // even before props are hydrated from the async fetch in useLocalLLMProfiles.
+  const storeLocalProfiles = useRuntimeStore(state => state.localLLMProfiles);
+  const localLLMProfiles = storeLocalProfiles?.length > 0 ? storeLocalProfiles : propLocalLLMProfiles;
 
   // Detect reconfiguration issues and usable providers
   const hasReconfigNeeded = llmConfigs.some(c => c.enabled && c.needsReconfig);
   const enabledAndUsable = llmConfigs.filter(c => c.enabled && !c.needsReconfig && c.apiKey);
-  const noUsableLLM = enabledAndUsable.length === 0;
+  // Local providers have no apiKey — check enabled profiles separately
+  const noUsableLLM = enabledAndUsable.length === 0 && !localLLMProfiles.some(p => p.enabled);
 
   const enabledLLMProvider = enabledAndUsable[0]?.provider || llmConfigs.find(c => c.enabled)?.provider || LLMProvider.Gemini;
 
@@ -108,11 +118,23 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     return models;
   }, [llmConfigs]);
 
+  // For new agents with only local LLMs configured, pre-select first enabled profile.
+  // Ensures the select has a matching option instead of a blank value.
+  const initialLocalProfile = !existingAgent && isLMStudio(enabledLLMProvider)
+    ? localLLMProfiles.find(p => p.enabled) ?? null
+    : null;
+
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [llmProvider, setLlmProvider] = useState<LLMProvider>(enabledLLMProvider);
   const [model, setModel] = useState<string>(() => {
+    if (existingAgent?.model) return existingAgent.model;
+    // Auto-hydrate model from pre-selected local profile's detectedModel
+    if (!existingAgent && isLMStudio(enabledLLMProvider)) {
+      const firstProfile = localLLMProfiles.find(p => p.enabled);
+      if (firstProfile?.detectedModel) return firstProfile.detectedModel;
+    }
     const availableModels = getAvailableModels(enabledLLMProvider);
     return availableModels.length > 0 ? availableModels[0] : '';
   });
@@ -151,15 +173,23 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
   const [capabilitiesExpanded, setCapabilitiesExpanded] = useState(false);
   const [lmStudioDynamicModels, setLmStudioDynamicModels] = useState<any[]>([]);
   const [isLoadingLMStudioModels, setIsLoadingLMStudioModels] = useState(false);
+  // Selected local LLM profile; pre-selected to first enabled profile for new agents
+  const [localLLMProfileId, setLocalLLMProfileId] = useState<string>(
+    existingAgent?.localLLMProfileId || initialLocalProfile?.id || ''
+  );
+  const [isDetectingLocalModel, setIsDetectingLocalModel] = useState(false);
+  const [inlineDetectionError, setInlineDetectionError] = useState<string | null>(null);
   const isEditing = !!existingAgent;
 
-  // NEW: Get LMStudio endpoint from localEndpoint field (not apiKey)
-  // Local providers store plaintext URLs, cloud providers store encrypted API keys
+  // LMStudio uses localEndpoint (plaintext URL); apiKey is kept as a fallback for legacy records
   const lmStudioConfig = llmConfigs.find(c => isLMStudio(c.provider));
-  const lmStudioEndpoint = lmStudioConfig?.localEndpoint || lmStudioConfig?.apiKey; // Fallback to apiKey for backwards compatibility
+  const lmStudioEndpoint = lmStudioConfig?.localEndpoint || lmStudioConfig?.apiKey;
+  // Stable boolean memo — avoids new array reference from .some() polluting effect deps
+  const hasEnabledLocalProfiles = useMemo(() => localLLMProfiles.some(p => p.enabled), [localLLMProfiles]);
   const { detection: lmStudioDetection, isDetecting: isDetectingLMStudio, redetect: redetectLMStudio } = useLMStudioDetection({
-    endpoint: isLMStudio(llmProvider) ? lmStudioEndpoint : undefined,
-    autoDetect: isLMStudio(llmProvider) && !!lmStudioEndpoint,
+    // Legacy endpoint only in pure legacy mode (no local profiles configured at all)
+    endpoint: isLMStudio(llmProvider) && !localLLMProfileId && !hasEnabledLocalProfiles ? lmStudioEndpoint : undefined,
+    autoDetect: false, // Detection is always user-triggered (inline button for profiles, redetect for legacy)
     onSuccess: (detection) => {
       // Auto-update capabilities when detection succeeds
       setSelectedCapabilities(prev => {
@@ -174,15 +204,15 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     }
   });
 
-  // Jalon 5: Fetch dynamic LMStudio models when provider is LMStudio
+  // Fetch dynamic models for legacy LMStudio mode (no local profiles configured)
   useEffect(() => {
-    if (llmProvider === LLMProvider.LMStudio && lmStudioEndpoint) {
+    if (llmProvider === LLMProvider.LMStudio && lmStudioEndpoint && !localLLMProfileId && !hasEnabledLocalProfiles) {
       setIsLoadingLMStudioModels(true);
       getLMStudioMergedModels(lmStudioEndpoint)
         .then(models => {
           setLmStudioDynamicModels(models);
 
-          // Point 1: Auto-sélection du modèle détecté si disponible
+          // Auto-select the detected model when available
           if (lmStudioDetection?.modelId) {
             const detectedModel = models.find(m => m.id === lmStudioDetection.modelId);
             if (detectedModel) {
@@ -194,9 +224,9 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
             }
           }
 
-          // Fallback: Auto-sélectionner le premier modèle si aucun modèle n'est sélectionné
-          if (!model && models.length > 0) {
-            setModel(models[0].id);
+          // Fallback: auto-select first available model if none is currently selected
+          if (models.length > 0) {
+            setModel(currentModel => currentModel || models[0].id);
           }
         })
         .catch(error => {
@@ -206,13 +236,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     } else {
       setLmStudioDynamicModels([]);
     }
-  }, [llmProvider, lmStudioEndpoint, lmStudioDetection]);
-
-  // Helper function to convert capability strings to LLMCapability enum
-  const stringToCapability = (str: string): LLMCapability | null => {
-    const enumValue = Object.values(LLMCapability).find(v => v === str);
-    return enumValue as LLMCapability || null;
-  };
+  }, [llmProvider, localLLMProfileId, hasEnabledLocalProfiles, lmStudioEndpoint, lmStudioDetection]);
 
   // Helper function to get label from capability string
   const getCapabilityLabel = (str: string): string => {
@@ -262,14 +286,39 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       setRole(existingAgent.role);
       setSystemPrompt(existingAgent.systemPrompt);
       setLlmProvider(existingAgent.llmProvider);
-      setModel(existingAgent.model);
+      setLocalLLMProfileId(existingAgent.localLLMProfileId || '');
+      // Fall back to profile.detectedModel when the saved agent has no model stored
+      if (isLMStudio(existingAgent.llmProvider) && existingAgent.localLLMProfileId && !existingAgent.model) {
+        const profile = localLLMProfiles.find(p => p.id === existingAgent.localLLMProfileId);
+        setModel(profile?.detectedModel || '');
+      } else {
+        setModel(existingAgent.model);
+      }
       setSelectedCapabilities(existingAgent.capabilities);
       setHistoryConfig(prev => ({ ...defaultHistoryConfig, ...prev, ...(existingAgent.historyConfig || {}) }));
       setTools(existingAgent.tools || []);
       setOutputConfig(existingAgent.outputConfig || defaultOutputConfig);
     }
-  }, [isEditing, existingAgent]);
+  }, [isEditing, existingAgent, localLLMProfiles]);
 
+  // Reactive auto-assignment for new agents when localLLMProfiles loads asynchronously.
+  // useState only runs once at mount; if profiles aren't loaded yet, localLLMProfileId stays ''
+  // and the select has no matching option → blank field. This effect fixes that by assigning
+  // the first enabled profile once profiles become available.
+  useEffect(() => {
+    if (isEditing) return;                          // Edit mode: governed by isEditing useEffect
+    if (!isLMStudio(llmProvider)) return;           // Not LMStudio: no profile needed
+    if (localLLMProfileId) return;                  // Profile already assigned: nothing to do
+    const firstEnabled = localLLMProfiles.find(p => p.enabled);
+    if (!firstEnabled) return;                      // No profiles available yet
+    setLocalLLMProfileId(firstEnabled.id);
+    setModel(prev => prev || firstEnabled.detectedModel || ''); // Don't overwrite if already set
+    const profileCaps = (Object.entries(firstEnabled.capabilities) as [string, boolean][])
+      .filter(([, v]) => v === true)
+      .map(([k]) => k as LLMCapability)
+      .filter(cap => Object.values(LLMCapability).includes(cap as LLMCapability));
+    setSelectedCapabilities([...new Set([LLMCapability.Chat, ...profileCaps])]);
+  }, [hasEnabledLocalProfiles]); // Stable boolean memo — fires only when profiles go from 0→N or N→0, not on each array reference change
   // Synchronize llmProvider with available providers
   // If current provider becomes disabled, switch to first enabled provider
   useEffect(() => {
@@ -285,12 +334,6 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     // CASE 2: Current provider is NO LONGER enabled → switch to first enabled provider
     if (enabledProviders.length > 0) {
       const newProvider = enabledProviders[0];
-      console.log('[AgentFormModal] 🔄 llmProvider sync: switching provider', {
-        old: llmProvider,
-        new: newProvider,
-        enabledProviders,
-        reason: 'Current provider no longer enabled'
-      });
 
       setLlmProvider(newProvider);
 
@@ -309,34 +352,16 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       return;
     }
 
-    // CASE 3: NO providers are enabled at all → don't change, let safety layer handle
+    // CASE 3: NO providers are enabled at all → don't change, let parent component fix this
   }, [llmConfigs, isEditing, llmProvider, getAvailableModels, getAvailableCapabilities]);
 
-  /**
-   * ⭐ SAFETY LAYER 2: Reactive Recovery (fallback)
-   * 
-   * CONTEXT: App.tsx should now have reliable llmConfigs hydration
-   * This effect is a SAFETY NET only for edge cases:
-   * - Modal opens before hydration completes (shouldn't happen now)
-   * - Props change unexpectedly during lifecycle
-   * 
-   * Since App.tsx now has deterministic hydration, this is much simpler:
-   * Just ensure we're showing ENABLED providers, nothing more
-   */
+  // Validate LMStudio capability — legacy mode only (no local profiles configured).
+  // Debounced 500ms: this effect has 12 deps including all form fields (name, role, model…).
+  // Without debounce, every keystroke + React Strict Mode double-mount = rapid uncached API calls.
+  // The cleanup cancels the pending setTimeout on dep change, so only one call fires after 500ms of inactivity.
   useEffect(() => {
-    // ONLY runs if NO providers are enabled (safety check)
-    const hasEnabledProviders = llmConfigs.some(c => c.enabled);
-    
-    if (!isEditing && !hasEnabledProviders && llmConfigs.length > 0) {
-      // Safety check: no enabled providers (parent component should fix this)
-      return;
-    }
-  }, [llmConfigs, isEditing]);
-
-  // Validate LMStudio capability
-  useEffect(() => {
-    if (isLMStudio(llmProvider)) {
-      const validateLMStudio = async () => {
+    if (isLMStudio(llmProvider) && !localLLMProfileId && !hasEnabledLocalProfiles) {
+      const timeoutId = setTimeout(async () => {
         try {
           const lmStudioConfig = llmConfigs.find(c => isLMStudio(c.provider));
           const endpoint = lmStudioConfig?.localEndpoint || lmStudioConfig?.apiKey || undefined;
@@ -359,33 +384,96 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
 
           const validation = await validateAgentCapabilities(mockAgent, endpoint);
           setLmStudioValidation(validation);
-        } catch (error) {
-          console.warn('LMStudio validation failed:', error);
+        } catch (_error) {
           setLmStudioValidation(null);
         }
-      };
-
-      validateLMStudio();
+      }, 500);
+      return () => clearTimeout(timeoutId); // Cancel on dep change or cleanup (Strict Mode, unmount)
     } else {
       setLmStudioValidation(null);
     }
-  }, [llmProvider, model, selectedCapabilities, tools, outputConfig, name, role, systemPrompt, historyConfig, llmConfigs]);
+  }, [llmProvider, localLLMProfileId, hasEnabledLocalProfiles, model, selectedCapabilities, tools, outputConfig, name, role, systemPrompt, historyConfig, llmConfigs]);
 
 
   const availableCapabilities = useMemo(() => {
     return getAvailableCapabilities(llmProvider, model);
   }, [llmProvider, model, llmConfigs, lmStudioDetection, getAvailableCapabilities]);
 
-  const handleProviderChange = (provider: LLMProvider) => {
+  // Composite select value: 'local:<id>' for local profiles, provider enum for cloud
+  const providerSelectValue = isLMStudio(llmProvider) && localLLMProfileId
+    ? `local:${localLLMProfileId}`
+    : llmProvider;
+
+  const handleProviderChange = (value: string) => {
+    if (value.startsWith('local:')) {
+      const profileId = value.replace('local:', '');
+      const profile = localLLMProfiles.find(p => p.id === profileId);
+      if (profile) {
+        setLlmProvider(LLMProvider.LMStudio);
+        setLocalLLMProfileId(profileId);
+        setModel(profile.detectedModel ?? '');
+        setInlineDetectionError(null);
+        // Populate capabilities from the profile
+        const profileCaps = (Object.entries(profile.capabilities) as [string, boolean][])
+          .filter(([, v]) => v === true)
+          .map(([k]) => k as LLMCapability)
+          .filter(cap => Object.values(LLMCapability).includes(cap as LLMCapability));
+        setSelectedCapabilities([...new Set([LLMCapability.Chat, ...profileCaps])]);
+        setCapabilitiesExpanded(false);
+      }
+      return;
+    }
+    // Cloud provider path
+    const provider = value as LLMProvider;
     setLlmProvider(provider);
+    setLocalLLMProfileId('');
+    setInlineDetectionError(null);
     const availableModels = getAvailableModels(provider);
     const firstModel = availableModels.length > 0 ? availableModels[0] : '';
     setModel(firstModel);
-
     const newCapabilities = getAvailableCapabilities(provider, firstModel);
     setSelectedCapabilities(prev => prev.filter(cap => newCapabilities.includes(cap)));
+    setCapabilitiesExpanded(false);
+  };
 
-    setCapabilitiesExpanded(false); // Reset accordion when changing provider
+  // Inline model detection for local profiles
+  const handleInlineDetect = async () => {
+    const profile = localLLMProfiles.find(p => p.id === localLLMProfileId);
+    if (!profile) return;
+    setIsDetectingLocalModel(true);
+    setInlineDetectionError(null);
+    try {
+      const apiUrl = `${API_BASE_URL}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(profile.endpoint)}`;
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(15000)
+      });
+      const result = await response.json();
+      if (!result.healthy || !result.modelId) {
+        setInlineDetectionError(result.error || t('agentForm_localModel_notDetected'));
+        return;
+      }
+      setModel(result.modelId);
+      // Persist detectedModel to the profile (fire-and-forget)
+      if (accessToken) {
+        void localLLMProfileService.updateProfile(
+          localLLMProfileId,
+          {
+            name: profile.name,
+            endpoint: profile.endpoint,
+            capabilities: profile.capabilities as Record<string, boolean>,
+            enabled: profile.enabled,
+            detectedModel: result.modelId
+          },
+          { useApi: true, token: accessToken }
+        );
+      }
+    } catch (err: any) {
+      setInlineDetectionError(err.message || t('agentForm_localModel_notDetected'));
+    } finally {
+      setIsDetectingLocalModel(false);
+    }
   };
 
   const handleHistoryProviderChange = (provider: LLMProvider) => {
@@ -473,6 +561,11 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       setFormError(t('agentForm_alert_invalidJson'));
       return;
     }
+    // Guard: local profile selected but no model detected yet
+    if (isLMStudio(llmProvider) && localLLMProfileId && !model) {
+      setFormError(t('agentForm_alert_localModelNotDetected'));
+      return;
+    }
 
     // Ensure Chat is always included
     const capabilitiesForSave = selectedCapabilities.includes(LLMCapability.Chat)
@@ -489,7 +582,8 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       historyConfig,
       tools,
       outputConfig,
-      creator_id: existingAgent?.creator_id || RobotId.Archi, // Default to Archi for new agents
+      localLLMProfileId: isLMStudio(llmProvider) ? (localLLMProfileId || undefined) : undefined,
+      creator_id: existingAgent?.creator_id || RobotId.Archi,
       created_at: existingAgent?.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString()
     }, existingAgent?.id);
@@ -522,7 +616,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
                 <input id="agent-role" type="text" value={role} onChange={(e) => setRole(e.target.value)} className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder={t('agentForm_rolePlaceholder')} />
               </div>
 
-              {/* ⭐ Warning: displayed ABOVE the LLM/Model row */}
+              {/* Reconfig warning displayed above the LLM/Model row */}
               {hasReconfigNeeded && (
                 <div className="p-2 bg-amber-900/40 border border-amber-500/50 rounded-md text-amber-200 text-xs leading-relaxed">
                   ⚠️ Vos clés API doivent être reconfigurées (problème de chiffrement). Rendez-vous dans les paramètres LLM pour les re-saisir.
@@ -537,8 +631,20 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="llm-provider" className="block text-sm font-medium text-gray-300 mb-1">{t('agentForm_llmLabel')}</label>
-                  <select id="llm-provider" value={llmProvider} onChange={(e) => handleProviderChange(e.target.value as LLMProvider)} className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    {llmConfigs.filter(c => c.enabled).map(({ provider }) => <option key={provider} value={provider}>{provider}</option>)}
+                  <select
+                    id="llm-provider"
+                    value={providerSelectValue}
+                    onChange={(e) => handleProviderChange(e.target.value)}
+                    className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {/* Cloud providers (skip LMStudio single entry) */}
+                    {llmConfigs.filter(c => c.enabled && !isLocalProvider(c.provider)).map(({ provider }) => (
+                      <option key={provider} value={provider}>{provider}</option>
+                    ))}
+                    {/* Local LLM profiles: one option per enabled profile */}
+                    {localLLMProfiles.filter(p => p.enabled).map(profile => (
+                      <option key={profile.id} value={`local:${profile.id}`}>{profile.name}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -548,17 +654,68 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
                       <span className="ml-2 text-xs text-cyan-400">⌛ Chargement modèles...</span>
                     )}
                   </label>
-                  <select id="llm-model" value={model} onChange={(e) => setModel(e.target.value)} className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" disabled={isLoadingLMStudioModels}>
-                    {isLMStudio(llmProvider) && lmStudioDynamicModels.length > 0 ? (
-                      lmStudioDynamicModels.map((modelDef) => (
-                        <option key={modelDef.id} value={modelDef.id}>
-                          {modelDef.name} {modelDef.isDynamic ? '' : '(Statique)'}
-                        </option>
-                      ))
-                    ) : (
-                      getAvailableModels(llmProvider).map((modelName) => <option key={modelName} value={modelName}>{modelName}</option>)
-                    )}
-                  </select>
+                  {/* Local profile selected: show detectedModel or inline detection button */}
+                  {isLMStudio(llmProvider) && localLLMProfileId ? (
+                    <div className="space-y-2">
+                      {model ? (
+                        <div className="w-full p-2 bg-gray-700 border border-green-600/50 rounded-md text-green-400 text-sm flex items-center gap-2">
+                          ✅ <span className="font-mono truncate">{model}</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="w-full p-2 bg-gray-900/50 border border-red-500/50 rounded-md text-red-400 text-xs">
+                            {t('agentForm_localModel_notDetected')}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleInlineDetect}
+                            disabled={isDetectingLocalModel}
+                            className="w-full px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                            style={{
+                              background: isDetectingLocalModel
+                                ? 'linear-gradient(90deg, rgba(6,182,212,0.3), rgba(59,130,246,0.3))'
+                                : 'linear-gradient(90deg, #06b6d4, #3b82f6)'
+                            }}
+                          >
+                            {isDetectingLocalModel ? `🔍 ${t('agentForm_localModel_detecting')}` : `🔍 ${t('agentForm_localModel_detect')}`}
+                          </button>
+                        </div>
+                      )}
+                      {/* Re-detect button when model exists */}
+                      {model && (
+                        <button
+                          type="button"
+                          onClick={handleInlineDetect}
+                          disabled={isDetectingLocalModel}
+                          className="text-xs text-cyan-400 hover:text-cyan-300 underline disabled:opacity-60"
+                        >
+                          {isDetectingLocalModel ? t('agentForm_localModel_detecting') : t('agentForm_localModel_redetect')}
+                        </button>
+                      )}
+                      {inlineDetectionError && (
+                        <p className="text-xs text-red-400">{inlineDetectionError}</p>
+                      )}
+                    </div>
+                  ) : (
+                    /* Cloud / legacy LMStudio path */
+                    <select
+                      id="llm-model"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      disabled={isLoadingLMStudioModels}
+                    >
+                      {isLMStudio(llmProvider) && lmStudioDynamicModels.length > 0 ? (
+                        lmStudioDynamicModels.map((modelDef) => (
+                          <option key={modelDef.id} value={modelDef.id}>
+                            {modelDef.name} {modelDef.isDynamic ? '' : '(Statique)'}
+                          </option>
+                        ))
+                      ) : (
+                        getAvailableModels(llmProvider).map((modelName) => <option key={modelName} value={modelName}>{modelName}</option>)
+                      )}
+                    </select>
+                  )}
                 </div>
               </div>
 
@@ -632,7 +789,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
                 </div>
               )}
 
-              {/* Jalon 3: LMStudio Auto-Detection Panel (HUD Style) */}
+              {/* LMStudio Auto-Detection Panel (HUD Style) — legacy mode only */}
               {llmProvider === LLMProvider.LMStudio && lmStudioEndpoint && (
                 <div className="relative p-4 rounded-lg overflow-hidden" style={{
                   background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%)',
@@ -712,7 +869,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
                             {cap === LLMCapability.OutputFormatting && '📋 JSON Mode'}
                             {cap === LLMCapability.Embedding && '🧮 Embeddings'}
                             {cap === LLMCapability.ImageGeneration && '🎨 Images'}
-                            {cap === LLMCapability.OCR && '🎵 Audio'}
+                            {cap === LLMCapability.OCR && '🔍 OCR'}
                             {cap === LLMCapability.CodeSpecialization && '💻 Code'}
                             {cap === LLMCapability.ExtendedThinking && '💭 Extended Thinking'}
                             {cap === LLMCapability.PDFSupport && '📄 PDF Support'}
