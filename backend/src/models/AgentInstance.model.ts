@@ -123,7 +123,13 @@ export interface IAgentInstance extends Document {
     llmModel: string;
     capabilities: string[];
     historyConfig?: object;
-    tools?: object[];
+    // ⭐ Tools V2: références vers user_functions + héritage prototype
+    tools?: mongoose.Types.ObjectId[];   // Références vers user_functions._id
+    legacyTools?: object[];              // Ancien format inline (migration rétrocompat)
+    functionInheritance?: {
+        inheritFromPrototype: boolean;   // true par défaut
+        overrideFunctionIds?: string[]; // Si inheritFromPrototype = false
+    };
     outputConfig?: object;
     robotId: string;
 
@@ -214,7 +220,19 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         type: String
     }],
     historyConfig: Schema.Types.Mixed,
-    tools: [Schema.Types.Mixed],
+    // ⭐ Tools V2: tableau de références ObjectId vers user_functions
+    tools: [{
+        type: Schema.Types.ObjectId,
+        ref: 'UserFunction'
+    }],
+    // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)
+    legacyTools: [Schema.Types.Mixed],
+    // ⭐ Tools V2: configuration d'héritage des fonctions depuis le prototype
+    functionInheritance: {
+        inheritFromPrototype: { type: Boolean, default: true },
+        overrideFunctionIds: [{ type: String }],
+        _id: false
+    },
     outputConfig: Schema.Types.Mixed,
     robotId: {
         type: String,

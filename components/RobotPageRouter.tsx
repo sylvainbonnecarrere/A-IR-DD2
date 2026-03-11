@@ -6,6 +6,7 @@ import { ComConnectionsPage } from './ComConnectionsPage';
 import { ComDatabasesPage } from './ComDatabasesPage';
 import { ComApiPage } from './ComApiPage';
 import { PhilDataPage } from './PhilDataPage';
+import { PhilFunctionsPage } from './PhilFunctionsPage';
 import { TimEventsPage } from './TimEventsPage';
 import BosWorkflowManagementPage from './BosWorkflowManagementPage';
 import { useLocalization } from '../hooks/useLocalization';
@@ -231,6 +232,10 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
 
   if (currentPath.startsWith('/com')) {
     return <ComApiPage />;
+  }
+
+  if (currentPath.startsWith('/phil/functions')) {
+    return <PhilFunctionsPage />;
   }
 
   if (currentPath.startsWith('/phil')) {

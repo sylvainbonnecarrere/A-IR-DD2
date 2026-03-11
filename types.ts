@@ -167,6 +167,7 @@ export interface Agent {
   capabilities: LLMCapability[];
   historyConfig?: HistoryConfig;
   tools?: Tool[];
+  functionIds?: string[];               // V2: ObjectId refs to UserFunction registry
   outputConfig?: OutputConfig;
   persistenceConfig?: PersistenceConfig;
   localLLMProfileId?: string;            // Only set when llmProvider === LLMProvider.LMStudio
@@ -262,6 +263,12 @@ export interface AgentInstance {
     capabilities?: LLMCapability[];
     historyConfig?: HistoryConfig;
     localLLMProfileId?: string;  // Which local LLM profile is used for this instance
+
+    // V2: Function Inheritance (J6)
+    functionInheritance?: {
+      inheritFromPrototype: boolean;
+      overrideFunctionIds?: string[];
+    };
 
     // Métadonnées d'instance
     position: { x: number; y: number };

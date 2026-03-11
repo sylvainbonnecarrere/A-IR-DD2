@@ -35,6 +35,7 @@ export function transformAgentInstanceForFrontend(instance: any) {
         tools,
         historyConfig,
         outputConfig,
+        functionInheritance,
         robotId,
         position,
         ...rest
@@ -76,7 +77,8 @@ export function transformAgentInstanceForFrontend(instance: any) {
             tools: Array.isArray(tools) ? tools : [],
             historyConfig: historyConfig || {},
             outputConfig: outputConfig || {},
-            position: position || { x: 0, y: 0 }
+            position: position || { x: 0, y: 0 },
+            functionInheritance: functionInheritance || { inheritFromPrototype: true, overrideFunctionIds: [] }
         },
         ...remaining
     };

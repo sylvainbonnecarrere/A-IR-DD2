@@ -22,6 +22,8 @@ import llmProxyRoutes from './routes/llm-proxy.routes';
 import userSettingsRoutes from './routes/user-settings.routes';
 import userWorkspaceRoutes from './routes/user-workspace.routes';
 import mediaRoutes from './routes/media.routes';
+import functionsRoutes from './routes/functions.routes';
+import sandboxRoutes from './routes/sandbox.routes';
 import { initializeDatabase } from './services/databaseInit';
 
 // SOLID: Valider la configuration au démarrage (fail-fast pattern)
@@ -117,6 +119,10 @@ app.use('/api/user', userWorkspaceRoutes);
 
 // ⭐ NOUVEAU: Routes média (stockage images, fichiers générés par agents)
 app.use('/api/media', mediaRoutes);
+
+// ⭐ Tools V2 — Bibliothèque de fonctions personnalisées (Phil Robot)
+app.use('/api/functions', functionsRoutes);
+app.use('/api/sandbox', sandboxRoutes);
 
 // Routes proxy LMStudio (legacy)
 app.use('/api/lmstudio', lmstudioRoutes);
