@@ -1,0 +1,82 @@
+/**
+ * Routes API — Sandbox d'exécution des fonctions (Tools V2)
+ *
+ * ENDPOINTS :
+ *   POST /api/sandbox/run     — Exécute une fonction avec des paramètres de test
+ *   POST /api/sandbox/check   — Vérifie la syntaxe d'un snippet de code (dry-run)
+ *
+ * Sécurité :
+ *   - requireAuth requis sur toutes les routes
+ *   - Timeout global (15s Python / 10s TypeScript)
+ *   - Validation Zod stricte des inputs
+ *   - Rate-limit (10 req/min par utilisateur — via rateLimiter middleware)
+ */
+
+import { Router } from 'express';
+import { z } from 'zod';
+import { requireAuth } from '../middleware/auth.middleware';
+import { validateRequest } from '../middleware/validation.middleware';
+import { SandboxService } from '../services/sandbox.service';
+import { IUser } from '../models/User.model';
+
+const router = Router();
+const sandboxService = new SandboxService();
+
+// ─── Schémas de Validation ────────────────────────────────────────────────────
+
+const runFunctionSchema = z.object({
+    functionId: z
+        .string()
+        .regex(/^[a-f\d]{24}$/i, 'functionId doit être un ObjectId MongoDB valide'),
+    testArgs: z
+        .record(z.unknown())
+        .optional()
+        .default({})
+});
+
+const checkSyntaxSchema = z.object({
+    language: z.enum(['python', 'typescript']),
+    code: z
+        .string()
+        .min(1, 'Le code ne peut pas être vide')
+        .max(50_000, 'Le code dépasse la limite de 50 000 caractères')
+});
+
+// ─── POST /api/sandbox/run ────────────────────────────────────────────────────
+router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req, res) => {
+    try {
+        const user = req.user as IUser;
+        const { functionId, testArgs } = req.body;
+
+        const result = await sandboxService.runFunction(functionId, user.id, testArgs);
+        res.json(result);
+    } catch (error: any) {
+        console.error('[SandboxRoute] POST /run error:', error);
+
+        if (error.message?.includes('introuvable') || error.message?.includes('not found')) {
+            return res.status(404).json({ error: error.message });
+        }
+        if (error.message?.includes('désactivée') || error.message?.includes('disabled')) {
+            return res.status(403).json({ error: error.message });
+        }
+        if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
+            return res.status(408).json({ error: 'Timeout : la fonction a dépassé le délai d\'exécution autorisé' });
+        }
+
+        res.status(500).json({ error: 'Erreur lors de l\'exécution dans le sandbox' });
+    }
+});
+
+// ─── POST /api/sandbox/check ──────────────────────────────────────────────────
+router.post('/check', requireAuth, validateRequest(checkSyntaxSchema), async (req, res) => {
+    try {
+        const { language, code } = req.body;
+        const result = await sandboxService.checkSyntax(language, code);
+        res.json(result);
+    } catch (error) {
+        console.error('[SandboxRoute] POST /check error:', error);
+        res.status(500).json({ error: 'Erreur lors de la vérification syntaxique' });
+    }
+});
+
+export default router;

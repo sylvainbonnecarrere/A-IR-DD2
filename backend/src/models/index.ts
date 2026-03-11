@@ -80,6 +80,13 @@ export { AgentTemplate } from './AgentTemplate.model';
 export type { IAgentTemplate, ITemplate } from './AgentTemplate.model';
 
 // ============================================
+// MODÈLES TOOLS V2
+// ============================================
+
+export { UserFunction } from './UserFunction.model';
+export type { IUserFunction, FunctionLanguage, FunctionOrigin } from './UserFunction.model';
+
+// ============================================
 // MODÈLES CONFIGURATION LLM
 // ============================================
 

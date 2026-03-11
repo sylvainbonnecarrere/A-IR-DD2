@@ -55,7 +55,13 @@ const createAgentInstanceSchema = z.object({
     }),
     isMinimized: z.boolean().default(false),
     isMaximized: z.boolean().default(false),
-    zIndex: z.number().default(0)
+    zIndex: z.number().default(0),
+
+    // ⭐ J6: functionInheritance — héritage des fonctions depuis le prototype
+    functionInheritance: z.object({
+        inheritFromPrototype: z.boolean(),
+        overrideFunctionIds: z.array(z.string()).optional()
+    }).optional()
 });
 
 const updateAgentInstanceSchema = createAgentInstanceSchema.partial();
@@ -280,6 +286,12 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
             // persistenceConfig avec overrides
             persistenceConfig: finalPersistenceConfig,
 
+            // ⭐ J6: functionInheritance — hériter les fonctions du prototype par défaut
+            functionInheritance: {
+                inheritFromPrototype: true,
+                overrideFunctionIds: []
+            },
+
             // initialisation contenu et métriques
             content: [],
             metrics: {
@@ -415,6 +427,10 @@ router.put('/:id',
                 }
                 if (configuration_json.outputConfig !== undefined) {
                     instance.outputConfig = configuration_json.outputConfig;
+                }
+                // J6: Function Inheritance
+                if (configuration_json.functionInheritance !== undefined) {
+                    instance.functionInheritance = configuration_json.functionInheritance;
                 }
                 
                 // PRESERVE RUNTIME DATA: Never overwrite logs, errors, tasks, links from frontend

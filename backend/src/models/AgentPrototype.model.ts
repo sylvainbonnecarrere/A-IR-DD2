@@ -33,7 +33,9 @@ export interface IAgentPrototype extends Document {
     llmModel: string;
     capabilities: string[];
     historyConfig?: object;
-    tools?: object[];
+    // ⭐ Tools V2: Références vers user_functions (rétrocompat : legacyTools conservé)
+    tools?: mongoose.Types.ObjectId[];     // Références vers user_functions._id
+    legacyTools?: object[];               // Ancien format inline (migration rétrocompat)
     outputConfig?: object;
     robotId: string;
     isPrototype: true;
@@ -102,7 +104,13 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
         type: String
     }],
     historyConfig: Schema.Types.Mixed,
-    tools: [Schema.Types.Mixed],
+    // ⭐ Tools V2: tableau de références ObjectId vers user_functions
+    tools: [{
+        type: Schema.Types.ObjectId,
+        ref: 'UserFunction'
+    }],
+    // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)
+    legacyTools: [Schema.Types.Mixed],
     outputConfig: Schema.Types.Mixed,
     robotId: {
         type: String,

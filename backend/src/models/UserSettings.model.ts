@@ -27,6 +27,14 @@ export interface UserPreferences {
     language: 'fr' | 'en' | 'de' | 'es' | 'pt';
     theme?: 'dark' | 'light';
     saveMode?: 'auto' | 'manual';
+    // ⭐ Tools V2: préférences agent codeur (page Phil/Functions)
+    codingAgent?: {
+        llmProvider?: string;
+        llmModel?: string;
+        speciality?: 'typescript' | 'python';
+        tsCodingSystemPrompt?: string;
+        pyCodingSystemPrompt?: string;
+    };
 }
 
 /**
@@ -38,6 +46,13 @@ export interface IUserSettings extends Document {
 
     // User Preferences only
     preferences: UserPreferences;
+
+    // ⭐ Tools V2: chemins filesystem des fonctions custom par workflow
+    functionPaths?: {
+        workflowId: string;
+        pythonPath: string;  // ex: "users/{userId}/{workflowId}/functions"
+        tsPath: string;      // ex: "users_functions/{userId}/{workflowId}"
+    }[];
 
     // Sync tracking
     lastSync?: Date;
@@ -81,6 +96,14 @@ const userSettingsSchema = new Schema(
             type: Date,
             default: null
         },
+
+        // ⭐ Tools V2: mapping workflowId -> chemins filesystem (Open/Closed Pattern)
+        functionPaths: [{
+            workflowId: { type: String, required: true },
+            pythonPath: { type: String, required: true },
+            tsPath: { type: String, required: true },
+            _id: false
+        }],
 
         // Versioning for conflict resolution
         version: {
