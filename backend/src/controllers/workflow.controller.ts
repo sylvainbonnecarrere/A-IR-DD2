@@ -27,6 +27,7 @@ import {
     AgentInstanceConfiguration
 } from '../types/persistence';
 import { IUser } from '../models/User.model';
+import { CanonicalRobotIdEnum, DEFAULT_ROBOT_ID } from '../types/robotIds';
 
 // ============================================
 // SCHÉMAS DE VALIDATION ZOD
@@ -79,7 +80,7 @@ const CreateInstanceBodySchema = z.object({
         name: z.string().min(1).max(100),
         role: z.string().min(1).max(200),
         prototypeId: z.string().optional(),
-        robotId: z.enum(['AR_001', 'BOS_001', 'COM_001', 'PHIL_001', 'TIM_001']).default('AR_001'),
+        robotId: CanonicalRobotIdEnum.default(DEFAULT_ROBOT_ID),
         configuration: AgentConfigurationSchema
     }),
     persistenceOptions: PersistenceOptionsSchema.optional(),

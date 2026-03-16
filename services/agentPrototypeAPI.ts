@@ -43,7 +43,9 @@ function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string,
     llmModel: agentData.model || '', // Frontend uses 'model', backend expects 'llmModel'
     capabilities: agentData.capabilities?.map(c => String(c)) || [],
     historyConfig: agentData.historyConfig || undefined,
-    tools: agentData.tools || undefined,
+    // C3 FIX: Envoyer functionIds (V2) au lieu de tools (legacy)
+    // tools legacy omis intentionnellement — le backend les stocke en legacyTools
+    functionIds: agentData.functionIds?.length ? agentData.functionIds : undefined,
     outputConfig: agentData.outputConfig || undefined,
     robotId: robotId // Frontend uses 'creator_id', backend expects 'robotId'
   };
@@ -76,7 +78,10 @@ export function mapAPIResponseToAgent(apiData: any): Agent {
     model: apiData.llmModel || '', // Backend uses 'llmModel', frontend expects 'model'
     capabilities: apiData.capabilities || [],
     historyConfig: apiData.historyConfig,
-    tools: apiData.tools,
+    tools: apiData.legacyTools || undefined, // legacy tools (non-ObjectId objects)
+    // C3/C4/C5 FIX: mapper functionIds depuis la réponse API
+    // apiData.functionIds est ajouté par les handlers backend (tools.map(id.toString()))
+    functionIds: apiData.functionIds || (apiData.tools || []).map((id: any) => id.toString()).filter(Boolean) || [],
     outputConfig: apiData.outputConfig,
     creator_id: apiData.robotId, // Backend uses 'robotId', frontend expects 'creator_id'
     created_at: apiData.createdAt || new Date().toISOString(),
@@ -155,6 +160,7 @@ export async function updateAgentPrototype(
     if (agentData.capabilities !== undefined) payload.capabilities = agentData.capabilities.map(c => String(c));
     if (agentData.historyConfig !== undefined) payload.historyConfig = agentData.historyConfig;
     if (agentData.tools !== undefined) payload.tools = agentData.tools;
+    if (agentData.functionIds !== undefined) payload.functionIds = agentData.functionIds; // C3 FIX
     if (agentData.outputConfig !== undefined) payload.outputConfig = agentData.outputConfig;
     if (agentData.localLLMProfileId !== undefined) payload.localLLMProfileId = agentData.localLLMProfileId;
     if (robotId) payload.robotId = robotId;

@@ -24,7 +24,7 @@ interface NativeFunctionSeed {
     dependencies: string[];
     isEnabled: boolean;
     isReadonly: boolean;
-    version: string;
+    version: number;
     tags: string[];
 }
 
@@ -62,7 +62,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: [],
         isEnabled: true,
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['agent', 'orchestration', 'delegation']
     },
 
@@ -100,7 +100,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: [],
         isEnabled: false, // SÉCURITÉ: désactivé par défaut
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['shell', 'bash', 'system', 'sandbox', 'dangerous']
     },
 
@@ -137,7 +137,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: [],
         isEnabled: true,
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['file', 'edit', 'write', 'workspace']
     },
 
@@ -185,7 +185,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: [],
         isEnabled: true,
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['file', 'directory', 'list', 'workspace']
     },
 
@@ -232,7 +232,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: [],
         isEnabled: true,
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['file', 'edit', 'batch', 'workspace']
     },
 
@@ -270,7 +270,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: [],
         isEnabled: true,
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['file', 'read', 'workspace']
     },
 
@@ -324,7 +324,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: [],
         isEnabled: true,
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['todo', 'tasks', 'planning']
     },
 
@@ -373,7 +373,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: [],
         isEnabled: true,
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['todo', 'tasks', 'planning', 'write']
     },
 
@@ -414,7 +414,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: ['beautifulsoup4', 'requests', 'lxml'],
         isEnabled: true,
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['web', 'fetch', 'http', 'scraping']
     },
 
@@ -462,7 +462,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: ['duckduckgo-search'],
         isEnabled: true,
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['web', 'search', 'internet', 'research']
     },
 
@@ -501,7 +501,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         dependencies: [],
         isEnabled: true,
         isReadonly: true,
-        version: '1.0.0',
+        version: 1,
         tags: ['file', 'write', 'create', 'workspace']
     }
 ];

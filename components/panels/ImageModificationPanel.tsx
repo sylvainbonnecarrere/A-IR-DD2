@@ -32,6 +32,9 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
     // Use agent from editingImageInfo if available (fresh from V2AgentNode)
     // Otherwise fallback to lookup from workflowNodes
     const agent = editingImageInfo?.agent || workflowNodes.find(n => n.id === editingImageInfo?.nodeId)?.agent;
+    // ✅ SAFE: find(provider) is correct for cloud-only panels (image editing = Gemini/OpenAI only).
+    // Cloud providers have exactly ONE LLMConfig per provider type → no cross-agent contamination possible.
+    // ⚠️ NEVER apply this pattern to local LLM calls (Ollama/LMStudio) — use localLLMProfileId instead.
     const agentConfig = llmConfigs.find(c => c.provider === agent?.llmProvider);
     
     useEffect(() => {
@@ -102,10 +105,11 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
                 timestamp: new Date()
             }];
 
+            // ⭐ FIX: Use agent.model (not hardcoded 'gemini-2.5-flash') — model must match agent config
             const { text } = await llmService.generateContent(
                 agentConfig.provider,
                 agentConfig.apiKey,
-                'gemini-2.5-flash',
+                agent!.model,
                 "Vous êtes un assistant IA qui décrit les modifications d'images.",
                 descriptionHistory
             );

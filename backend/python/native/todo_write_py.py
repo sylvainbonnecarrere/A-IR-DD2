@@ -5,7 +5,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
-from ..core.function_context import FunctionContext
+from core.function_context import FunctionContext
 
 TODO_FILE = ".todo.json"
 

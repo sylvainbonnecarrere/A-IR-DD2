@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import mongoose from 'mongoose';
 import { AgentPrototype } from '../models/AgentPrototype.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
+import { CanonicalRobotIdEnum } from '../types/robotIds';
 
 const router = Router();
 
@@ -18,9 +20,10 @@ const createAgentPrototypeSchema = z.object({
     llmModel: z.string(),
     capabilities: z.array(z.string()).default([]),
     historyConfig: z.object({}).passthrough().optional(),
-    tools: z.array(z.object({}).passthrough()).optional(),
+    tools: z.array(z.object({}).passthrough()).optional(),       // legacy (rétrocompat)
+    functionIds: z.array(z.string()).optional(),                 // V2 — références ObjectId UserFunction
     outputConfig: z.object({}).passthrough().optional(),
-    robotId: z.enum(['AR_001', 'BO_002', 'CO_003', 'PH_004', 'TI_005']),
+    robotId: CanonicalRobotIdEnum,
     workflowId: z.string().optional(), // ⭐ V2: Optional workflow scope
     localLLMProfileId: z.string().optional() // ⭐ NEW: Optional local LLM profile reference
 });
@@ -29,7 +32,7 @@ const updateAgentPrototypeSchema = createAgentPrototypeSchema.partial();
 
 // ⭐ SECURITY: Query parameter validation schemas
 const queryParamsSchema = z.object({
-    robotId: z.enum(['AR_001', 'BO_002', 'CO_003', 'PH_004', 'TI_005']).optional(),
+    robotId: CanonicalRobotIdEnum.optional(),
     workflowId: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid ObjectId format').optional()
 });
 
@@ -94,14 +97,27 @@ router.post('/',
         try {
             const user = req.user as IUser;
 
-            const prototype = new AgentPrototype({
-                userId: user.id,
-                ...req.body
-            });
+            // C3 FIX: Extraire functionIds et mapper vers tools (ObjectId[])
+            const { functionIds, tools, ...rest } = req.body;
+            const prototypeData: Record<string, any> = { userId: user.id, ...rest };
+
+            // V2: fonctions sélectionnées via FunctionSelector → ObjectId refs
+            if (functionIds && functionIds.length > 0) {
+                prototypeData.tools = functionIds.map((id: string) => new mongoose.Types.ObjectId(id));
+            } else if (!functionIds && tools && Array.isArray(tools)) {
+                // Rétrocompat: si tools contient des objets legacy (non-ObjectId), les mettre en legacyTools
+                prototypeData.legacyTools = tools;
+            }
+
+            const prototype = new AgentPrototype(prototypeData);
 
             await prototype.save();
 
-            res.status(201).json(prototype);
+            // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
+            const responseObj: Record<string, any> = prototype.toObject();
+            responseObj.functionIds = (prototype.tools || []).map((id: any) => id.toString());
+
+            res.status(201).json(responseObj);
         } catch (error) {
             console.error('[AgentPrototypes] POST error:', error);
             res.status(500).json({ error: 'Erreur création prototype' });
@@ -127,7 +143,7 @@ router.put('/:id',
             }
 
             // ⭐ SECURITY FIX: Whitelist allowed fields to prevent mass assignment
-            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, tools, outputConfig, robotId, workflowId, localLLMProfileId } = req.body;
+            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, tools, functionIds, outputConfig, robotId, workflowId, localLLMProfileId } = req.body;
 
             // Update only whitelisted fields (userId never modifiable)
             if (name !== undefined) prototype.name = name;
@@ -137,7 +153,13 @@ router.put('/:id',
             if (llmModel !== undefined) prototype.llmModel = llmModel;
             if (capabilities !== undefined) prototype.capabilities = capabilities;
             if (historyConfig !== undefined) prototype.historyConfig = historyConfig;
-            if (tools !== undefined) prototype.tools = tools;
+            // C3 FIX: functionIds (V2) prend la priorité sur tools (legacy)
+            if (functionIds !== undefined) {
+                prototype.tools = functionIds.map((id: string) => new mongoose.Types.ObjectId(id));
+            } else if (tools !== undefined) {
+                // Rétrocompat: stocker en legacyTools si ce sont des objets (pas des ObjectId strings)
+                prototype.legacyTools = tools;
+            }
             if (outputConfig !== undefined) prototype.outputConfig = outputConfig;
             if (robotId !== undefined) prototype.robotId = robotId;
             if (workflowId !== undefined) prototype.workflowId = workflowId;
@@ -145,7 +167,11 @@ router.put('/:id',
 
             await prototype.save();
 
-            res.json(prototype);
+            // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
+            const responseObj: Record<string, any> = prototype.toObject();
+            responseObj.functionIds = (prototype.tools || []).map((id: any) => id.toString());
+
+            res.json(responseObj);
         } catch (error) {
             console.error('[AgentPrototypes] PUT error:', error);
             res.status(500).json({ error: 'Erreur mise à jour prototype' });

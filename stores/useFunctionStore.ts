@@ -56,6 +56,9 @@ interface FunctionStore {
 
     // Inline code update (optimiste, sans save)
     updateInlineCodeOptimistic: (id: string, code: string) => void;
+
+    // Reset complet (appelé au logout / changement d'utilisateur)
+    resetStore: () => void;
 }
 
 export const useFunctionStore = create<FunctionStore>((set, get) => ({
@@ -223,5 +226,17 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
             functions: state.functions.map(f =>
                 f._id === id ? { ...f, codeInline: code } : f
             )
-        }))
+        })),
+
+    // ─── Reset complet (sécurité : appelé au logout pour ne pas fuiter les données) ─
+    resetStore: () => set({
+        functions: [],
+        selectedFunctionId: null,
+        isLoading: false,
+        error: null,
+        filters: { origin: 'all', language: 'all', isEnabled: 'all', search: '' },
+        sandboxResult: null,
+        isSandboxRunning: false,
+        sandboxError: null,
+    })
 }));

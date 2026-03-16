@@ -297,7 +297,7 @@ export const generateContentStream = async function* (
     const config: LMStudioConfig = {
         endpoint: endpoint || DEFAULT_CONFIG.endpoint,
         apiKey,
-        timeout: 30000
+        timeout: 120000  // ⭐ 120s — local models (Ollama/LMStudio) can be slow to load
     };
 
     console.log(`[LMStudio] generateContentStream - endpoint: ${config.endpoint}, model: ${model}`);

@@ -2,8 +2,8 @@
 multi_edit_py — Remplacements multiples atomiques sur un fichier du workspace sandbox
 """
 from typing import Any, Dict, List
-from ..core.function_context import FunctionContext
-from ..core.file_utils import atomic_write_bytes
+from core.function_context import FunctionContext
+from core.file_utils import atomic_write_bytes
 
 
 def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:

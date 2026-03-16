@@ -14,6 +14,19 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Editor, { OnChange, OnMount } from '@monaco-editor/react';
+
+// C8: Définitions de types FunctionContext injectées dans Monaco TypeScript
+const FUNCTION_CONTEXT_TYPES = `
+declare interface FunctionContext {
+  userId: string;
+  agentId?: string;
+  workflowId?: string;
+  depth: number;
+  maxDepth: number;
+  sessionId?: string;
+}
+declare type FunctionResult = unknown;
+`;
 import { useFunctionStore } from '../stores/useFunctionStore';
 import { useNotifications } from '../contexts/NotificationContext';
 import type { SandboxRunResult } from '../types/function.types';
@@ -143,6 +156,20 @@ export const FunctionEditorTab: React.FC = () => {
     const [isConsolePanelOpen, setIsConsolePanelOpen] = useState(true);
     const syntaxDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // C8: Injection des types FunctionContext dans Monaco TypeScript (onMount)
+    const handleEditorMount: OnMount = useCallback((_editor, monaco) => {
+        monaco.languages.typescript.typescriptDefaults.addExtraLib(
+            FUNCTION_CONTEXT_TYPES,
+            'file:///function-context.d.ts'
+        );
+    }, []);
+
+    // ─── Schémas I/O ───────────────────────────────────────────────────────────
+    const [showSchemas, setShowSchemas] = useState(false);
+    const [inputSchemaStr, setInputSchemaStr] = useState('{}');
+    const [outputSchemaStr, setOutputSchemaStr] = useState('{}');
+    const [isSavingSchemas, setIsSavingSchemas] = useState(false);
+
     // Charger le code de la fonction sélectionnée
     useEffect(() => {
         if (fn?.codeInline != null) {
@@ -152,6 +179,13 @@ export const FunctionEditorTab: React.FC = () => {
         }
         clearSandboxResult();
         setSyntaxErrors([]);
+        // Synchroniser les schémas
+        setInputSchemaStr(fn?.inputSchema && Object.keys(fn.inputSchema).length > 0
+            ? JSON.stringify(fn.inputSchema, null, 2)
+            : '{}');
+        setOutputSchemaStr(fn?.outputSchema && Object.keys(fn.outputSchema).length > 0
+            ? JSON.stringify(fn.outputSchema, null, 2)
+            : '{}');
     }, [fn?._id]);
 
     // Vérification syntaxique en temps réel (debounce 800ms)
@@ -171,7 +205,7 @@ export const FunctionEditorTab: React.FC = () => {
         }, 800);
     }, [fn, checkSyntax, updateInlineCodeOptimistic]);
 
-    // Sauvegarder
+    // Sauvegarder le code
     const handleSave = async () => {
         if (!fn || fn.isReadonly) return;
         setIsSaving(true);
@@ -180,6 +214,29 @@ export const FunctionEditorTab: React.FC = () => {
         if (updated) {
             addNotification({ type: 'success', title: 'Sauvegardé', message: `"${fn.name}" sauvegardée.` });
         }
+    };
+
+    // Sauvegarder les schémas I/O
+    const handleSaveSchemas = async () => {
+        if (!fn || fn.isReadonly) return;
+        let inputSchema: Record<string, unknown>;
+        let outputSchema: Record<string, unknown>;
+        try {
+            inputSchema = JSON.parse(inputSchemaStr);
+        } catch {
+            addNotification({ type: 'error', title: 'Input Schema invalide', message: 'JSON malformé dans le schéma d\'entrée.' });
+            return;
+        }
+        try {
+            outputSchema = JSON.parse(outputSchemaStr);
+        } catch {
+            addNotification({ type: 'error', title: 'Output Schema invalide', message: 'JSON malformé dans le schéma de sortie.' });
+            return;
+        }
+        setIsSavingSchemas(true);
+        await updateFunction(fn._id, { inputSchema, outputSchema });
+        setIsSavingSchemas(false);
+        addNotification({ type: 'success', title: 'Schémas sauvegardés', message: `Schémas de "${fn.name}" mis à jour.` });
     };
 
     // Exécuter dans le sandbox
@@ -295,28 +352,42 @@ export const FunctionEditorTab: React.FC = () => {
             {/* Split: Editor (gauche) + Console + Args (droite) */}
             <div className="flex-1 flex overflow-hidden">
                 {/* Monaco Editor */}
-                <div className="flex-1 overflow-hidden">
-                    <Editor
-                        height="100%"
-                        language={monacoLanguage}
-                        value={code}
-                        onChange={handleCodeChange}
-                        theme="vs-dark"
-                        options={{
-                            readOnly: fn.isReadonly,
-                            fontSize: 13,
-                            lineNumbers: 'on',
-                            minimap: { enabled: false },
-                            scrollBeyondLastLine: false,
-                            wordWrap: 'on',
-                            tabSize: 4,
-                            automaticLayout: true,
-                            padding: { top: 8, bottom: 8 },
-                            renderLineHighlight: 'line',
-                            suggestOnTriggerCharacters: true,
-                            bracketPairColorization: { enabled: true },
-                        }}
-                    />
+                <div className="flex-1 overflow-hidden flex flex-col">
+                    {/* C8: Bannière d'aide signature TypeScript */}
+                    {fn.language === 'typescript' && (
+                        <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-950/40 border-b border-blue-800/30 flex-shrink-0">
+                            <span className="font-mono text-[11px] text-blue-300/90 truncate">
+                                {'export function run(context: FunctionContext, args: { [key: string]: unknown }): unknown'}
+                            </span>
+                            <span className="text-[11px] text-blue-400/60 flex-shrink-0">
+                                — accès via <code className="bg-blue-900/40 px-1 rounded">args.param_name</code>
+                            </span>
+                        </div>
+                    )}
+                    <div className="flex-1 overflow-hidden">
+                        <Editor
+                            height="100%"
+                            language={monacoLanguage}
+                            value={code}
+                            onChange={handleCodeChange}
+                            onMount={handleEditorMount}
+                            theme="vs-dark"
+                            options={{
+                                readOnly: fn.isReadonly,
+                                fontSize: 13,
+                                lineNumbers: 'on',
+                                minimap: { enabled: false },
+                                scrollBeyondLastLine: false,
+                                wordWrap: 'on',
+                                tabSize: 4,
+                                automaticLayout: true,
+                                padding: { top: 8, bottom: 8 },
+                                renderLineHighlight: 'line',
+                                suggestOnTriggerCharacters: true,
+                                bracketPairColorization: { enabled: true },
+                            }}
+                        />
+                    </div>
                 </div>
 
                 {/* Panneau droit : Console + Args */}
@@ -356,25 +427,93 @@ export const FunctionEditorTab: React.FC = () => {
                         )}
                     </div>
 
-                    {/* Input Schema Preview */}
-                    {fn.inputSchema && Object.keys(fn.inputSchema).length > 0 && (
-                        <div className="border-t border-gray-700/40 p-3">
-                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
-                                Schéma attendu
-                            </p>
-                            <div className="space-y-1">
-                                {Object.entries(
-                                    (fn.inputSchema as { properties?: Record<string, { type: string; description?: string }> })
-                                        .properties ?? {}
-                                ).slice(0, 5).map(([key, val]) => (
-                                    <div key={key} className="flex gap-2 text-xs">
-                                        <span className="font-mono text-cyan-400/80 flex-shrink-0">{key}</span>
-                                        <span className="text-gray-600">{(val as any).type}</span>
+                    {/* Schémas I/O — expandable */}
+                    <div className="border-t border-gray-700/40">
+                        <button
+                            onClick={() => setShowSchemas(v => !v)}
+                            className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-400 hover:text-gray-300 hover:bg-gray-800/30 transition-colors"
+                        >
+                            <span className="font-medium uppercase tracking-wider">Schémas I/O</span>
+                            <svg
+                                className={`w-3 h-3 transition-transform ${showSchemas ? '' : '-rotate-90'}`}
+                                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                            >
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+
+                        {showSchemas && (
+                            <div className="p-3 space-y-3">
+                                {/* Input Schema */}
+                                <div>
+                                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Input Schema</label>
+                                    <div className="h-28 border border-gray-700/50 rounded overflow-hidden">
+                                        <Editor
+                                            height="100%"
+                                            language="json"
+                                            value={inputSchemaStr}
+                                            onChange={v => { if (!fn.isReadonly) setInputSchemaStr(v ?? '{}'); }}
+                                            theme="vs-dark"
+                                            options={{
+                                                readOnly: fn.isReadonly,
+                                                fontSize: 11,
+                                                lineNumbers: 'off',
+                                                minimap: { enabled: false },
+                                                scrollBeyondLastLine: false,
+                                                wordWrap: 'on',
+                                                automaticLayout: true,
+                                                padding: { top: 4, bottom: 4 },
+                                                folding: false,
+                                            }}
+                                        />
                                     </div>
-                                ))}
+                                </div>
+
+                                {/* Output Schema */}
+                                <div>
+                                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Output Schema</label>
+                                    <div className="h-28 border border-gray-700/50 rounded overflow-hidden">
+                                        <Editor
+                                            height="100%"
+                                            language="json"
+                                            value={outputSchemaStr}
+                                            onChange={v => { if (!fn.isReadonly) setOutputSchemaStr(v ?? '{}'); }}
+                                            theme="vs-dark"
+                                            options={{
+                                                readOnly: fn.isReadonly,
+                                                fontSize: 11,
+                                                lineNumbers: 'off',
+                                                minimap: { enabled: false },
+                                                scrollBeyondLastLine: false,
+                                                wordWrap: 'on',
+                                                automaticLayout: true,
+                                                padding: { top: 4, bottom: 4 },
+                                                folding: false,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Save schemas — custom only */}
+                                {!fn.isReadonly && (
+                                    <button
+                                        onClick={handleSaveSchemas}
+                                        disabled={isSavingSchemas}
+                                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-xs rounded-md disabled:opacity-50 transition-colors"
+                                    >
+                                        {isSavingSchemas ? (
+                                            <div className="w-3 h-3 border border-cyan-400/40 border-t-cyan-400 rounded-full animate-spin" />
+                                        ) : (
+                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                                            </svg>
+                                        )}
+                                        Sauvegarder les schémas
+                                    </button>
+                                )}
                             </div>
-                        </div>
-                    )}
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

@@ -1,15 +1,139 @@
-# PARTIE 2 — Fonctions Natives par Défaut
+#  Fonctions Natives par Défaut
 ## Implémentation Python Backend · 11 Fonctions Natives
-
-> **Suite de** : Plan — Fonctions Personnalisées pour Agents IA (Partie 1)  
+  
 > **Destinataires** : Agent Architecte + Agents Développeurs  
 > **Stack** : Python 3.12 (backend) · Node.js (orchestration) · MongoDB (existant) · Docker Compose (existant)  
 > **Périmètre** : Architecture fichiers, implémentation des 11 fonctions natives, multi-utilisateur, sécurité, intégration  
 > **Version** : 1.0 — Mars 2026
 
 ---
+## P1 Préambule - Bonnes pratiques des Tools
+Partie 1 - Avant de commencer l'intégration des Tools natifs, partagés par tous les utilisateurs, il est nécessaire de respecter les Bonnes pratiques préalables à tout développement de Tools.
 
-## Table des Matières — Partie 2
+### 1. 
+
+
+Bonnes pratiques — Tools natifs dans un workflow agentique multi-LLM
+
+### 1.1 Contrat d'interface des tools
+Chaque tool doit exposer un contrat stable et portable entre LLMs :
+
+Schema JSON strict : définir input_schema et output_schema explicites. Pas de types any, pas de champs optionnels non documentés.
+Sémantique de nommage inter-modèles : les noms et descriptions doivent être compréhensibles par GPT-4o, Claude, Gemini, etc. — éviter les termes trop liés à un vendor.
+Idempotence : un tool appelé deux fois avec les mêmes paramètres doit produire le même résultat, ou signaler explicitement qu'il ne le peut pas (side effects).
+Versionnement : exposer un champ tool_version dans le schema. Un changement de signature = nouvelle version, pas de breaking change silencieux.
+
+
+### 1.2. Gestion des erreurs — Taxonomie complète
+Implémenter une taxonomie d'erreurs structurée que tous les LLMs peuvent interpréter :
+json{
+  "status": "error",
+  "error": {
+    "type": "validation|timeout|permission|not_found|upstream|rate_limit|partial",
+    "message": "message lisible",
+    "retryable": true,
+    "context": {}
+  }
+}
+```
+
+- **Erreurs récupérables** (`retryable: true`) : timeout, rate limit upstream, indisponibilité transitoire. Le LLM peut retenter ou reformuler.
+- **Erreurs bloquantes** (`retryable: false`) : validation du schéma, permission refusée, ressource inexistante. Le LLM doit changer de stratégie.
+- **Résultats partiels** (`status: "partial"`) : timeout long, pagination incomplète — retourner ce qui est disponible plutôt que rien.
+- Ne jamais laisser une **exception non catchée remonter** au LLM sous forme de stack trace : c'est du bruit dans le contexte et une fuite d'information interne.
+
+---
+
+### 1.3. Hooks — Architecture recommandée
+
+Implémenter une pipeline en couches autour de chaque tool call :
+```
+[LLM request]
+     ↓
+[PreCall Hook]   → validation, auth, rate limiting, dry-run
+     ↓
+[Tool Executor]  → exécution réelle
+     ↓
+[PostCall Hook]  → transformation, audit, enrichissement
+     ↓
+[LLM response]
+PreCall hooks :
+
+Valider le schéma d'entrée avant d'appeler le tool (évite un call inutile).
+Vérifier les permissions selon le contexte de l'agent (quel LLM, quelle session, quel rôle).
+Logger l'intent avec un trace_id propagé de bout en bout.
+Implémenter un dry-run mode : retourner le résultat prévu sans exécuter les side effects, utile pour les tests et la validation humaine.
+
+PostCall hooks :
+
+Tronquer/résumer les réponses volumineuses avant qu'elles rentrent dans le contexte du LLM.
+Normaliser les formats de retour entre sources hétérogènes (API REST, SQL, fichier...).
+Enrichir avec des métadonnées : duration_ms, tokens_estimated, source, cache_hit.
+
+
+### 1.4. Monitoring et observabilité
+Le minimum viable pour la production :
+Par tool call, logger systématiquement :
+
+tool_name, tool_version
+llm_caller (quel modèle a déclenché le call)
+trace_id / span_id (compatible OpenTelemetry)
+input_tokens_estimated — taille de l'input sérialisé
+output_tokens_estimated — taille de la réponse avant injection dans le contexte
+duration_ms
+status + error_type si applicable
+cache_hit: bool
+
+Métriques agrégées à exposer :
+
+Taux d'erreur par tool et par type d'erreur
+Latence P50/P95/P99 par tool
+Fréquence d'appel par tool par LLM — détecter les boucles et les appels redondants
+Token burn rate : tokens consommés par tool call × fréquence = coût réel par workflow
+
+
+### 1.5. Consommation de tokens — Stratégies de maîtrise
+C'est le levier de coût principal dans les architectures agentiques :
+
+Réponses à haute densité : un tool ne doit retourner que les champs nécessaires au prochain raisonnement du LLM. Pas de payloads complets, pas de champs redondants. Implémenter une projection explicite (fields: ["id", "status", "summary"]).
+Résumés adaptatifs : si le résultat dépasse un seuil (ex : 2000 tokens), activer automatiquement un hook de compression avant injection.
+Context window budget : allouer un budget en tokens par étape du workflow. Si un tool dépasse son budget, retourner un résultat tronqué + un flag truncated: true pour que le LLM puisse demander la suite.
+Caching des tool results : mettre en cache les appels deterministes (lecture pure, même paramètres) avec un TTL adapté. Annoter le cache hit dans la réponse.
+Éviter la duplication dans l'historique : dans un workflow multi-turn, ne pas ré-injecter les tool results déjà présents dans le contexte — utiliser des références par ID si le LLM le supporte.
+
+
+### 1.6. Sécurité et contrôle d'accès
+
+Principe du moindre privilège par agent : chaque LLM de l'orchestration doit avoir accès uniquement aux tools dont il a besoin pour son rôle. Implémenter un registre de tools par rôle d'agent.
+Sanitisation des inputs : ne jamais exécuter de strings générées par le LLM directement dans un shell, une requête SQL, ou un appel filesystem. Toujours passer par un parser/validator.
+Injection de prompt via tool result : un tool qui lit du contenu externe (fichier, web, base de données) peut ramener du contenu hostile. Sanitiser les retours avant injection dans le contexte.
+Audit trail immuable : chaque tool call doit être loggé de manière non altérable avec l'input complet, l'output, l'agent déclencheur et le timestamp. Essentiel pour le debug et la conformité.
+
+
+### 1.7. Résilience et patterns de retry
+
+Retry avec backoff exponentiel sur les erreurs retryable: true, avec jitter pour éviter les thundering herds.
+Circuit breaker par tool : après N échecs consécutifs, désactiver temporairement le tool et retourner une erreur explicite au LLM (tool_unavailable) plutôt que de le laisser boucler. Le nombre d'échecs consécuttifs doit être de 2 appels par défaut mais paramétrable dans la page "Fonctions personnalisées" pour chaque fonction (native ou créé par l'utilisateur). Ce paramètre doit être persisté dans la table user_fonctions.
+Fallback tools : déclarer des alternatives pour les tools critiques. Si une recherche approfondie est indisponible sur un LLM, fallback sur search_basic — la logique de fallback doit être dans l'orchestrateur, pas dans le LLM.
+Timeout strict : chaque tool doit avoir un timeout configuré lui aussi indépendamment dans la page"Fonctions personnalisées" pour chaque fonction (native ou créé par l'utilisateur). Un tool lent ne doit pas bloquer tout le workflow.
+
+
+8. Spécificités multi-LLM
+Le vrai défi de l'architecture multi-LLM :
+
+Normaliser les formats de tool call natifs etcustom : chaque LLM a sa propre sérialisation pour les tools (tool_use chez Anthropic, function_call chez OpenAI, functionCall chez Gemini). Implémenter un adaptateur pour les tools natifs et custom universel dans l'orchestrateur qui traduit vers/depuis un format interne canonique. Il ne faut e revanche pas créer de régression et conserver les appels de tools cloud-only implémentés actuellement. 
+Gérer les différences de comportement : certains modèles appellent plusieurs tools en parallèle, d'autres séquentiellement. Certains retentent spontanément, d'autres non. Les hooks doivent être indépotents par rapport à ces comportements.
+Tracer les frontières d'agent : dans un workflow multi-LLM, chaque LLM doit voir uniquement les tool results qui le concernent — ne pas cross-contaminer les contextes entre agents.
+Format de réponse portable : standardiser les réponses de tools sur un format JSON simple, sans markdown, sans prose — certains LLMs interprètent le markdown dans les tool results comme du contenu utilisateur.
+
+
+Résumé — Checklist de production
+DomaineMinimum viableBest-in-classSchémaJSON Schema strict + versioningOpenAPI complet + validation runtimeErreursTaxonomie typée + retryable flagCircuit breaker + fallback automatiqueTokensProjection des champsBudget par step + compression adaptativeObservabilitéLog structuré par callOpenTelemetry + dashboard token burnSécuritéValidation input + sanitisation outputRBAC par agent + audit trail immuableMulti-LLMAdaptateur de formatRegistre de tools par rôle d'agent
+
+## Table des Matières — Partie 2 - Implémentation des Fonctions Natives
+
+---
+
 
 - [P2.1 Analyse Préalable & Décisions d'Architecture](#p21-analyse-préalable--décisions-darchitecture)
 - [P2.2 Arborescence Complète du Backend](#p22-arborescence-complète-du-backend)

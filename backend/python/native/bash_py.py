@@ -7,19 +7,9 @@ SÉCURITÉ : Cette fonction ne doit s'exécuter QUE dans un conteneur Docker iso
 """
 import subprocess
 import os
-import sys
 from typing import Any, Dict
-from ..core.function_context import FunctionContext
-
-# Commandes explicitement interdites même dans le sandbox Docker
-_BLOCKED_COMMANDS = [
-    "rm -rf /",
-    "mkfs",
-    "dd if=",
-    "chmod 777 /",
-    "chown -R root",
-    "> /dev/",
-]
+from core.function_context import FunctionContext
+from core.command_validator import validate_command
 
 
 def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -64,11 +54,10 @@ def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
         if k in _BLOCKED_ENV_KEYS:
             raise PermissionError(f"Variable d'environnement '{k}' non autorisée pour des raisons de sécurité")
 
-    # Vérification basique des commandes bloquées
-    cmd_lower = command.lower().strip()
-    for blocked in _BLOCKED_COMMANDS:
-        if blocked in cmd_lower:
-            raise PermissionError(f"Commande refusée pour des raisons de sécurité : {command}")
+    # Validation par whitelist stricte (remplace l'ancienne blacklist)
+    is_safe, reason = validate_command(command)
+    if not is_safe:
+        raise PermissionError(f"Commande refusée (sécurité) : {reason}")
 
     # Valider que cwd reste dans le workspace
     context.resolve_path(os.path.relpath(cwd, str(context.workspace_dir)) if os.path.isabs(cwd) else cwd)

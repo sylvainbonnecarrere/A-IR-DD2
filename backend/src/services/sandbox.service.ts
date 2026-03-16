@@ -4,7 +4,7 @@
  * Stratégie d'exécution selon le langage :
  *   - Python  : sous-processus vers `backend/python/runner.py`
  *               (timeout 15s, sortie JSON stdout, erreurs stderr)
- *   - TypeScript : isolé avec `isolated-vm` (non implémenté en V1 — stub retourné)
+ *   - TypeScript : sous-processus Node.js avec environnement réduit
  *
  * Design Patterns :
  *   - Strategy  : exécution différente selon le langage
@@ -42,8 +42,61 @@ export interface SyntaxCheckResult {
 }
 
 export class SandboxService {
+    // C9.1: Exécutable Python détecté dynamiquement (python3 ou python selon l'OS)
+    private pythonExecutable: string = 'python3';
+    private pythonDetected: boolean = false;
+
     /**
-     * Exécute une fonction UserFunction dans un environnement sandboxé.
+     * Vérifie la disponibilité du sandbox Python.
+     * Détecte l'exécutable python3 ou python disponible sur l'OS courant.
+     * Windows utilise souvent 'python', Linux/Mac 'python3'.
+     */
+    async checkHealth(): Promise<{
+        python: { available: boolean; version?: string; executable: string };
+        typescript: { available: boolean; engine: 'node-subprocess' };
+    }> {
+        const pythonResult = await this._detectPython();
+        return {
+            python: pythonResult,
+            typescript: { available: true, engine: 'node-subprocess' }
+        };
+    }
+
+    /**
+     * Détecte l'exécutable Python disponible (python3 > python).
+     * Met en cache le résultat dans this.pythonExecutable.
+     */
+    private async _detectPython(): Promise<{ available: boolean; version?: string; executable: string }> {
+        for (const exe of ['python3', 'python']) {
+            try {
+                const result = await new Promise<{ code: number; stdout: string }>((resolve) => {
+                    const proc = spawn(exe, ['--version']);
+                    let stdout = '';
+                    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+                    proc.stderr.on('data', (d: Buffer) => { stdout += d.toString(); }); // python --version écrit sur stderr
+                    proc.on('close', (code) => resolve({ code: code ?? 1, stdout }));
+                    proc.on('error', () => resolve({ code: 1, stdout: '' }));
+                });
+                if (result.code === 0) {
+                    this.pythonExecutable = exe;
+                    this.pythonDetected = true;
+                    return { available: true, version: result.stdout.trim(), executable: exe };
+                }
+            } catch { /* essayer le suivant */ }
+        }
+        return { available: false, executable: 'python3' };
+    }
+
+    /**
+     * S'assure que l'exécutable Python est détecté avant utilisation.
+     */
+    private async _ensurePythonDetected(): Promise<void> {
+        if (!this.pythonDetected) {
+            await this._detectPython();
+        }
+    }
+
+    /**
      *
      * @throws Error si la fonction est introuvable, désactivée, ou si le timeout est dépassé
      */
@@ -53,6 +106,9 @@ export class SandboxService {
         testArgs: Record<string, unknown> = {}
     ): Promise<SandboxResult> {
         // 1. Charger la fonction depuis la BDD
+        // C9.1 FIX: S'assurer que Python est détecté avant execution
+        await this._ensurePythonDetected();
+
         const fn = await UserFunction.findOne({
             _id: functionId,
             $or: [
@@ -103,13 +159,12 @@ export class SandboxService {
             const startTime = Date.now();
             const argsJson = JSON.stringify(args);
 
-            // Pour les fonctions inline (custom), utiliser le code inline via stdin
-            // Pour les fonctions natives, utiliser le runner.py avec le nom de la fonction
             const pythonArgs = fn.origin === 'native'
                 ? [PYTHON_RUNNER_PATH, fn.name, argsJson]
                 : [PYTHON_RUNNER_PATH, fn.name, argsJson];
 
-            const proc = spawn('python3', pythonArgs, {
+            // C9.1 FIX: utiliser l'exécutable détecté (python3 ou python)
+            const proc = spawn(this.pythonExecutable, pythonArgs, {
                 timeout: PYTHON_TIMEOUT_MS,
                 env: {
                     ...process.env,
@@ -196,7 +251,8 @@ export class SandboxService {
     private _checkPythonSyntax(code: string): Promise<SyntaxCheckResult> {
         return new Promise((resolve) => {
             // Écrire le code sur stdin de py_compile
-            const proc = spawn('python3', ['-c', `
+            // C9.1 FIX: utiliser l'exécutable détecté
+            const proc = spawn(this.pythonExecutable, ['-c', `
 import ast, sys, json
 try:
     ast.parse(sys.stdin.read())
@@ -225,18 +281,112 @@ except SyntaxError as e:
     }
 
     /**
-     * Stub TypeScript — à implémenter avec isolated-vm en V2
+    * Exécution TypeScript sandboxée via un sous-processus Node.js à environnement réduit.
+     *
+     * Contrat du code utilisateur :
+     *   - `args` est disponible en global (objet passé à la fonction)
+     *   - `console.log/error/warn` sont capturés dans stdout
+     *   - Si l'utilisateur définit `function run(args) {...}`, son retour devient l'output
+     *   - Sinon, toute valeur assignée à `__result__` en dernière ligne est l'output
      */
     private async _runTypescript(
         fn: IUserFunction,
         args: Record<string, unknown>
     ): Promise<SandboxResult> {
-        // TODO J8: Implémenter avec isolated-vm
-        return {
-            success: false,
-            output: null,
-            stderr: "L'exécution TypeScript sandboxée sera disponible en V2 (isolated-vm).",
-            durationMs: 0
-        };
+        const startTime = Date.now();
+        const timeoutMs = parseInt(process.env.FUNCTION_SANDBOX_TIMEOUT_MS || '15000');
+        return this._runTypescriptSubprocess(fn, args, timeoutMs, startTime);
+    }
+
+    /**
+     * Exécution TypeScript dans un child process Node.js avec environment vidé.
+     * Protège MongoDB credentials, JWT_SECRET, etc. (process env non transmis).
+     * Timeout piloté par SIGTERM (fiable cross-platform).
+     *
+     * Contrat identique : fonction `run(args)` ou code libre avec `__result__`.
+     */
+    private _runTypescriptSubprocess(
+        fn: IUserFunction,
+        args: Record<string, unknown>,
+        timeoutMs: number,
+        startTime: number
+    ): Promise<SandboxResult> {
+        return new Promise((resolve) => {
+            const argsJson = JSON.stringify(args).replace(/\\/g, '\\\\').replace(/`/g, '\\`');
+
+            // Wrapper minimal : console redirigé, run() appelé ou code libre
+            const wrapper = `
+const args = ${argsJson};
+const __logs = [];
+const console = {
+    log:   (...a) => __logs.push(a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')),
+    error: (...a) => __logs.push(a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')),
+    warn:  (...a) => __logs.push(a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')),
+};
+let __result__ = undefined;
+try {
+    ${fn.codeInline || ''}
+    if (typeof run === 'function') { __result__ = run(args); }
+    process.stdout.write(JSON.stringify({ success: true, output: __result__, stdout: __logs.join('\\n') }));
+} catch(e) {
+    process.stdout.write(JSON.stringify({ success: false, output: null, stderr: e.message, stdout: __logs.join('\\n') }));
+}`;
+
+            const proc = spawn(process.execPath, ['--eval', wrapper], {
+                // Env vidé : aucun accès aux secrets MONGODB_URI / JWT_SECRET / ENCRYPTION_KEY
+                env: {
+                    HOME: process.env.HOME ?? '',
+                    TMP: process.env.TMP ?? '',
+                    TEMP: process.env.TEMP ?? '',
+                    ...(process.platform === 'win32'
+                        ? { USERPROFILE: process.env.USERPROFILE ?? '' }
+                        : {}),
+                }
+            });
+
+            let stdout = '';
+            let stderr = '';
+            let timedOut = false;
+
+            proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+            proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+
+            const timer = setTimeout(() => {
+                timedOut = true;
+                proc.kill('SIGTERM');
+            }, timeoutMs);
+
+            proc.on('close', () => {
+                clearTimeout(timer);
+                const durationMs = Date.now() - startTime;
+
+                if (timedOut) {
+                    resolve({ success: false, output: null, stderr: 'Timeout: exécution TypeScript dépassée', durationMs, timedOut: true });
+                    return;
+                }
+
+                try {
+                    const result = JSON.parse(stdout) as SandboxResult;
+                    resolve({ ...result, durationMs });
+                } catch {
+                    resolve({
+                        success: false,
+                        output: null,
+                        stderr: stderr || `Sortie JSON invalide: ${stdout.slice(0, 200)}`,
+                        durationMs
+                    });
+                }
+            });
+
+            proc.on('error', (err: Error) => {
+                clearTimeout(timer);
+                resolve({
+                    success: false,
+                    output: null,
+                    stderr: `Erreur démarrage sandbox Node: ${err.message}`,
+                    durationMs: Date.now() - startTime
+                });
+            });
+        });
     }
 }

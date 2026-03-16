@@ -9,7 +9,13 @@ declare const __dirname: string;
 
 import { spawn } from 'child_process';
 import path from 'path';
+import mongoose from 'mongoose';
+import { UserFunction, IUserFunction } from './models/UserFunction.model';
 import { WHITELISTED_PYTHON_TOOLS } from './config';
+
+// Path to the Tools V2 runner.py (J7.3)
+const PYTHON_RUNNER_PATH = path.join(__dirname, '../python/runner.py');
+const PYTHON_TIMEOUT_MS = 15_000;
 
 // The manual calculation of __dirname using ESM features (import.meta.url) has been removed.
 // This project is configured as a CommonJS module (see tsconfig.json),
@@ -66,6 +72,103 @@ export const executePythonTool = (toolName: string, args: object): Promise<objec
         pythonProcess.on('error', (err) => {
              console.error(`Failed to start python process for '${toolName}'. Error: ${err.message}`);
              reject(new Error(`Failed to start python process for '${toolName}'. Is Python 3 installed and in your PATH?`));
+        });
+    });
+};
+
+/**
+ * J7.4 — Execute a UserFunction (Tools V2) identified by its MongoDB _id.
+ *
+ * Flow:
+ *  1. Load IUserFunction from DB (ownership: native OR belongs to userId)
+ *  2. Validate enabled status
+ *  3. Spawn runner.py with function name + args JSON
+ *  4. Return parsed FunctionResult payload
+ *
+ * @param fnId    ObjectId string of the UserFunction document
+ * @param args    Key/value map of function arguments
+ * @param userId  Authenticated user id (for ownership gate)
+ * @param agentId Optional agent id for context (audit / logging)
+ */
+export const executeFunctionById = async (
+    fnId: string,
+    args: Record<string, unknown>,
+    userId: string,
+    agentId?: string
+): Promise<object> => {
+    // --- 1. Load from DB with ownership gate ---
+    if (!mongoose.Types.ObjectId.isValid(fnId)) {
+        throw new Error(`Invalid function id: ${fnId}`);
+    }
+
+    const fn = await UserFunction.findOne({
+        _id: new mongoose.Types.ObjectId(fnId),
+        $or: [
+            { userId: null },                                 // native / shared
+            { userId: new mongoose.Types.ObjectId(userId) }  // user-owned
+        ]
+    }).lean<IUserFunction>();
+
+    if (!fn) {
+        throw new Error(`Function '${fnId}' not found or access denied for user '${userId}'.`);
+    }
+    if (!fn.isEnabled) {
+        throw new Error(`Function '${fn.name}' is disabled.`);
+    }
+
+    // --- 2. Build sandboxed env context ---
+    const workspaceRoot = process.env.WORKSPACE_ROOT ?? '/sandbox';
+    const env = {
+        ...process.env,
+        SANDBOX_WORKSPACE_DIR: `${workspaceRoot}/users/${userId}/workspace`,
+        FUNCTION_USER_ID: userId,
+        FUNCTION_AGENT_ID: agentId ?? '',
+        PYTHONIOENCODING: 'utf-8'
+    };
+
+    // --- 3. Spawn runner.py ---
+    return new Promise((resolve, reject) => {
+        const argsJson = JSON.stringify(args);
+        const proc = spawn('python3', [PYTHON_RUNNER_PATH, fn.name, argsJson], { env });
+
+        let stdout = '';
+        let stderr = '';
+        let timedOut = false;
+
+        proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+        proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+        const timer = setTimeout(() => {
+            timedOut = true;
+            proc.kill('SIGTERM');
+        }, PYTHON_TIMEOUT_MS);
+
+        proc.on('close', (code: number | null) => {
+            clearTimeout(timer);
+
+            if (timedOut) {
+                return reject(new Error(`Function '${fn.name}' timed out after ${PYTHON_TIMEOUT_MS / 1000}s.`));
+            }
+
+            if (code !== 0) {
+                let errorMessage = stderr;
+                try {
+                    const parsed = JSON.parse(stderr);
+                    errorMessage = parsed.error ?? stderr;
+                } catch { /* keep raw stderr */ }
+                return reject(new Error(errorMessage || `Function '${fn.name}' failed with exit code ${code}.`));
+            }
+
+            try {
+                resolve(JSON.parse(stdout));
+            } catch {
+                reject(new Error(`Could not parse JSON output from function '${fn.name}': ${stdout.slice(0, 300)}`));
+            }
+        });
+
+        proc.on('error', (err: Error) => {
+            clearTimeout(timer);
+            reject(new Error(`Failed to start Python process for '${fn.name}': ${err.message}`));
         });
     });
 };

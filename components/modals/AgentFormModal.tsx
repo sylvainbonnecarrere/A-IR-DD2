@@ -330,7 +330,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
             tools,
             outputConfig,
             historyConfig,
-            creator_id: 'archi' as RobotId,
+            creator_id: RobotId.Archi,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           };

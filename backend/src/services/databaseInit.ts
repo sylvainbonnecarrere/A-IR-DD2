@@ -18,6 +18,7 @@
  */
 
 import mongoose from 'mongoose';
+import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
 
 /**
  * Define MongoDB collection schemas with validation rules
@@ -235,6 +236,28 @@ const COLLECTION_SCHEMAS = {
         }
       }
     }
+  },
+
+  user_functions: {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        additionalProperties: true,
+        properties: {
+          _id: { bsonType: 'objectId' },
+          name: { bsonType: 'string' },
+          description: { bsonType: 'string' },
+          language: { bsonType: 'string' },
+          origin: { bsonType: 'string' },
+          userId: { bsonType: ['objectId', 'null'] },
+          workflowId: { bsonType: ['objectId', 'null'] },
+          isEnabled: { bsonType: 'bool' },
+          isReadonly: { bsonType: 'bool' },
+          createdAt: { bsonType: 'date' },
+          updatedAt: { bsonType: 'date' }
+        }
+      }
+    }
   }
 };
 
@@ -281,6 +304,11 @@ const INDEX_DEFINITIONS = {
   local_llm_profiles: [
     { spec: { userId: 1, name: 1 }, options: { unique: true } },
     { spec: { userId: 1 }, options: {} }
+  ],
+  user_functions: [
+    { spec: { userId: 1, workflowId: 1, isEnabled: 1 }, options: { name: 'idx_user_workflow_enabled' } },
+    { spec: { origin: 1, isEnabled: 1 }, options: { name: 'idx_origin_enabled' } },
+    { spec: { name: 1, userId: 1 }, options: { unique: true, sparse: true, name: 'idx_name_user_unique' } }
   ]
 };
 
@@ -365,6 +393,9 @@ export async function initializeDatabase(): Promise<void> {
           indexError instanceof Error ? indexError.message : String(indexError));
       }
     }
+
+    // ─── Toujours seeder les fonctions natives (idempotent) ───────────────
+    await seedNativeFunctions(db);
 
     console.info('🎯 Database initialization complete!');
   } catch (error) {
@@ -570,6 +601,38 @@ async function createIndexesForNewCollections(
   }
   
   console.info('✅ Indexes created for new collections');
+}
+
+/**
+ * Seed des 11 fonctions natives dans user_functions.
+ * Idempotent : utilise upsert sur (name, userId:null) pour ne jamais dupliquer.
+ * Appelée à chaque démarrage du serveur.
+ */
+async function seedNativeFunctions(db: any): Promise<void> {
+  try {
+    const col = db.collection('user_functions');
+    let upserted = 0;
+    for (const fn of nativeFunctionsSeed) {
+      const result = await col.updateOne(
+        { name: fn.name, userId: null },
+        {
+          // Corrige la version (number) sur les docs existants seedés avec l'ancienne string '1.0.0'
+          $set: { version: fn.version },
+          $setOnInsert: { ...fn, createdAt: new Date(), updatedAt: new Date() }
+        },
+        { upsert: true }
+      );
+      if (result.upsertedCount > 0) upserted++;
+    }
+    if (upserted > 0) {
+      console.info(`🌱 ${upserted} fonction(s) native(s) seedée(s) dans user_functions`);
+    } else {
+      console.debug('  ✓ Fonctions natives déjà présentes (aucun upsert nécessaire)');
+    }
+  } catch (err) {
+    // Non-bloquant : log mais ne crashe pas le démarrage
+    console.warn('⚠️  seedNativeFunctions warning:', err instanceof Error ? err.message : String(err));
+  }
 }
 
 export default { initializeDatabase };

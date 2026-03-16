@@ -27,105 +27,13 @@
 
 import { Router, Request, Response } from 'express';
 import { Workflow } from '../models/Workflow.model';
-import { AgentInstance } from '../models/AgentInstance.model';
 import { AgentPrototype } from '../models/AgentPrototype.model';
-import { WorkflowEdge } from '../models/WorkflowEdge.model';
-import { LLMConfig } from '../models/LLMConfig.model';
-import UserSettings from '../models/UserSettings.model';
-import { AgentJournal } from '../models/AgentJournal.model'; // ⭐ FIX QA: For chat history restoration
 import { requireAuth } from '../middleware/auth.middleware';
 import { IUser } from '../models/User.model';
 import { WorkflowSelfHealingService } from '../services/workflowSelfHealing.service';
+import { buildWorkspaceSnapshot } from '../utils/workspaceSnapshot';
 
 const router = Router();
-
-/**
- * Response interface for workspace endpoint
- * Defines contract between backend and frontend hydration
- * 
- * ⭐ UPDATED ÉTAPE 1.6: Added canvasState, isDefault, content support
- */
-interface WorkspaceResponse {
-    workflow: {
-        id: string;
-        name: string;
-        description?: string;
-        isActive: boolean;
-        isDefault: boolean; // ⭐ NOUVEAU ÉTAPE 1.6
-        isDirty: boolean;
-        canvasState: { // ⭐ NOUVEAU ÉTAPE 1.6
-            zoom: number;
-            panX: number;
-            panY: number;
-        };
-        createdAt: Date;
-        updatedAt: Date;
-        lastSavedAt?: Date;
-    } | null;
-    nodes: Array<{
-        id: string;
-        agentId: string;
-        agentName: string;
-        position: { x: number; y: number };
-        provider: string;
-        model: string;
-        createdAt: Date;
-    }>;
-    edges: Array<{
-        id: string;
-        sourceId: string;
-        targetId: string;
-        type: string;
-    }>;
-    agentInstances: Array<{
-        id: string;
-        name: string;
-        provider: string;
-        model: string;
-        position: { x: number; y: number };
-        systemInstruction?: string;
-        // ⭐ NOUVEAU ÉTAPE 1.6: Ajout des propriétés polymorphes
-        executionId?: string;
-        status?: string;
-        content?: Array<{
-            type: 'chat' | 'image' | 'video' | 'error';
-            [key: string]: any;
-        }>;
-        metrics?: {
-            totalTokens: number;
-            totalErrors: number;
-            totalMediaGenerated: number;
-            callCount: number;
-        };
-        createdAt: Date;
-    }>;
-    agentPrototypes: Array<{
-        id: string;
-        name: string;
-        provider: string;
-        model: string;
-        description?: string;
-    }>;
-    llmConfigs: Array<{
-        id: string;
-        provider: string;
-        enabled: boolean;
-        hasApiKey: boolean;
-        capabilities: Record<string, boolean>;
-        updatedAt: Date;
-    }>;
-    userSettings: {
-        language: string;
-        theme: string;
-    };
-    metadata: {
-        loadedAt: Date;
-        userId: string;
-        hasWorkflow: boolean;
-        workflowWasCreated?: boolean;  // ⭐ SELF-HEALING indicator
-        healingActions?: string[];      // ⭐ SELF-HEALING actions taken
-    };
-}
 
 /**
  * GET /api/user/workspace
@@ -152,27 +60,14 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
             console.log('[Workspace] Self-healing triggered:', healingActions);
         }
 
-        // Parallel fetch all user resources for performance
-        const [
-            agentPrototypes,
-            llmConfigs,
-            userSettings
-        ] = await Promise.all([
-            // ⭐ V2: Get agent prototypes scoped to default workflow
-            // Include legacy prototypes (no workflowId) for self-healing migration
-            AgentPrototype.find({
-                userId,
-                $or: [
-                    { workflowId: defaultWorkflow?._id },
-                    { workflowId: { $exists: false } },
-                    { workflowId: null }
-                ]
-            }).sort({ name: 1 }),
-            // Get all LLM configs (without API keys)
-            LLMConfig.find({ userId }),
-            // Get user settings
-            UserSettings.findOne({ userId })
-        ]);
+        const agentPrototypes = await AgentPrototype.find({
+            userId,
+            $or: [
+                { workflowId: defaultWorkflow?._id },
+                { workflowId: { $exists: false } },
+                { workflowId: null }
+            ]
+        }).sort({ name: 1 });
 
         // ⭐ V2 SELF-HEALING: Assign orphaned prototypes (no workflowId) to default workflow
         if (defaultWorkflow) {
@@ -188,195 +83,17 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
             }
         }
 
-        // Le workflow par défaut est garanti par Self-Healing
-        const workflow = defaultWorkflow;
-
-        // Fetch workflow-specific data if workflow exists
-        let agentInstances: any[] = [];
-        let edges: any[] = [];
-        let journalEntries: any[] = [];
-
-        if (workflow) {
-            [agentInstances, edges, journalEntries] = await Promise.all([
-                AgentInstance.find({ workflowId: workflow.id }),
-                WorkflowEdge.find({ workflowId: workflow.id }),
-                // ⭐ FIX QA: Récupérer les entrées du journal (chat avec images)
-                AgentJournal.find({ workflowId: workflow.id, type: 'chat' }).sort({ timestamp: 1 })
-            ]);
-        }
-
-        // ⭐ FIX QA: Grouper les entrées du journal par instanceId pour restauration rapide
-        const journalByInstance: Record<string, any[]> = {};
-        for (const entry of journalEntries) {
-            const instanceId = entry.agentInstanceId?.toString() || '';
-            if (!journalByInstance[instanceId]) {
-                journalByInstance[instanceId] = [];
-            }
-            journalByInstance[instanceId].push(entry);
-        }
-
-        // Build response (SECURITY: never expose apiKeyEncrypted)
-        const response: WorkspaceResponse = {
-            workflow: workflow ? {
-                id: workflow.id,
-                name: workflow.name,
-                description: workflow.description,
-                isActive: workflow.isActive,
-                isDefault: (workflow as any).isDefault || false, // ⭐ NOUVEAU ÉTAPE 1.6
-                isDirty: workflow.isDirty,
-                // ⭐ NOUVEAU ÉTAPE 1.6: Canvas state pour reconstruction visuelle
-                canvasState: (workflow as any).canvasState || {
-                    zoom: 1,
-                    panX: 0,
-                    panY: 0
-                },
-                createdAt: workflow.createdAt,
-                updatedAt: workflow.updatedAt,
-                lastSavedAt: workflow.lastSavedAt
-            } : null,
-
-            nodes: agentInstances.map(agent => ({
-                id: agent._id?.toString() || agent.id,
-                agentId: agent._id?.toString() || agent.id,
-                agentName: agent.name,
-                position: agent.position || { x: 0, y: 0 },
-                provider: agent.llmProvider || agent.provider,
-                model: agent.llmModel || agent.model,
-                createdAt: agent.createdAt
-            })),
-
-            edges: edges.map(edge => ({
-                id: edge.id,
-                sourceId: edge.sourceNodeId || edge.sourceId,
-                targetId: edge.targetNodeId || edge.targetId,
-                type: edge.type || 'default'
-            })),
-
-        // ⭐ ÉTAPE 1.6: Ajout des propriétés polymorphes (content, metrics, status)
-            agentInstances: agentInstances.map(agent => {
-                // ⭐ CRITICAL: Reconstruct configuration_json like transformAgentInstanceForFrontend
-                // This ensures consistency across all API endpoints (agent-instances, user-workspace, etc.)
-                const instanceId = agent._id?.toString() || agent.id;
-                
-                // ⭐ FIX QA: Récupérer les messages de chat avec images depuis le journal
-                const instanceJournal = journalByInstance[instanceId] || [];
-                const chatMessages = instanceJournal.map((entry: any) => ({
-                    sender: entry.payload?.role || 'agent',
-                    text: entry.payload?.content || '',
-                    timestamp: entry.timestamp,
-                    // ⭐ FIX QA: Include image data for restoration
-                    image: entry.payload?.imageBase64,
-                    mimeType: entry.payload?.mimeType,
-                    fileName: entry.payload?.fileName,
-                    // Include LLM metadata
-                    llmProvider: entry.payload?.llmProvider,
-                    modelUsed: entry.payload?.modelUsed,
-                    tokensUsed: entry.payload?.tokensUsed,
-                    toolCalls: entry.payload?.toolCalls
-                }));
-                
-                return {
-                    id: instanceId,
-                    name: agent.name,
-                    provider: agent.llmProvider,
-                    model: agent.llmModel,
-                    position: agent.position || { x: 0, y: 0 },
-                    systemInstruction: agent.systemPrompt,
-                    executionId: agent.executionId,
-                    status: agent.status,
-                    content: agent.content || [],
-                    // ⭐ FIX QA: Include chat messages with images
-                    chatMessages,
-                    metrics: agent.metrics || {
-                        totalTokens: 0,
-                        totalErrors: 0,
-                        totalMediaGenerated: 0,
-                        callCount: 0
-                    },
-                    prototypeId: agent.prototypeId?.toString() || agent.prototypeId,
-                    workflowId: agent.workflowId?.toString() || agent.workflowId,
-                    createdAt: agent.createdAt,
-                    // ⭐ TOP-LEVEL fields (for backward compatibility with some code)
-                    role: agent.role,
-                    llmProvider: agent.llmProvider,
-                    llmModel: agent.llmModel,
-                    systemPrompt: agent.systemPrompt,
-                    capabilities: agent.capabilities || [],
-                    tools: agent.tools || [],
-                    historyConfig: agent.historyConfig || {},
-                    outputConfig: agent.outputConfig || {},
-                    robotId: agent.robotId,
-                    isMinimized: agent.isMinimized || false,
-                    isMaximized: agent.isMaximized || false,
-                    // ⭐ FIX QA: Include persistenceConfig for media storage options
-                    persistenceConfig: agent.persistenceConfig || {
-                        saveChat: true,
-                        saveErrors: true,
-                        saveHistorySummary: false,
-                        saveLinks: false,
-                        saveTasks: false,
-                        saveMedia: false,
-                        mediaStorage: 'db'
-                    },
-                    // ⭐ CRITICAL: Include configuration_json reconstructed from individual fields
-                    // This matches what transformAgentInstanceForFrontend returns
-                    // useWorkspaceHydration will use this directly, not reconstruct it
-                    configuration_json: {
-                        role: agent.role || 'assistant',
-                        model: agent.llmModel || 'gpt-4o-mini',
-                        llmProvider: agent.llmProvider || 'openai',
-                        systemPrompt: agent.systemPrompt || '',
-                        capabilities: Array.isArray(agent.capabilities) ? agent.capabilities : [],
-                        tools: Array.isArray(agent.tools) ? agent.tools : [],
-                        historyConfig: agent.historyConfig || {},
-                        outputConfig: agent.outputConfig || {},
-                        position: agent.position || { x: 0, y: 0 }
-                    }
-                };
-            }),
-
-            agentPrototypes: agentPrototypes.map(proto => ({
-                id: proto.id,
-                name: proto.name,
-                provider: proto.llmProvider,
-                model: proto.llmModel,
-                description: proto.role, // Use role as description for prototypes
-                // ⭐ BUG FIX #1.5: Include configuration fields (were omitted from prototypes too)
-                role: proto.role,
-                capabilities: proto.capabilities || [],
-                tools: proto.tools || [],
-                historyConfig: proto.historyConfig,
-                outputConfig: proto.outputConfig,
-                robotId: proto.robotId
-            })),
-
-            // SECURITY: Only expose hasApiKey boolean, never the encrypted key
-            llmConfigs: llmConfigs.map(config => ({
-                id: config.id,
-                provider: config.provider,
-                enabled: config.enabled,
-                hasApiKey: !!config.apiKeyEncrypted,
-                capabilities: config.capabilities || {},
-                updatedAt: config.updatedAt
-            })),
-
-            userSettings: {
-                language: userSettings?.preferences?.language || 'fr',
-                theme: userSettings?.preferences?.theme || 'dark'
-            },
-
-            metadata: {
-                loadedAt: new Date(),
-                userId: userId.toString(),
-                hasWorkflow: !!workflow,
-                workflowWasCreated: wasCreated,  // ⭐ SELF-HEALING indicator
-                healingActions: healingActions.length > 0 ? healingActions : undefined
-            }
-        };
+        const response = await buildWorkspaceSnapshot({
+            userId: userId.toString(),
+            workflow: defaultWorkflow,
+            wasCreated,
+            healingActions,
+            includeLegacyPrototypes: true
+        });
 
         console.log('[Workspace] GET - response summary:', {
-            hasWorkflow: !!workflow,
-            workflowId: workflow?.id,
+            hasWorkflow: !!defaultWorkflow,
+            workflowId: defaultWorkflow?.id,
             workflowWasCreated: wasCreated,
             nodesCount: response.nodes.length,
             edgesCount: response.edges.length,

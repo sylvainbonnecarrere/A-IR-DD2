@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { CANONICAL_ROBOT_IDS } from '../types/robotIds';
 
 // ============================================
 // PERSISTENCE CONFIG (copie de AgentPrototype)
@@ -131,6 +132,7 @@ export interface IAgentInstance extends Document {
         overrideFunctionIds?: string[]; // Si inheritFromPrototype = false
     };
     outputConfig?: object;
+    localLLMProfileId?: string;   // Which LocalLLMProfile is used for this instance
     robotId: string;
 
     // Canvas properties
@@ -234,10 +236,15 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         _id: false
     },
     outputConfig: Schema.Types.Mixed,
+    // ⭐ LOCAL LLM: Profil LLM local sélectionné pour cette instance
+    localLLMProfileId: {
+        type: String,
+        default: null
+    },
     robotId: {
         type: String,
         required: true,
-        enum: ['AR_001', 'BOS_001', 'COM_001', 'PHIL_001', 'TIM_001']
+        enum: [...CANONICAL_ROBOT_IDS]
     },
 
     // Canvas properties

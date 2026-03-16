@@ -3,8 +3,8 @@ edit_py — Remplacement ciblé d'une chaîne dans un fichier du workspace sandb
 """
 from pathlib import Path
 from typing import Any, Dict
-from ..core.function_context import FunctionContext
-from ..core.file_utils import atomic_write_bytes
+from core.function_context import FunctionContext
+from core.file_utils import atomic_write_bytes
 
 
 def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
