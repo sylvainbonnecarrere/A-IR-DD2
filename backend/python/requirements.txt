@@ -8,3 +8,12 @@ lxml>=5.0.0
 
 # web_search_py.py
 duckduckgo-search>=6.0.0
+
+# environment / config (function_context.py, runner.py)
+python-dotenv>=1.0.0
+
+# async MongoDB access (future agent_py integrations)
+motor>=3.3.0
+
+# HTTP async client (alternative to requests for async runners)
+httpx>=0.27.0

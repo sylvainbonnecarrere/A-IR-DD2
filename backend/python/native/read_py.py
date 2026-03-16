@@ -3,8 +3,8 @@ read_py — Lecture du contenu d'un fichier dans le workspace sandbox
 """
 from pathlib import Path
 from typing import Any, Dict
-from ..core.function_context import FunctionContext
-from ..core.file_utils import MAX_FILE_SIZE
+from core.function_context import FunctionContext
+from core.file_utils import MAX_FILE_SIZE
 
 
 def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:

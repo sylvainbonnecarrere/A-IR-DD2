@@ -3,7 +3,7 @@ web_fetch_py — Récupération sécurisée du contenu d'une URL (HTTPS uniqueme
 """
 import re
 from typing import Any, Dict
-from ..core.function_context import FunctionContext
+from core.function_context import FunctionContext
 
 try:
     import requests

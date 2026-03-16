@@ -36,6 +36,7 @@ export function transformAgentInstanceForFrontend(instance: any) {
         historyConfig,
         outputConfig,
         functionInheritance,
+        localLLMProfileId,
         robotId,
         position,
         ...rest
@@ -64,8 +65,8 @@ export function transformAgentInstanceForFrontend(instance: any) {
             saveLinks: false,
             saveTasks: false,
             saveMedia: false,
-            mediaStorage: 'db',
-            cloudStorageConfig: null
+            mediaStorage: 'db'
+            // cloudStorageConfig: intentionally omitted (null would fail Zod validation)
         },
         // ⭐ CRITICAL: Reconstruct configuration_json for frontend
         configuration_json: {
@@ -78,7 +79,9 @@ export function transformAgentInstanceForFrontend(instance: any) {
             historyConfig: historyConfig || {},
             outputConfig: outputConfig || {},
             position: position || { x: 0, y: 0 },
-            functionInheritance: functionInheritance || { inheritFromPrototype: true, overrideFunctionIds: [] }
+            functionInheritance: functionInheritance || { inheritFromPrototype: true, overrideFunctionIds: [] },
+            // ⭐ LOCAL LLM: Include localLLMProfileId for correct endpoint resolution after reload
+            ...(localLLMProfileId != null && { localLLMProfileId })
         },
         ...remaining
     };

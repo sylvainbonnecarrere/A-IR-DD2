@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { ChatMessage, LLMConfig, LLMProvider, LocalLLMProfile } from '../types';
 
+const isDevelopmentEnvironment = process.env.NODE_ENV !== 'production';
+
 /**
  * Runtime Domain Store - Gère l'exécution et les états temps réel
  * Responsabilité : Messages de chat, exécution des agents,
@@ -257,7 +259,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     });
 
     // Only log in development to avoid production noise
-    if (import.meta.env.DEV) {
+    if (isDevelopmentEnvironment) {
       console.log(`[useRuntimeStore] getNewMessages(${nodeId}): ${newMessages.length} new messages (out of ${messages.length} total). Last saved: ${lastSaved.toISOString()}`);
     }
     return newMessages;

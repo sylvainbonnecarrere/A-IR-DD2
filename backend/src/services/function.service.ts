@@ -204,11 +204,15 @@ export class FunctionService {
             throw new Error('bash_py requiert un consentement explicite (allowBashPy: true)');
         }
 
-        fn.isEnabled = !fn.isEnabled;
-        fn.updatedAt = new Date();
-        await fn.save();
+        // Utilise $set atomique pour éviter la validation complète du document
+        // (protège contre les dérives de schéma dans les données seedées, ex: version string vs number)
+        const updated = await UserFunction.findOneAndUpdate(
+            { _id: fn._id },
+            { $set: { isEnabled: !fn.isEnabled } },
+            { new: true }
+        );
 
-        return fn.toObject();
+        return updated ? updated.toObject() : null;
     }
 
     /**

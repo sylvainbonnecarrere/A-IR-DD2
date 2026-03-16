@@ -12,7 +12,9 @@
 import React, { useEffect, useState } from 'react';
 import { useFunctionStore } from '../stores/useFunctionStore';
 import { useNotifications } from '../contexts/NotificationContext';
+import { useAuth } from '../hooks/useAuth';
 import { FunctionEditorTab } from './FunctionEditorTab';
+import { SandboxHealthLoader } from './SandboxHealthLoader';
 import type { UserFunction, FunctionOrigin, FunctionLanguage } from '../types/function.types';
 
 // ─── Icônes inline ────────────────────────────────────────────────────────────
@@ -29,13 +31,58 @@ const CustomBadge = () => (
     <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-900/40 text-purple-400 border border-purple-500/30">custom</span>
 );
 
+// ─── DeleteConfirmModal ───────────────────────────────────────────────────────
+interface DeleteConfirmModalProps {
+    fnName: string;
+    onConfirm: () => void;
+    onCancel: () => void;
+}
+
+const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({ fnName, onConfirm, onCancel }) => (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60]">
+        <div className="bg-gray-800 border border-red-500/40 rounded-xl p-6 w-96 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-500/15 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                </div>
+                <div>
+                    <h3 className="text-base font-semibold text-white">Supprimer la fonction</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">Cette action est irréversible</p>
+                </div>
+            </div>
+            <p className="text-sm text-gray-300 mb-6">
+                Êtes-vous sûr de vouloir supprimer la fonction{' '}
+                <span className="font-mono text-red-300">"{fnName}"</span> ?
+                <br />
+                <span className="text-xs text-gray-500 mt-1 block">Elle ne pourra pas être récupérée.</span>
+            </p>
+            <div className="flex gap-3">
+                <button
+                    onClick={onCancel}
+                    className="flex-1 py-2 rounded-lg border border-gray-600 text-gray-300 text-sm hover:bg-gray-700/50 transition-colors"
+                >
+                    Annuler
+                </button>
+                <button
+                    onClick={onConfirm}
+                    className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-semibold text-sm transition-colors"
+                >
+                    Supprimer définitivement
+                </button>
+            </div>
+        </div>
+    </div>
+);
+
 // ─── FunctionCard ─────────────────────────────────────────────────────────────
 interface FunctionCardProps {
     fn: UserFunction;
     isSelected: boolean;
     onSelect: () => void;
     onToggle: () => void;
-    onDelete?: () => void;
+    onDeleteRequest?: () => void;
 }
 
 const FunctionCard: React.FC<FunctionCardProps> = ({
@@ -43,7 +90,7 @@ const FunctionCard: React.FC<FunctionCardProps> = ({
     isSelected,
     onSelect,
     onToggle,
-    onDelete
+    onDeleteRequest
 }) => {
     return (
         <div
@@ -96,18 +143,20 @@ const FunctionCard: React.FC<FunctionCardProps> = ({
                 </div>
             )}
 
-            {/* Actions — visible au hover pour custom */}
-            {!fn.isReadonly && onDelete && (
-                <button
-                    onClick={e => { e.stopPropagation(); onDelete(); }}
-                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-300 p-1 rounded"
-                    title="Supprimer la fonction"
-                    aria-label="Supprimer la fonction"
-                >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
+            {/* Bouton suppression — rangée dédiée sous la carte (custom uniquement) */}
+            {fn.origin === 'custom' && !fn.isReadonly && onDeleteRequest && (
+                <div className="mt-2 pt-2 border-t border-gray-700/40 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                        onClick={e => { e.stopPropagation(); onDeleteRequest(); }}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-900/30 hover:bg-red-800/50 border border-red-700/40 hover:border-red-600/60 text-red-400 hover:text-red-300 text-xs transition-all"
+                        title="Supprimer définitivement cette fonction"
+                    >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Supprimer
+                    </button>
+                </div>
             )}
         </div>
     );
@@ -130,45 +179,121 @@ const FunctionLibraryTab: React.FC = () => {
     } = useFunctionStore();
 
     const { addNotification } = useNotifications();
+    const { isAuthenticated } = useAuth();
     const [isCreating, setIsCreating] = useState(false);
     const [newFnName, setNewFnName] = useState('');
     const [newFnDesc, setNewFnDesc] = useState('');
     const [newFnLang, setNewFnLang] = useState<FunctionLanguage>('python');
+    const [nameTouched, setNameTouched] = useState(false);
+    const [descTouched, setDescTouched] = useState(false);
+    const [pendingDeleteFn, setPendingDeleteFn] = useState<UserFunction | null>(null);
+    // C6: état pour la modal de consentement bash_py
+    const [bashPyConsentTarget, setBashPyConsentTarget] = useState<string | null>(null);
+
+    // Règles miroir du schéma Zod backend (createFunctionSchema)
+    const NAME_REGEX = /^[a-z][a-z0-9_]*$/;
+    const nameValue = newFnName.trim();
+    const descValue = newFnDesc.trim();
+    const nameError: string | null =
+        !nameValue ? 'Le nom est obligatoire.' :
+        nameValue.length < 2 ? 'Minimum 2 caractères.' :
+        nameValue.length > 64 ? 'Maximum 64 caractères.' :
+        !NAME_REGEX.test(nameValue) ? 'Format requis : snake_case — lettres minuscules, chiffres et _ uniquement, commençant par une lettre.' :
+        null;
+    const descError: string | null =
+        !descValue ? 'La description est obligatoire.' :
+        descValue.length < 10 ? `Minimum 10 caractères (${descValue.length}/10).` :
+        descValue.length > 500 ? 'Maximum 500 caractères.' :
+        null;
 
     useEffect(() => {
-        loadFunctions();
-    }, [loadFunctions]);
+        if (isAuthenticated) {
+            loadFunctions();
+        }
+    }, [loadFunctions, isAuthenticated]);
+
+    // ── Bannière invité ──────────────────────────────────────────────────────
+    if (!isAuthenticated) {
+        return (
+            <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">
+                <div className="w-14 h-14 rounded-xl bg-gray-800 border border-gray-700 flex items-center justify-center">
+                    <svg className="w-7 h-7 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                </div>
+                <div>
+                    <p className="text-gray-300 font-medium mb-1">Utilisateur invité</p>
+                    <p className="text-sm text-gray-500">
+                        Veuillez vous connecter pour accéder aux fonctions personnalisées.
+                    </p>
+                </div>
+                <div className="flex items-center gap-2 mt-1 px-4 py-2 rounded-lg bg-gray-800/60 border border-gray-700/50 text-xs text-gray-500">
+                    <svg className="w-3.5 h-3.5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                    Connexion requise
+                </div>
+            </div>
+        );
+    }
 
     const filteredFns = getFilteredFunctions();
     const nativeCount = filteredFns.filter(f => f.origin === 'native').length;
     const customCount = filteredFns.filter(f => f.origin === 'custom').length;
 
-    const handleDelete = async (fn: UserFunction) => {
-        if (!window.confirm(`Supprimer la fonction "${fn.name}" ? Cette action est irréversible.`)) return;
-        const ok = await deleteFunction(fn._id);
+    const handleDeleteConfirmed = async () => {
+        if (!pendingDeleteFn) return;
+        const ok = await deleteFunction(pendingDeleteFn._id);
+        setPendingDeleteFn(null);
         if (ok) {
-            addNotification({ type: 'success', title: 'Fonction supprimée', message: `"${fn.name}" a été supprimée.` });
+            addNotification({ type: 'success', title: 'Fonction supprimée', message: `"${pendingDeleteFn.name}" a été supprimée.` });
         }
     };
 
+    // C6: Handler de toggle enrichi — interception bash_py pour consentement
+    const handleToggle = (fn: UserFunction) => {
+        if (fn.name === 'bash_py' && !fn.isEnabled) {
+            setBashPyConsentTarget(fn._id);
+            return;
+        }
+        toggleFunction(fn._id);
+    };
+
+    // C6: Confirmation du consentement bash_py → retry avec allowBashPy: true
+    const handleBashPyConsentConfirm = async () => {
+        if (!bashPyConsentTarget) return;
+        const targetId = bashPyConsentTarget;
+        setBashPyConsentTarget(null);
+        await toggleFunction(targetId, true);
+        addNotification({
+            type: 'success',
+            title: 'bash_py activée',
+            message: 'La fonction shell est maintenant disponible. Docker sandbox requis pour l’exécution.'
+        });
+    };
+
     const handleCreate = async () => {
-        if (!newFnName.trim() || !newFnDesc.trim()) {
-            addNotification({ type: 'error', title: 'Champs requis', message: 'Le nom et la description sont obligatoires.' });
+        setNameTouched(true);
+        setDescTouched(true);
+        if (nameError || descError) {
+            addNotification({ type: 'error', title: 'Formulaire invalide', message: nameError ?? descError ?? 'Corrigez les erreurs.' });
             return;
         }
         const created = await createFunction({
-            name: newFnName.trim(),
-            description: newFnDesc.trim(),
+            name: nameValue,
+            description: descValue,
             language: newFnLang,
             codeInline: newFnLang === 'python'
-                ? `# Votre fonction ${newFnName}\n\n\ndef run(context, args):\n    \"\"\"\n    ${newFnDesc}\n    \"\"\"\n    # TODO: Implémentez votre logique ici\n    return {"result": "ok"}\n`
-                : `// Votre fonction ${newFnName}\nexport function run(context: any, args: any) {\n  // TODO: Implémentez votre logique ici\n  return { result: "ok" };\n}\n`
+                ? `# Votre fonction ${nameValue}\n\n\ndef run(context, args):\n    \"\"\"\n    ${descValue}\n    \"\"\"\n    # TODO: Implémentez votre logique ici\n    return {"result": "ok"}\n`
+                : `// Votre fonction ${nameValue}\n// Accès aux arguments : args.param_name, args.limit, etc.\nexport function run(\n  context: { userId: string; agentId?: string; workflowId?: string; depth: number },\n  args: { [key: string]: unknown }  // Ex: { user_name: string; limit?: number }\n): unknown {\n  // TODO: Implémentez votre logique ici\n  return { result: "ok" };\n}\n`
         });
         if (created) {
             addNotification({ type: 'success', title: 'Fonction créée', message: `"${created.name}" est prête à éditer.` });
             setIsCreating(false);
             setNewFnName('');
             setNewFnDesc('');
+            setNameTouched(false);
+            setDescTouched(false);
         }
     };
 
@@ -262,12 +387,64 @@ const FunctionLibraryTab: React.FC = () => {
                             fn={fn}
                             isSelected={fn._id === selectedFunctionId}
                             onSelect={() => selectFunction(fn._id)}
-                            onToggle={() => toggleFunction(fn._id)}
-                            onDelete={() => handleDelete(fn)}
+                            onToggle={() => handleToggle(fn)}
+                            onDeleteRequest={() => setPendingDeleteFn(fn)}
                         />
                     ))}
                 </div>
             </div>
+
+            {/* Modale de confirmation suppression */}
+            {pendingDeleteFn && (
+                <DeleteConfirmModal
+                    fnName={pendingDeleteFn.name}
+                    onConfirm={handleDeleteConfirmed}
+                    onCancel={() => setPendingDeleteFn(null)}
+                />
+            )}
+
+            {/* C6: Modal de consentement bash_py */}
+            {bashPyConsentTarget !== null && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+                    <div className="bg-gray-900 border border-red-700/50 rounded-xl p-6 max-w-md w-full shadow-2xl">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-full bg-red-900/50 border border-red-700 flex items-center justify-center flex-shrink-0">
+                                <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.07 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-red-300 text-base">Consentement de sécurité requis</h3>
+                                <p className="text-xs text-gray-500">Fonction bash_py — Exécution shell</p>
+                            </div>
+                        </div>
+                        <div className="bg-red-950/40 border border-red-800/30 rounded-lg p-4 mb-4 text-sm text-red-200 space-y-2">
+                            <p>⚠️ <strong>bash_py</strong> permet d’exécuter des commandes shell directement sur le système.</p>
+                            <ul className="text-xs text-red-300/80 space-y-1 ml-4 list-disc">
+                                <li>Sur <strong>Windows</strong> : exécution PowerShell (détection automatique)</li>
+                                <li>Sur <strong>Linux/macOS</strong> : exécution Bash</li>
+                                <li>Requère un environnement Docker sandbox actif</li>
+                                <li>Les commandes dangereuses sont bloquées par whitelist</li>
+                            </ul>
+                            <p className="text-xs text-yellow-400 mt-2">Cette fonction ne doit être activée que si vous comprenez les risques d’exécution de commandes système.</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setBashPyConsentTarget(null)}
+                                className="flex-1 py-2.5 rounded-lg border border-gray-600 text-gray-300 text-sm hover:bg-gray-800 transition-colors"
+                            >
+                                Annuler
+                            </button>
+                            <button
+                                onClick={handleBashPyConsentConfirm}
+                                className="flex-1 py-2.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-semibold text-sm transition-colors"
+                            >
+                                J’accepte, activer bash_py
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Create Modal */}
             {isCreating && (
@@ -278,26 +455,42 @@ const FunctionLibraryTab: React.FC = () => {
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-xs font-medium text-gray-400 mb-1">
-                                    Nom <span className="text-gray-500">(snake_case)</span>
+                                    Nom <span className="text-red-400">*</span>{' '}
+                                    <span className="text-gray-600 font-normal">snake_case, lettres minuscules + chiffres + _</span>
                                 </label>
                                 <input
                                     type="text"
                                     value={newFnName}
-                                    onChange={e => setNewFnName(e.target.value)}
+                                    onChange={e => { setNewFnName(e.target.value); setNameTouched(true); }}
+                                    onBlur={() => setNameTouched(true)}
                                     placeholder="ma_fonction_py"
-                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm text-gray-200 font-mono focus:outline-none focus:border-cyan-500/60"
+                                    className={`w-full px-3 py-2 bg-gray-700 border rounded-lg text-sm text-gray-200 font-mono focus:outline-none focus:border-cyan-500/60 ${
+                                        nameTouched && nameError ? 'border-red-500/60' : 'border-gray-600'
+                                    }`}
                                 />
+                                {nameTouched && nameError && (
+                                    <p className="text-xs text-red-400 mt-1">{nameError}</p>
+                                )}
                             </div>
 
                             <div>
-                                <label className="block text-xs font-medium text-gray-400 mb-1">Description</label>
+                                <label className="block text-xs font-medium text-gray-400 mb-1">
+                                    Description <span className="text-red-400">*</span>
+                                    <span className="text-gray-600 font-normal ml-1">(min. 10 caractères — obligatoire pour le function calling)</span>
+                                </label>
                                 <textarea
                                     value={newFnDesc}
-                                    onChange={e => setNewFnDesc(e.target.value)}
+                                    onChange={e => { setNewFnDesc(e.target.value); setDescTouched(true); }}
+                                    onBlur={() => setDescTouched(true)}
                                     placeholder="Décrivez ce que fait cette fonction..."
                                     rows={3}
-                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm text-gray-200 focus:outline-none focus:border-cyan-500/60 resize-none"
+                                    className={`w-full px-3 py-2 bg-gray-700 border rounded-lg text-sm text-gray-200 focus:outline-none focus:border-cyan-500/60 resize-none ${
+                                        descTouched && descError ? 'border-red-500/60' : 'border-gray-600'
+                                    }`}
                                 />
+                                {descTouched && descError && (
+                                    <p className="text-xs text-red-400 mt-1">{descError}</p>
+                                )}
                             </div>
 
                             <div>
@@ -322,7 +515,7 @@ const FunctionLibraryTab: React.FC = () => {
 
                         <div className="flex gap-3 mt-6">
                             <button
-                                onClick={() => setIsCreating(false)}
+                                onClick={() => { setIsCreating(false); setNewFnName(''); setNewFnDesc(''); setNameTouched(false); setDescTouched(false); }}
                                 className="flex-1 py-2 rounded-lg border border-gray-600 text-gray-300 text-sm hover:bg-gray-700/50 transition-colors"
                             >
                                 Annuler
@@ -345,8 +538,17 @@ const FunctionLibraryTab: React.FC = () => {
 // Panneau latéral droit — affiche les détails de la fonction sélectionnée
 // et le lien vers l'éditeur Monaco (J4)
 const FunctionDetailPanel: React.FC<{ onOpenEditor: () => void }> = ({ onOpenEditor }) => {
-    const { getSelectedFunction } = useFunctionStore();
+    const { getSelectedFunction, updateFunction } = useFunctionStore();
+    const { addNotification } = useNotifications();
     const fn = getSelectedFunction();
+
+    const [editDesc, setEditDesc] = useState('');
+    const [isSavingDesc, setIsSavingDesc] = useState(false);
+
+    // Synchronise l'édition locale quand la fonction sélectionnée change
+    useEffect(() => {
+        setEditDesc(fn?.description ?? '');
+    }, [fn?._id]);
 
     if (!fn) {
         return (
@@ -359,6 +561,21 @@ const FunctionDetailPanel: React.FC<{ onOpenEditor: () => void }> = ({ onOpenEdi
         );
     }
 
+    const descChanged = editDesc.trim() !== fn.description.trim();
+
+    const handleSaveDesc = async () => {
+        if (!editDesc.trim()) {
+            addNotification({ type: 'error', title: 'Description requise', message: 'La description ne peut pas être vide.' });
+            return;
+        }
+        setIsSavingDesc(true);
+        const updated = await updateFunction(fn._id, { description: editDesc.trim() });
+        setIsSavingDesc(false);
+        if (updated) {
+            addNotification({ type: 'success', title: 'Description mise à jour', message: `"${fn.name}" modifiée.` });
+        }
+    };
+
     return (
         <div className="flex flex-col h-full p-4 space-y-4 overflow-y-auto">
             {/* Title */}
@@ -368,7 +585,43 @@ const FunctionDetailPanel: React.FC<{ onOpenEditor: () => void }> = ({ onOpenEdi
                     {fn.origin === 'native' ? <NativeBadge /> : <CustomBadge />}
                 </div>
                 <h3 className="text-lg font-mono font-bold text-white">{fn.name}</h3>
-                <p className="text-sm text-gray-400 mt-1 leading-relaxed">{fn.description}</p>
+
+                {/* Description — éditable pour les fonctions custom */}
+                {fn.isReadonly ? (
+                    <p className="text-sm text-gray-400 mt-1 leading-relaxed">{fn.description}</p>
+                ) : (
+                    <div className="mt-2">
+                        <label className="text-xs font-medium text-gray-500 mb-1 block">
+                            Description <span className="text-red-400">*</span>
+                        </label>
+                        <textarea
+                            value={editDesc}
+                            onChange={e => setEditDesc(e.target.value)}
+                            rows={3}
+                            className="w-full px-2.5 py-2 bg-gray-900/60 border border-gray-700/60 rounded-lg text-sm text-gray-200 focus:outline-none focus:border-cyan-500/40 resize-none"
+                        />
+                        {/* C7 FIX: Bouton toujours visible (disabled si rien n'a changé) */}
+                        <button
+                            onClick={handleSaveDesc}
+                            disabled={isSavingDesc || !editDesc.trim() || !descChanged}
+                            className={`mt-1.5 flex items-center gap-1.5 px-3 py-1 rounded-md border text-xs transition-all ${
+                                descChanged && editDesc.trim()
+                                    ? 'bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30 text-cyan-400 cursor-pointer'
+                                    : 'bg-gray-800/40 border-gray-700/40 text-gray-600 cursor-not-allowed opacity-50'
+                            }`}
+                            title={descChanged ? 'Enregistrer les modifications' : 'Aucune modification à sauvegarder'}
+                        >
+                            {isSavingDesc ? (
+                                <div className="w-3 h-3 border border-cyan-400/40 border-t-cyan-400 rounded-full animate-spin" />
+                            ) : (
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                                </svg>
+                            )}
+                            Sauvegarder la description
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Meta */}
@@ -428,38 +681,6 @@ const FunctionDetailPanel: React.FC<{ onOpenEditor: () => void }> = ({ onOpenEdi
     );
 };
 
-// ─── EditorTabPlaceholder ─────────────────────────────────────────────────────
-// Placeholder pour J4 (Monaco Editor)
-const EditorTabPlaceholder: React.FC = () => {
-    const { getSelectedFunction } = useFunctionStore();
-    const fn = getSelectedFunction();
-
-    return (
-        <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-3 p-8">
-            <div className="w-16 h-16 rounded-xl bg-gray-800/80 border border-gray-700 flex items-center justify-center">
-                <svg className="w-8 h-8 text-cyan-500/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                </svg>
-            </div>
-            <p className="text-center text-sm">
-                {fn ? (
-                    <>
-                        <span className="text-gray-300 font-mono">{fn.name}</span><br />
-                        L'éditeur Monaco sera disponible au Jalon J4
-                    </>
-                ) : (
-                    'Sélectionnez une fonction dans la bibliothèque'
-                )}
-            </p>
-            {fn && !fn.isReadonly && fn.codeInline && (
-                <pre className="text-xs bg-gray-900/80 border border-gray-700/50 rounded-lg p-4 overflow-auto max-w-full max-h-80 text-gray-300 w-full">
-                    {fn.codeInline}
-                </pre>
-            )}
-        </div>
-    );
-};
-
 // ─── PhilFunctionsPage ────────────────────────────────────────────────────────
 type TabId = 'library' | 'editor';
 
@@ -497,10 +718,12 @@ export const PhilFunctionsPage: React.FC = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                     </svg>
                 </div>
-                <div>
+                <div className="flex-1">
                     <h1 className="text-base font-bold text-white leading-tight">Fonctions Personnalisées</h1>
                     <p className="text-xs text-gray-400">Phil · Bibliothèque de fonctions pour les agents</p>
                 </div>
+                {/* C9.2: Indicateur sandbox Python */}
+                <SandboxHealthLoader />
             </div>
 
             {/* Tabs */}

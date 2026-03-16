@@ -22,3 +22,4 @@ Object.defineProperty(window, 'matchMedia', {
 
 // Mock environment variables
 process.env.REACT_APP_API_URL = 'http://localhost:3001';
+process.env.VITE_API_URL = 'http://localhost:3001';

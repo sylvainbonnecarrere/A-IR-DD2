@@ -12,6 +12,7 @@ import { generateAccessToken } from '../utils/jwt';
 const app = express();
 app.use(express.json());
 app.use(passport.initialize());
+app.use('/api/workflows/:workflowId/instances', agentInstancesRoutes);
 app.use('/api/agent-instances', agentInstancesRoutes);
 
 describe('Simple Test - POST /from-prototype', () => {
@@ -54,10 +55,9 @@ describe('Simple Test - POST /from-prototype', () => {
 
     it('POST /from-prototype should create instance', async () => {
         const res = await request(app)
-            .post('/api/agent-instances/from-prototype')
+            .post(`/api/workflows/${workflow.id}/instances/from-prototype`)
             .set('Authorization', `Bearer ${token}`)
             .send({
-                workflowId: workflow.id,
                 prototypeId: prototype.id,
                 position: { x: 10, y: 20 }
             });
@@ -66,7 +66,7 @@ describe('Simple Test - POST /from-prototype', () => {
         console.log('Response body:', JSON.stringify(res.body));
 
         expect(res.status).toBe(201);
-        expect(res.body._id).toBeDefined();
+        expect(res.body.id).toBeDefined();
         expect(res.body.name).toBe('Test Proto');
     });
 });

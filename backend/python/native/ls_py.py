@@ -5,7 +5,7 @@ import os
 import fnmatch
 from pathlib import Path
 from typing import Any, Dict, List
-from ..core.function_context import FunctionContext
+from core.function_context import FunctionContext
 
 
 def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:

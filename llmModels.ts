@@ -40,23 +40,6 @@ export const getCapabilitiesForLLM = (provider: LLMProvider, modelId: string): L
 export const LLM_MODELS_DETAILED: Record<LLMProvider, LLMModelDefinition[]> = {
     [LLMProvider.Gemini]: [
         {
-            id: 'gemini-3-pro-preview',
-            name: 'Gemini 3 Pro Preview',
-            capabilities: [
-                LLMCapability.Chat,
-                LLMCapability.FileUpload,
-                LLMCapability.ImageGeneration,
-                LLMCapability.ImageModification,
-                LLMCapability.FunctionCalling,
-                LLMCapability.WebSearch,
-                LLMCapability.VideoGeneration,
-                LLMCapability.WebSearchGrounding,
-                LLMCapability.Reasoning
-            ],
-            recommended: true,
-            description: '🧠 Advanced reasoning model with thinking levels (1M context)'
-        },
-        {
             id: 'gemini-2.5-flash',
             name: 'Gemini 2.5 Flash',
             capabilities: [
@@ -96,9 +79,11 @@ export const LLM_MODELS_DETAILED: Record<LLMProvider, LLMModelDefinition[]> = {
                 LLMCapability.WebSearch,
                 LLMCapability.VideoGeneration,
                 LLMCapability.MapsGrounding,
-                LLMCapability.WebSearchGrounding
+                LLMCapability.WebSearchGrounding,
+                LLMCapability.Reasoning
             ],
-            description: 'Advanced multimodal model with extended context'
+            recommended: true,
+            description: '🧠 Advanced reasoning model with thinking levels (1M context)'
         },
         {
             id: 'imagen-3.0-generate-001',

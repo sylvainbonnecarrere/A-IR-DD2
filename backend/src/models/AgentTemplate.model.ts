@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { CANONICAL_ROBOT_IDS, CANONICAL_ROBOT_IDS_LABEL } from '../types/robotIds';
 
 /**
  * Template d'agent - Réutilisable au niveau utilisateur
@@ -112,8 +113,8 @@ const AgentTemplateSchema = new Schema<IAgentTemplate>(
       type: String,
       required: true,
       enum: {
-        values: ['AR_001', 'BO_002', 'CO_003', 'PH_004', 'TI_005'],
-        message: 'RobotId must be one of: AR_001, BO_002, CO_003, PH_004, TI_005'
+        values: [...CANONICAL_ROBOT_IDS],
+        message: `RobotId must be one of: ${CANONICAL_ROBOT_IDS_LABEL}`
       }
     },
     icon: {

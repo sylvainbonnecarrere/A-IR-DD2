@@ -149,8 +149,138 @@ interface UpdateConfirmationState {
   count: number;
 }
 
-// ⭐ ÉTAPE 5: API URL — source de vérité unique
-import { API_BASE_URL } from './config/api.config';
+interface WorkspaceSnapshot {
+  workflow: {
+    id: string;
+    name: string;
+    description?: string;
+    isActive: boolean;
+    isDefault: boolean;
+    canvasState?: {
+      zoom: number;
+      panX: number;
+      panY: number;
+    };
+  } | null;
+  nodes?: any[];
+  edges?: any[];
+  agentInstances?: any[];
+  agentPrototypes?: any[];
+}
+
+const mapPrototypeToAgent = (prototype: any, fallbackTimestamp: string): Agent => ({
+  id: prototype.id || prototype._id,
+  name: prototype.name,
+  role: prototype.role || prototype.description || 'assistant',
+  systemPrompt: prototype.systemPrompt || prototype.description || '',
+  llmProvider: (prototype.provider as LLMProvider) || LLMProvider.Gemini,
+  model: prototype.model || 'gemini-2.0-flash',
+  capabilities: Array.isArray(prototype.capabilities) ? prototype.capabilities : [],
+  tools: Array.isArray(prototype.tools) ? prototype.tools : [],
+  functionIds: Array.isArray(prototype.functionIds)
+    ? prototype.functionIds
+    : (Array.isArray(prototype.tools)
+        ? prototype.tools.map((tool: any) => tool?.toString ? tool.toString() : String(tool))
+        : []),
+  outputConfig: prototype.outputConfig || {},
+  historyConfig: prototype.historyConfig || {},
+  creator_id: prototype.robotId || RobotId.Archi,
+  created_at: prototype.created_at || fallbackTimestamp,
+  updated_at: prototype.updated_at || fallbackTimestamp
+});
+
+const buildInstanceConfiguration = (instance: any, prototype?: Agent) => (
+  instance.configuration_json || {
+    role: instance.role || prototype?.role || 'assistant',
+    model: instance.llmModel || instance.model || prototype?.model || 'gemini-2.0-flash',
+    llmProvider: instance.llmProvider || instance.provider || prototype?.llmProvider || LLMProvider.Gemini,
+    systemPrompt: instance.systemPrompt || instance.systemInstruction || prototype?.systemPrompt || '',
+    capabilities: Array.isArray(instance.capabilities) ? instance.capabilities : (prototype?.capabilities || []),
+    tools: Array.isArray(instance.tools) ? instance.tools : (prototype?.tools || []),
+    historyConfig: instance.historyConfig || prototype?.historyConfig || {},
+    outputConfig: instance.outputConfig || prototype?.outputConfig || {},
+    position: instance.position || { x: 0, y: 0 }
+  }
+);
+
+const mapInstanceToAgentInstance = (instance: any, workflowId?: string, prototype?: Agent): AgentInstance => ({
+  id: instance.id || instance._id,
+  prototypeId: instance.prototypeId || prototype?.id || instance.id || instance._id,
+  name: instance.name,
+  position: instance.position || instance.configuration_json?.position || { x: 0, y: 0 },
+  isMinimized: instance.isMinimized || false,
+  isMaximized: instance.isMaximized || false,
+  workflowId: instance.workflowId || workflowId,
+  persistenceConfig: instance.persistenceConfig,
+  configuration_json: buildInstanceConfiguration(instance, prototype)
+});
+
+const mapInstanceToLegacyWorkflowNode = (instance: any, workflowId: string | undefined, prototype?: Agent, fallbackTimestamp?: string): WorkflowNode => {
+  const timestamp = fallbackTimestamp || new Date().toISOString();
+  const hydratedInstance = mapInstanceToAgentInstance(instance, workflowId, prototype);
+  const hydratedAgent: Agent = prototype || {
+    id: hydratedInstance.prototypeId,
+    name: instance.name,
+    role: hydratedInstance.configuration_json.role,
+    systemPrompt: hydratedInstance.configuration_json.systemPrompt,
+    llmProvider: hydratedInstance.configuration_json.llmProvider,
+    model: hydratedInstance.configuration_json.model,
+    capabilities: hydratedInstance.configuration_json.capabilities || [],
+    tools: hydratedInstance.configuration_json.tools || [],
+    historyConfig: hydratedInstance.configuration_json.historyConfig || {},
+    outputConfig: hydratedInstance.configuration_json.outputConfig || {},
+    creator_id: instance.robotId || RobotId.Archi,
+    created_at: instance.createdAt || timestamp,
+    updated_at: timestamp
+  };
+
+  return {
+    id: hydratedInstance.id,
+    agent: hydratedAgent,
+    position: hydratedInstance.position,
+    messages: [],
+    isMinimized: hydratedInstance.isMinimized,
+    isMaximized: hydratedInstance.isMaximized,
+    instanceId: hydratedInstance.id
+  };
+};
+
+const mapInstanceToV2Node = (instance: any, workflowId: string | undefined, prototype?: Agent, fallbackTimestamp?: string): V2WorkflowNode => {
+  const legacyNode = mapInstanceToLegacyWorkflowNode(instance, workflowId, prototype, fallbackTimestamp);
+  const hydratedInstance = mapInstanceToAgentInstance(instance, workflowId, prototype);
+
+  return {
+    id: `node-${hydratedInstance.id}`,
+    type: 'agent',
+    position: hydratedInstance.position,
+    data: {
+      robotId: legacyNode.agent.creator_id,
+      label: hydratedInstance.name,
+      agent: legacyNode.agent,
+      agentInstance: hydratedInstance,
+      workflowId,
+      isMinimized: hydratedInstance.isMinimized,
+      isMaximized: hydratedInstance.isMaximized
+    }
+  };
+};
+
+const mapChatMessages = (messages: any[] = []): ChatMessage[] => messages.map((message: any, index: number) => ({
+  id: message.id || `chat-${index}-${message.timestamp || Date.now()}`,
+  sender: message.sender === 'user'
+    ? 'user'
+    : message.sender === 'tool'
+      ? 'tool'
+      : message.sender === 'tool_result'
+        ? 'tool_result'
+        : 'agent',
+  text: message.text || '',
+  timestamp: new Date(message.timestamp || Date.now()),
+  image: message.image,
+  mimeType: message.mimeType,
+  filename: message.fileName || message.filename,
+  toolCalls: message.toolCalls
+}));
 
 /**
  * Inner App component that uses Auth context
@@ -252,13 +382,76 @@ function AppContent() {
   const { updateLLMConfigs, updateLocalLLMProfiles, setNavigationHandler, addNodeMessage } = useRuntimeStore();
 
   // Design Store access for integrity validation  
-  const { validateWorkflowIntegrity, cleanupOrphanedInstances, addAgentInstance, deleteNode, deleteAgentInstance, hydrateFromServer, setNodes, setEdges, updateInstanceId, addNode, agentInstances, nodes: storeNodes } = useDesignStore();
+  const { validateWorkflowIntegrity, cleanupOrphanedInstances, addAgentInstance, deleteNode, deleteAgentInstance, hydrateFromServer, updateInstanceId, addNode, agentInstances, nodes: storeNodes } = useDesignStore();
   
   // ⭐ SELF-HEALING: Workflow Store for hydrating workflow ID
   const { hydrateWorkflowFromServer, getCurrentWorkflowId } = useWorkflowStore();
   
   // ⭐ FIX QA: Journal queue for persisting generated images
   const { enqueueEntry: enqueueJournalEntry } = useJournalQueue();
+
+  const applyWorkspaceSnapshot = useCallback((workspace: WorkspaceSnapshot) => {
+    const snapshotWorkflowId = workspace.workflow?.id;
+    const fallbackTimestamp = new Date().toISOString();
+    const rawPrototypes = Array.isArray(workspace.agentPrototypes) ? workspace.agentPrototypes : [];
+    const rawInstances = Array.isArray(workspace.agentInstances) ? workspace.agentInstances : [];
+    const prototypeIndex = new Map<string, Agent>();
+    const hydratedPrototypes = rawPrototypes.map((prototype: any) => {
+      const hydratedPrototype = mapPrototypeToAgent(prototype, fallbackTimestamp);
+      prototypeIndex.set(hydratedPrototype.id, hydratedPrototype);
+      return hydratedPrototype;
+    });
+    const hydratedInstances = rawInstances.map((instance: any) => {
+      const prototype = prototypeIndex.get(instance.prototypeId);
+      return mapInstanceToAgentInstance(instance, snapshotWorkflowId, prototype);
+    });
+    const v2Nodes = rawInstances.map((instance: any) => {
+      const prototype = prototypeIndex.get(instance.prototypeId);
+      return mapInstanceToV2Node(instance, snapshotWorkflowId, prototype, fallbackTimestamp);
+    });
+    const legacyNodes = rawInstances.map((instance: any) => {
+      const prototype = prototypeIndex.get(instance.prototypeId);
+      return mapInstanceToLegacyWorkflowNode(instance, snapshotWorkflowId, prototype, fallbackTimestamp);
+    });
+
+    if (workspace.workflow) {
+      hydrateWorkflowFromServer({
+        id: workspace.workflow.id,
+        name: workspace.workflow.name,
+        description: workspace.workflow.description,
+        isDefault: workspace.workflow.isDefault,
+        isActive: workspace.workflow.isActive,
+        canvasState: workspace.workflow.canvasState
+      });
+    }
+
+    useDesignStore.getState().setCurrentWorkflowId(snapshotWorkflowId || null);
+    hydrateFromServer({
+      agents: hydratedPrototypes,
+      agentInstances: hydratedInstances,
+      nodes: v2Nodes,
+      edges: Array.isArray(workspace.edges) ? workspace.edges : []
+    });
+
+    setAgents(hydratedPrototypes);
+    setWorkflowNodes(legacyNodes);
+
+    const { setNodeMessages } = useRuntimeStore.getState();
+    for (const instance of rawInstances) {
+      const instanceId = instance.id || instance._id;
+      if (!instanceId) {
+        continue;
+      }
+      setNodeMessages(`node-${instanceId}`, mapChatMessages(instance.chatMessages));
+    }
+
+    console.log('[App] Workspace snapshot applied:', {
+      workflowId: snapshotWorkflowId,
+      prototypes: hydratedPrototypes.length,
+      instances: hydratedInstances.length,
+      edges: Array.isArray(workspace.edges) ? workspace.edges.length : 0
+    });
+  }, [hydrateFromServer, hydrateWorkflowFromServer]);
 
   /**
    * ⭐ ÉTAPE 5: Hydration for authenticated users
@@ -277,6 +470,7 @@ function AppContent() {
       try {
         // CRITICAL: Hard reset on authenticated user login to prevent stale data
         useDesignStore.getState().resetAll();
+        useRuntimeStore.getState().resetForWorkflowSwitch();
         
         // ⭐ SECURITY FIX: Wipe sélectif — préserver auth_data_v1 (JWT token)
         // localStorage.clear() détruisait le token JWT juste après le login,
@@ -289,348 +483,12 @@ function AppContent() {
         
         setHydrationProgress(30);
 
-        // Parallel load: workspace and instances from API (via apiClient — Facade)
+        // Single authoritative snapshot from API
         setHydrationProgress(60);
 
         const { data: workspace } = await apiClient.get('/api/user/workspace');
-
-        let instancesData: any[] | null = null;
-
-        if (workspace.workflow?.id) {
-          console.log('[App] Loading instances for workflowId:', workspace.workflow.id);
-          try {
-            const instRes = await apiClient.get(`/api/workflows/${workspace.workflow.id}/instances`);
-            instancesData = instRes.data;
-          } catch (err) {
-            console.error('[App] Error loading instances:', err);
-          }
-        }
         setHydrationProgress(80);
-
-        // ⭐ SELF-HEALING: Hydrate workflow with REAL MongoDB ID from server
-        // This is CRITICAL for persistence to work correctly
-        if (workspace.workflow) {
-          hydrateWorkflowFromServer({
-            id: workspace.workflow.id,  // ⭐ Real MongoDB ObjectId
-            name: workspace.workflow.name,
-            description: workspace.workflow.description,
-            isDefault: workspace.workflow.isDefault,
-            isActive: workspace.workflow.isActive,
-            canvasState: workspace.workflow.canvasState
-          });
-          
-          console.log('[App] ⭐ Workflow hydrated with ID:', workspace.workflow.id, {
-            wasCreated: workspace.metadata?.workflowWasCreated,
-            isDefault: workspace.workflow.isDefault
-          });
-        } else {
-          console.warn('[App] ⚠️ No workflow in server response - Self-Healing may have failed');
-        }
-
-        // ⭐ DECLARE EARLY: Declare these variables BEFORE the if blocks so they're accessible later
-        let hydratedPrototypes: Agent[] = [];
-        
-        // ⭐ FIX: Hydrater les prototypes d'agents dans le state React et le store Zustand
-        if (workspace.agentPrototypes && workspace.agentPrototypes.length > 0) {
-          const now = new Date().toISOString();
-          hydratedPrototypes = workspace.agentPrototypes.map((proto: any) => ({
-            id: proto.id,
-            name: proto.name,
-            role: proto.description || proto.role || 'assistant',
-            systemPrompt: proto.description || proto.systemPrompt || '',
-            llmProvider: (proto.provider as LLMProvider) || LLMProvider.Gemini,
-            model: proto.model || 'gemini-2.0-flash',
-            // ⭐ BUG FIX: Copy capabilities + tools from backend prototype (was always empty!)
-            capabilities: Array.isArray(proto.capabilities) ? proto.capabilities : [],
-            tools: Array.isArray(proto.tools) ? proto.tools : [],
-            outputConfig: proto.outputConfig || {},
-            historyConfig: proto.historyConfig || {},
-            creator_id: proto.robotId || RobotId.Archi,
-            created_at: proto.created_at || now,
-            updated_at: proto.updated_at || now
-          }));
-          
-          // Hydrater le state React (legacy)
-          setAgents(hydratedPrototypes);
-          
-          // ⭐ NOTE: hydrateFromServer call moved to AFTER instances are ready
-          // This ensures ATOMIC hydration (agents + instances together)
-          console.log('[App] ✅ Agent prototypes loaded:', hydratedPrototypes.length);
-        }
-
-        // Load external instances from API (if fetched separately)
-        const externalInstances = Array.isArray(instancesData)
-          ? instancesData
-          : [];
-        
-        // Merge instances from both sources, deduplicating by ID
-        const allInstancesMap = new Map();
-        
-        if (workspace.agentInstances && workspace.agentInstances.length > 0) {
-          workspace.agentInstances.forEach((inst: any) => {
-            allInstancesMap.set(inst.id, inst);
-          });
-        }
-        
-        if (externalInstances.length > 0) {
-          externalInstances.forEach((inst: any) => {
-            if (!allInstancesMap.has(inst.id)) {
-              allInstancesMap.set(inst.id, inst);
-            }
-          });
-        }
-        
-        const mergedInstances = Array.from(allInstancesMap.values());
-        
-        // Filter out any undefined/null instances
-        const validMergedInstances = mergedInstances.filter((inst: any) => inst && inst.id);
-        
-        // Prepare hydration for Zustand store
-        let hydratedInstancesForStore: AgentInstance[] = [];
-        
-        // Hydrate instances to store before building nodes
-        if (validMergedInstances.length > 0) {
-          hydratedInstancesForStore = validMergedInstances.map((instance: any) => {
-            const agentProto = workspace.agentPrototypes?.find((proto: any) => proto.id === instance.prototypeId);
-            
-            // ⭐ CRITICAL: Use configuration_json ALREADY reconstructed by backend
-            // Backend returns it via transformAgentInstanceForFrontend()
-            // No reconstruction needed - trust the backend data
-            const configurationJson = instance.configuration_json || {
-              role: instance.role || agentProto?.description || 'assistant',
-              model: instance.llmModel || agentProto?.model || 'gemini-2.0-flash',
-              llmProvider: instance.llmProvider || agentProto?.provider || LLMProvider.Gemini,
-              systemPrompt: instance.systemPrompt || agentProto?.description || '',
-              capabilities: Array.isArray(instance.capabilities) ? instance.capabilities : (agentProto?.capabilities || []),
-              tools: Array.isArray(instance.tools) ? instance.tools : (agentProto?.tools || []),
-              outputConfig: instance.outputConfig || agentProto?.outputConfig || {},
-              historyConfig: instance.historyConfig || agentProto?.historyConfig || {},
-              position: instance.position || { x: 0, y: 0 }
-            };
-            
-            return {
-              id: instance.id,
-              prototypeId: instance.prototypeId || instance.id,
-              name: instance.name,
-              position: instance.position || { x: 0, y: 0 },
-              isMinimized: instance.isMinimized || false,
-              isMaximized: instance.isMaximized || false,
-              workflowId: instance.workflowId || workspace.workflow?.id,
-              configuration_json: configurationJson
-            } as AgentInstance;
-          });
-          
-          // Atomic hydration: single call with agents and instances together
-          // Prevents race conditions from partial state updates
-          hydrateFromServer({
-            agents: hydratedPrototypes,
-            agentInstances: hydratedInstancesForStore
-          });
-          
-          console.log('[App] ✅ ÉTAPE 1 - ATOMIC HYDRATION COMPLETE:', {
-            agents: hydratedPrototypes.length,
-            instances: hydratedInstancesForStore.length,
-            workflowId: workspace.workflow?.id,
-            message: 'Single atomic call - no partial states',
-            sampleInstance: hydratedInstancesForStore[0]?.configuration_json
-          });
-        }
-
-        // ⭐ CRITICAL: Build V2WorkflowNodes from instances and hydrate to store
-        // This ensures nodes are properly linked to instances for WorkflowCanvas resolution
-        if (validMergedInstances.length > 0) {
-          const v2Nodes: V2WorkflowNode[] = validMergedInstances.map((instance: any) => {
-            // Find the agent prototype for this instance
-            const agentProto = workspace.agentPrototypes?.find((proto: any) => proto.id === instance.prototypeId);
-            
-            // ⭐ FIX: Build Agent from prototype or instance, using capabilities from configuration_json
-            const agent: Agent = agentProto ? {
-              id: agentProto.id,
-              name: agentProto.name,
-              role: agentProto.description || 'assistant',
-              systemPrompt: instance.systemInstruction || agentProto.description || '',
-              llmProvider: (agentProto.provider as LLMProvider) || LLMProvider.Gemini,
-              model: agentProto.model || 'gemini-2.0-flash',
-              // Use instance capabilities if available (from configuration_json), else prototype
-              capabilities: instance.configuration_json?.capabilities || agentProto.capabilities || [],
-              tools: instance.configuration_json?.tools || agentProto.tools || [],
-              creator_id: RobotId.Archi,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            } : {
-              // Fallback: build agent from instance data
-              id: instance.prototypeId || instance.id,
-              name: instance.name,
-              role: 'assistant',
-              systemPrompt: instance.systemInstruction || '',
-              llmProvider: (instance.provider as LLMProvider) || LLMProvider.Gemini,
-              model: instance.model || 'gemini-2.0-flash',
-              // Use configuration_json for capabilities
-              capabilities: instance.configuration_json?.capabilities || [],
-              tools: instance.configuration_json?.tools || [],
-              creator_id: RobotId.Archi,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            };
-            
-            // ⭐ FIX: Use instance data (with configuration_json that includes capabilities)
-            const hydratedInstance: AgentInstance = {
-              id: instance.id,
-              prototypeId: instance.prototypeId || agent.id,
-              name: instance.name,
-              position: instance.position || { x: 0, y: 0 },
-              isMinimized: false,
-              isMaximized: false,
-              workflowId: instance.workflowId || workspace.workflow?.id,
-              // ⭐ CRITICAL: Use configuration_json from instance (includes capabilities)
-              configuration_json: instance.configuration_json || {
-                role: agent.role,
-                model: agent.model,
-                llmProvider: agent.llmProvider,
-                systemPrompt: agent.systemPrompt,
-                capabilities: agent.capabilities || [],
-                tools: agent.tools || [],
-                position: instance.position || { x: 0, y: 0 }
-              }
-            };
-            
-            return {
-              id: `node-${instance.id}`,
-              type: 'agent',
-              position: instance.position || { x: 0, y: 0 },
-              data: {
-                robotId: RobotId.Archi,
-                label: instance.name,
-                agent,
-                agentInstance: hydratedInstance,
-                workflowId: workspace.workflow?.id,
-                isMinimized: false,
-                isMaximized: false
-              }
-            };
-          });
-          
-          // Build and store visual nodes
-          setNodes(v2Nodes);
-          console.log('[App] ✅ V2WorkflowNodes built from instances:', v2Nodes.length);
-        } else {
-          // Fall back to storing backend nodes if available (legacy nodes without instances)
-          console.log('[App] ℹ️ No merged instances found, checking for legacy workspace.nodes');
-          if (workspace.nodes && workspace.nodes.length > 0) {
-            setNodes(workspace.nodes);
-            console.log('[App] ✅ Using legacy workspace.nodes:', workspace.nodes.length);
-          } else {
-            console.warn('[App] ⚠️ No nodes or instances available');
-          }
-        }
-
-        if (workspace.edges) {
-          setEdges(workspace.edges);
-        }
-
-        // Convert instances to WorkflowNode format for legacy React state
-        if (workspace.agentInstances && workspace.agentInstances.length > 0) {
-          
-          const now = new Date().toISOString();
-          const hydrationNodes: WorkflowNode[] = workspace.agentInstances.map((instance: any) => ({
-            id: instance.id,
-            agent: {
-              id: instance.id,
-              name: instance.name,
-              role: instance.role || instance.systemPrompt || 'assistant',
-              systemPrompt: instance.systemPrompt || instance.systemInstruction || '',
-              llmProvider: (instance.llmProvider || instance.provider as LLMProvider) || LLMProvider.Gemini,
-              model: instance.model || instance.llmModel || 'gemini-2.0-flash',
-              // ⭐ CRITICAL FIX #1: Use capabilities from configuration_json (not hardcoded [])
-              capabilities: instance.configuration_json?.capabilities || instance.capabilities || [],
-              tools: instance.configuration_json?.tools || instance.tools || [],
-              // ⭐ CRITICAL FIX #2: Use historyConfig from configuration_json
-              historyConfig: instance.configuration_json?.historyConfig || instance.historyConfig || { enabled: false, llmProvider: LLMProvider.Gemini, model: '', role: '', systemPrompt: '', limits: { char: 0, word: 0, token: 0, sentence: 0, message: 50 } },
-              creator_id: RobotId.Archi,
-              created_at: instance.createdAt || now,
-              updated_at: now
-            } as Agent,
-            position: instance.position || { x: 0, y: 0 },
-            messages: instance.content?.filter((c: any) => c.type === 'chat').map((c: any) => ({
-              id: c.id || `msg-${Date.now()}`,
-              sender: c.role || 'agent',
-              text: c.message || '',
-              timestamp: new Date(c.timestamp || Date.now())
-            })) || [],
-            isMinimized: false,
-            isMaximized: false,
-            instanceId: instance.id
-          }));
-          setWorkflowNodes(hydrationNodes);
-        }
-
-        // ⭐ ÉTAPE 4: Diagnostic logging - verify hydration success
-        
-        console.log('[App] Workspace hydration complete:', {
-          workflowId: workspace.workflow?.id,
-          nodes: workspace.nodes?.length || 0,
-          instances: workspace.agentInstances?.length || 0
-        });
-
-        // Load persisted journals for each agent instance
-        if (workspace.agentInstances && workspace.agentInstances.length > 0 && workspace.workflow?.id) {
-          for (const instance of workspace.agentInstances) {
-            try {
-              const journalRes = await apiClient.get(
-                `/api/workflows/${workspace.workflow.id}/instances/${instance.id}/journals`
-              );
-              const journalsData = journalRes.data;
-              // ⭐ FIX: Le contrôleur retourne { data: [...], meta: {...} }, pas { journals: [...] }
-              const journals = Array.isArray(journalsData)
-                ? journalsData
-                : (journalsData.data || journalsData.journals || []);
-
-              if (journals.length > 0) {
-                // Convert journals to ChatMessages
-                // ⭐ FIX QA: Include imageBase64, mimeType, fileName for image persistence
-                const chatMessages: ChatMessage[] = journals
-                  .filter((j: any) => j.type === 'chat')
-                  .map((j: any) => {
-                    const payload = j.payload || {};
-                    const role = payload.role || 'agent';
-                    const content = payload.content || '';
-                    
-                    // ⭐ FIX QA: Reconstruct image data from journal payload
-                    const chatMessage: ChatMessage = {
-                      id: j._id || `journal-${j.timestamp}`,
-                      sender: role === 'user' ? 'user' :
-                             role === 'agent' ? 'agent' :
-                             role === 'tool' ? 'tool' :
-                             role === 'tool_result' ? 'tool_result' : 'agent',
-                      text: content,
-                      timestamp: new Date(j.createdAt || j.timestamp)
-                    };
-                    
-                    // ⭐ FIX QA: Restore image data if present in journal
-                    if (payload.imageBase64) {
-                      chatMessage.image = payload.imageBase64;
-                    }
-                    if (payload.mimeType) {
-                      chatMessage.mimeType = payload.mimeType;
-                    }
-                    if (payload.fileName) {
-                      chatMessage.filename = payload.fileName;
-                    }
-                    
-                    return chatMessage;
-                  });
-
-                const nodeId = `node-${instance.id}`;
-                const { setNodeMessages } = useRuntimeStore.getState();
-                setNodeMessages(nodeId, chatMessages);
-                console.log(`[App] Loaded ${chatMessages.length} messages for instance ${nodeId}`);
-              }
-            } catch (error) {
-              // Non-blocking: skip this instance's journals
-              console.warn(`[App] Failed to load journals for instance ${instance.id}:`, error);
-            }
-          }
-        }
+        applyWorkspaceSnapshot(workspace);
 
       } catch (err) {
         console.error('[App] Workspace hydration error:', err);
@@ -646,7 +504,7 @@ function AppContent() {
     };
 
     hydrateWorkspace();
-  }, [isAuthenticated, accessToken, hydrateFromServer, setNodes, setEdges, hydrateWorkflowFromServer]);
+  }, [isAuthenticated, accessToken, applyWorkspaceSnapshot]);
 
   /**
    * ⭐ V2 SWITCH WORKFLOW: Fonction unifiée de réhydratation complète
@@ -699,230 +557,15 @@ function AppContent() {
       // ═══ ÉTAPE 2 : APPEL API (progress 30%) ═══
       setSwitchProgress(30);
       const { data } = await apiClient.post(`/api/workflows/${workflowId}/select`);
-      const reloadedData = data.reloadedData;
-      const workflowMeta = data.workflow;
 
       if (!data.success) {
         throw new Error(data.message || 'Switch failed');
       }
-      
-      // ═══ ÉTAPE 3 : MAPPER LES PROTOTYPES (progress 50%) ═══
-      // ⭐ COPIE EXACTE du mapping de l'hydratation initiale (App.tsx L310-329)
-      setSwitchProgress(50);
-      const now = new Date().toISOString();
-      const rawPrototypes = reloadedData?.agentPrototypes || [];
-      const hydratedPrototypes: Agent[] = rawPrototypes.map((proto: any) => ({
-        id: proto.id || proto._id,
-        name: proto.name,
-        role: proto.description || proto.role || 'assistant',
-        systemPrompt: proto.description || proto.systemPrompt || '',
-        llmProvider: (proto.provider as LLMProvider) || LLMProvider.Gemini,
-        model: proto.model || 'gemini-2.0-flash',
-        capabilities: Array.isArray(proto.capabilities) ? proto.capabilities : [],
-        tools: Array.isArray(proto.tools) ? proto.tools : [],
-        outputConfig: proto.outputConfig || {},
-        historyConfig: proto.historyConfig || {},
-        creator_id: proto.robotId || RobotId.Archi,
-        created_at: proto.created_at || now,
-        updated_at: proto.updated_at || now
-      }));
-
-      // ═══ ÉTAPE 4 : HYDRATATION ATOMIQUE (progress 70%) ═══
+      // ═══ ÉTAPE 3 : APPLIQUER LE SNAPSHOT (progress 70%) ═══
       setSwitchProgress(70);
-      
-      // 4a. React state prototypes (legacy) — OBLIGATOIRE (corrige P0-2)
-      setAgents(hydratedPrototypes);
+      applyWorkspaceSnapshot(data.reloadedData);
 
-      // 4b. Zustand store — APPEL UNIQUE, TOUTES LES DONNÉES (corrige P0-1)
-      // ⭐ FIX: Hydrater correctement les instances (structure AgentInstance attendue par le store)
-      const rawInstances = reloadedData?.agents || [];
-      const hydratedInstances: AgentInstance[] = rawInstances.map((inst: any) => ({
-        id: inst._id || inst.id,
-        prototypeId: inst.prototypeId || inst._id || inst.id,
-        name: inst.name,
-        position: inst.configuration_json?.position || inst.position || { x: 0, y: 0 },
-        isMinimized: inst.isMinimized || false,
-        isMaximized: inst.isMaximized || false,
-        workflowId: inst.workflowId || workflowId,
-        configuration_json: inst.configuration_json || {
-          role: inst.role || 'assistant',
-          model: inst.llmModel || 'gemini-2.0-flash',
-          llmProvider: inst.llmProvider || LLMProvider.Gemini,
-          systemPrompt: inst.systemPrompt || '',
-          capabilities: Array.isArray(inst.capabilities) ? inst.capabilities : [],
-          tools: Array.isArray(inst.tools) ? inst.tools : [],
-          position: inst.position || { x: 0, y: 0 }
-        }
-      }));
-      
-      useDesignStore.getState().hydrateFromServer({
-        agents: hydratedPrototypes,
-        agentInstances: hydratedInstances,
-        nodes: reloadedData?.nodes || [],
-        edges: reloadedData?.edges || []
-      });
-
-      // 4c. Workflow store (canvas state, metadata)
-      if (workflowMeta) {
-        hydrateWorkflowFromServer({
-          id: workflowMeta._id || workflowId,
-          name: workflowMeta.name,
-          description: workflowMeta.description,
-          isDefault: workflowMeta.isDefault,
-          isActive: workflowMeta.isActive,
-          canvasState: reloadedData?.canvasState || workflowMeta.canvasState
-        });
-      }
-
-      // 4d. Set currentWorkflowId dans le design store
-      useDesignStore.getState().setCurrentWorkflowId(workflowId);
-      
-      // ═══ ÉTAPE 5 : JOURNAUX (progress 85%) ═══
-      setSwitchProgress(85);
-      const instances = reloadedData?.agents || [];
-      for (const instance of instances) {
-        const instanceId = instance._id || instance.id;
-        if (!instanceId) continue;
-        try {
-          const journalRes = await apiClient.get(
-            `/api/workflows/${workflowId}/instances/${instanceId}/journals`
-          );
-          const journals = journalRes.data?.data || journalRes.data?.journals || [];
-          
-          if (journals.length > 0) {
-            // ⭐ FIX QA: Include imageBase64, mimeType, fileName for image persistence during workflow switch
-            const chatMessages: ChatMessage[] = journals
-              .filter((j: any) => j.type === 'chat')
-              .map((j: any) => {
-                const payload = j.payload || {};
-                const role = payload.role || 'agent';
-                const content = payload.content || '';
-                
-                // ⭐ FIX QA: Reconstruct chat message with image data
-                const chatMessage: ChatMessage = {
-                  id: j._id || `journal-${j.timestamp}`,
-                  sender: role === 'user' ? 'user' :
-                         role === 'agent' ? 'agent' :
-                         role === 'tool' ? 'tool' :
-                         role === 'tool_result' ? 'tool_result' : 'agent',
-                  text: content,
-                  timestamp: new Date(j.createdAt || j.timestamp)
-                };
-                
-                // ⭐ FIX QA: Restore image data if present in journal
-                if (payload.imageBase64) {
-                  chatMessage.image = payload.imageBase64;
-                }
-                if (payload.mimeType) {
-                  chatMessage.mimeType = payload.mimeType;
-                }
-                if (payload.fileName) {
-                  chatMessage.filename = payload.fileName;
-                }
-                
-                return chatMessage;
-              });
-            
-            const nodeId = `node-${instanceId}`;
-            useRuntimeStore.getState().setNodeMessages(nodeId, chatMessages);
-            console.log(`[SwitchWorkflow] Loaded ${chatMessages.length} messages for ${nodeId}`);
-          }
-        } catch {
-          console.warn(`[SwitchWorkflow] Journals load failed for instance ${instanceId}`);
-        }
-      }
-      
-      // ═══ ÉTAPE 6 : RECONSTRUIRE LES NODES LEGACY + V2 (progress 90%) ═══
-      setSwitchProgress(90);
-      if (instances.length > 0) {
-        const hydrationNodes: WorkflowNode[] = instances.map((inst: any) => ({
-          id: inst._id || inst.id,
-          agent: {
-            id: inst._id || inst.id,
-            name: inst.name,
-            role: inst.configuration_json?.role || inst.role || 'assistant',
-            systemPrompt: inst.configuration_json?.systemPrompt || inst.systemPrompt || '',
-            llmProvider: (inst.configuration_json?.llmProvider || inst.llmProvider || LLMProvider.Gemini) as LLMProvider,
-            model: inst.configuration_json?.model || inst.llmModel || 'gemini-2.0-flash',
-            capabilities: inst.configuration_json?.capabilities || inst.capabilities || [],
-            tools: inst.configuration_json?.tools || inst.tools || [],
-            historyConfig: inst.configuration_json?.historyConfig || inst.historyConfig || {},
-            creator_id: RobotId.Archi,
-            created_at: inst.createdAt || now,
-            updated_at: now
-          } as Agent,
-          position: inst.configuration_json?.position || inst.position || { x: 0, y: 0 },
-          messages: [],
-          isMinimized: false,
-          isMaximized: false,
-          instanceId: inst._id || inst.id
-        }));
-        setWorkflowNodes(hydrationNodes);
-        
-        // Also rebuild V2 nodes for the design store
-        // ⭐ FIX Bug 2: Build data.agent + structured agentInstance (matches initial hydration)
-        const v2Nodes: V2WorkflowNode[] = instances.map((inst: any) => {
-          const instanceId = inst._id || inst.id;
-          
-          // Build Agent from instance data (same fields as hydrationNodes above)
-          const agent: Agent = {
-            id: instanceId,
-            name: inst.name,
-            role: inst.configuration_json?.role || inst.role || 'assistant',
-            systemPrompt: inst.configuration_json?.systemPrompt || inst.systemPrompt || '',
-            llmProvider: (inst.configuration_json?.llmProvider || inst.llmProvider || LLMProvider.Gemini) as LLMProvider,
-            model: inst.configuration_json?.model || inst.llmModel || 'gemini-2.0-flash',
-            capabilities: inst.configuration_json?.capabilities || inst.capabilities || [],
-            tools: inst.configuration_json?.tools || inst.tools || [],
-            historyConfig: inst.configuration_json?.historyConfig || inst.historyConfig || {},
-            outputConfig: inst.configuration_json?.outputConfig || inst.outputConfig || {},
-            creator_id: RobotId.Archi,
-            created_at: inst.createdAt || now,
-            updated_at: now
-          };
-          
-          // Build properly structured AgentInstance
-          const hydratedInstance: AgentInstance = {
-            id: instanceId,
-            prototypeId: inst.prototypeId || instanceId,
-            name: inst.name,
-            position: inst.configuration_json?.position || inst.position || { x: 0, y: 0 },
-            isMinimized: false,
-            isMaximized: false,
-            workflowId: inst.workflowId || workflowId,
-            configuration_json: inst.configuration_json || {
-              role: agent.role,
-              model: agent.model,
-              llmProvider: agent.llmProvider,
-              systemPrompt: agent.systemPrompt,
-              capabilities: agent.capabilities || [],
-              tools: agent.tools || [],
-              position: inst.position || { x: 0, y: 0 }
-            }
-          };
-          
-          return {
-            id: `node-${instanceId}`,
-            type: 'agent' as const,
-            position: inst.configuration_json?.position || inst.position || { x: 0, y: 0 },
-            data: {
-              robotId: RobotId.Archi,
-              label: inst.name,
-              agent,
-              agentInstance: hydratedInstance,
-              workflowId,
-              isMinimized: false,
-              isMaximized: false
-            }
-          };
-        });
-        setNodes(v2Nodes);
-      } else {
-        setWorkflowNodes([]);
-        setNodes([]);
-      }
-
-      // ═══ ÉTAPE 7 : REFRESH LISTE WORKFLOWS (progress 95%) ═══
+      // ═══ ÉTAPE 4 : REFRESH LISTE WORKFLOWS (progress 95%) ═══
       setSwitchProgress(95);
       try {
         await useDesignStore.getState().loadUserWorkflows();
@@ -936,8 +579,8 @@ function AppContent() {
       console.log('[SwitchWorkflow] ✅ Workflow switch complete:', {
         workflowId,
         workflowName,
-        prototypesCount: hydratedPrototypes.length,
-        instancesCount: instances.length
+        prototypesCount: Array.isArray(data.reloadedData?.agentPrototypes) ? data.reloadedData.agentPrototypes.length : 0,
+        instancesCount: Array.isArray(data.reloadedData?.agentInstances) ? data.reloadedData.agentInstances.length : 0
       });
       
       // ⭐ V2: Notify observers of successful switch
@@ -959,7 +602,7 @@ function AppContent() {
       }, 300);
       isSwitchingRef.current = false;
     }
-  }, [accessToken, hydrateWorkflowFromServer, setNodes, t, isHydrating]);
+  }, [accessToken, applyWorkspaceSnapshot, t, isHydrating]);
 
   /**
    * ⭐ V2: Listen for workflow:switch custom events from BosWorkflowManagementPage

@@ -40,6 +40,9 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
 
     const node = workflowNodes.find(n => n.id === nodeId);
     const agent = node?.agent;
+    // ✅ SAFE: find(provider) is correct for cloud-only panels (Maps Grounding = Gemini only).
+    // Cloud providers have exactly ONE LLMConfig per provider type → no cross-agent contamination possible.
+    // ⚠️ NEVER apply this pattern to local LLM calls (Ollama/LMStudio) — use localLLMProfileId instead.
     const agentConfig = llmConfigs.find(c => c.provider === agent?.llmProvider);
 
     const [query, setQuery] = useState('');

@@ -57,6 +57,35 @@ describe('Agent Schemas (ÉTAPE 1.6)', () => {
             expect(result.success).toBe(false);
         });
 
+        it('should accept canonical non-Archi robotId values', () => {
+            const validAgent = {
+                name: 'Bos Agent',
+                role: 'Supervisor',
+                systemPrompt: 'You monitor workflow execution.',
+                llmProvider: 'Mistral',
+                llmModel: 'mistral-large',
+                robotId: 'BO_002'
+            };
+
+            const result = safeValidateAgentCreate(validAgent);
+            expect(result.success).toBe(true);
+        });
+
+        it('should reject obsolete robotId alphabet values', () => {
+            const obsoleteBosRobotId = ['BOS', '001'].join('_');
+            const obsoleteAgent = {
+                name: 'Legacy Bos Agent',
+                role: 'Supervisor',
+                systemPrompt: 'Legacy robot id must be rejected.',
+                llmProvider: 'Mistral',
+                llmModel: 'mistral-large',
+                robotId: obsoleteBosRobotId
+            };
+
+            const result = safeValidateAgentCreate(obsoleteAgent);
+            expect(result.success).toBe(false);
+        });
+
         it('should reject empty name', () => {
             const invalidAgent = {
                 name: '', // Empty!

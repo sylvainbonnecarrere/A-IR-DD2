@@ -4,7 +4,7 @@ todo_read_py — Lecture de la liste TODO de la session sandbox
 import json
 import os
 from typing import Any, Dict, List
-from ..core.function_context import FunctionContext
+from core.function_context import FunctionContext
 
 TODO_FILE = ".todo.json"
 

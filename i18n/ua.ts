@@ -404,6 +404,7 @@ export default {
     archi_prototyping_header: 'АРХІ • Прототипер',
     bos_supervision_header: 'BOS • Керівник',
     com_connections_header: 'COM • Конектор',
+    com_connections_desc: 'Управління підключеннями та зовнішніми сервісами',
     phil_data_header: 'PHIL • Спеціаліст з даних',
     tim_events_header: 'TIM • Менеджер часу',
     archi_prototyping_desc: 'Створення та оркестрація агентів',

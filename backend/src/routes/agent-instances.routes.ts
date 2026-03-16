@@ -9,6 +9,7 @@ import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middlewar
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 import { transformAgentInstanceForFrontend } from '../utils/transforms';
+import { CanonicalRobotIdEnum } from '../types/robotIds';
 
 // Type pour les paramètres de route hérités (via mergeParams)
 interface WorkflowParams {
@@ -34,7 +35,7 @@ const createAgentInstanceSchema = z.object({
     historyConfig: z.object({}).passthrough().optional(),
     tools: z.array(z.object({}).passthrough()).optional(),
     outputConfig: z.object({}).passthrough().optional(),
-    robotId: z.enum(['AR_001', 'BOS_001', 'COM_001', 'PHIL_001', 'TIM_001']),
+    robotId: CanonicalRobotIdEnum,
     
     // ⭐ FIX QA: Add persistenceConfig to validation schema for media storage
     persistenceConfig: z.object({
@@ -45,7 +46,7 @@ const createAgentInstanceSchema = z.object({
         saveTasks: z.boolean().optional(),
         saveMedia: z.boolean().optional(),
         mediaStorage: z.enum(['db', 'local', 'cloud']).optional(), // ⭐ FIX: Use 'db' not 'database'
-        cloudStorageConfig: z.object({}).passthrough().optional()
+        cloudStorageConfig: z.object({}).passthrough().nullable().optional()
     }).optional(),
 
     // Canvas properties
@@ -228,6 +229,8 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
         // 4. PHASE 2 - HistoryConfig: Use frontend config if provided
         const finalHistoryConfig = configuration_json?.historyConfig || prototype.historyConfig || {};
         const finalOutputConfig = configuration_json?.outputConfig || prototype.outputConfig || {};
+        // ⭐ LOCAL LLM: Resolve localLLMProfileId (frontend takes precedence over prototype)
+        const finalLocalLLMProfileId = configuration_json?.localLLMProfileId ?? (prototype as any).localLLMProfileId ?? null;
         
         // 5. PersistenceConfig: merge prototype config avec overrides
         const prototypePersistenceConfig = prototype.persistenceConfig || {
@@ -276,6 +279,8 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
             outputConfig: finalOutputConfig,  // ⭐ PHASE 2: From frontend configuration_json
             tools: finalTools,
             robotId: finalRobotId,
+            // ⭐ LOCAL LLM: Persist localLLMProfileId for correct endpoint resolution
+            localLLMProfileId: finalLocalLLMProfileId,
 
             // Canvas properties
             position,
@@ -413,12 +418,23 @@ router.put('/:id',
                     instance.llmModel = configuration_json.model; // Note: frontend sends 'model', schema uses 'llmModel'
                 }
                 
-                // ARRAYS: Capabilities + tools
+                // ARRAYS: Capabilities
                 if (Array.isArray(configuration_json.capabilities)) {
                     instance.capabilities = configuration_json.capabilities;
                 }
-                if (Array.isArray(configuration_json.tools)) {
-                    instance.tools = configuration_json.tools;
+                // ⭐ ARCHITECTURE NOTE — dual storage:
+                //   instance.tools (ObjectId[]) = V2 function registry refs from prototype (set at creation)
+                //   functionInheritance.overrideFunctionIds (String[]) = instance-level override IDs
+                //   These serve DIFFERENT purposes and are NOT the same field.
+                //
+                //   DO NOT overwrite instance.tools from configuration_json.tools here because:
+                //   - configuration_json.tools may contain legacy Tool objects (schema: {name, description, parameters})
+                //     which are NOT valid ObjectId refs and would corrupt the V2 function registry links.
+                //   - The canonical way to override functions for an instance is via functionInheritance below.
+                //
+                //   instance.tools is updated only via functionInheritance.overrideFunctionIds sync (see below).
+                if (Array.isArray(configuration_json.legacyTools)) {
+                    instance.legacyTools = configuration_json.legacyTools;
                 }
                 
                 // OBJECTS: HistoryConfig + OutputConfig
@@ -431,6 +447,20 @@ router.put('/:id',
                 // J6: Function Inheritance
                 if (configuration_json.functionInheritance !== undefined) {
                     instance.functionInheritance = configuration_json.functionInheritance;
+                    // ⭐ SYNC: When override mode is active, also update instance.tools with ObjectId refs
+                    // so the V2 function registry is consistent for runtime execution.
+                    if (
+                        configuration_json.functionInheritance.inheritFromPrototype === false &&
+                        Array.isArray(configuration_json.functionInheritance.overrideFunctionIds)
+                    ) {
+                        instance.tools = configuration_json.functionInheritance.overrideFunctionIds
+                            .filter((id: string) => mongoose.Types.ObjectId.isValid(id))
+                            .map((id: string) => new mongoose.Types.ObjectId(id));
+                    }
+                }
+                // ⭐ LOCAL LLM: Persist localLLMProfileId (which local LLM profile to use)
+                if (configuration_json.localLLMProfileId !== undefined) {
+                    instance.localLLMProfileId = configuration_json.localLLMProfileId;
                 }
                 
                 // PRESERVE RUNTIME DATA: Never overwrite logs, errors, tasks, links from frontend

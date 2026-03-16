@@ -9,7 +9,11 @@
     "dev": "ts-node-dev --respawn --transpile-only -r  dotenv/config src/server.ts",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "migrate:up": "ts-node -r dotenv/config src/migrations/004_tools_v2_function_registry.ts up",
+    "migrate:down": "ts-node -r dotenv/config src/migrations/004_tools_v2_function_registry.ts down",
+    "seed:functions": "ts-node -r dotenv/config src/seeds/nativeFunctions.seed.ts",
+    "setup:tools-v2": "npm run migrate:up && npm run seed:functions && echo 'Tools V2 setup terminé'"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -27,6 +31,9 @@
     "passport-local": "^1.0.0",
     "socket.io": "^4.7.5",
     "zod": "^3.22.4"
+  },
+  "optionalDependencies": {
+    "isolated-vm": "^4.7.2"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",

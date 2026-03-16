@@ -5,7 +5,7 @@ NOTE V1: Cette fonction est un stub — l'intégration complète avec les agents
           enregistrés sera disponible à Jalon J8 (AgentLoop + adapters LLM).
 """
 from typing import Any, Dict
-from ..core.function_context import FunctionContext
+from core.function_context import FunctionContext
 
 
 def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:

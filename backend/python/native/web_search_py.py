@@ -2,7 +2,7 @@
 web_search_py — Recherche web via DuckDuckGo (sans clé API)
 """
 from typing import Any, Dict, List
-from ..core.function_context import FunctionContext
+from core.function_context import FunctionContext
 
 try:
     from duckduckgo_search import DDGS
@@ -25,7 +25,7 @@ def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
         results (list[{title, url, snippet, position}]), query (str), total_results (int)
     """
     if not _DEPS_OK:
-        return {"error": "Dépendances manquantes : pip install duckduckgo-search"}
+        raise ImportError("Dépendances manquantes pour web_search_py : pip install duckduckgo-search")
 
     query: str = args.get("query", "")
     num_results: int = min(max(int(args.get("num_results", 5)), 1), 20)

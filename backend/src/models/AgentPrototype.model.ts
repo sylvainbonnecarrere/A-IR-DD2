@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { CANONICAL_ROBOT_IDS, CANONICAL_ROBOT_IDS_LABEL } from '../types/robotIds';
 
 /**
  * ⭐ PERSISTENCE CONFIG: Configuration granulaire par agent
@@ -117,8 +118,8 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
         required: true,
         enum: {
             // ⭐ J4.5: Must match frontend RobotId enum in types.ts
-            values: ['AR_001', 'BO_002', 'CO_003', 'PH_004', 'TI_005'],
-            message: 'RobotId invalide. Seuls AR_001, BO_002, CO_003, PH_004, TI_005 sont autorisés'
+            values: [...CANONICAL_ROBOT_IDS],
+            message: `RobotId invalide. Seuls ${CANONICAL_ROBOT_IDS_LABEL} sont autorisés`
         }
         // Removed: index: true (used in composite index with userId)
     },

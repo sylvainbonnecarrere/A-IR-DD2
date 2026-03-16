@@ -42,6 +42,18 @@ const checkSyntaxSchema = z.object({
         .max(50_000, 'Le code dépasse la limite de 50 000 caractères')
 });
 
+// ─── GET /api/sandbox/health ──────────────────────────────────────────────────
+// C9.1: Vérifie la disponibilité du sandbox Python (détection cross-platform)
+router.get('/health', requireAuth, async (_req, res) => {
+    try {
+        const health = await sandboxService.checkHealth();
+        res.json(health);
+    } catch (error) {
+        console.error('[SandboxRoute] GET /health error:', error);
+        res.status(500).json({ error: 'Erreur vérification health sandbox' });
+    }
+});
+
 // ─── POST /api/sandbox/run ────────────────────────────────────────────────────
 router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req, res) => {
     try {

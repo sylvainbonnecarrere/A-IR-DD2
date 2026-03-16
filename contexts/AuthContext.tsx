@@ -26,6 +26,7 @@ import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useLocalizationStore } from '../stores/useLocalizationStore';
+import { useFunctionStore } from '../stores/useFunctionStore';
 import apiClient from '../utils/apiClient';
 
 import { API_BASE_URL } from '../config/api.config';
@@ -323,6 +324,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             useWorkflowStore.getState().resetAll();
             useRuntimeStore.getState().resetAll();
             useLocalizationStore.getState().resetAll(); // ⭐ NEW: Reset localization too
+            useFunctionStore.getState().resetStore();   // ⭐ C2 FIX: Reset functions store (confidentialité)
         } catch (err) {
             // Silent fail - stores may not be initialized
         }
