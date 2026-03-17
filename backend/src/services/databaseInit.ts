@@ -266,7 +266,7 @@ const COLLECTION_SCHEMAS = {
  */
 const INDEX_DEFINITIONS = {
   users: [
-    { spec: { email: 1 }, options: { unique: true, sparse: true } }
+    { spec: { email: 1 }, options: { unique: true } }
   ],
   llm_configs: [
     { spec: { userId: 1, provider: 1 }, options: { unique: true } },
@@ -490,13 +490,12 @@ async function verifyIndexes(db: any): Promise<void> {
 }
 
 /**
- * Create test user for development/testing
+ * Create a development seed user for local testing
  * Email: test@example.com
- * Password: TestPassword123
  * 
  * SECURITY NOTE: 
  * - Only created in development mode
- * - Password is bcrypt-hashed
+ * - Password is stored only as a bcrypt hash
  * - This user is for testing purposes only
  */
 async function createTestUser(db: any): Promise<void> {
@@ -509,7 +508,7 @@ async function createTestUser(db: any): Promise<void> {
       return;
     }
 
-    // Bcrypt hash of "TestPassword123" with 10 rounds
+    // Static bcrypt hash used only for the local development seed account
     const hashedPassword = '$2b$10$JkttyuwNvLIxq.f2p9rW8uKD7CFyZZvPZP8jKgRPrBXf2wq8Z2j6u';
 
     const testUser = {
@@ -524,7 +523,6 @@ async function createTestUser(db: any): Promise<void> {
     await collection.insertOne(testUser);
     console.info('  ✓ Test user created:');
     console.info('    Email: test@example.com');
-    console.info('    Password: TestPassword123');
   } catch (error: any) {
     if (error.code === 11000 && error.keyPattern?.email) {
       // Duplicate key on email - this is fine

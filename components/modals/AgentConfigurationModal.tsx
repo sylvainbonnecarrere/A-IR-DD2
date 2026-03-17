@@ -11,6 +11,7 @@ import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels, getCapabilit
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
 import { initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
 import { API_BASE_URL } from '../../config/api.config';
+import { buildGovernanceHeaders } from '../../utils/governanceHeaders';
 import { isLocalProvider, isLMStudio } from '../../utils/llmProviderUtils';
 import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
@@ -219,10 +220,9 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             try {
                 const response = await fetch(`${API_BASE_URL}/api/agent-instances/${instance.id}`, {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${accessToken}`
-                    },
+                    headers: buildGovernanceHeaders(accessToken, {
+                        'Content-Type': 'application/json'
+                    }),
                     body: JSON.stringify({
                         configuration_json: configToSave,
                         name: editedName,

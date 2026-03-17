@@ -12,6 +12,44 @@ import { AgentInstance } from '../src/models/AgentInstance.model';
 import { WorkflowEdge } from '../src/models/WorkflowEdge.model';
 import { app } from '../src/server';
 
+const TEST_ONLY_PASSWORD = 'test-only-password-123';
+
+function buildAgentInstancePayload(workflowId: string, userId: string, overrides: Partial<Record<string, any>> = {}) {
+    return {
+        workflowId,
+        userId,
+        prototypeId: new mongoose.Types.ObjectId(),
+        executionId: `run-${new mongoose.Types.ObjectId().toString()}`,
+        status: 'running',
+        name: 'Test Agent',
+        role: 'Assistant',
+        systemPrompt: 'Test prompt',
+        llmProvider: 'Gemini',
+        llmModel: 'gemini-2.0-flash-exp',
+        capabilities: ['Chat'],
+        tools: [],
+        robotId: 'AR_001',
+        position: { x: 0, y: 0 },
+        content: [],
+        metrics: {
+            totalTokens: 0,
+            totalErrors: 0,
+            totalMediaGenerated: 0,
+            callCount: 0
+        },
+        persistenceConfig: {
+            saveChat: true,
+            saveErrors: true,
+            saveHistorySummary: false,
+            saveLinks: false,
+            saveTasks: false,
+            saveMedia: false,
+            mediaStorage: 'db'
+        },
+        ...overrides
+    };
+}
+
 describe('📡 Workflows Integration Tests - Phase 1', () => {
     let authToken: string;
     let testUser: any;
@@ -31,7 +69,7 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
                 .post('/api/auth/register')
                 .send({
                     email: 'user@test.com',
-                    password: 'TestPassword123'
+                    password: TEST_ONLY_PASSWORD
                 });
             
             expect(res.status).toBe(201);
@@ -59,7 +97,7 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
                 .post('/api/auth/register')
                 .send({
                     email: 'creator@test.com',
-                    password: 'TestPassword123'
+                    password: TEST_ONLY_PASSWORD
                 });
             authToken = res.body.accessToken;
             testUser = res.body.user;
@@ -106,7 +144,7 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
                 .post('/api/auth/register')
                 .send({
                     email: 'selector@test.com',
-                    password: 'TestPassword123'
+                    password: TEST_ONLY_PASSWORD
                 });
             authToken = registerRes.body.accessToken;
             testUser = registerRes.body.user;
@@ -156,20 +194,16 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
         
         it('✅ should return reloadedData with agents & edges', async () => {
             // Create agent instance in second workflow
-            const agent = new AgentInstance({
-                workflowId: wf2Id,
-                prototypeId: new mongoose.Types.ObjectId(),
-                name: 'Test Agent'
-            });
+            const agent = new AgentInstance(buildAgentInstancePayload(wf2Id, testUser.id));
             await agent.save();
             
             const res = await request(app)
                 .post(`/api/workflows/${wf2Id}/select`)
                 .set('Authorization', `Bearer ${authToken}`);
             
-            expect(res.body.reloadedData.agents).toBeDefined();
-            expect(Array.isArray(res.body.reloadedData.agents)).toBe(true);
-            expect(res.body.reloadedData.agents.length).toBe(1);
+            expect(res.body.reloadedData.agentInstances).toBeDefined();
+            expect(Array.isArray(res.body.reloadedData.agentInstances)).toBe(true);
+            expect(res.body.reloadedData.agentInstances.length).toBe(1);
         });
     });
     
@@ -181,7 +215,7 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
                 .post('/api/auth/register')
                 .send({
                     email: 'statter@test.com',
-                    password: 'TestPassword123'
+                    password: TEST_ONLY_PASSWORD
                 });
             authToken = registerRes.body.accessToken;
             testUser = registerRes.body.user;
@@ -204,16 +238,8 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
         
         it('✅ should count agents and nodes', async () => {
             // Add agents
-            const agent1 = new AgentInstance({
-                workflowId,
-                prototypeId: new mongoose.Types.ObjectId(),
-                name: 'Agent 1'
-            });
-            const agent2 = new AgentInstance({
-                workflowId,
-                prototypeId: new mongoose.Types.ObjectId(),
-                name: 'Agent 2'
-            });
+            const agent1 = new AgentInstance(buildAgentInstancePayload(workflowId, testUser.id, { name: 'Agent 1' }));
+            const agent2 = new AgentInstance(buildAgentInstancePayload(workflowId, testUser.id, { name: 'Agent 2' }));
             await Promise.all([agent1.save(), agent2.save()]);
             
             const res = await request(app)
@@ -233,7 +259,7 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
                 .post('/api/auth/register')
                 .send({
                     email: 'deleter@test.com',
-                    password: 'TestPassword123'
+                    password: TEST_ONLY_PASSWORD
                 });
             authToken = registerRes.body.accessToken;
             testUser = registerRes.body.user;
@@ -267,11 +293,7 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
         
         it('✅ should delete workflow and cascade to agents/edges', async () => {
             // Add agents to second workflow
-            const agent = new AgentInstance({
-                workflowId: wf2Id,
-                prototypeId: new mongoose.Types.ObjectId(),
-                name: 'Test Agent'
-            });
+            const agent = new AgentInstance(buildAgentInstancePayload(wf2Id, testUser.id));
             await agent.save();
             
             // Delete second workflow
@@ -331,7 +353,7 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
                 .post('/api/auth/register')
                 .send({
                     email: 'owner@test.com',
-                    password: 'TestPassword123'
+                    password: TEST_ONLY_PASSWORD
                 });
             authToken = res.body.accessToken;
             
@@ -343,7 +365,7 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
                 .post('/api/auth/register')
                 .send({
                     email: 'other@test.com',
-                    password: 'TestPassword123'
+                    password: TEST_ONLY_PASSWORD
                 });
             otherAuthToken = res.body.accessToken;
         });
@@ -353,7 +375,7 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
                 .get(`/api/workflows/${workflowId}`)
                 .set('Authorization', `Bearer ${otherAuthToken}`);
             
-            expect(res.status).toBe(401);
+            expect(res.status).toBe(403);
         });
         
         it('❌ should prevent deletion of other user workflows', async () => {
@@ -361,7 +383,7 @@ describe('📡 Workflows Integration Tests - Phase 1', () => {
                 .delete(`/api/workflows/${workflowId}`)
                 .set('Authorization', `Bearer ${otherAuthToken}`);
             
-            expect(res.status).toBe(401);
+            expect(res.status).toBe(403);
         });
     });
 });

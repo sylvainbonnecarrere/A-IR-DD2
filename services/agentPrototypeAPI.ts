@@ -12,6 +12,7 @@
 
 import { getBackendUrl } from '../config/api.config';
 import { Agent } from '../types';
+import { buildGovernanceHeaders } from '../utils/governanceHeaders';
 
 const API_BASE = `${getBackendUrl()}/api/agent-prototypes`;
 
@@ -108,10 +109,9 @@ export async function createAgentPrototype(
     
     const response = await fetch(API_BASE, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
-      },
+      headers: buildGovernanceHeaders(accessToken, {
+        'Content-Type': 'application/json'
+      }),
       body: JSON.stringify(payload)
     });
 
@@ -167,10 +167,9 @@ export async function updateAgentPrototype(
     
     const response = await fetch(`${API_BASE}/${prototypeId}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
-      },
+      headers: buildGovernanceHeaders(accessToken, {
+        'Content-Type': 'application/json'
+      }),
       body: JSON.stringify(payload)
     });
 
@@ -207,9 +206,7 @@ export async function deleteAgentPrototype(
   try {
     const response = await fetch(`${API_BASE}/${prototypeId}`, {
       method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
+      headers: buildGovernanceHeaders(accessToken)
     });
 
     if (!response.ok) {
@@ -246,9 +243,7 @@ export async function fetchAgentPrototypes(
     const url = workflowId ? `${API_BASE}?workflowId=${encodeURIComponent(workflowId)}` : API_BASE;
     const response = await fetch(url, {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
+      headers: buildGovernanceHeaders(accessToken)
     });
 
     if (!response.ok) {

@@ -14,6 +14,8 @@ import React from 'react';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { AuthProvider, useAuth } from '../../contexts';
 
+const TEST_ONLY_PASSWORD = 'test-only-password-123';
+
 const mockApiPost = jest.fn();
 
 jest.mock('../../utils/apiClient', () => ({
@@ -76,13 +78,13 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
             const mockApiKeysResponse = [
                 {
                     provider: 'OpenAI',
-                    apiKey: 'sk-proj-xxxxx',
+                    apiKey: 'openai-test-key-placeholder',
                     enabled: true,
                     capabilities: { Chat: true }
                 },
                 {
                     provider: 'Anthropic',
-                    apiKey: 'sk-ant-xxxxx',
+                    apiKey: 'anthropic-test-key-placeholder',
                     enabled: true,
                     capabilities: { Chat: true }
                 }
@@ -108,7 +110,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
 
             // Call login
             await act(async () => {
-                await authState.login('user@test.com', 'password123');
+                await authState.login('user@test.com', TEST_ONLY_PASSWORD);
             });
 
             // Wait for API key fetch
@@ -143,7 +145,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
             );
 
             await act(async () => {
-                await authState.login('user@test.com', 'password123');
+                await authState.login('user@test.com', TEST_ONLY_PASSWORD);
             });
 
             // Login should succeed even if key fetch fails
@@ -167,7 +169,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
             const mockApiKeysResponse = [
                 {
                     provider: 'OpenAI',
-                    apiKey: 'sk-proj-xxxxx',
+                    apiKey: 'openai-test-key-placeholder',
                     enabled: true
                 }
             ];
@@ -187,7 +189,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
             );
 
             await act(async () => {
-                await authState.login('user@test.com', 'password123');
+                await authState.login('user@test.com', TEST_ONLY_PASSWORD);
             });
 
             // Check localStorage
@@ -196,7 +198,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
 
             const parsed = JSON.parse(authData || '{}');
             expect(parsed.llmApiKeys).toBeUndefined();
-            expect(JSON.stringify(parsed)).not.toContain('sk-proj');
+            expect(JSON.stringify(parsed)).not.toContain('openai-test-key-placeholder');
         });
 
         test('should clear API keys on logout', async () => {
@@ -209,7 +211,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
             const mockApiKeysResponse = [
                 {
                     provider: 'OpenAI',
-                    apiKey: 'sk-proj-xxxxx',
+                    apiKey: 'openai-test-key-placeholder',
                     enabled: true
                 }
             ];
@@ -230,7 +232,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
 
             // Login and get keys
             await act(async () => {
-                await authState.login('user@test.com', 'password123');
+                await authState.login('user@test.com', TEST_ONLY_PASSWORD);
             });
 
             await waitFor(() => {
@@ -253,7 +255,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
         test('should include Authorization header with Bearer token', async () => {
             const mockLoginResponse = {
                 user: { id: '123', email: 'user@test.com', role: 'user' },
-                accessToken: 'secret-access-token-xyz',
+                accessToken: 'mock-access-token-xyz',
                 refreshToken: 'refresh-token-123'
             };
 
@@ -278,7 +280,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
             );
 
             await act(async () => {
-                await authState.login('user@test.com', 'password123');
+                await authState.login('user@test.com', TEST_ONLY_PASSWORD);
             });
 
             await waitFor(() => {
@@ -287,7 +289,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
                     {},
                     expect.objectContaining({
                         headers: expect.objectContaining({
-                            Authorization: 'Bearer secret-access-token-xyz'
+                            Authorization: 'Bearer mock-access-token-xyz'
                         })
                     })
                 );
@@ -298,7 +300,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
                 {},
                 expect.objectContaining({
                     headers: expect.objectContaining({
-                        Authorization: 'Bearer secret-access-token-xyz'
+                        Authorization: 'Bearer mock-access-token-xyz'
                     })
                 })
             );
@@ -330,7 +332,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
             );
 
             await act(async () => {
-                await authState.register('newuser@test.com', 'securePassword123');
+                await authState.register('newuser@test.com', TEST_ONLY_PASSWORD);
             });
 
             // Verify registration succeeded and API key fetch was called

@@ -87,6 +87,23 @@ export class MediaStorageService {
         this.options = { ...DEFAULT_OPTIONS, ...options };
     }
 
+    private resolveStorageMode(config: PersistenceConfig & { mediaStorageMode?: 'database' | 'local' | 'cloud' }): 'db' | 'local' | 'cloud' {
+        if (config.mediaStorage) {
+            return config.mediaStorage;
+        }
+
+        switch (config.mediaStorageMode) {
+            case 'database':
+                return 'db';
+            case 'local':
+                return 'local';
+            case 'cloud':
+                return 'cloud';
+            default:
+                return 'db';
+        }
+    }
+
     // ============================================
     // MÉTHODE PRINCIPALE
     // ============================================
@@ -103,7 +120,7 @@ export class MediaStorageService {
     async saveMedia(
         file: Buffer,
         metadata: FileMetadata,
-        config: PersistenceConfig,
+        config: PersistenceConfig & { mediaStorageMode?: 'database' | 'local' | 'cloud' },
         context: {
             userId: string;
             workflowId: string;
@@ -120,8 +137,10 @@ export class MediaStorageService {
             ? this.generateChecksum(file)
             : undefined;
 
+        const storageMode = this.resolveStorageMode(config);
+
         // Routage selon le mode de stockage
-        switch (config.mediaStorage) {
+        switch (storageMode) {
             case 'db':
                 return this.saveToDatabase(file, metadata, checksum);
             
@@ -133,7 +152,7 @@ export class MediaStorageService {
             
             default:
                 throw new MediaStorageError(
-                    `Mode de stockage non supporté: ${config.mediaStorage}`,
+                    `Mode de stockage non supporté: ${storageMode}`,
                     'INVALID_STORAGE_MODE'
                 );
         }
@@ -540,10 +559,15 @@ export class MediaStorageService {
      * Nettoyer un nom de fichier
      */
     private sanitizeFileName(fileName: string): string {
-        return fileName
+        const sanitized = fileName
+            .replace(/[\\/]+/g, '_')
+            .replace(/\.{2,}/g, '_')
             .replace(/[^a-zA-Z0-9._-]/g, '_')
             .replace(/_{2,}/g, '_')
+            .replace(/^\.+/, '')
             .substring(0, 100);
+
+        return sanitized || 'file';
     }
 
     /**

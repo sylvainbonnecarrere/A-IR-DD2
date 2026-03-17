@@ -14,6 +14,8 @@ import { act } from 'react';
 import { AuthProvider, useAuth } from '../../contexts/AuthContext';
 import React from 'react';
 
+const TEST_ONLY_PASSWORD = 'test-only-password-123';
+
 jest.mock('../../utils/apiClient', () => ({
     __esModule: true,
     default: {
@@ -64,7 +66,7 @@ const TestComponent = () => {
             <div data-testid="session-status">{sessionStatus}</div>
             <div data-testid="auth-status">{isAuthenticated ? 'authenticated' : 'guest'}</div>
             <div data-testid="user-email">{user?.email || 'no-user'}</div>
-            <button onClick={() => login('test@example.com', 'password123')}>
+            <button onClick={() => login('test@example.com', TEST_ONLY_PASSWORD)}>
                 Login
             </button>
             <button onClick={logout}>Logout</button>

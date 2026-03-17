@@ -6,6 +6,7 @@ import { AgentPrototype } from '../models/AgentPrototype.model';
 import { Workflow } from '../models/Workflow.model';
 import { AgentJournal } from '../models/AgentJournal.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
+import { requireRobotGovernance } from '../middleware/robot-governance.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 import { transformAgentInstanceForFrontend } from '../utils/transforms';
@@ -120,6 +121,11 @@ router.get('/:id',
 router.post('/',
     requireAuth,
     validateRequest(createAgentInstanceSchema),
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'create',
+        resolveTargetRobotId: (req) => req.body?.robotId
+    }),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -167,7 +173,23 @@ router.post('/',
 
 // POST /api/workflows/:workflowId/instances/from-prototype - Créer instance depuis prototype
 // ⭐ MERGE STRATEGY: prototype (source) + body overrides (name, persistenceConfig)
-router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>, res: Response) => {
+router.post('/from-prototype', requireAuth,
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'create',
+        resolveTargetRobotId: async (req) => {
+            const user = req.user as IUser | undefined;
+            const prototypeId = req.body?.prototypeId;
+
+            if (!user?.id || typeof prototypeId !== 'string' || !mongoose.Types.ObjectId.isValid(prototypeId)) {
+                return undefined;
+            }
+
+            const prototype = await AgentPrototype.findOne({ _id: prototypeId, userId: user.id }).select('robotId');
+            return prototype?.robotId;
+        }
+    }),
+    async (req, res) => {
     try {
         const user = req.user as IUser;
         const { workflowId } = req.params;
@@ -370,6 +392,18 @@ router.put('/:id',
         return instance ? instance.userId.toString() : null;
     }),
     validateRequest(updateAgentInstanceSchema),
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'modify',
+        resolveTargetRobotId: async (req) => {
+            if (typeof req.body?.robotId === 'string') {
+                return req.body.robotId;
+            }
+
+            const instance = await AgentInstance.findById(req.params.id).select('robotId');
+            return instance?.robotId;
+        }
+    }),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -708,6 +742,14 @@ router.delete('/:id',
     requireOwnershipAsync(async (req) => {
         const instance = await AgentInstance.findById(req.params.id);
         return instance ? instance.userId.toString() : null;
+    }),
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'delete',
+        resolveTargetRobotId: async (req) => {
+            const instance = await AgentInstance.findById(req.params.id).select('robotId');
+            return instance?.robotId;
+        }
     }),
     async (req, res) => {
         try {

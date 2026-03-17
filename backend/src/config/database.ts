@@ -1,6 +1,23 @@
 import mongoose from 'mongoose';
 import config from './environment';
 
+const isTestEnvironment = process.env.NODE_ENV === 'test';
+const logInfo = (...args: unknown[]) => {
+    if (!isTestEnvironment) {
+        console.log(...args);
+    }
+};
+const logWarn = (...args: unknown[]) => {
+    if (!isTestEnvironment) {
+        console.warn(...args);
+    }
+};
+const logError = (...args: unknown[]) => {
+    if (!isTestEnvironment) {
+        console.error(...args);
+    }
+};
+
 /**
  * Configuration et connexion à MongoDB avec retry logic
  * SOLID Pattern: Dependency Injection - config injectée depuis environment.ts
@@ -28,29 +45,29 @@ const connectionOptions: mongoose.ConnectOptions = {
  */
 export async function connectDatabase(retryCount = 0): Promise<void> {
     if (isConnected) {
-        console.log('📦 MongoDB déjà connecté');
+        logInfo('📦 MongoDB déjà connecté');
         return;
     }
 
     try {
-        console.log(`🔄 Tentative de connexion à MongoDB (${retryCount + 1}/${MAX_RETRIES})...`);
+        logInfo(`🔄 Tentative de connexion à MongoDB (${retryCount + 1}/${MAX_RETRIES})...`);
 
         await mongoose.connect(MONGODB_URI, connectionOptions);
 
         isConnected = true;
-        console.log('✅ MongoDB connecté avec succès');
-        console.log(`📍 URI: ${MONGODB_URI.replace(/\/\/.*@/, '//<credentials>@')}`);
+        logInfo('✅ MongoDB connecté avec succès');
+        logInfo(`📍 URI: ${MONGODB_URI.replace(/\/\/.*@/, '//<credentials>@')}`);
 
     } catch (error) {
-        console.error('❌ Erreur de connexion MongoDB:', error instanceof Error ? error.message : error);
+        logError('❌ Erreur de connexion MongoDB:', error instanceof Error ? error.message : error);
 
         if (retryCount < MAX_RETRIES - 1) {
-            console.log(`⏳ Nouvelle tentative dans ${RETRY_DELAY / 1000}s...`);
+            logInfo(`⏳ Nouvelle tentative dans ${RETRY_DELAY / 1000}s...`);
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
             return connectDatabase(retryCount + 1);
         } else {
-            console.error('💀 Échec de connexion MongoDB après toutes les tentatives');
-            console.error('   Le backend fonctionnera en mode Guest uniquement (localStorage)');
+            logError('💀 Échec de connexion MongoDB après toutes les tentatives');
+            logError('   Le backend fonctionnera en mode Guest uniquement (localStorage)');
             throw new Error('MongoDB non disponible');
         }
     }
@@ -65,9 +82,9 @@ export async function disconnectDatabase(): Promise<void> {
     try {
         await mongoose.disconnect();
         isConnected = false;
-        console.log('👋 MongoDB déconnecté');
+        logInfo('👋 MongoDB déconnecté');
     } catch (error) {
-        console.error('❌ Erreur lors de la déconnexion MongoDB:', error);
+        logError('❌ Erreur lors de la déconnexion MongoDB:', error);
         throw error;
     }
 }
@@ -76,16 +93,16 @@ export async function disconnectDatabase(): Promise<void> {
  * Gère les événements de connexion Mongoose
  */
 mongoose.connection.on('connected', () => {
-    console.log('📡 Mongoose connecté au serveur MongoDB');
+    logInfo('📡 Mongoose connecté au serveur MongoDB');
 });
 
 mongoose.connection.on('error', (err) => {
-    console.error('❌ Erreur Mongoose:', err);
+    logError('❌ Erreur Mongoose:', err);
     isConnected = false;
 });
 
 mongoose.connection.on('disconnected', () => {
-    console.log('🔌 Mongoose déconnecté de MongoDB');
+    logInfo('🔌 Mongoose déconnecté de MongoDB');
     isConnected = false;
 });
 

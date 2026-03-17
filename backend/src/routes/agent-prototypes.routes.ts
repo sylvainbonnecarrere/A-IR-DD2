@@ -3,6 +3,7 @@ import { z } from 'zod';
 import mongoose from 'mongoose';
 import { AgentPrototype } from '../models/AgentPrototype.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
+import { requireRobotGovernance } from '../middleware/robot-governance.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
@@ -93,6 +94,11 @@ router.get('/:id',
 router.post('/',
     requireAuth,
     validateRequest(createAgentPrototypeSchema),
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'create',
+        resolveTargetRobotId: (req) => req.body?.robotId
+    }),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -133,6 +139,18 @@ router.put('/:id',
         return prototype ? prototype.userId.toString() : null;
     }),
     validateRequest(updateAgentPrototypeSchema),
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'modify',
+        resolveTargetRobotId: async (req) => {
+            if (typeof req.body?.robotId === 'string') {
+                return req.body.robotId;
+            }
+
+            const prototype = await AgentPrototype.findById(req.params.id).select('robotId');
+            return prototype?.robotId;
+        }
+    }),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -186,6 +204,14 @@ router.delete('/:id',
     requireOwnershipAsync(async (req) => {
         const prototype = await AgentPrototype.findById(req.params.id);
         return prototype ? prototype.userId.toString() : null;
+    }),
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'delete',
+        resolveTargetRobotId: async (req) => {
+            const prototype = await AgentPrototype.findById(req.params.id).select('robotId');
+            return prototype?.robotId;
+        }
     }),
     async (req, res) => {
         try {

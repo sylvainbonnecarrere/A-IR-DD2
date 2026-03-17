@@ -14,6 +14,8 @@ import userEvent from '@testing-library/user-event';
 import { LoginModal } from '../../components/modals/LoginModal';
 import React from 'react';
 
+const TEST_ONLY_PASSWORD = 'test-only-password-123';
+
 const mockLogin = jest.fn();
 
 jest.mock('../../hooks/useAuth', () => ({
@@ -82,10 +84,10 @@ describe('LoginModal', () => {
             const passwordInput = screen.getByPlaceholderText('••••••••') as HTMLInputElement;
 
             await user.type(emailInput, 'test@example.com');
-            await user.type(passwordInput, 'password123');
+            await user.type(passwordInput, TEST_ONLY_PASSWORD);
 
             expect(emailInput.value).toBe('test@example.com');
-            expect(passwordInput.value).toBe('password123');
+            expect(passwordInput.value).toBe(TEST_ONLY_PASSWORD);
         });
 
         test('should disable submit button when fields are empty', () => {
@@ -109,7 +111,7 @@ describe('LoginModal', () => {
             const submitButton = screen.getByRole('button', { name: /Se connecter/i });
 
             await user.type(emailInput, 'test@example.com');
-            await user.type(passwordInput, 'password123');
+            await user.type(passwordInput, TEST_ONLY_PASSWORD);
 
             expect(submitButton).not.toBeDisabled();
         });
@@ -144,7 +146,7 @@ describe('LoginModal', () => {
             const submitButton = screen.getByRole('button', { name: /Se connecter/i });
 
             await user.type(emailInput, 'test@example.com');
-            await user.type(passwordInput, 'password123');
+            await user.type(passwordInput, TEST_ONLY_PASSWORD);
             await user.click(submitButton);
 
             // Wait for error to appear
@@ -167,7 +169,7 @@ describe('LoginModal', () => {
             const submitButton = screen.getByRole('button', { name: /Se connecter/i });
 
             await user.type(emailInput, 'test@example.com');
-            await user.type(passwordInput, 'password123');
+            await user.type(passwordInput, TEST_ONLY_PASSWORD);
             await user.click(submitButton);
 
             // Modal should still be accessible and interactive
@@ -191,7 +193,7 @@ describe('LoginModal', () => {
             const passwordInput = screen.getByPlaceholderText('••••••••');
 
             await user.type(emailInput, 'test@example.com');
-            await user.type(passwordInput, 'password123');
+            await user.type(passwordInput, TEST_ONLY_PASSWORD);
 
             // Click close button instead of submit
             const closeButton = screen.getByLabelText('Close');

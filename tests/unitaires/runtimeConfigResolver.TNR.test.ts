@@ -20,7 +20,7 @@ describe('BC-03 runtime identity resolver', () => {
         {
             provider: LLMProvider.OpenAI,
             enabled: true,
-            apiKey: 'sk-openai',
+            apiKey: 'openai-test-key-placeholder',
             capabilities: {
                 [LLMCapability.Chat]: true,
             },
@@ -83,7 +83,7 @@ describe('BC-03 runtime identity resolver', () => {
             localLLMProfileId: 'profile-a',
         });
 
-        expect(resolution.credential).toBe('sk-openai');
+        expect(resolution.credential).toBe('openai-test-key-placeholder');
         expect(resolution.localProfile).toBeNull();
         expect(resolution.identityKey).toBe(LLMProvider.OpenAI);
     });
