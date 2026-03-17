@@ -12,24 +12,42 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LoginModal } from '../../components/modals/LoginModal';
-import { AuthProvider } from '../../contexts/AuthContext';
 import React from 'react';
 
-// Mock fetch for API calls
-global.fetch = jest.fn();
+const mockLogin = jest.fn();
+
+jest.mock('../../hooks/useAuth', () => ({
+    useAuth: () => ({
+        login: mockLogin,
+        isLoading: false,
+    }),
+}));
+
+jest.mock('../../hooks/useLocalization', () => ({
+    useLocalization: () => ({
+        t: (key: string) => ({
+            login_modal_title: 'Connexion',
+            login_email_label: 'Email',
+            login_password_label: 'Mot de passe',
+            login_button_text: 'Se connecter',
+            login_button_loading: 'Connexion...',
+            login_footer_text: 'Pas encore de compte ?',
+            login_footer_link: 'Créer un compte',
+            login_error_required_fields: 'Tous les champs sont requis',
+            login_error_message: 'Erreur de connexion',
+        }[key] ?? key),
+    }),
+}));
 
 const renderWithAuth = (component: React.ReactElement) => {
-    return render(
-        <AuthProvider>
-            {component}
-        </AuthProvider>
-    );
+    return render(component);
 };
 
 describe('LoginModal', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         localStorage.clear();
+        mockLogin.mockResolvedValue(undefined);
     });
 
     describe('Visibility', () => {
@@ -115,9 +133,7 @@ describe('LoginModal', () => {
     describe('Form Submission', () => {
         test('should show error message on login failure', async () => {
             const user = userEvent.setup();
-            (global.fetch as jest.Mock).mockRejectedValueOnce(
-                new Error('Login failed')
-            );
+            mockLogin.mockRejectedValueOnce(new Error('Login failed'));
 
             renderWithAuth(
                 <LoginModal isOpen={true} onClose={() => { }} />
@@ -140,9 +156,7 @@ describe('LoginModal', () => {
 
         test('should not block UI on submission error', async () => {
             const user = userEvent.setup();
-            (global.fetch as jest.Mock).mockRejectedValueOnce(
-                new Error('Connection error')
-            );
+            mockLogin.mockRejectedValueOnce(new Error('Connection error'));
 
             const { rerender } = renderWithAuth(
                 <LoginModal isOpen={true} onClose={() => { }} />

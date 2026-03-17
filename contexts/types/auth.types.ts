@@ -59,11 +59,14 @@ export interface StoredAuthData {
     refreshToken: string;
 }
 
+export type AuthSessionStatus = 'loading' | 'restoring-session' | 'degraded' | 'ready';
+
 /**
  * Auth loading state
  */
 export interface AuthLoadingState {
     isLoading: boolean;
+    sessionStatus: AuthSessionStatus;
 }
 
 /**
@@ -76,6 +79,7 @@ export interface AuthContextType {
     refreshToken: string | null;
     isAuthenticated: boolean;
     isLoading: boolean;
+    sessionStatus: AuthSessionStatus;
     error: string | null;
     llmApiKeys: LLMApiKey[] | null; // J4.2: Session-only API keys
     runtimeLLMConfigs: LLMConfig[];

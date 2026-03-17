@@ -11,6 +11,7 @@ module.exports = {
     moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
     moduleNameMapper: {
         '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
+        '^@/(.*)$': '<rootDir>/$1',
         '^(\\.{1,2}/)+config/api\\.config$': '<rootDir>/tests/mocks/api.config.ts',
     },
     collectCoverageFrom: [
