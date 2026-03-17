@@ -4,6 +4,8 @@
  * @domain Design Domain - Authentication
  */
 
+import { LLMConfig, LocalLLMProfile } from '../../types';
+
 /**
  * User data stored in auth context and localStorage
  */
@@ -76,6 +78,8 @@ export interface AuthContextType {
     isLoading: boolean;
     error: string | null;
     llmApiKeys: LLMApiKey[] | null; // J4.2: Session-only API keys
+    runtimeLLMConfigs: LLMConfig[];
+    localLLMProfiles: LocalLLMProfile[];
 
     // Methods
     login: (email: string, password: string) => Promise<void>;
@@ -84,4 +88,5 @@ export interface AuthContextType {
     refreshAccessToken: () => Promise<void>;
     clearError: () => void;
     refreshLLMApiKeys: () => Promise<void>; // ⭐ J4.6: Refetch keys after config changes
+    refreshRuntimeConfigState: () => Promise<void>;
 }

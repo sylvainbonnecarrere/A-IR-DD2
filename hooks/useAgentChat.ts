@@ -5,7 +5,8 @@ import * as llmService from '../services/llmService';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
 import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
-import { isLLMConfigured, getEffectiveCredential } from '../utils/llmProviderUtils';
+import { isLLMConfigured } from '../utils/llmProviderUtils';
+import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
 // ⭐ AUTO-SAVE: Import persistence service for chat content
 import { PersistenceService } from '../services/persistenceService';
 
@@ -55,6 +56,7 @@ export const useAgentChat = ({
         addNodeMessage,
         setNodeMessages,
         setNodeExecuting,
+        localLLMProfiles,
     } = useRuntimeStore();
 
     const [loadingMessage, setLoadingMessage] = useState('');
@@ -137,7 +139,8 @@ export const useAgentChat = ({
 
         await addAndPersistMessage(nodeId, userMessage);
 
-        const agentConfig = llmConfigs?.find(c => c.provider === agent.llmProvider);
+        const agentRuntime = resolveAgentRuntimeConfig(agent, llmConfigs, localLLMProfiles);
+        const agentConfig = agentRuntime.config;
 
         if (!isLLMConfigured(agentConfig, agent.llmProvider)) {
             const errorMessage: ChatMessage = {
@@ -176,7 +179,13 @@ export const useAgentChat = ({
 
                 if (shouldSummarize) {
                     setLoadingMessage(t('agentNode_history_summarizing'));
-                    const summarizationConfig = llmConfigs.find(c => c.provider === historyConfig.llmProvider);
+                    const summarizationRuntime = resolveHistoryRuntimeConfig(
+                        historyConfig,
+                        llmConfigs,
+                        localLLMProfiles,
+                        agent.localLLMProfileId
+                    );
+                    const summarizationConfig = summarizationRuntime.config;
 
                     if (!summarizationConfig) {
                         throw new Error(`Summarization LLM ${historyConfig.llmProvider} not configured.`);
@@ -192,10 +201,13 @@ export const useAgentChat = ({
 
                     const { text: summary } = await llmService.generateContent(
                         summarizationConfig.provider,
-                        summarizationConfig.apiKey,
+                        summarizationRuntime.credential,
                         historyConfig.model,
                         historyConfig.systemPrompt,
-                        summarizationHistory
+                        summarizationHistory,
+                        undefined,
+                        undefined,
+                        summarizationRuntime.credential
                     );
 
                     const summaryMessage: ChatMessage = {
@@ -216,7 +228,7 @@ export const useAgentChat = ({
             }
 
             // Stream LLM response
-            const credential = getEffectiveCredential(agentConfig, agent.llmProvider);
+            const credential = agentRuntime.credential;
             const stream = llmService.generateContentStream(
                 agent.llmProvider,
                 credential,
@@ -351,7 +363,7 @@ export const useAgentChat = ({
                     }
 
                     // Generate a follow-up response using the tool results as context
-                    const credential = getEffectiveCredential(agentConfig, agent.llmProvider);
+                    const credential = agentRuntime.credential;
                     const followUpStream = llmService.generateContentStream(
                         agent.llmProvider,
                         credential,

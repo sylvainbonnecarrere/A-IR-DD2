@@ -1,5 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
-import { CANONICAL_ROBOT_IDS } from '../types/robotIds';
+import { CANONICAL_ROBOT_IDS } from '../types';
 
 // ============================================
 // PERSISTENCE CONFIG (copie de AgentPrototype)

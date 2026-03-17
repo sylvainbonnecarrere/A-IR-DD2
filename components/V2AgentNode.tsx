@@ -17,10 +17,11 @@ import { ToolCallBlock } from './workflow/ToolCallBlock';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
 import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
-import { isLLMConfigured, getEffectiveCredential, isLocalProvider } from '../utils/llmProviderUtils';
+import { isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
 import { useLocalization } from '../hooks/useLocalization';
 import { useJournalQueue } from '../hooks/useJournalQueue';
 import { useAuth } from '../hooks/useAuth';
+import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -178,6 +179,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   // Get messages from store
   const messages = getNodeMessages(id);
   const isLoading = isNodeExecuting(id);
+  const agentRuntime = resolveAgentRuntimeConfig(effectiveAgent, llmConfigs, localLLMProfiles);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -293,7 +295,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   const handleWebSearchGrounding = async () => {
     if (!agent || !userInput.trim()) return;
 
-    const agentConfig = llmConfigs?.find(c => c.provider === agent.llmProvider);
+    const agentConfig = resolveAgentRuntimeConfig(agent, llmConfigs, localLLMProfiles).config;
     // ⭐ SOLID: Use centralized validation function
     if (!isLLMConfigured(agentConfig, agent.llmProvider)) {
       console.error('LLM not configured for web search grounding');
@@ -405,7 +407,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     });
 
     // Get LLM config
-    const agentConfig = llmConfigs?.find(c => c.provider === effectiveAgent.llmProvider);
+    const agentConfig = agentRuntime.config;
 
     // ⭐ SOLID: Use centralized validation function (works for both local and cloud)
     if (!isLLMConfigured(agentConfig, effectiveAgent.llmProvider)) {
@@ -447,7 +449,13 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
         if (shouldSummarize) {
           setLoadingMessage(t('agentNode_history_summarizing'));
-          const summarizationConfig = llmConfigs.find(c => c.provider === historyConfig.llmProvider);
+          const summarizationRuntime = resolveHistoryRuntimeConfig(
+            historyConfig,
+            llmConfigs,
+            localLLMProfiles,
+            effectiveAgent.localLLMProfileId
+          );
+          const summarizationConfig = summarizationRuntime.config;
 
           if (!summarizationConfig) {
             throw new Error(`Summarization LLM ${historyConfig.llmProvider} not configured.`);
@@ -463,13 +471,13 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
           const { text: summary } = await llmService.generateContent(
             summarizationConfig.provider,
-            summarizationConfig.apiKey,
+            summarizationRuntime.credential,
             historyConfig.model,
             historyConfig.systemPrompt,
             summarizationHistory,
             undefined, // tools
             undefined, // outputConfig
-            summarizationConfig.apiKey // endpoint for LMStudio
+            summarizationRuntime.credential // endpoint for LMStudio
           );
 
           const summaryMessage: ChatMessage = {
@@ -490,27 +498,13 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       }
       // Stream LLM response
       // ⭐ NEW: Resolve local endpoint from profile if available, fallback to llm_configs
-      const resolveLocalEndpoint = (): string => {
-        if (effectiveAgent.localLLMProfileId) {
-          const profile = localLLMProfiles?.find(p => p.id === effectiveAgent.localLLMProfileId);
-          if (profile?.endpoint) return profile.endpoint;
-        }
-        // Fallback: legacy behavior
-        return agentConfig?.localEndpoint || agentConfig?.apiKey || '';
-      };
-
-      const credential = isLocalProvider(effectiveAgent.llmProvider)
-        ? resolveLocalEndpoint()
-        : getEffectiveCredential(agentConfig, effectiveAgent.llmProvider);
+      const credential = agentRuntime.credential;
 
       // ─── J8: AgentLoop path for local LLMs (emulated function calling) ──────
       const adapter = createAdapter(
         effectiveAgent.llmProvider as LLMProvider,
-        llmConfigs as LLMConfig[],
-        effectiveAgent.model,
-        // ⭐ Pass resolved endpoint so each instance uses its own localLLMProfile
-        // not the generic singleton LLMConfig — fixes Ollama/LMStudio port confusion
-        isLocalProvider(effectiveAgent.llmProvider) ? credential : undefined
+        agentConfig,
+        effectiveAgent.model
       );
 
       if (adapter) {

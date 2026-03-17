@@ -38,19 +38,15 @@ const LOCAL_PROVIDERS: LLMProvider[] = [LLMProvider.LMStudio];
  */
 export function createAdapter(
     provider: LLMProvider,
-    llmConfigs: LLMConfig[],
-    model: string,
-    endpointOverride?: string
+    config: LLMConfig | null,
+    model: string
 ): ILLMAdapter | null {
     if (!LOCAL_PROVIDERS.includes(provider)) {
         // Native function-calling provider — use existing streaming path
         return null;
     }
 
-    const config = llmConfigs.find(c => c.provider === provider);
-    // ⭐ Priority: endpointOverride (from localLLMProfile) > llmConfigs > default
-    const endpoint: string = endpointOverride
-        || (config as any)?.localEndpoint
+    const endpoint: string = (config as any)?.localEndpoint
         || (config as any)?.apiKey
         || 'http://localhost:1234';
 
