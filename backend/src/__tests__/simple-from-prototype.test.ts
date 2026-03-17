@@ -9,6 +9,8 @@ import { AgentPrototype } from '../models/AgentPrototype.model';
 import agentInstancesRoutes from '../routes/agent-instances.routes';
 import { generateAccessToken } from '../utils/jwt';
 
+const TEST_ONLY_PASSWORD = 'test-only-password-123';
+
 const app = express();
 app.use(express.json());
 app.use(passport.initialize());
@@ -25,7 +27,7 @@ describe('Simple Test - POST /from-prototype', () => {
         // Create user
         user = await User.create({
             email: `test-simple-${Date.now()}@test.com`,
-            password: 'testpass123456',
+            password: TEST_ONLY_PASSWORD,
             username: `user${Date.now()}`
         });
 

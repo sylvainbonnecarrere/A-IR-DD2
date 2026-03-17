@@ -26,6 +26,18 @@ import { PersistenceService } from '../services/persistenceService';
 
 export type AutoSaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
+const INVALID_WORKFLOW_IDS = new Set([
+  'default-workflow',
+  'new-workflow',
+  'temp-workflow',
+  'placeholder',
+  ''
+]);
+
+function isValidWorkflowId(workflowId: string | null | undefined): workflowId is string {
+  return !!workflowId && !INVALID_WORKFLOW_IDS.has(workflowId.toLowerCase()) && /^[a-f\d]{24}$/i.test(workflowId);
+}
+
 interface UseAutoSaveOptions {
   /** Debounce delay in ms (default: 2000) */
   debounceMs?: number;
@@ -93,8 +105,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
 
     const currentWorkflowId = getCurrentWorkflowId();
     const effectiveWorkflowId = workflowId || currentWorkflowId;
-    if (!effectiveWorkflowId) {
-      console.warn('[useAutoSave] No workflow ID available');
+    if (!isValidWorkflowId(effectiveWorkflowId)) {
       return;
     }
 

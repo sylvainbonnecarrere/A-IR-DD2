@@ -29,6 +29,8 @@ import { initializeDatabase } from './services/databaseInit';
 // SOLID: Valider la configuration au démarrage (fail-fast pattern)
 validateConfig();
 
+const isTestEnvironment = process.env.NODE_ENV === 'test';
+
 const app = express();
 const PORT = config.port;
 
@@ -184,9 +186,16 @@ const httpServer = createServer(app);
 
 // Initialiser WebSocket
 const wsManager = new WebSocketManager(httpServer);
+void wsManager;
+
+let serverStarted = false;
 
 // ===== DÉMARRAGE DU SERVEUR =====
 async function startServer() {
+  if (serverStarted) {
+    return httpServer;
+  }
+
   try {
     // Tentative connexion MongoDB (non-bloquante pour Jalon 1)
     try {
@@ -205,24 +214,55 @@ async function startServer() {
     }
 
     // Démarrer le serveur HTTP (même sans MongoDB)
-    httpServer.listen(PORT, () => {
-      console.log('\n✨ ===== A-IR-DD2 BACKEND DÉMARRÉ ===== ✨');
-      console.log(`🚀 Serveur HTTP: http://localhost:${PORT}`);
-      console.log(`📡 WebSocket prêt pour les connexions`);
-      console.log(`🔐 Mode: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`✅ Jalon 1: Infrastructure prête (MongoDB + Encryption)`);
-      console.log(`✅ Jalon 2: Authentification JWT (Passport + Zod)`);
-      console.log(`🔓 Mode Guest: OPÉRATIONNEL (Python tools, WebSocket)`);
-      console.log(`🔐 Mode Auth: DISPONIBLE (/api/auth/*)`);
-      console.log('═══════════════════════════════════════════\n');
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once('error', reject);
+      httpServer.listen(PORT, () => {
+        serverStarted = true;
+
+        if (!isTestEnvironment) {
+          console.log('\n✨ ===== A-IR-DD2 BACKEND DÉMARRÉ ===== ✨');
+          console.log(`🚀 Serveur HTTP: http://localhost:${PORT}`);
+          console.log('📡 WebSocket prêt pour les connexions');
+          console.log(`🔐 Mode: ${process.env.NODE_ENV || 'development'}`);
+          console.log('✅ Jalon 1: Infrastructure prête (MongoDB + Encryption)');
+          console.log('✅ Jalon 2: Authentification JWT (Passport + Zod)');
+          console.log('🔓 Mode Guest: OPÉRATIONNEL (Python tools, WebSocket)');
+          console.log('🔐 Mode Auth: DISPONIBLE (/api/auth/*)');
+          console.log('═══════════════════════════════════════════\n');
+        }
+
+        resolve();
+      });
     });
+
+    return httpServer;
   } catch (error) {
     console.error('💀 Erreur critique au démarrage:', error);
     process.exit(1);
   }
 }
 
-// Lancer le serveur
-startServer();
+async function stopServer() {
+  if (!serverStarted) {
+    return;
+  }
 
-export { app };
+  await new Promise<void>((resolve, reject) => {
+    httpServer.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      serverStarted = false;
+      resolve();
+    });
+  });
+}
+
+// Lancer le serveur uniquement en exécution directe
+if (require.main === module) {
+  void startServer();
+}
+
+export { app, startServer, stopServer, httpServer };

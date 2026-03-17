@@ -60,7 +60,7 @@ const LOCAL_RUNTIME_CONFIG: LLMConfig = {
 const CLOUD_RUNTIME_CONFIG: LLMConfig = {
     provider: LLMProvider.Gemini,
     enabled: true,
-    apiKey: 'gemini-live-key',
+    apiKey: 'gemini-test-key-placeholder',
     capabilities: {
         [LLMCapability.Chat]: true,
         [LLMCapability.MapsGrounding]: true,
@@ -358,7 +358,7 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
         await waitFor(() => {
             expect(mockedGenerateContentWithMaps).toHaveBeenCalledWith(
                 LLMProvider.Gemini,
-                'gemini-live-key',
+                'gemini-test-key-placeholder',
                 'gemini-2.5-pro',
                 'restaurants in Paris',
                 undefined,

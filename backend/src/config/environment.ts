@@ -1,17 +1,23 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
+const isTestEnvironment = process.env.NODE_ENV === 'test';
+
 // Charger .env - chercher à partir du répertoire src et remonter
 // src est à src/, donc ../ = backend/, ../../ = racine du projet
 const envPath = path.resolve(__dirname, '../../.env');
-console.log(`📁 Loading .env from: ${envPath}`);
+if (!isTestEnvironment) {
+    console.log(`📁 Loading .env from: ${envPath}`);
+}
 
 const result = dotenv.config({ 
     path: envPath
 });
 
 if (result.error) {
-    console.warn('⚠️  .env file not found - using environment variables');
+    if (!isTestEnvironment) {
+        console.warn('⚠️  .env file not found - using environment variables');
+    }
 }
 
 /**
@@ -65,7 +71,9 @@ export function validateConfig(): void {
         process.exit(1);
     }
 
-    console.log('✅ Configuration validated');
+    if (!isTestEnvironment) {
+        console.log('✅ Configuration validated');
+    }
 }
 
 export default config;

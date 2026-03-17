@@ -255,6 +255,16 @@ export class WorkflowSelfHealingService {
         });
         
         await workflow.save();
+        await User.findByIdAndUpdate(
+            userId,
+            {
+                defaultWorkflowId: workflow._id,
+                workflowCount: 1,
+                lastActiveWorkflowId: workflow._id,
+                updatedAt: new Date()
+            },
+            { new: true }
+        );
         
         console.log(`[WorkflowSelfHealing] Created default workflow for new user ${userId}:`, workflow.id);
         

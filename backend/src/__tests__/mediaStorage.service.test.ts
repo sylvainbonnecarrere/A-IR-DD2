@@ -51,7 +51,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'database' as const
+                mediaStorage: 'db' as const
             };
 
             const metadata = {
@@ -89,7 +89,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'database' as const
+                mediaStorage: 'db' as const
             };
 
             const metadata = {
@@ -121,7 +121,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'database' as const
+                mediaStorage: 'db' as const
             };
 
             const metadata = {
@@ -154,7 +154,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'local' as const
+                mediaStorage: 'local' as const
             };
 
             const metadata = {
@@ -196,12 +196,12 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'local' as const
+                mediaStorage: 'local' as const
             };
 
             const metadata = {
-                originalName: 'large-local-file.bin',
-                mimeType: 'application/octet-stream',
+                originalName: 'large-local-file.pdf',
+                mimeType: 'application/pdf',
                 size: largeBuffer.length
             };
 
@@ -223,7 +223,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'local' as const
+                mediaStorage: 'local' as const
             };
 
             const metadata = {
@@ -258,7 +258,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'database' as const
+                mediaStorage: 'db' as const
             };
 
             const metadata = {
@@ -283,7 +283,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'database' as const
+                mediaStorage: 'db' as const
             };
 
             const metadata = {
@@ -316,7 +316,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'database' as const
+                mediaStorage: 'db' as const
             };
 
             const metadata = {
@@ -344,7 +344,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'database' as const
+                mediaStorage: 'db' as const
             };
 
             const metadata = {
@@ -388,7 +388,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'database' as const
+                mediaStorage: 'db' as const
             };
 
             const metadata = {
@@ -422,7 +422,7 @@ describe('MediaStorageService - Validation et stockage', () => {
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorageMode: 'cloud' as const
+                mediaStorage: 'cloud' as const
             };
 
             const metadata = {

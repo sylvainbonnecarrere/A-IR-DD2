@@ -220,9 +220,8 @@ console.log('\nÔ£à All collections created successfully!');
 console.log('Ô£à Schema validation enabled on all collections');
 console.log('Ô£à Indexes created for optimal performance\n');
 
-// Create default test user for development/testing
+// Create default development seed user
 // Email: test@example.com
-// Password: TestPassword123 (hashed with bcrypt rounds: 10)
 // NOTE: Schema uses 'password' field (not 'passwordHash') to match backend Mongoose model
 db.users.insertOne({
   email: 'test@example.com',
@@ -234,7 +233,7 @@ db.users.insertOne({
 });
 console.log('Ô£ô Created test user account');
 console.log('  Email: test@example.com');
-console.log('  Password: TestPassword123\n');
+console.log('  Password: [redacted in seed logs]\n');
 
 // Verify collections
 const collections = db.getCollectionNames();

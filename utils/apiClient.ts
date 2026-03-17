@@ -23,6 +23,7 @@ import axios, {
 } from 'axios';
 import { API_BASE_URL } from '../config/api.config';
 import type { StoredAuthData } from '../contexts/types/auth.types';
+import { useDesignStore } from '../stores/useDesignStore';
 
 const AUTH_STORAGE_KEY = 'auth_data_v1';
 const REFRESH_ENDPOINT = '/api/auth/refresh';
@@ -137,6 +138,12 @@ axiosInstance.interceptors.request.use(
         if (authData?.accessToken && !config.headers.Authorization) {
             config.headers.Authorization = `Bearer ${authData.accessToken}`;
         }
+
+        const currentRobotId = useDesignStore.getState().currentRobotId;
+        if (currentRobotId && !config.headers['X-Robot-Id']) {
+            config.headers['X-Robot-Id'] = currentRobotId;
+        }
+
         return config;
     },
     (error: AxiosError) => {

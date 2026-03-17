@@ -358,7 +358,7 @@ describe('J4.4 ÉTAPE 2 - No Data Leak Validation', () => {
         };
         localStorage.setItem(GUEST_STORAGE_KEYS.workflow, JSON.stringify(guestWorkflow));
         localStorage.setItem(GUEST_STORAGE_KEYS.llmConfigs, JSON.stringify([
-            { provider: 'OpenAI', apiKeyPlaintext: 'sk-guest-key-123' }
+            { provider: 'OpenAI', apiKeyPlaintext: 'openai-guest-test-key-placeholder' }
         ]));
 
         // Verify guest data exists
