@@ -195,7 +195,7 @@ const mapChatMessages = (messages: any[] = []): ChatMessage[] => messages.map((m
  * Must be wrapped by AuthProvider to access useAuth()
  */
 function AppContent() {
-  const { isAuthenticated, accessToken, runtimeLLMConfigs, localLLMProfiles, user, logout, refreshRuntimeConfigState } = useAuth();
+  const { isAuthenticated, accessToken, runtimeLLMConfigs, localLLMProfiles, user, logout, refreshRuntimeConfigState, sessionStatus, error: authError } = useAuth();
   const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
   const [isAgentModalOpen, setAgentModalOpen] = useState(false);
   const [isLoginModalOpen, setLoginModalOpen] = useState(false);
@@ -361,11 +361,17 @@ function AppContent() {
    */
   useEffect(() => {
     const hydrateWorkspace = async () => {
-      if (!isAuthenticated || !accessToken) {
+      if (!isAuthenticated || !accessToken || sessionStatus === 'loading' || sessionStatus === 'degraded') {
         setIsHydrating(false);
+        sessionStorage.removeItem('_arc_hydrating');
         return;
       }
 
+      setHydrationMessage(
+        sessionStatus === 'restoring-session'
+          ? 'Restauration de votre session et du workspace...'
+          : 'Chargement de votre workspace...'
+      );
       setIsHydrating(true);
       setHydrationProgress(10);
 
@@ -394,6 +400,7 @@ function AppContent() {
 
       } catch (err) {
         console.error('[App] Workspace hydration error:', err);
+        setHydrationMessage(authError || 'Restauration de session impossible. Reconnexion requise.');
       } finally {
         // Small delay to show 100% before hiding
         setTimeout(() => {
@@ -406,7 +413,7 @@ function AppContent() {
     };
 
     hydrateWorkspace();
-  }, [isAuthenticated, accessToken, applyWorkspaceSnapshot]);
+  }, [isAuthenticated, accessToken, applyWorkspaceSnapshot, authError, sessionStatus]);
 
   /**
    * ⭐ V2 SWITCH WORKFLOW: Fonction unifiée de réhydratation complète

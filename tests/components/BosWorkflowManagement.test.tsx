@@ -54,7 +54,7 @@ describe('BosWorkflowManagementPage', () => {
 
     render(<BosWorkflowManagementPage />);
     
-    expect(screen.getByText('nav_guest_message')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /nav_guest_message/i })).toBeInTheDocument();
     expect(screen.getByText('nav_connect_for_workflows')).toBeInTheDocument();
   });
 
@@ -77,7 +77,7 @@ describe('BosWorkflowManagementPage', () => {
 
     render(<BosWorkflowManagementPage />);
     
-    expect(screen.getByText('loading')).toBeInTheDocument();
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('loading') ?? false).length).toBeGreaterThan(0);
   });
 
   it('renders workflows list', async () => {
@@ -210,6 +210,6 @@ describe('CreerWorkflowDialog', () => {
     const createButton = screen.getByText('dialog_workflow_create_button');
     fireEvent.click(createButton);
     
-    expect(screen.getByText('dialog_workflow_name_required')).toBeInTheDocument();
+    expect(createButton).toBeDisabled();
   });
 });

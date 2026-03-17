@@ -1,62 +1,15 @@
 /**
  * @file tests/unitaires/apiClient.test.ts
- * @description Unit tests for apiClient interceptors
+ * @description Unit tests for apiClient interceptors and BC-05 refresh flow
  * @coverage:
  * - Request interceptor (Authorization header injection)
- * - Response interceptor (401 handling)
+ * - Response interceptor refresh/retry on 401
+ * - Session degradation when refresh fails
  * - Guest mode (no token)
- * - Authenticated mode (Bearer token)
  */
 
 import axios, { AxiosInstance } from 'axios';
 import MockAdapter from 'axios-mock-adapter';
-
-// We'll test the interceptor logic in isolation
-const createTestApiClient = (): AxiosInstance => {
-    const instance = axios.create({
-        baseURL: 'http://localhost:3001',
-        timeout: 10000,
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    // Request interceptor
-    instance.interceptors.request.use(
-        (config) => {
-            try {
-                const authDataStr = localStorage.getItem('auth_data_v1');
-                if (authDataStr) {
-                    const authData = JSON.parse(authDataStr);
-                    if (authData.accessToken) {
-                        config.headers.Authorization = `Bearer ${authData.accessToken}`;
-                    }
-                }
-            } catch (err) {
-                console.error('[apiClient] Error reading auth data:', err);
-            }
-            return config;
-        },
-        (error) => Promise.reject(error)
-    );
-
-    // Response interceptor
-    instance.interceptors.response.use(
-        (response) => response,
-        (error) => {
-            if (error.response?.status === 401) {
-                localStorage.removeItem('auth_data_v1');
-                const logoutEvent = new CustomEvent('auth:logout', {
-                    detail: { reason: 'token_expired' },
-                });
-                window.dispatchEvent(logoutEvent);
-            }
-            return Promise.reject(error);
-        }
-    );
-
-    return instance;
-};
 
 // Mock localStorage
 const localStorageMock = (() => {
@@ -81,17 +34,31 @@ Object.defineProperty(window, 'localStorage', {
 
 describe('apiClient Interceptors', () => {
     let apiClient: AxiosInstance;
-    let mock: MockAdapter;
+    let instanceMock: MockAdapter;
+    let transportMock: MockAdapter;
+    let consoleWarnSpy: jest.SpyInstance;
+    let consoleErrorSpy: jest.SpyInstance;
 
-    beforeEach(() => {
+    beforeEach(async () => {
         localStorage.clear();
-        apiClient = createTestApiClient();
-        mock = new MockAdapter(apiClient);
+        jest.resetModules();
         jest.clearAllMocks();
+
+        consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+        const apiClientModule = await import('../../utils/apiClient');
+        const axiosModule = await import('axios');
+        apiClient = apiClientModule.default.getInstance();
+        instanceMock = new MockAdapter(apiClient);
+        transportMock = new MockAdapter(axiosModule.default);
     });
 
     afterEach(() => {
-        mock.reset();
+        instanceMock.restore();
+        transportMock.restore();
+        consoleWarnSpy.mockRestore();
+        consoleErrorSpy.mockRestore();
     });
 
     describe('Request Interceptor', () => {
@@ -104,36 +71,42 @@ describe('apiClient Interceptors', () => {
 
             localStorage.setItem('auth_data_v1', JSON.stringify(mockAuthData));
 
-            mock.onGet('/api/test').reply(200, { success: true });
+            instanceMock.onGet('/api/test').reply(200, { success: true });
 
             await apiClient.get('/api/test');
 
-            expect(mock.history.get[0].headers.Authorization).toBe('Bearer test-access-token-12345');
+            expect(instanceMock.history.get[0].headers.Authorization).toBe('Bearer test-access-token-12345');
         });
 
         test('should NOT attach header in guest mode (no token)', async () => {
             // localStorage is empty (guest mode)
-            mock.onGet('/api/test').reply(200, { success: true });
+            instanceMock.onGet('/api/test').reply(200, { success: true });
 
             await apiClient.get('/api/test');
 
-            expect(mock.history.get[0].headers.Authorization).toBeUndefined();
+            expect(instanceMock.history.get[0].headers.Authorization).toBeUndefined();
         });
 
-        test('should handle corrupted localStorage gracefully', async () => {
+        test('should degrade corrupted localStorage gracefully', async () => {
             localStorage.setItem('auth_data_v1', 'invalid-json');
+            const dispatchSpy = jest.spyOn(window, 'dispatchEvent');
 
-            mock.onGet('/api/test').reply(200, { success: true });
+            instanceMock.onGet('/api/test').reply(200, { success: true });
 
             // Should not throw
             await apiClient.get('/api/test');
 
-            expect(mock.history.get[0].headers.Authorization).toBeUndefined();
+            expect(instanceMock.history.get[0].headers.Authorization).toBeUndefined();
+            expect(dispatchSpy).toHaveBeenCalledWith(
+                expect.objectContaining({ type: 'auth:session-degraded' })
+            );
+
+            dispatchSpy.mockRestore();
         });
     });
 
     describe('Response Interceptor', () => {
-        test('should handle 401 Unauthorized and clear auth', async () => {
+        test('should refresh token and retry request after 401', async () => {
             const mockAuthData = {
                 user: { id: '123', email: 'test@example.com', role: 'user' },
                 accessToken: 'expired-token',
@@ -141,24 +114,55 @@ describe('apiClient Interceptors', () => {
             };
 
             localStorage.setItem('auth_data_v1', JSON.stringify(mockAuthData));
-
-            mock.onGet('/api/protected').reply(401, { error: 'Unauthorized' });
-
             const dispatchSpy = jest.spyOn(window, 'dispatchEvent');
 
-            try {
-                await apiClient.get('/api/protected');
-            } catch (error) {
-                // Expected to throw
-            }
+            instanceMock.onGet('/api/protected').replyOnce(401, { error: 'Unauthorized' });
+            instanceMock.onGet('/api/protected').replyOnce(200, { data: 'success-after-refresh' });
+            transportMock.onPost('http://localhost:3001/api/auth/refresh')
+                .reply(200, { accessToken: 'fresh-access-token' });
 
-            // Verify localStorage was cleared
-            expect(localStorage.getItem('auth_data_v1')).toBeNull();
+            const response = await apiClient.get('/api/protected');
 
-            // Verify logout event was dispatched
+            expect(response.status).toBe(200);
+            expect(response.data).toEqual({ data: 'success-after-refresh' });
+            expect(transportMock.history.post).toHaveLength(1);
+            expect(instanceMock.history.get).toHaveLength(2);
+            expect(instanceMock.history.get[1].headers.Authorization).toBe('Bearer fresh-access-token');
+            expect(JSON.parse(localStorage.getItem('auth_data_v1') || '{}')).toMatchObject({
+                accessToken: 'fresh-access-token',
+                refreshToken: 'test-refresh-token',
+            });
             expect(dispatchSpy).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    type: 'auth:logout',
+                    type: 'auth:session-refreshed',
+                })
+            );
+
+            dispatchSpy.mockRestore();
+        });
+
+        test('should degrade session when refresh fails', async () => {
+            const mockAuthData = {
+                user: { id: '123', email: 'test@example.com', role: 'user' },
+                accessToken: 'expired-token',
+                refreshToken: 'invalid-refresh-token',
+            };
+
+            localStorage.setItem('auth_data_v1', JSON.stringify(mockAuthData));
+            const dispatchSpy = jest.spyOn(window, 'dispatchEvent');
+
+            instanceMock.onGet('/api/protected').reply(401, { error: 'Unauthorized' });
+            transportMock.onPost('http://localhost:3001/api/auth/refresh')
+                .reply(401, { error: 'Invalid refresh token' });
+
+            await expect(apiClient.get('/api/protected')).rejects.toMatchObject({
+                response: expect.objectContaining({ status: 401 }),
+            });
+
+            expect(localStorage.getItem('auth_data_v1')).toBeNull();
+            expect(dispatchSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'auth:session-degraded',
                 })
             );
 
@@ -166,7 +170,7 @@ describe('apiClient Interceptors', () => {
         });
 
         test('should handle 403 Forbidden', async () => {
-            mock.onGet('/api/admin').reply(403, { error: 'Forbidden' });
+            instanceMock.onGet('/api/admin').reply(403, { error: 'Forbidden' });
 
             try {
                 await apiClient.get('/api/admin');
@@ -176,7 +180,7 @@ describe('apiClient Interceptors', () => {
         });
 
         test('should pass through successful responses', async () => {
-            mock.onGet('/api/test').reply(200, { data: 'success' });
+            instanceMock.onGet('/api/test').reply(200, { data: 'success' });
 
             const response = await apiClient.get('/api/test');
 
@@ -187,28 +191,28 @@ describe('apiClient Interceptors', () => {
 
     describe('Guest Mode (Non-Régression)', () => {
         test('should allow requests without auth in guest mode', async () => {
-            mock.onGet('/api/public').reply(200, { public: 'data' });
+            instanceMock.onGet('/api/public').reply(200, { public: 'data' });
 
             const response = await apiClient.get('/api/public');
 
             expect(response.status).toBe(200);
             expect(response.data).toEqual({ public: 'data' });
-            expect(mock.history.get[0].headers.Authorization).toBeUndefined();
+            expect(instanceMock.history.get[0].headers.Authorization).toBeUndefined();
         });
 
         test('should not interfere with POST requests in guest mode', async () => {
-            mock.onPost('/api/public-action').reply(201, { created: true });
+            instanceMock.onPost('/api/public-action').reply(201, { created: true });
 
             const response = await apiClient.post('/api/public-action', { data: 'test' });
 
             expect(response.status).toBe(201);
-            expect(mock.history.post[0].headers.Authorization).toBeUndefined();
+            expect(instanceMock.history.post[0].headers.Authorization).toBeUndefined();
         });
     });
 
     describe('Error Scenarios', () => {
         test('should handle network errors', async () => {
-            mock.onGet('/api/test').networkError();
+            instanceMock.onGet('/api/test').networkError();
 
             try {
                 await apiClient.get('/api/test');
@@ -218,7 +222,7 @@ describe('apiClient Interceptors', () => {
         });
 
         test('should handle timeout errors', async () => {
-            mock.onGet('/api/test').timeoutOnce();
+            instanceMock.onGet('/api/test').timeoutOnce();
 
             try {
                 await apiClient.get('/api/test');

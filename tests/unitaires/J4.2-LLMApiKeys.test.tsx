@@ -14,6 +14,25 @@ import React from 'react';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { AuthProvider, useAuth } from '../../contexts';
 
+const mockApiPost = jest.fn();
+
+jest.mock('../../utils/apiClient', () => ({
+    __esModule: true,
+    default: {
+        post: (...args: any[]) => mockApiPost(...args),
+    },
+}));
+
+jest.mock('../../services/localLLMProfileService', () => ({
+    __esModule: true,
+    getAllProfiles: jest.fn().mockResolvedValue([]),
+}));
+
+jest.mock('../../services/llmConfigService', () => ({
+    __esModule: true,
+    getAllLLMConfigs: jest.fn().mockResolvedValue([]),
+}));
+
 /**
  * Test component to access useAuth hook
  */
@@ -43,6 +62,7 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         localStorage.clear();
+        mockApiPost.mockResolvedValue({ data: [] });
     });
 
     describe('API Key Fetch on Login', () => {
@@ -70,16 +90,11 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
 
             let authState: any = null;
 
-            // Mock login request
-            global.fetch = jest.fn()
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockLoginResponse
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockApiKeysResponse
-                });
+            global.fetch = jest.fn().mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockLoginResponse
+            });
+            mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
 
             const { getByTestId } = render(
                 <AuthProvider>
@@ -115,16 +130,11 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
 
             let authState: any = null;
 
-            // Mock login success but API key fetch failure
-            global.fetch = jest.fn()
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockLoginResponse
-                })
-                .mockResolvedValueOnce({
-                    ok: false,
-                    status: 500
-                });
+            global.fetch = jest.fn().mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockLoginResponse
+            });
+            mockApiPost.mockRejectedValueOnce(new Error('Network Error'));
 
             const { getByTestId } = render(
                 <AuthProvider>
@@ -164,15 +174,11 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
 
             let authState: any = null;
 
-            global.fetch = jest.fn()
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockLoginResponse
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockApiKeysResponse
-                });
+            global.fetch = jest.fn().mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockLoginResponse
+            });
+            mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
 
             render(
                 <AuthProvider>
@@ -210,15 +216,11 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
 
             let authState: any = null;
 
-            global.fetch = jest.fn()
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockLoginResponse
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockApiKeysResponse
-                });
+            global.fetch = jest.fn().mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockLoginResponse
+            });
+            mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
 
             const { getByTestId } = render(
                 <AuthProvider>
@@ -280,18 +282,26 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
             });
 
             await waitFor(() => {
-                // Verify fetch was called with correct headers
-                const calls = (global.fetch as jest.Mock).mock.calls;
-                const apiKeyCall = calls.find(call =>
-                    call[0].includes('get-all-api-keys')
-                );
-
-                expect(apiKeyCall).toBeTruthy();
-                const [, options] = apiKeyCall!;
-                expect(options.headers.Authorization).toBe(
-                    'Bearer secret-access-token-xyz'
+                expect(mockApiPost).toHaveBeenCalledWith(
+                    '/api/llm/get-all-api-keys',
+                    {},
+                    expect.objectContaining({
+                        headers: expect.objectContaining({
+                            Authorization: 'Bearer secret-access-token-xyz'
+                        })
+                    })
                 );
             });
+
+            expect(mockApiPost).toHaveBeenCalledWith(
+                '/api/llm/get-all-api-keys',
+                {},
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Authorization: 'Bearer secret-access-token-xyz'
+                    })
+                })
+            );
         });
     });
 
@@ -307,15 +317,11 @@ describe('J4.2: LLM API Keys Fetch at Login', () => {
 
             let authState: any = null;
 
-            global.fetch = jest.fn()
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockRegisterResponse
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockApiKeysResponse
-                });
+            global.fetch = jest.fn().mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockRegisterResponse
+            });
+            mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
 
             const { getByTestId } = render(
                 <AuthProvider>
