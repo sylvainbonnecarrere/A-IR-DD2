@@ -21,6 +21,7 @@ import { AuthContextType } from '../contexts/AuthContext';
 import { getBackendUrl } from '../config/api.config';
 
 export interface UserSettingsData {
+    llmConfigs?: Record<string, any>;
     preferences: {
         language: 'fr' | 'en' | 'de' | 'es' | 'pt';
         theme?: 'dark' | 'light';
@@ -32,6 +33,7 @@ export interface UserSettingsData {
 export interface ISettingsStorage {
     getSettings(): Promise<UserSettingsData>;
     saveSettings(data: {
+        llmConfigs?: Record<string, any>;
         preferences?: {
             language?: 'fr' | 'en' | 'de' | 'es' | 'pt';
             theme?: 'dark' | 'light';
@@ -55,6 +57,7 @@ class GuestSettingsStorage implements ISettingsStorage {
 
             const parsed = JSON.parse(stored);
             return {
+                llmConfigs: parsed.llmConfigs && typeof parsed.llmConfigs === 'object' ? parsed.llmConfigs : {},
                 preferences: {
                     language: parsed.preferences?.language || 'fr',
                     theme: parsed.preferences?.theme || 'dark'
@@ -71,6 +74,10 @@ class GuestSettingsStorage implements ISettingsStorage {
         try {
             const current = await this.getSettings();
             const updated: UserSettingsData = {
+                llmConfigs: {
+                    ...(current.llmConfigs || {}),
+                    ...(data.llmConfigs || {})
+                },
                 preferences: {
                     ...current.preferences,
                     ...data.preferences
@@ -88,6 +95,7 @@ class GuestSettingsStorage implements ISettingsStorage {
 
     private getDefaults(): UserSettingsData {
         return {
+            llmConfigs: {},
             preferences: {
                 language: 'fr',
                 theme: 'dark'
@@ -125,6 +133,7 @@ class AuthenticatedSettingsStorage implements ISettingsStorage {
 
             const data = await response.json();
             return {
+                llmConfigs: data.llmConfigs && typeof data.llmConfigs === 'object' ? data.llmConfigs : {},
                 preferences: {
                     language: data.preferences?.language || 'fr',
                     theme: data.preferences?.theme || 'dark'
@@ -155,6 +164,7 @@ class AuthenticatedSettingsStorage implements ISettingsStorage {
 
             const saved = await response.json();
             return {
+                llmConfigs: saved.llmConfigs && typeof saved.llmConfigs === 'object' ? saved.llmConfigs : (data.llmConfigs || {}),
                 preferences: {
                     language: saved.preferences?.language || 'fr',
                     theme: saved.preferences?.theme || 'dark'
@@ -190,24 +200,35 @@ export class MockSettingsStorage implements ISettingsStorage {
 
     constructor(initialData?: UserSettingsData) {
         this.data = initialData || {
+            llmConfigs: {},
             preferences: { language: 'fr', theme: 'dark' },
             updatedAt: new Date()
         };
     }
 
     async getSettings(): Promise<UserSettingsData> {
-        return { ...this.data };
+        return {
+            ...this.data,
+            llmConfigs: { ...(this.data.llmConfigs || {}) }
+        };
     }
 
     async saveSettings(data: Partial<UserSettingsData>): Promise<UserSettingsData> {
         this.data = {
+            llmConfigs: {
+                ...(this.data.llmConfigs || {}),
+                ...(data.llmConfigs || {})
+            },
             preferences: {
                 ...this.data.preferences,
                 ...data.preferences
             },
             updatedAt: new Date()
         };
-        return { ...this.data };
+        return {
+            ...this.data,
+            llmConfigs: { ...(this.data.llmConfigs || {}) }
+        };
     }
 }
 

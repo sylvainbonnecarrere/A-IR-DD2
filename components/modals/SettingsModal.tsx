@@ -26,7 +26,7 @@ interface LLMConfigWithHasKey extends LLMConfig {
 export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: SettingsModalProps) => {
   const [currentLLMConfigs, setCurrentLLMConfigs] = useState<LLMConfigWithHasKey[]>(JSON.parse(JSON.stringify(propConfigs)));
   const { t, locale, setLocale } = useLocalization();
-  const { user, isAuthenticated, refreshLLMApiKeys } = useAuth();
+  const { user, isAuthenticated, refreshRuntimeConfigState } = useAuth();
   const { configs: hookConfigs, loading: hookLoading, updateConfig, deleteConfig } = useLLMConfigs();
   const { saveMode, setSaveMode, isLoading: saveModeLoading } = useSaveMode();
   const {
@@ -178,7 +178,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
               localEndpoint: config.localEndpoint,
               enabled: config.enabled,
               capabilities: config.capabilities
-            })
+            }, false)
           );
         }
       }
@@ -207,11 +207,6 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
       // STEP 4: Update UI state with final configs
       setCurrentLLMConfigs(finalConfigs);
       
-      // J4.6 FIX: Refetch ALL LLM API keys from backend after saving
-      // This ensures new/updated/deleted configs are reflected in AuthContext
-      if (isAuthenticated && refreshLLMApiKeys) {
-        await refreshLLMApiKeys();
-      }
     } catch (err) {
       console.error('[SettingsModal] Failed to save configs:', err);
       alert(`Erreur: ${err instanceof Error ? err.message : 'Impossible de sauvegarder les configurations'}`);
@@ -234,27 +229,29 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
         if (!profile.id) {
           // New profile (no persisted id yet) — skip if both name and endpoint are empty
           if (profile.name.trim() || profile.endpoint.trim()) {
-            await createLLMProfile(data);
+            await createLLMProfile(data, false);
           }
         } else {
           // Existing profile
-          await updateLLMProfile(profile.id, data);
+          await updateLLMProfile(profile.id, data, false);
         }
       }
       // 2. Delete profiles that were removed during the session
       for (const id of originalProfileIds) {
         if (!localProfiles.some(p => p.id === id)) {
-          await deleteLLMProfile(id);
+          await deleteLLMProfile(id, false);
         }
       }
+
     } catch (profileErr) {
       console.error('[SettingsModal] Failed to save local LLM profiles:', profileErr);
       alert(`Erreur profils LLM local: ${profileErr instanceof Error ? profileErr.message : 'Sauvegarde échouée'}`);
     }
 
+    await refreshRuntimeConfigState();
+
     setIsSaving(false);
-    // CRITICAL: Notify parent component of saved configs
-    // This ensures App.tsx updates its llmConfigs state with final values
+    // Notify parent so it can persist non-LLM preferences if needed.
     onSave(finalConfigs);
     onClose();
   };

@@ -5,7 +5,7 @@ import { RobotPageRouter } from './components/RobotPageRouter';
 import { AgentFormModal } from './components/modals/AgentFormModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { Header } from './components/Header';
-import { GUEST_STORAGE_KEYS, getAllGuestKeys } from './utils/guestDataUtils';
+import { getAllGuestKeys } from './utils/guestDataUtils';
 import { LoginModal } from './components/modals/LoginModal';
 import { RegisterModal } from './components/modals/RegisterModal';
 import { ImageGenerationPanel } from './components/panels/ImageGenerationPanel';
@@ -13,13 +13,11 @@ import { ImageModificationPanel } from './components/panels/ImageModificationPan
 import { VideoGenerationConfigPanel } from './components/panels/VideoGenerationConfigPanel';
 import { MapsGroundingConfigPanel } from './components/panels/MapsGroundingConfigPanel';
 import { useLocalization } from './hooks/useLocalization';
-import { useLocalLLMProfiles } from './hooks/useLocalLLMProfiles';
 import { Button } from './components/UI';
 import { ConfirmationModal } from './components/modals/ConfirmationModal';
 import { FullscreenChatModal } from './components/modals/FullscreenChatModal';
 import { AgentConfigurationModal } from './components/modals/AgentConfigurationModal';
 import { useRuntimeStore } from './stores/useRuntimeStore';
-import { isLMStudio } from './utils/llmProviderUtils';
 import { useDesignStore } from './stores/useDesignStore';
 import { useWorkflowStore } from './stores/useWorkflowStore';
 import { NotificationProvider } from './contexts';
@@ -40,9 +38,6 @@ import apiClient from './utils/apiClient';
 // ⭐ FIX QA: Import useJournalQueue for image persistence
 import { useJournalQueue } from './hooks/useJournalQueue';
 
-// ⭐ J4.4: Use the key from guestDataUtils to ensure consistency with wipeGuestData()
-const LLM_CONFIGS_KEY = GUEST_STORAGE_KEYS.LLM_CONFIGS;
-
 interface EditingImageInfo {
   nodeId: string;
   sourceImage: string;
@@ -50,93 +45,6 @@ interface EditingImageInfo {
   agent?: Agent;
   agentInstance?: AgentInstance;
 }
-
-// ⭐ CRITICAL FIX: ALL providers start disabled by default
-// Only providers saved in the database (with API keys) will be enabled
-// This prevents Gemini from always appearing when user hasn't configured it
-const initialLLMConfigs: LLMConfig[] = [
-  { provider: LLMProvider.Gemini, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.ImageGeneration]: true, [LLMCapability.ImageModification]: true, [LLMCapability.WebSearch]: true, [LLMCapability.URLAnalysis]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true, [LLMCapability.VideoGeneration]: true, [LLMCapability.MapsGrounding]: true, [LLMCapability.WebSearchGrounding]: true } },
-  { provider: LLMProvider.OpenAI, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.ImageGeneration]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true } },
-  { provider: LLMProvider.Mistral, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true, [LLMCapability.Embedding]: true, [LLMCapability.OCR]: true } },
-  { provider: LLMProvider.Anthropic, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true } },
-  { provider: LLMProvider.Grok, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true } },
-  { provider: LLMProvider.Perplexity, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true, [LLMCapability.WebSearch]: true } },
-  { provider: LLMProvider.Qwen, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FileUpload]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true } },
-  { provider: LLMProvider.Kimi, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true } },
-  { provider: LLMProvider.DeepSeek, enabled: false, apiKey: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true, [LLMCapability.Reasoning]: true, [LLMCapability.CacheOptimization]: true } },
-  // LLM local (on premise): Generic local provider for any local LLM (LMStudio, Ollama, Jan, etc)
-  { provider: LLMProvider.LMStudio, enabled: false, localEndpoint: '', capabilities: { [LLMCapability.Chat]: true, [LLMCapability.FunctionCalling]: true, [LLMCapability.OutputFormatting]: true, [LLMCapability.Embedding]: false, [LLMCapability.CodeSpecialization]: false } },
-];
-
-const loadLLMConfigs = (isAuthenticated: boolean = false, accessToken: string | null = null): LLMConfig[] => {
-  try {
-    // ⭐ J4.4 CRITICAL: Guest-only fallback
-    // Authenticated users get configs from AuthContext.llmApiKeys (fetched at login)
-    // This localStorage ONLY for guest mode
-    
-    if (isAuthenticated && accessToken) {
-      // Authenticated mode: IGNORE localStorage, use llmApiKeys from AuthContext
-      // Return defaults here, real configs merged via useEffect when llmApiKeys loads
-      return initialLLMConfigs;
-    }
-    
-    // Guest mode: Load from localStorage
-    // ⭐ J4.5: Try new key first, then legacy key for backward compatibility
-    let storedConfigsJSON = localStorage.getItem(LLM_CONFIGS_KEY);
-    if (!storedConfigsJSON) {
-      // Try legacy key
-      storedConfigsJSON = localStorage.getItem(GUEST_STORAGE_KEYS.LLM_CONFIGS_LEGACY);
-      if (storedConfigsJSON) {
-        localStorage.setItem(LLM_CONFIGS_KEY, storedConfigsJSON);
-      }
-    }
-    if (!storedConfigsJSON) {
-      return initialLLMConfigs;
-    }
-
-    const storedConfigs = JSON.parse(storedConfigsJSON) as any[];
-    const storedProviders = new Map(storedConfigs.map(c => [c.provider, c]));
-
-    const syncedConfigs = initialLLMConfigs.map(initialConfig => {
-      const storedConfig = storedProviders.get(initialConfig.provider);
-
-      if (!storedConfig) {
-        return initialConfig; // No user settings for this provider, use default.
-      }
-
-      // Sync capabilities
-      const syncedCapabilities: { [key in LLMCapability]?: boolean } = {};
-      for (const capKey in initialConfig.capabilities) {
-        const cap = capKey as LLMCapability;
-        if (storedConfig.capabilities && storedConfig.capabilities[cap] !== undefined) {
-          syncedCapabilities[cap] = storedConfig.capabilities[cap];
-        } else {
-          syncedCapabilities[cap] = initialConfig.capabilities[cap];
-        }
-      }
-
-      // ⭐ J4.4.3 FIX: Support both LLMConfig format (apiKey) and ILLMConfigUI format (apiKeyPlaintext)
-      // llmConfigService stores as ILLMConfigUI with apiKeyPlaintext for guest mode
-      // Legacy code stored as LLMConfig with apiKey
-      const apiKey = storedConfig.apiKey || storedConfig.apiKeyPlaintext || '';
-
-      // Merge
-      return {
-        ...initialConfig,
-        enabled: storedConfig.enabled,
-        apiKey: apiKey,
-        capabilities: syncedCapabilities,
-      };
-    });
-
-    return syncedConfigs;
-
-  } catch (error) {
-    console.error("Failed to load LLM configs from localStorage", error);
-    return initialLLMConfigs;
-  }
-};
-
 
 interface DeleteConfirmationState {
   agentId: string;
@@ -287,7 +195,7 @@ const mapChatMessages = (messages: any[] = []): ChatMessage[] => messages.map((m
  * Must be wrapped by AuthProvider to access useAuth()
  */
 function AppContent() {
-  const { isAuthenticated, accessToken, llmApiKeys, user, logout } = useAuth();
+  const { isAuthenticated, accessToken, runtimeLLMConfigs, localLLMProfiles, user, logout, refreshRuntimeConfigState } = useAuth();
   const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
   const [isAgentModalOpen, setAgentModalOpen] = useState(false);
   const [isLoginModalOpen, setLoginModalOpen] = useState(false);
@@ -309,8 +217,6 @@ function AppContent() {
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [workflowNodes, setWorkflowNodes] = useState<WorkflowNode[]>([]);
-  // ⭐ J4.4: Start with defaults - will be reloaded on first auth change
-  const [llmConfigs, setLlmConfigs] = useState<LLMConfig[]>(initialLLMConfigs);
   const [editingImageInfo, setEditingImageInfo] = useState<EditingImageInfo | null>(null);
   const [mapsPreloadedResults, setMapsPreloadedResults] = useState<{
     text: string;
@@ -321,8 +227,7 @@ function AppContent() {
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; mimeType: string } | null>(null);
   const { t } = useLocalization();
 
-  // ⭐ NEW: Local LLM Profiles hook
-  const { profiles: localLLMProfiles } = useLocalLLMProfiles();
+  const llmConfigs = runtimeLLMConfigs;
 
   // ⭐ ÉTAPE 5: Hydration state for authenticated users
   const [isHydrating, setIsHydrating] = useState(false);
@@ -344,9 +249,6 @@ function AppContent() {
   const [hyperspaceActive, setHyperspaceActive] = useState(false);
   const wasAuthenticatedRef = React.useRef(isAuthenticated);
   
-  // ⭐ J4.4.3: Ref to track previous llmApiKeys to prevent infinite loops
-  const prevApiKeysRef = React.useRef<string>('');
-
   // ⭐ UX: Trigger hyperspace on logout (auth → guest transition)
   useEffect(() => {
     const wasAuth = wasAuthenticatedRef.current;
@@ -645,111 +547,11 @@ function AppContent() {
     setCurrentMapsNodeId(null);
     setMapsPreloadedResults(null);
     
-    // ⭐ FIX: Reset prevApiKeysRef on auth change to allow fresh hydration
-    prevApiKeysRef.current = '';
   }, [isAuthenticated, accessToken]);
 
-  /**
-   * ⭐ UNIFIED HYDRATION EFFECT v2 (FIX for reconnect race condition)
-   * 
-   * Single source of truth for llmConfigs hydration
-   * Merges authentication state + llmApiKeys to create authoritative config
-   * 
-   * Logic flow:
-   * 1. If not authenticated → Load guest configs from localStorage
-   * 2. If authenticated but llmApiKeys still loading → Use defaults (safe wait)
-   * 3. If authenticated and llmApiKeys loaded → Merge with API keys (final state)
-   * 
-   * This prevents the previous race condition where two competing effects
-   * (one on [isAuthenticated, accessToken] and one on [llmApiKeys])
-   * could cause stale llmConfigs to be seen by child components during reconnect
-   * 
-   * CRITICAL: This effect runs on ALL relevant changes to ensure deterministic state
-   */
   useEffect(() => {
-    // ══════════════════════════════════════════════════
-    // Case 1: User not authenticated → Use guest mode
-    // ══════════════════════════════════════════════════
-    if (!isAuthenticated) {
-      const guestConfigs = loadLLMConfigs(false, null);
-      setLlmConfigs(guestConfigs);
-      updateLLMConfigs(guestConfigs);
-      return;
-    }
-
-    // ══════════════════════════════════════════════════
-    // Case 2: Authenticated but still hydrating
-    // ══════════════════════════════════════════════════
-    // If no accessToken yet, wait for it
-    if (!accessToken) {
-      const defaults = initialLLMConfigs;
-      setLlmConfigs(defaults);
-      updateLLMConfigs(defaults);
-      return;
-    }
-
-    // If llmApiKeys is null, it means AuthContext is still fetching
-    // Use defaults while waiting
-    if (llmApiKeys === null || llmApiKeys === undefined) {
-      const defaults = initialLLMConfigs;
-      setLlmConfigs(defaults);
-      updateLLMConfigs(defaults);
-      return;
-    }
-
-    // ══════════════════════════════════════════════════
-    // Case 3: Authenticated AND llmApiKeys loaded
-    // ══════════════════════════════════════════════════
-
-    // Prevent unnecessary re-merges of identical data (hash check)
-    const keysHash = JSON.stringify(llmApiKeys);
-    if (keysHash === prevApiKeysRef.current) {
-      return;
-    }
-    prevApiKeysRef.current = keysHash;
-
-    // If user has zero LLM configs saved, set all to disabled
-    if (llmApiKeys.length === 0) {
-      const allDisabled = initialLLMConfigs;
-      setLlmConfigs(allDisabled);
-      updateLLMConfigs(allDisabled);
-      return;
-    }
-
-    // Convert LLMApiKey[] to LLMConfig[] with local endpoint support
-    const apiConfigs: LLMConfig[] = llmApiKeys.map(key => ({
-      provider: key.provider as LLMProvider,
-      apiKey: key.apiKey,
-      localEndpoint: (key as any).localEndpoint,
-      enabled: key.enabled,
-      capabilities: (key.capabilities || {}) as { [k in LLMCapability]?: boolean },
-      needsReconfig: (key as any).needsReconfig || false
-    }));
-
-    // Merge defaults with API configs, preserving local endpoint
-    const mergedConfigs = initialLLMConfigs.map(initial => {
-      const apiConfig = apiConfigs.find(c => c.provider === initial.provider);
-      if (!apiConfig) return initial;
-
-      return {
-        ...initial,
-        ...apiConfig,
-        localEndpoint: apiConfig.localEndpoint !== undefined ? apiConfig.localEndpoint : initial.localEndpoint,
-        needsReconfig: apiConfig.needsReconfig || false,
-        capabilities: apiConfig.capabilities
-          ? Object.keys(initial.capabilities).reduce((acc, capKey) => {
-              const cap = capKey as LLMCapability;
-              acc[cap] = cap in apiConfig.capabilities ? apiConfig.capabilities[cap] : initial.capabilities[cap];
-              return acc;
-            }, {} as { [k in LLMCapability]?: boolean })
-          : initial.capabilities
-      };
-    });
-
-    setLlmConfigs(mergedConfigs);
-    updateLLMConfigs(mergedConfigs);
-
-  }, [isAuthenticated, accessToken, llmApiKeys, updateLLMConfigs]);
+    updateLLMConfigs(llmConfigs);
+  }, [llmConfigs, updateLLMConfigs]);
 
   // ⭐ NEW: Sync local LLM profiles into runtime store
   useEffect(() => {
@@ -895,23 +697,24 @@ function AppContent() {
     }
   };
 
-  const handleSaveSettings = async (newLLMConfigs: LLMConfig[]) => {
+  const handleSaveSettings = async (_newLLMConfigs: LLMConfig[]) => {
     try {
-      const lmStudioConfig = newLLMConfigs.find(c => isLMStudio(c.provider));
-
       // Get appropriate storage based on auth state
       const storage = getSettingsStorage({
         isAuthenticated,
         accessToken,
         refreshToken: null,
-        user: null,
+        user,
+        runtimeLLMConfigs: llmConfigs,
+        localLLMProfiles,
         login: async () => { },
         register: async () => { },
-        logout: () => { },
+        logout,
         refreshAccessToken: async () => { },
         clearError: () => { },
         refreshLLMApiKeys: async () => { },
         llmApiKeys: null,
+        refreshRuntimeConfigState,
         isLoading: false,
         error: null
       });
@@ -925,21 +728,7 @@ function AppContent() {
         preferences: { language: 'fr' }
       });
       
-      if (!isAuthenticated) {
-        // ⭐ Guest mode: reload from localStorage
-        const freshConfigs = loadLLMConfigs(false, null);
-        setLlmConfigs(freshConfigs);
-        updateLLMConfigs(freshConfigs);
-      } else {
-        // ⭐ FIX: For authenticated users, use the configs directly from modal
-        // refreshLLMApiKeys() was already called in SettingsModal before onSave()
-        // The newLLMConfigs reflect what was just saved to the database
-        // We also reset the hash so the useEffect will sync on next llmApiKeys update
-        console.log('[App] handleSaveSettings - applying', newLLMConfigs.filter(c => c.enabled).length, 'enabled configs');
-        setLlmConfigs(newLLMConfigs);
-        updateLLMConfigs(newLLMConfigs);
-        prevApiKeysRef.current = ''; // Reset for next llmApiKeys sync
-      }
+      await refreshRuntimeConfigState();
     } catch (error) {
       console.error('[App] handleSaveSettings error:', error);
     }

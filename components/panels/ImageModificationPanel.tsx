@@ -3,6 +3,8 @@ import { LLMConfig, WorkflowNode, ChatMessage, Agent, AgentInstance } from '../.
 import { Button, SlideOver } from '../UI';
 import * as llmService from '../../services/llmService';
 import { useLocalization } from '../../hooks/useLocalization';
+import { useRuntimeStore } from '../../stores/useRuntimeStore';
+import { resolveAgentRuntimeConfig } from '../../services/runtimeConfigResolver';
 
 interface EditingImageInfo {
   nodeId: string;
@@ -28,14 +30,13 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
     const [error, setError] = useState<string | null>(null);
     const [currentSourceImage, setCurrentSourceImage] = useState<string | null>(null);
     const { t } = useLocalization();
+    const localLLMProfiles = useRuntimeStore(state => state.localLLMProfiles);
 
     // Use agent from editingImageInfo if available (fresh from V2AgentNode)
     // Otherwise fallback to lookup from workflowNodes
     const agent = editingImageInfo?.agent || workflowNodes.find(n => n.id === editingImageInfo?.nodeId)?.agent;
-    // ✅ SAFE: find(provider) is correct for cloud-only panels (image editing = Gemini/OpenAI only).
-    // Cloud providers have exactly ONE LLMConfig per provider type → no cross-agent contamination possible.
-    // ⚠️ NEVER apply this pattern to local LLM calls (Ollama/LMStudio) — use localLLMProfileId instead.
-    const agentConfig = llmConfigs.find(c => c.provider === agent?.llmProvider);
+    const agentRuntime = resolveAgentRuntimeConfig(agent || null, llmConfigs, localLLMProfiles);
+    const agentConfig = agentRuntime.config;
     
     useEffect(() => {
         if (isOpen && editingImageInfo) {
@@ -66,7 +67,7 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
 
         const result = await llmService.editImage(
             agentConfig.provider, 
-            agentConfig.apiKey, 
+            agentRuntime.credential, 
             prompt, 
             { mimeType: editingImageInfo.mimeType, data: currentSourceImage }
         );
@@ -108,10 +109,13 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
             // ⭐ FIX: Use agent.model (not hardcoded 'gemini-2.5-flash') — model must match agent config
             const { text } = await llmService.generateContent(
                 agentConfig.provider,
-                agentConfig.apiKey,
+                agentRuntime.credential,
                 agent!.model,
                 "Vous êtes un assistant IA qui décrit les modifications d'images.",
-                descriptionHistory
+                descriptionHistory,
+                undefined,
+                undefined,
+                agentRuntime.credential
             );
             
             onImageModified(editingImageInfo.nodeId, modifiedImage, text || `Image modifiée selon vos instructions.`);
