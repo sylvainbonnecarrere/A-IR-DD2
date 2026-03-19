@@ -28,6 +28,17 @@ export interface IPersistenceConfig {
     retentionDays?: number;        // Durée de conservation en jours
 }
 
+export interface IToolSelectionVersionRef {
+    versionTag?: string;
+    versionNumber?: number;
+    workspaceId?: string | null;
+}
+
+export interface IToolSelection {
+    toolId: string;
+    versionRef?: IToolSelectionVersionRef;
+}
+
 // ============================================
 // TYPES DE CONTENU POLYMORPHE (ÉTAPE 1.6)
 // ============================================
@@ -126,10 +137,12 @@ export interface IAgentInstance extends Document {
     historyConfig?: object;
     // ⭐ Tools V2: références vers user_functions + héritage prototype
     tools?: mongoose.Types.ObjectId[];   // Références vers user_functions._id
+    toolSelections?: IToolSelection[];   // Références versionnées effectives pour cette instance
     legacyTools?: object[];              // Ancien format inline (migration rétrocompat)
     functionInheritance?: {
         inheritFromPrototype: boolean;   // true par défaut
         overrideFunctionIds?: string[]; // Si inheritFromPrototype = false
+        overrideToolSelections?: IToolSelection[];
     };
     outputConfig?: object;
     localLLMProfileId?: string;   // Which LocalLLMProfile is used for this instance
@@ -227,12 +240,30 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         type: Schema.Types.ObjectId,
         ref: 'UserFunction'
     }],
+    toolSelections: [{
+        toolId: { type: String, required: true, trim: true },
+        versionRef: {
+            versionTag: { type: String, required: false, trim: true },
+            versionNumber: { type: Number, required: false },
+            workspaceId: { type: String, required: false, default: null }
+        },
+        _id: false
+    }],
     // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)
     legacyTools: [Schema.Types.Mixed],
     // ⭐ Tools V2: configuration d'héritage des fonctions depuis le prototype
     functionInheritance: {
         inheritFromPrototype: { type: Boolean, default: true },
         overrideFunctionIds: [{ type: String }],
+        overrideToolSelections: [{
+            toolId: { type: String, required: true, trim: true },
+            versionRef: {
+                versionTag: { type: String, required: false, trim: true },
+                versionNumber: { type: Number, required: false },
+                workspaceId: { type: String, required: false, default: null }
+            },
+            _id: false
+        }],
         _id: false
     },
     outputConfig: Schema.Types.Mixed,

@@ -22,7 +22,7 @@
  */
 
 import { API_BASE_URL } from '../../config/api.config';
-import type { ChatMessage } from '../../types';
+import type { ChatMessage, ToolSelection } from '../../types';
 import type { UserFunction } from '../../types/function.types';
 import type { ILLMAdapter, LLMRequest } from '../adapters/ILLMAdapter';
 import type { ParsedToolCall } from './ToolCallParser';
@@ -38,6 +38,11 @@ export interface ToolCallRecord {
     result: unknown;
     status: 'success' | 'error';
     durationMs: number;
+    executionId?: string;
+    runner?: string;
+    exitCode?: number;
+    failureKind?: string;
+    artifacts?: Array<{ path: string; kind: 'file' | 'json' | 'log' }>;
     timestamp: Date;
 }
 
@@ -78,20 +83,39 @@ function findFunction(name: string, functions: UserFunction[]): UserFunction | n
 /**
  * Execute a UserFunction via the backend sandbox route POST /api/sandbox/run.
  * Body: { functionId, testArgs }
- * Response: { success, output, stdout, stderr, durationMs }
+ * Response: { success, output, stdout, stderr, durationMs, executionId, runner, exitCode, metadata }
  */
 async function executeFunction(
     fn: UserFunction,
     args: Record<string, unknown>,
     authToken?: string
-): Promise<{ result: unknown; durationMs: number }> {
+): Promise<{
+    result: unknown;
+    durationMs: number;
+    executionId?: string;
+    runner?: string;
+    exitCode?: number;
+    failureKind?: string;
+    artifacts?: Array<{ path: string; kind: 'file' | 'json' | 'log' }>;
+}> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
 
     const response = await fetch(`${API_BASE_URL}/api/sandbox/run`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ functionId: fn._id, testArgs: args }),
+        body: JSON.stringify({
+            functionId: fn._id,
+            toolSelection: {
+                toolId: fn._id,
+                versionRef: {
+                    versionTag: fn.versionTag,
+                    versionNumber: fn.version,
+                    workspaceId: fn.workspaceContext?.workspaceId ?? null,
+                },
+            } satisfies ToolSelection,
+            testArgs: args
+        }),
     });
 
     if (!response.ok) {
@@ -103,7 +127,15 @@ async function executeFunction(
     if (!data.success) {
         throw new Error(data.stderr || 'Sandbox execution failed');
     }
-    return { result: data.output ?? {}, durationMs: data.durationMs ?? 0 };
+    return {
+        result: data.output ?? {},
+        durationMs: data.durationMs ?? 0,
+        executionId: data.executionId,
+        runner: data.runner,
+        exitCode: data.exitCode,
+        failureKind: data.metadata?.failureKind,
+        artifacts: data.metadata?.artifacts
+    };
 }
 
 // ─── AgentLoop ───────────────────────────────────────────────────────────────
@@ -200,7 +232,7 @@ export async function runAgentLoop(
                 };
             } else {
                 try {
-                    const { result, durationMs } = await executeFunction(fn, tc.arguments, authToken);
+                    const { result, durationMs, executionId, runner, exitCode, failureKind, artifacts } = await executeFunction(fn, tc.arguments, authToken);
                     record = {
                         id: generateId(),
                         functionId: fn._id,
@@ -209,6 +241,11 @@ export async function runAgentLoop(
                         result,
                         status: 'success',
                         durationMs,
+                        executionId,
+                        runner,
+                        exitCode,
+                        failureKind,
+                        artifacts,
                         timestamp: new Date(),
                     };
                 } catch (err) {

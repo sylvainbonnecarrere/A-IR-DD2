@@ -11,8 +11,12 @@
  */
 
 import mongoose from 'mongoose';
+import path from 'path';
 import { UserFunction, IUserFunction } from '../models/UserFunction.model';
+import { deleteUserToolMirror, syncUserToolMirrorFromLegacyFunction } from './userToolMirror.service';
 import { AgentPrototype } from '../models/AgentPrototype.model';
+import { createWorkspaceManager } from './workspace/WorkspaceManager';
+import type { WorkspaceProvisioningResult } from './workspace/types';
 
 interface ListFunctionsFilter {
     workflowId?: string;
@@ -33,7 +37,24 @@ interface CreateFunctionData {
     tags?: string[];
 }
 
+export interface FunctionWorkspaceContext {
+    workspaceId: string;
+    logicalRoot: string;
+    runtimeRoots: WorkspaceProvisioningResult['runtimeRoots'];
+    manifests: WorkspaceProvisioningResult['manifests'];
+    status: WorkspaceProvisioningResult['status'];
+    lastScanAt?: Date | null;
+}
+
+export interface FunctionReadModel extends IUserFunction {
+    workspaceContext?: FunctionWorkspaceContext;
+    resolvedCodePath?: string | null;
+    codePathRoot?: 'workspace_source' | 'absolute' | 'native_repo' | 'legacy_relative' | null;
+}
+
 export class FunctionService {
+    private readonly workspaceManager = createWorkspaceManager();
+
     /**
      * Retourne toutes les fonctions disponibles pour un utilisateur :
      * - Les fonctions natives (userId: null, isReadonly: true)
@@ -41,7 +62,7 @@ export class FunctionService {
      *
      * Filtre optionnel : workflowId, origin, language, isEnabled
      */
-    async listFunctions(userId: string, filters: ListFunctionsFilter = {}): Promise<IUserFunction[]> {
+    async listFunctions(userId: string, filters: ListFunctionsFilter = {}): Promise<FunctionReadModel[]> {
         const query: Record<string, unknown> = {
             $or: [
                 { userId: null },                                            // natives
@@ -76,15 +97,25 @@ export class FunctionService {
             ];
         }
 
-        return UserFunction.find(query)
+        const functions = await UserFunction.find(query)
             .sort({ origin: -1, name: 1 })  // natives d'abord, puis alphabétique
             .lean<IUserFunction[]>();
+
+        return this.attachWorkspacePathContext(userId, functions);
     }
 
     /**
      * Crée une nouvelle fonction custom pour l'utilisateur
      */
-    async createFunction(userId: string, data: CreateFunctionData): Promise<IUserFunction> {
+    async createFunction(userId: string, data: CreateFunctionData): Promise<FunctionReadModel> {
+        if (data.workflowId) {
+            await this.workspaceManager.syncLegacyFunctionPaths(userId, data.workflowId);
+        }
+
+        const dependencies = data.language === 'python'
+            ? { python: data.dependencies ?? [], npm: [] }
+            : { python: [], npm: data.dependencies ?? [] };
+
         const fn = new UserFunction({
             name: data.name,
             description: data.description,
@@ -97,10 +128,7 @@ export class FunctionService {
             inputSchema: data.inputSchema ?? {},
             outputSchema: data.outputSchema ?? {},
             codeInline: data.codeInline ?? null,
-            dependencies: {
-                python: data.dependencies ?? [],
-                npm: []
-            },
+            dependencies,
             isEnabled: true,
             isReadonly: false,
             version: 1,
@@ -108,7 +136,15 @@ export class FunctionService {
         });
 
         await fn.save();
-        return fn.toObject();
+        const created = fn.toObject();
+        try {
+            await syncUserToolMirrorFromLegacyFunction(created);
+        } catch (error) {
+            await UserFunction.deleteOne({ _id: fn._id });
+            throw error;
+        }
+        const [resolved] = await this.attachWorkspacePathContext(userId, [created]);
+        return resolved;
     }
 
     /**
@@ -117,16 +153,23 @@ export class FunctionService {
      *   - c'est une fonction native (userId: null)
      *   - c'est une fonction de l'utilisateur courant
      */
-    async getFunctionById(functionId: string, userId: string): Promise<IUserFunction | null> {
+    async getFunctionById(functionId: string, userId: string): Promise<FunctionReadModel | null> {
         if (!mongoose.Types.ObjectId.isValid(functionId)) return null;
 
-        return UserFunction.findOne({
+        const fn = await UserFunction.findOne({
             _id: functionId,
             $or: [
                 { userId: null },
                 { userId: new mongoose.Types.ObjectId(userId) }
             ]
         }).lean<IUserFunction>();
+
+        if (!fn) {
+            return null;
+        }
+
+        const [resolved] = await this.attachWorkspacePathContext(userId, [fn]);
+        return resolved;
     }
 
     /**
@@ -137,25 +180,63 @@ export class FunctionService {
         functionId: string,
         userId: string,
         data: Partial<CreateFunctionData>
-    ): Promise<IUserFunction | null> {
+    ): Promise<FunctionReadModel | null> {
         if (!mongoose.Types.ObjectId.isValid(functionId)) return null;
+
+        const existing = await UserFunction.findOne({
+            _id: functionId,
+            userId: new mongoose.Types.ObjectId(userId),
+            isReadonly: false
+        }).lean<IUserFunction>();
+
+        if (!existing) {
+            return null;
+        }
+
+        const updatePayload: Record<string, unknown> = {
+            ...data,
+            updatedAt: new Date()
+        };
+
+        if (data.workflowId !== undefined) {
+            updatePayload.workflowId = data.workflowId
+                ? new mongoose.Types.ObjectId(data.workflowId)
+                : null;
+        }
+
+        if (data.dependencies !== undefined) {
+            const language = data.language ?? existing.language;
+            updatePayload.dependencies = language === 'python'
+                ? { python: data.dependencies, npm: [] }
+                : { python: [], npm: data.dependencies };
+        }
 
         const updated = await UserFunction.findOneAndUpdate(
             {
-                _id: functionId,
-                userId: new mongoose.Types.ObjectId(userId),
-                isReadonly: false
+                _id: existing._id
             },
-            {
-                $set: {
-                    ...data,
-                    updatedAt: new Date()
-                }
-            },
+            { $set: updatePayload },
             { new: true, runValidators: true }
         ).lean<IUserFunction>();
 
-        return updated;
+        if (updated) {
+            const effectiveWorkflowId = data.workflowId !== undefined
+                ? data.workflowId
+                : (existing.workflowId ? existing.workflowId.toString() : null);
+
+            if (effectiveWorkflowId) {
+                await this.workspaceManager.syncLegacyFunctionPaths(userId, effectiveWorkflowId);
+            }
+
+            await syncUserToolMirrorFromLegacyFunction(updated);
+        }
+
+        if (!updated) {
+            return null;
+        }
+
+        const [resolved] = await this.attachWorkspacePathContext(userId, [updated]);
+        return resolved;
     }
 
     /**
@@ -165,6 +246,18 @@ export class FunctionService {
      */
     async deleteFunction(functionId: string, userId: string): Promise<boolean> {
         if (!mongoose.Types.ObjectId.isValid(functionId)) return false;
+
+        const existing = await UserFunction.findOne({
+            _id: functionId,
+            userId: new mongoose.Types.ObjectId(userId),
+            isReadonly: false
+        }).lean<IUserFunction>();
+
+        if (!existing) {
+            return false;
+        }
+
+        await deleteUserToolMirror(functionId);
 
         const result = await UserFunction.deleteOne({
             _id: functionId,
@@ -184,7 +277,7 @@ export class FunctionService {
         functionId: string,
         userId: string,
         options?: { allowBashPy?: boolean }
-    ): Promise<IUserFunction | null> {
+    ): Promise<FunctionReadModel | null> {
         if (!mongoose.Types.ObjectId.isValid(functionId)) return null;
 
         // Chercher la fonction (native ou custom)
@@ -212,7 +305,17 @@ export class FunctionService {
             { new: true }
         );
 
-        return updated ? updated.toObject() : null;
+        const normalized = updated ? updated.toObject() : null;
+        if (normalized) {
+            await syncUserToolMirrorFromLegacyFunction(normalized);
+        }
+
+        if (!normalized) {
+            return null;
+        }
+
+        const [resolved] = await this.attachWorkspacePathContext(userId, [normalized]);
+        return resolved;
     }
 
     /**
@@ -222,7 +325,7 @@ export class FunctionService {
     async getFunctionsForAgent(
         agentId: string,
         userId: string
-    ): Promise<IUserFunction[]> {
+    ): Promise<FunctionReadModel[]> {
         if (!mongoose.Types.ObjectId.isValid(agentId)) return [];
 
         const prototype = await AgentPrototype.findOne({
@@ -235,6 +338,99 @@ export class FunctionService {
         if (!prototype || !prototype.tools) return [];
 
         // tools est maintenant un tableau d'IUserFunction après populate
-        return prototype.tools as unknown as IUserFunction[];
+        return this.attachWorkspacePathContext(
+            userId,
+            prototype.tools as unknown as IUserFunction[]
+        );
+    }
+
+    private async attachWorkspacePathContext(
+        ownerUserId: string,
+        functions: IUserFunction[]
+    ): Promise<FunctionReadModel[]> {
+        if (functions.length === 0) {
+            return [];
+        }
+
+        const workflowIds = Array.from(new Set(
+            functions
+                .filter((fn) => fn.origin === 'custom' && fn.workflowId)
+                .map((fn) => fn.workflowId!.toString())
+        ));
+
+        const workspaceByWorkflowId = new Map<string, WorkspaceProvisioningResult>();
+
+        for (const workflowId of workflowIds) {
+            const existingWorkspace = await this.workspaceManager.getWorkspace({
+                ownerUserId,
+                scopeType: 'workflow',
+                scopeId: workflowId
+            });
+
+            const workspace = existingWorkspace
+                ?? await this.workspaceManager.ensureWorkflowWorkspace(ownerUserId, workflowId);
+
+            workspaceByWorkflowId.set(workflowId, workspace);
+        }
+
+        return functions.map((fn) => {
+            const workflowId = fn.workflowId?.toString() ?? null;
+            const workspace = workflowId ? workspaceByWorkflowId.get(workflowId) : undefined;
+            const pathMetadata = this.resolveCodePathMetadata(fn, workspace);
+
+            return {
+                ...fn,
+                workspaceContext: workspace
+                    ? {
+                        workspaceId: workspace.workspaceId,
+                        logicalRoot: workspace.logicalRoot,
+                        runtimeRoots: workspace.runtimeRoots,
+                        manifests: workspace.manifests,
+                        status: workspace.status,
+                        lastScanAt: workspace.lastScanAt ?? null
+                    }
+                    : undefined,
+                resolvedCodePath: pathMetadata.resolvedCodePath,
+                codePathRoot: pathMetadata.codePathRoot
+            } as FunctionReadModel;
+        });
+    }
+
+    private resolveCodePathMetadata(
+        fn: IUserFunction,
+        workspace?: WorkspaceProvisioningResult
+    ): Pick<FunctionReadModel, 'resolvedCodePath' | 'codePathRoot'> {
+        if (!fn.codePath) {
+            return {
+                resolvedCodePath: null,
+                codePathRoot: null
+            };
+        }
+
+        if (path.isAbsolute(fn.codePath)) {
+            return {
+                resolvedCodePath: fn.codePath,
+                codePathRoot: 'absolute'
+            };
+        }
+
+        if (fn.origin === 'native') {
+            return {
+                resolvedCodePath: fn.codePath,
+                codePathRoot: 'native_repo'
+            };
+        }
+
+        if (workspace) {
+            return {
+                resolvedCodePath: path.resolve(workspace.runtimeRoots.sourceRoot, fn.codePath),
+                codePathRoot: 'workspace_source'
+            };
+        }
+
+        return {
+            resolvedCodePath: fn.codePath,
+            codePathRoot: 'legacy_relative'
+        };
     }
 }

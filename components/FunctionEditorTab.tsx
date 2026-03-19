@@ -4,9 +4,9 @@
  * Fonctionnalités :
  *   - Éditeur Monaco avec langage Python ou TypeScript
  *   - Vérification syntaxique en temps réel (debounce 800ms)
- *   - Exécution sandbox via POST /api/sandbox/run
+ *   - Exécution de test via la façade frontend hybridée J9
  *   - Console d'affichage des résultats (stdout/stderr/output)
- *   - Sauvegarde du code inline via PUT /api/functions/:id
+ *   - Sauvegarde du code inline via la façade frontend legacy->target
  *   - CodingAgentPanel (prompt → génération LLM de code) — placeholder J8
  *
  * Couleur Phil : cyan-500
@@ -14,6 +14,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Editor, { OnChange, OnMount } from '@monaco-editor/react';
+import { FunctionRunArtifactsPanel } from './FunctionRunArtifactsPanel';
+import { toolRepository } from '../services/toolRepository';
 
 // C8: Définitions de types FunctionContext injectées dans Monaco TypeScript
 const FUNCTION_CONTEXT_TYPES = `
@@ -29,7 +31,10 @@ declare type FunctionResult = unknown;
 `;
 import { useFunctionStore } from '../stores/useFunctionStore';
 import { useNotifications } from '../contexts/NotificationContext';
-import type { SandboxRunResult } from '../types/function.types';
+import type { BuildPreparationResult, RuntimeHealthReport, SandboxRunResult, FunctionRunSortField, FunctionRunSortOrder } from '../types/function.types';
+
+const RUN_RETENTION_DAYS = 14;
+const RUN_RETAIN_LATEST = 20;
 
 // ─── SandboxConsole ────────────────────────────────────────────────────────────
 interface SandboxConsoleProps {
@@ -39,6 +44,10 @@ interface SandboxConsoleProps {
 }
 
 const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, error }) => {
+    const failureKindLabel = result?.metadata?.failureKind
+        ? result.metadata.failureKind.replace(/_/g, ' ')
+        : null;
+
     if (isRunning) {
         return (
             <div className="flex items-center gap-2 text-cyan-400 text-xs p-3">
@@ -65,7 +74,18 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
                         {result.success ? '✓ Succès' : '✗ Échec'}
                     </span>
                     <span>{result.durationMs}ms</span>
+                    {result.runner && <span>{result.runner}</span>}
+                    {typeof result.exitCode === 'number' && <span>exit {result.exitCode}</span>}
                     {result.timedOut && <span className="text-yellow-400">⏱ Timeout</span>}
+                    {result.executionId && <span className="font-mono text-[11px] truncate">{result.executionId}</span>}
+                </div>
+            )}
+
+            {(result?.resourceUsage?.wallTimeMs != null || result?.resourceUsage?.memoryLimitMb != null || failureKindLabel) && (
+                <div className="px-3 py-2 border-b border-gray-700/40 text-[11px] text-gray-400 flex flex-wrap gap-3">
+                    {result?.resourceUsage?.wallTimeMs != null && <span>wall {result.resourceUsage.wallTimeMs}ms</span>}
+                    {result?.resourceUsage?.memoryLimitMb != null && <span>mem limit {result.resourceUsage.memoryLimitMb}MB</span>}
+                    {failureKindLabel && <span>failure {failureKindLabel}</span>}
                 </div>
             )}
 
@@ -75,6 +95,15 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
                     <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Résultat</div>
                     <pre className="text-green-300 overflow-x-auto whitespace-pre-wrap break-words">
                         {JSON.stringify(result.output, null, 2)}
+                    </pre>
+                </div>
+            )}
+
+            {result?.stdout && (
+                <div className="px-3 py-2">
+                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Stdout</div>
+                    <pre className="text-gray-300 overflow-x-auto whitespace-pre-wrap break-words">
+                        {result.stdout}
                     </pre>
                 </div>
             )}
@@ -89,15 +118,118 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
                 </div>
             )}
 
-            {/* Stdout (si pas success mais stdout dispo) */}
-            {result?.stdout && !result.success && (
+            {(result?.metadata?.artifacts?.length ?? 0) > 0 && (
                 <div className="px-3 py-2">
-                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Stdout</div>
-                    <pre className="text-gray-300 overflow-x-auto whitespace-pre-wrap break-words">
-                        {result.stdout}
-                    </pre>
+                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Artifacts</div>
+                    <div className="space-y-1">
+                        {result?.metadata?.artifacts?.map((artifact) => (
+                            <div key={artifact.path} className="flex items-center justify-between gap-2 text-gray-300">
+                                <span className="truncate">{artifact.path}</span>
+                                <span className="text-[11px] uppercase tracking-wide text-gray-500">{artifact.kind}</span>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
+        </div>
+    );
+};
+
+interface BuildStatusPanelProps {
+    result: BuildPreparationResult | null;
+    isBuilding: boolean;
+    error: string | null;
+}
+
+const BuildStatusPanel: React.FC<BuildStatusPanelProps> = ({ result, isBuilding, error }) => {
+    if (isBuilding) {
+        return (
+            <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-amber-300 flex items-center gap-2">
+                <div className="w-3 h-3 border border-amber-500/40 border-t-amber-300 rounded-full animate-spin" />
+                Préparation du build en cours...
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-red-300">
+                {error}
+            </div>
+        );
+    }
+
+    if (!result) {
+        return null;
+    }
+
+    return (
+        <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-gray-300 space-y-1">
+            <div className="flex items-center justify-between gap-2">
+                <span className="text-green-300">Build prêt</span>
+                <span className="text-gray-500">{new Date(result.builtAt).toLocaleString()}</span>
+            </div>
+            <div className="text-gray-500 truncate">Artefacts: {result.artifactPaths.length}</div>
+            {result.warnings.length > 0 && (
+                <div className="text-amber-300 whitespace-pre-wrap">{result.warnings.join('\n')}</div>
+            )}
+        </div>
+    );
+};
+
+interface RuntimeStatusBannerProps {
+    runtimeHealth: RuntimeHealthReport | null;
+    isLoading: boolean;
+    error: string | null;
+    language: 'python' | 'typescript';
+}
+
+const RuntimeStatusBanner: React.FC<RuntimeStatusBannerProps> = ({ runtimeHealth, isLoading, error, language }) => {
+    if (isLoading && !runtimeHealth) {
+        return (
+            <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-gray-400 flex items-center gap-2">
+                <div className="w-3 h-3 border border-gray-500/40 border-t-cyan-400 rounded-full animate-spin" />
+                Vérification du runtime d'exécution...
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-red-300">
+                {error}
+            </div>
+        );
+    }
+
+    if (!runtimeHealth) {
+        return null;
+    }
+
+    const canRun = runtimeHealth.capabilities.run[language];
+    const isDevOnly = runtimeHealth.runtime.docker.securityLevel === 'dev-only';
+    const dockerMode = runtimeHealth.runtime.docker.mode;
+    const modeDetail = dockerMode === 'docker-desktop'
+        ? 'Docker Desktop · dev-only'
+        : dockerMode === 'rootless'
+            ? 'Docker rootless'
+            : dockerMode === 'rootful-linux'
+                ? 'Docker rootful · dev-only'
+                : 'mode non confirmé';
+    if (canRun) {
+        return (
+            <div className={`px-3 py-2 border-b border-gray-700/40 text-xs ${isDevOnly ? 'text-amber-300' : 'text-emerald-300'}`}>
+                Runtime {language === 'python' ? 'Python' : 'TypeScript'} prêt pour l'exécution via {modeDetail}.
+                {runtimeHealth.runtime.docker.warning && (
+                    <span className="text-gray-400"> {runtimeHealth.runtime.docker.warning}</span>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-amber-300">
+            Exécution bloquée : {runtimeHealth.summary}
         </div>
     );
 };
@@ -140,9 +272,30 @@ export const FunctionEditorTab: React.FC = () => {
         runInSandbox,
         checkSyntax,
         clearSandboxResult,
+        loadFunctionRuns,
+        loadArtifactPreview,
+        cleanupFunctionRuns,
+        clearArtifactPreview,
+        runBuild,
+        loadBuildStatus,
+        clearBuildResult,
         sandboxResult,
         isSandboxRunning,
         sandboxError,
+        functionRuns,
+        functionRunsPagination,
+        isFunctionRunsLoading,
+        functionRunsError,
+        artifactPreview,
+        isArtifactPreviewLoading,
+        artifactPreviewError,
+        buildResult,
+        isBuilding,
+        buildError,
+        runtimeHealth,
+        isRuntimeHealthLoading,
+        runtimeHealthError,
+        loadRuntimeHealth,
     } = useFunctionStore();
 
     const { addNotification } = useNotifications();
@@ -154,6 +307,10 @@ export const FunctionEditorTab: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [syntaxErrors, setSyntaxErrors] = useState<Array<{ line?: number; message: string }>>([]);
     const [isConsolePanelOpen, setIsConsolePanelOpen] = useState(true);
+    const [runPage, setRunPage] = useState(1);
+    const [runStatusFilter, setRunStatusFilter] = useState<'all' | 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out'>('all');
+    const [runSortBy, setRunSortBy] = useState<FunctionRunSortField>('createdAt');
+    const [runSortOrder, setRunSortOrder] = useState<FunctionRunSortOrder>('desc');
     const syntaxDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // C8: Injection des types FunctionContext dans Monaco TypeScript (onMount)
@@ -178,6 +335,8 @@ export const FunctionEditorTab: React.FC = () => {
             setCode('');
         }
         clearSandboxResult();
+        clearBuildResult();
+        clearArtifactPreview();
         setSyntaxErrors([]);
         // Synchroniser les schémas
         setInputSchemaStr(fn?.inputSchema && Object.keys(fn.inputSchema).length > 0
@@ -186,7 +345,28 @@ export const FunctionEditorTab: React.FC = () => {
         setOutputSchemaStr(fn?.outputSchema && Object.keys(fn.outputSchema).length > 0
             ? JSON.stringify(fn.outputSchema, null, 2)
             : '{}');
+        setRunPage(1);
+        setRunStatusFilter('all');
+        setRunSortBy('createdAt');
+        setRunSortOrder('desc');
+        if (fn?._id) {
+            void loadBuildStatus(fn._id);
+            void loadFunctionRuns(fn._id, { page: 1, limit: functionRunsPagination.limit, sortBy: 'createdAt', sortOrder: 'desc' });
+        }
+        void loadRuntimeHealth();
     }, [fn?._id]);
+
+    useEffect(() => {
+        if (fn?._id && sandboxResult?.executionId) {
+            void loadFunctionRuns(fn._id, {
+                page: runPage,
+                limit: functionRunsPagination.limit,
+                status: runStatusFilter === 'all' ? undefined : runStatusFilter,
+                sortBy: runSortBy,
+                sortOrder: runSortOrder
+            });
+        }
+    }, [fn?._id, sandboxResult?.executionId, runPage, runStatusFilter, runSortBy, runSortOrder, functionRunsPagination.limit]);
 
     // Vérification syntaxique en temps réel (debounce 800ms)
     const handleCodeChange: OnChange = useCallback((value) => {
@@ -243,6 +423,15 @@ export const FunctionEditorTab: React.FC = () => {
     const handleRun = async () => {
         if (!fn) return;
 
+        if (!runtimeHealth?.capabilities.run[fn.language]) {
+            addNotification({
+                type: 'error',
+                title: 'Runtime non prêt',
+                message: runtimeHealth?.summary || 'Le runtime d\'exécution n\'est pas prêt.'
+            });
+            return;
+        }
+
         let testArgs: Record<string, unknown> = {};
         try {
             testArgs = JSON.parse(testArgsStr);
@@ -261,6 +450,23 @@ export const FunctionEditorTab: React.FC = () => {
         await runInSandbox(fn._id, testArgs);
     };
 
+    const handleBuild = async () => {
+        if (!fn || fn.isReadonly) return;
+
+        if (code !== fn.codeInline) {
+            const updated = await updateFunction(fn._id, { codeInline: code });
+            if (!updated) {
+                addNotification({ type: 'error', title: 'Build annulé', message: 'La sauvegarde du code a échoué avant la préparation du build.' });
+                return;
+            }
+        }
+
+        const result = await runBuild(fn._id);
+        if (result) {
+            addNotification({ type: 'success', title: 'Build prêt', message: `Artefacts préparés pour "${fn.name}".` });
+        }
+    };
+
     // Valider le JSON des args en temps réel
     const handleTestArgsChange = (value: string) => {
         setTestArgsStr(value);
@@ -271,6 +477,144 @@ export const FunctionEditorTab: React.FC = () => {
             setTestArgsValid(false);
         }
     };
+
+    const handleRefreshRuns = useCallback(() => {
+        if (fn?._id) {
+            void loadFunctionRuns(fn._id, {
+                page: runPage,
+                limit: functionRunsPagination.limit,
+                status: runStatusFilter === 'all' ? undefined : runStatusFilter,
+                sortBy: runSortBy,
+                sortOrder: runSortOrder
+            });
+        }
+    }, [fn?._id, loadFunctionRuns, runPage, runStatusFilter, runSortBy, runSortOrder, functionRunsPagination.limit]);
+
+    const handleOpenArtifact = useCallback((executionId: string, artifactPath: string) => {
+        if (fn?._id) {
+            void loadArtifactPreview(fn._id, executionId, artifactPath);
+        }
+    }, [fn?._id, loadArtifactPreview]);
+
+    const handleDownloadArtifact = useCallback(async (executionId: string, artifactPath: string) => {
+        if (!fn?._id) {
+            return;
+        }
+
+        try {
+            const response = await toolRepository.downloadArtifact(fn._id, executionId, artifactPath);
+
+            const url = window.URL.createObjectURL(response.data);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = artifactPath.split('/').pop() || 'artifact';
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (error: any) {
+            addNotification({
+                type: 'error',
+                title: 'Téléchargement impossible',
+                message: error.response?.data?.error || `Impossible de télécharger ${artifactPath}.`
+            });
+        }
+    }, [fn?._id, addNotification]);
+
+    const handleChangeRunPage = useCallback((page: number) => {
+        setRunPage(page);
+        if (fn?._id) {
+            void loadFunctionRuns(fn._id, {
+                page,
+                limit: functionRunsPagination.limit,
+                status: runStatusFilter === 'all' ? undefined : runStatusFilter,
+                sortBy: runSortBy,
+                sortOrder: runSortOrder
+            });
+        }
+    }, [fn?._id, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy, runSortOrder]);
+
+    const handleChangeRunStatusFilter = useCallback((status: 'all' | 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out') => {
+        setRunStatusFilter(status);
+        setRunPage(1);
+        if (fn?._id) {
+            void loadFunctionRuns(fn._id, {
+                page: 1,
+                limit: functionRunsPagination.limit,
+                status: status === 'all' ? undefined : status,
+                sortBy: runSortBy,
+                sortOrder: runSortOrder
+            });
+        }
+    }, [fn?._id, loadFunctionRuns, functionRunsPagination.limit, runSortBy, runSortOrder]);
+
+    const handleChangeRunSortBy = useCallback((sortBy: FunctionRunSortField) => {
+        setRunSortBy(sortBy);
+        setRunPage(1);
+        if (fn?._id) {
+            void loadFunctionRuns(fn._id, {
+                page: 1,
+                limit: functionRunsPagination.limit,
+                status: runStatusFilter === 'all' ? undefined : runStatusFilter,
+                sortBy,
+                sortOrder: runSortOrder
+            });
+        }
+    }, [fn?._id, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortOrder]);
+
+    const handleChangeRunSortOrder = useCallback((sortOrder: FunctionRunSortOrder) => {
+        setRunSortOrder(sortOrder);
+        setRunPage(1);
+        if (fn?._id) {
+            void loadFunctionRuns(fn._id, {
+                page: 1,
+                limit: functionRunsPagination.limit,
+                status: runStatusFilter === 'all' ? undefined : runStatusFilter,
+                sortBy: runSortBy,
+                sortOrder
+            });
+        }
+    }, [fn?._id, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy]);
+
+    const handleCleanupRuns = useCallback(async () => {
+        if (!fn?._id) {
+            return;
+        }
+
+        const confirmed = window.confirm(`Supprimer les runs de plus de ${RUN_RETENTION_DAYS} jours en conservant les ${RUN_RETAIN_LATEST} plus récents ?`);
+        if (!confirmed) {
+            return;
+        }
+
+        const result = await cleanupFunctionRuns(fn._id, {
+            retentionDays: RUN_RETENTION_DAYS,
+            retainLatest: RUN_RETAIN_LATEST
+        });
+
+        if (!result) {
+            addNotification({
+                type: 'error',
+                title: 'Nettoyage impossible',
+                message: 'Le nettoyage des runs a échoué.'
+            });
+            return;
+        }
+
+        addNotification({
+            type: 'success',
+            title: 'Nettoyage terminé',
+            message: `${result.deletedRuns} run(s) supprimé(s), ${result.deletedArtifacts.length} artefact(s) nettoyé(s).`
+        });
+
+        void loadFunctionRuns(fn._id, {
+            page: 1,
+            limit: functionRunsPagination.limit,
+            status: runStatusFilter === 'all' ? undefined : runStatusFilter,
+            sortBy: runSortBy,
+            sortOrder: runSortOrder
+        });
+        setRunPage(1);
+    }, [fn?._id, cleanupFunctionRuns, addNotification, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy, runSortOrder]);
 
     // Pas de fonction sélectionnée
     if (!fn) {
@@ -285,6 +629,10 @@ export const FunctionEditorTab: React.FC = () => {
     }
 
     const monacoLanguage = fn.language === 'python' ? 'python' : 'typescript';
+    const runDisabled = isSandboxRunning || isRuntimeHealthLoading || !runtimeHealth?.capabilities.run[fn.language];
+    const runDisabledReason = runtimeHealthError
+        || runtimeHealth?.summary
+        || 'Le runtime d\'exécution n\'est pas encore prêt.';
 
     return (
         <div className="h-full flex flex-col">
@@ -317,6 +665,23 @@ export const FunctionEditorTab: React.FC = () => {
                 <div className="flex items-center gap-2 flex-shrink-0">
                     {!fn.isReadonly && (
                         <button
+                            onClick={handleBuild}
+                            disabled={isBuilding}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs rounded-lg transition-colors disabled:opacity-50"
+                        >
+                            {isBuilding ? (
+                                <div className="w-3 h-3 border border-amber-400/40 border-t-amber-300 rounded-full animate-spin" />
+                            ) : (
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M8 12l4 4m0 0l4-4m-4 4V4" />
+                                </svg>
+                            )}
+                            Préparer build
+                        </button>
+                    )}
+
+                    {!fn.isReadonly && (
+                        <button
                             onClick={handleSave}
                             disabled={isSaving}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white text-xs rounded-lg transition-colors disabled:opacity-50"
@@ -334,7 +699,8 @@ export const FunctionEditorTab: React.FC = () => {
 
                     <button
                         onClick={handleRun}
-                        disabled={isSandboxRunning}
+                        disabled={runDisabled}
+                        title={runDisabled ? runDisabledReason : undefined}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-gray-900 font-semibold text-xs rounded-lg transition-colors"
                     >
                         {isSandboxRunning ? (
@@ -392,6 +758,19 @@ export const FunctionEditorTab: React.FC = () => {
 
                 {/* Panneau droit : Console + Args */}
                 <div className="w-72 flex flex-col border-l border-gray-700/50 flex-shrink-0">
+                    <RuntimeStatusBanner
+                        runtimeHealth={runtimeHealth}
+                        isLoading={isRuntimeHealthLoading}
+                        error={runtimeHealthError}
+                        language={fn.language}
+                    />
+
+                    <BuildStatusPanel
+                        result={buildResult}
+                        isBuilding={isBuilding}
+                        error={buildError}
+                    />
+
                     {/* Test Arguments */}
                     <div className="p-3 border-b border-gray-700/40">
                         <TestArgsEditor
@@ -425,6 +804,29 @@ export const FunctionEditorTab: React.FC = () => {
                                 />
                             </div>
                         )}
+                    </div>
+
+                    <div className="h-72 border-t border-gray-700/40 overflow-hidden">
+                        <FunctionRunArtifactsPanel
+                            runs={functionRuns}
+                            pagination={functionRunsPagination}
+                            statusFilter={runStatusFilter}
+                            sortBy={runSortBy}
+                            sortOrder={runSortOrder}
+                            isLoading={isFunctionRunsLoading}
+                            error={functionRunsError}
+                            artifactPreview={artifactPreview}
+                            isArtifactPreviewLoading={isArtifactPreviewLoading}
+                            artifactPreviewError={artifactPreviewError}
+                            onRefresh={handleRefreshRuns}
+                            onOpenArtifact={handleOpenArtifact}
+                            onDownloadArtifact={handleDownloadArtifact}
+                            onStatusFilterChange={handleChangeRunStatusFilter}
+                            onSortByChange={handleChangeRunSortBy}
+                            onSortOrderChange={handleChangeRunSortOrder}
+                            onPageChange={handleChangeRunPage}
+                            onCleanupRuns={handleCleanupRuns}
+                        />
                     </div>
 
                     {/* Schémas I/O — expandable */}

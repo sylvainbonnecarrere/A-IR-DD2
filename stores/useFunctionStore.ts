@@ -11,15 +11,35 @@
  */
 
 import { create } from 'zustand';
-import apiClient from '../utils/apiClient';
+import { toolRepository } from '../services/toolRepository';
 import type {
     UserFunction,
     CreateFunctionPayload,
     UpdateFunctionPayload,
     FunctionFilter,
     SandboxRunResult,
+    FunctionRunRecord,
+    FunctionRunListResponse,
+    FunctionRunSortField,
+    FunctionRunSortOrder,
+    FunctionRunCleanupResult,
+    FunctionArtifactPreview,
     SyntaxCheckResult,
+    BuildPreparationResult,
+    RuntimeHealthReport,
+    RuntimeCompatibilityContext,
+    ToolWorkspaceSummary,
 } from '../types/function.types';
+
+const deriveRuntimeCompatibilityFromHealth = (runtimeHealth: RuntimeHealthReport): RuntimeCompatibilityContext => ({
+    checkedAt: runtimeHealth.checkedAt,
+    mode: runtimeHealth.runtime.docker.mode,
+    securityLevel: runtimeHealth.runtime.docker.securityLevel,
+    executionReady: runtimeHealth.runtime.docker.executionReady,
+    preferredRunner: runtimeHealth.runtime.runners.preferred,
+    warning: runtimeHealth.runtime.docker.warning,
+    summary: runtimeHealth.summary
+});
 
 interface FunctionStore {
     // State
@@ -33,6 +53,33 @@ interface FunctionStore {
     sandboxResult: SandboxRunResult | null;
     isSandboxRunning: boolean;
     sandboxError: string | null;
+    functionRuns: FunctionRunRecord[];
+    functionRunsPagination: {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+        status?: FunctionRunRecord['status'];
+        sortBy: FunctionRunSortField;
+        sortOrder: FunctionRunSortOrder;
+    };
+    isFunctionRunsLoading: boolean;
+    functionRunsError: string | null;
+    artifactPreview: FunctionArtifactPreview | null;
+    isArtifactPreviewLoading: boolean;
+    artifactPreviewError: string | null;
+
+    // Build state
+    buildResult: BuildPreparationResult | null;
+    isBuilding: boolean;
+    buildError: string | null;
+
+    // Runtime readiness state
+    runtimeHealth: RuntimeHealthReport | null;
+    runtimeCompatibility: RuntimeCompatibilityContext | null;
+    activeWorkspace: ToolWorkspaceSummary | null;
+    isRuntimeHealthLoading: boolean;
+    runtimeHealthError: string | null;
 
     // Actions CRUD
     loadFunctions: (workflowId?: string) => Promise<void>;
@@ -53,6 +100,23 @@ interface FunctionStore {
     runInSandbox: (functionId: string, testArgs: Record<string, unknown>) => Promise<void>;
     checkSyntax: (language: 'python' | 'typescript', code: string) => Promise<SyntaxCheckResult | null>;
     clearSandboxResult: () => void;
+    loadFunctionRuns: (
+        functionId: string,
+        options?: {
+            limit?: number;
+            page?: number;
+            status?: FunctionRunRecord['status'];
+            sortBy?: FunctionRunSortField;
+            sortOrder?: FunctionRunSortOrder;
+        }
+    ) => Promise<void>;
+    loadArtifactPreview: (functionId: string, executionId: string, artifactPath: string) => Promise<void>;
+    cleanupFunctionRuns: (functionId: string, options: { retentionDays?: number; retainLatest?: number; dryRun?: boolean }) => Promise<FunctionRunCleanupResult | null>;
+    clearArtifactPreview: () => void;
+    runBuild: (functionId: string) => Promise<BuildPreparationResult | null>;
+    loadBuildStatus: (functionId: string) => Promise<void>;
+    clearBuildResult: () => void;
+    loadRuntimeHealth: () => Promise<RuntimeHealthReport | null>;
 
     // Inline code update (optimiste, sans save)
     updateInlineCodeOptimistic: (id: string, code: string) => void;
@@ -71,18 +135,33 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     sandboxResult: null,
     isSandboxRunning: false,
     sandboxError: null,
+    functionRuns: [],
+    functionRunsPagination: { page: 1, limit: 20, total: 0, totalPages: 1, sortBy: 'createdAt', sortOrder: 'desc' },
+    isFunctionRunsLoading: false,
+    functionRunsError: null,
+    artifactPreview: null,
+    isArtifactPreviewLoading: false,
+    artifactPreviewError: null,
+    buildResult: null,
+    isBuilding: false,
+    buildError: null,
+    runtimeHealth: null,
+    runtimeCompatibility: null,
+    activeWorkspace: null,
+    isRuntimeHealthLoading: false,
+    runtimeHealthError: null,
 
     // ─── Charger les fonctions ───────────────────────────────────────────────
     loadFunctions: async (workflowId?: string) => {
         set({ isLoading: true, error: null });
         try {
-            const params = new URLSearchParams();
-            if (workflowId) params.append('workflowId', workflowId);
-
-            const { data } = await apiClient.get<UserFunction[]>(
-                `/api/functions${params.size > 0 ? `?${params}` : ''}`
-            );
-            set({ functions: data, isLoading: false });
+            const result = await toolRepository.loadPhilFunctions(workflowId);
+            set({
+                functions: result.functions,
+                runtimeCompatibility: result.runtimeCompatibility,
+                activeWorkspace: result.workspace,
+                isLoading: false
+            });
         } catch (err: any) {
             set({
                 isLoading: false,
@@ -95,10 +174,11 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     createFunction: async (payload) => {
         set({ isLoading: true, error: null });
         try {
-            const { data } = await apiClient.post<UserFunction>('/api/functions', payload);
+            const { data } = await toolRepository.createFunction(payload);
             set(state => ({
                 functions: [...state.functions, data],
                 selectedFunctionId: data._id,
+                runtimeCompatibility: data.runtimeCompatibility ?? state.runtimeCompatibility,
                 isLoading: false
             }));
             return data;
@@ -115,9 +195,10 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     updateFunction: async (id, payload) => {
         set({ isLoading: true, error: null });
         try {
-            const { data } = await apiClient.put<UserFunction>(`/api/functions/${id}`, payload);
+            const { data } = await toolRepository.updateFunction(id, payload);
             set(state => ({
                 functions: state.functions.map(f => f._id === id ? data : f),
+                runtimeCompatibility: data.runtimeCompatibility ?? state.runtimeCompatibility,
                 isLoading: false
             }));
             return data;
@@ -133,7 +214,7 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     // ─── Supprimer une fonction ──────────────────────────────────────────────
     deleteFunction: async (id) => {
         try {
-            await apiClient.delete(`/api/functions/${id}`);
+            await toolRepository.deleteFunction(id);
             set(state => ({
                 functions: state.functions.filter(f => f._id !== id),
                 selectedFunctionId: state.selectedFunctionId === id ? null : state.selectedFunctionId
@@ -148,10 +229,7 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     // ─── Toggle isEnabled ────────────────────────────────────────────────────
     toggleFunction: async (id, allowBashPy = false) => {
         try {
-            const { data } = await apiClient.patch<{ id: string; isEnabled: boolean }>(
-                `/api/functions/${id}/toggle`,
-                { allowBashPy }
-            );
+            const { data } = await toolRepository.toggleFunction(id, allowBashPy);
             set(state => ({
                 functions: state.functions.map(f =>
                     f._id === id ? { ...f, isEnabled: data.isEnabled } : f
@@ -192,10 +270,7 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     runInSandbox: async (functionId, testArgs) => {
         set({ isSandboxRunning: true, sandboxError: null, sandboxResult: null });
         try {
-            const { data } = await apiClient.post<SandboxRunResult>('/api/sandbox/run', {
-                functionId,
-                testArgs
-            });
+            const { data } = await toolRepository.runInSandbox(functionId, testArgs);
             set({ sandboxResult: data, isSandboxRunning: false });
         } catch (err: any) {
             set({
@@ -207,10 +282,7 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
 
     checkSyntax: async (language, code) => {
         try {
-            const { data } = await apiClient.post<SyntaxCheckResult>('/api/sandbox/check', {
-                language,
-                code
-            });
+            const { data } = await toolRepository.checkSyntax(language, code);
             return data;
         } catch {
             return null;
@@ -219,6 +291,114 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
 
     clearSandboxResult: () =>
         set({ sandboxResult: null, sandboxError: null }),
+
+    loadFunctionRuns: async (functionId, options = {}) => {
+        set({ isFunctionRunsLoading: true, functionRunsError: null });
+        try {
+            const limit = options.limit ?? 20;
+            const page = options.page ?? 1;
+            const sortBy = options.sortBy ?? get().functionRunsPagination.sortBy;
+            const sortOrder = options.sortOrder ?? get().functionRunsPagination.sortOrder;
+            const { data } = await toolRepository.loadFunctionRuns(functionId, {
+                limit,
+                page,
+                status: options.status,
+                sortBy,
+                sortOrder
+            });
+            set({
+                functionRuns: data.items,
+                functionRunsPagination: data.pagination,
+                runtimeCompatibility: data.runtimeCompatibility ?? get().runtimeCompatibility,
+                isFunctionRunsLoading: false
+            });
+        } catch (err: any) {
+            set({
+                isFunctionRunsLoading: false,
+                functionRunsError: err.response?.data?.error || 'Erreur lors du chargement des runs',
+                functionRuns: [],
+                functionRunsPagination: { page: 1, limit: 20, total: 0, totalPages: 1, sortBy: 'createdAt', sortOrder: 'desc' }
+            });
+        }
+    },
+
+    loadArtifactPreview: async (functionId, executionId, artifactPath) => {
+        set({ isArtifactPreviewLoading: true, artifactPreviewError: null, artifactPreview: null });
+        try {
+            const { data } = await toolRepository.loadArtifactPreview(functionId, executionId, artifactPath);
+            set({ artifactPreview: data, isArtifactPreviewLoading: false });
+        } catch (err: any) {
+            set({
+                isArtifactPreviewLoading: false,
+                artifactPreviewError: err.response?.data?.error || 'Erreur lors du chargement de l\'artefact'
+            });
+        }
+    },
+
+    cleanupFunctionRuns: async (functionId, options) => {
+        try {
+            const { data } = await toolRepository.cleanupFunctionRuns(functionId, options);
+            return data;
+        } catch (err: any) {
+            set({
+                functionRunsError: err.response?.data?.error || 'Erreur lors du nettoyage des runs'
+            });
+            return null;
+        }
+    },
+
+    clearArtifactPreview: () => set({ artifactPreview: null, artifactPreviewError: null }),
+
+    runBuild: async (functionId) => {
+        set({ isBuilding: true, buildError: null });
+        try {
+            const { data } = await toolRepository.runBuild(functionId);
+            set({ buildResult: data, isBuilding: false });
+            return data;
+        } catch (err: any) {
+            set({
+                isBuilding: false,
+                buildError: err.response?.data?.error || 'Erreur lors de la préparation du build'
+            });
+            return null;
+        }
+    },
+
+    loadBuildStatus: async (functionId) => {
+        try {
+            const { data } = await toolRepository.loadBuildStatus(functionId);
+            set({ buildResult: data, buildError: null });
+        } catch (err: any) {
+            if (err.response?.status === 404) {
+                set({ buildResult: null });
+                return;
+            }
+
+            set({ buildError: err.response?.data?.error || 'Erreur lors du chargement du build' });
+        }
+    },
+
+    clearBuildResult: () => set({ buildResult: null, buildError: null }),
+
+    loadRuntimeHealth: async () => {
+        set({ isRuntimeHealthLoading: true, runtimeHealthError: null });
+        try {
+            const { data } = await toolRepository.loadRuntimeHealth();
+            set({
+                runtimeHealth: data,
+                runtimeCompatibility: deriveRuntimeCompatibilityFromHealth(data),
+                isRuntimeHealthLoading: false,
+                runtimeHealthError: null
+            });
+            return data;
+        } catch (err: any) {
+            set({
+                isRuntimeHealthLoading: false,
+                runtimeHealthError: err.response?.data?.error || 'Erreur lors du chargement de l\'état runtime'
+            });
+            return null;
+        }
+    },
 
     // ─── Optimistic inline code update ───────────────────────────────────────
     updateInlineCodeOptimistic: (id, code) =>
@@ -238,5 +418,20 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
         sandboxResult: null,
         isSandboxRunning: false,
         sandboxError: null,
+        functionRuns: [],
+        functionRunsPagination: { page: 1, limit: 20, total: 0, totalPages: 1, sortBy: 'createdAt', sortOrder: 'desc' },
+        isFunctionRunsLoading: false,
+        functionRunsError: null,
+        artifactPreview: null,
+        isArtifactPreviewLoading: false,
+        artifactPreviewError: null,
+        buildResult: null,
+        isBuilding: false,
+        buildError: null,
+        runtimeHealth: null,
+        runtimeCompatibility: null,
+        activeWorkspace: null,
+        isRuntimeHealthLoading: false,
+        runtimeHealthError: null,
     })
 }));

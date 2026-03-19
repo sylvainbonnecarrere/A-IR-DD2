@@ -62,6 +62,28 @@ interface AgentInstanceMetrics {
  * ⭐ UPDATED ÉTAPE 1.6: Added canvasState, isDefault, content, metrics
  */
 export interface WorkspaceData {
+    runtimeCompatibility?: {
+        checkedAt: string;
+        mode: 'rootless' | 'docker-desktop' | 'rootful-linux' | 'unknown';
+        securityLevel: 'production-ready' | 'dev-only' | 'unavailable';
+        executionReady: boolean;
+        preferredRunner: 'docker_sandbox' | 'firecracker';
+        warning?: string;
+        summary: string;
+    };
+    workspaceContext?: {
+        id: string;
+        scopeType: 'project' | 'workflow';
+        scopeId: string;
+        status: 'active' | 'missing' | 'corrupted' | 'archived';
+        manifests: {
+            packageJson: boolean;
+            packageLockJson: boolean;
+            requirementsTxt: boolean;
+            pyprojectToml: boolean;
+        };
+        lastScanAt?: Date | null;
+    };
     workflow: {
         id: string;
         name: string;
@@ -127,6 +149,43 @@ export interface WorkspaceData {
         enabled: boolean;
         hasApiKey: boolean;
         capabilities: Record<string, boolean>;
+    }>;
+    toolRuns: Array<{
+        id: string;
+        executionId: string;
+        toolId: string;
+        toolVersionTag: string;
+        toolContentHash: string;
+        workflowId?: string;
+        agentPrototypeId?: string;
+        agentInstanceId?: string;
+        launchContext: 'editor_test' | 'workflow_run' | 'system_validation';
+        status: 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out';
+        runtime: 'typescript' | 'python';
+        runner: 'docker_sandbox' | 'docker_rootless' | 'firecracker';
+        inputs: Record<string, unknown>;
+        outputs?: {
+            result?: unknown;
+            stdout?: string;
+            stderr?: string;
+            artifacts?: Array<{
+                path: string;
+                kind: 'file' | 'json' | 'log';
+            }>;
+        };
+        error?: {
+            code?: string;
+            message: string;
+            retryable?: boolean;
+        };
+        timing: {
+            queuedAt?: Date | null;
+            startedAt?: Date | null;
+            finishedAt?: Date | null;
+            durationMs?: number | null;
+        };
+        createdAt: Date;
+        updatedAt: Date;
     }>;
     userSettings: {
         language: string;
@@ -210,6 +269,7 @@ const loadWorkspaceFromLocalStorage = (): WorkspaceData => {
             : { language: 'fr', theme: 'dark' };
 
         return {
+            workspaceContext: undefined,
             workflow,
             nodes,
             edges,
@@ -223,6 +283,7 @@ const loadWorkspaceFromLocalStorage = (): WorkspaceData => {
                     capabilities: c.capabilities || {}
                 }))
                 : [],
+            toolRuns: [],
             userSettings: {
                 language: userSettings.language || 'fr',
                 theme: userSettings.theme || 'dark'
@@ -238,6 +299,7 @@ const loadWorkspaceFromLocalStorage = (): WorkspaceData => {
         console.error('[useWorkspaceHydration] localStorage parse error:', err);
         // Return empty workspace on error
         return {
+            workspaceContext: undefined,
             workflow: null,
             nodes: [],
             edges: [],
@@ -425,6 +487,7 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
                 }
                 
                 console.log('[useWorkspaceHydration] API hydration complete:', {
+                    hasWorkspace: !!data.workspaceContext,
                     hasWorkflow: !!data.workflow,
                     nodesCount: data.nodes.length,
                     llmConfigsCount: data.llmConfigs.length,
@@ -453,6 +516,7 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
                 edges: [],
                 agentInstances: [],
                 llmConfigs: [],
+                toolRuns: [],
                 userSettings: { language: 'fr', theme: 'dark' },
                 metadata: {
                     loadedAt: new Date(),

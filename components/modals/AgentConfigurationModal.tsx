@@ -6,7 +6,7 @@ import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../contexts/NotificationContext';
-import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, PersistenceConfig, defaultPersistenceConfig, LocalLLMProfile } from '../../types';
+import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, PersistenceConfig, defaultPersistenceConfig, LocalLLMProfile, ToolSelection } from '../../types';
 import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels, getCapabilitiesForLLM } from '../../llmModels';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
 import { initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
@@ -16,6 +16,7 @@ import { isLocalProvider, isLMStudio } from '../../utils/llmProviderUtils';
 import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
 import { FunctionSelector } from '../FunctionSelector';
+import { useFunctionStore } from '../../stores/useFunctionStore';
 
 type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence' | 'links' | 'tasks' | 'logs' | 'errors';
 
@@ -45,6 +46,23 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
     // J6: Function Inheritance
     const [inheritFromPrototype, setInheritFromPrototype] = useState(true);
     const [overrideFunctionIds, setOverrideFunctionIds] = useState<string[]>([]);
+    const availableFunctions = useFunctionStore(state => state.functions);
+
+    const buildToolSelections = useMemo(() => {
+        return (functionIds: string[]): ToolSelection[] => functionIds.map((toolId) => {
+            const matchingFunction = availableFunctions.find((fn) => fn._id === toolId);
+            return {
+                toolId,
+                versionRef: matchingFunction
+                    ? {
+                        versionTag: matchingFunction.versionTag,
+                        versionNumber: matchingFunction.version,
+                        workspaceId: matchingFunction.workspaceContext?.workspaceId ?? null,
+                    }
+                    : undefined,
+            };
+        });
+    }, [availableFunctions]);
 
     // Récupérer l'instance et le prototype (peut être null)
     const resolved = configModalInstanceId ? getResolvedInstance(configModalInstanceId) : null;
@@ -140,7 +158,11 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         // J6: Load function inheritance state
         const fi = instanceConfig?.functionInheritance;
         setInheritFromPrototype(fi?.inheritFromPrototype !== false);
-        setOverrideFunctionIds(fi?.overrideFunctionIds || []);
+        setOverrideFunctionIds(
+            fi?.overrideFunctionIds
+            || fi?.overrideToolSelections?.map(selection => selection.toolId)
+            || []
+        );
 
         setHasChanges(false);
     }, [configModalInstanceId, getResolvedInstance, localLLMProfiles]);
@@ -204,7 +226,11 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             functionInheritance: {
                 inheritFromPrototype,
                 overrideFunctionIds: inheritFromPrototype ? [] : overrideFunctionIds,
+                overrideToolSelections: inheritFromPrototype ? [] : buildToolSelections(overrideFunctionIds),
             },
+            toolSelections: inheritFromPrototype
+                ? (prototype.toolSelections || buildToolSelections(prototype.functionIds || []))
+                : buildToolSelections(overrideFunctionIds),
             // Preserve runtime data (logs, errors, tasks, links)
             logs: instance.configuration_json?.logs || [],
             errors: instance.configuration_json?.errors || [],

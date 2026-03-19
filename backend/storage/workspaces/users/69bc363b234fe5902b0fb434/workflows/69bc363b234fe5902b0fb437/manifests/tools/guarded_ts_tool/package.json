@@ -1,0 +1,9 @@
+{
+  "name": "workspace-tool-guarded_ts_tool",
+  "private": true,
+  "version": "0.0.1",
+  "type": "commonjs",
+  "dependencies": {
+    "zod": "3.22.4"
+  }
+}

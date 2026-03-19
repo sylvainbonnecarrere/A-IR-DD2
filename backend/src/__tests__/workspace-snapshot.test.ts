@@ -9,6 +9,8 @@ import { AgentPrototype } from '../models/AgentPrototype.model';
 import { AgentInstance } from '../models/AgentInstance.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
 import { AgentJournal } from '../models/AgentJournal.model';
+import { UserToolRun } from '../models/UserToolRun.model';
+import { Workspace } from '../models/Workspace.model';
 import userWorkspaceRoutes from '../routes/user-workspace.routes';
 import workflowsRoutes from '../routes/workflows.routes';
 import { generateAccessToken } from '../utils/jwt';
@@ -23,8 +25,10 @@ interface SnapshotFixture {
     userId: string;
     accessToken: string;
     workflowId: string;
+    prototypeId: string;
     sourceInstanceId: string;
     targetInstanceId: string;
+    toolRunExecutionId: string;
 }
 
 async function createSnapshotFixture(): Promise<SnapshotFixture> {
@@ -132,6 +136,41 @@ async function createSnapshotFixture(): Promise<SnapshotFixture> {
         }
     });
 
+    const toolRunExecutionId = `tool-run-${new mongoose.Types.ObjectId().toString()}`;
+    await UserToolRun.create({
+        executionId: toolRunExecutionId,
+        ownerUserId: user._id,
+        toolId: prototype._id,
+        toolVersionTag: 'v1',
+        toolContentHash: 'hash-snapshot-v1',
+        workflowId: workflow._id,
+        agentPrototypeId: prototype._id,
+        agentInstanceId: sourceInstance._id,
+        launchContext: 'workflow_run',
+        status: 'completed',
+        runtime: 'python',
+        runner: 'docker_rootless',
+        inputs: {
+            prompt: 'hydrate snapshot'
+        },
+        outputs: {
+            stdout: 'ok',
+            result: { restored: true }
+        },
+        policySnapshot: {
+            networkMode: 'restricted',
+            timeoutSeconds: 30,
+            maxMemoryMb: 256,
+            secretAliases: []
+        },
+        timing: {
+            queuedAt: new Date(),
+            startedAt: new Date(),
+            finishedAt: new Date(),
+            durationMs: 42
+        }
+    });
+
     return {
         userId: user.id,
         accessToken: generateAccessToken({
@@ -140,8 +179,10 @@ async function createSnapshotFixture(): Promise<SnapshotFixture> {
             role: user.role
         }),
         workflowId: workflow.id,
+        prototypeId: prototype.id,
         sourceInstanceId: sourceInstance.id,
-        targetInstanceId: targetInstance.id
+        targetInstanceId: targetInstance.id,
+        toolRunExecutionId
     };
 }
 
@@ -149,7 +190,9 @@ async function cleanupSnapshotFixture(fixture: SnapshotFixture) {
     await AgentJournal.deleteMany({ workflowId: fixture.workflowId });
     await WorkflowEdge.deleteMany({ workflowId: fixture.workflowId });
     await AgentInstance.deleteMany({ workflowId: fixture.workflowId });
+    await UserToolRun.deleteMany({ workflowId: fixture.workflowId });
     await AgentPrototype.deleteMany({ workflowId: fixture.workflowId });
+    await Workspace.deleteMany({ scopeType: 'workflow', scopeId: fixture.workflowId });
     await Workflow.deleteMany({ _id: fixture.workflowId });
     await User.deleteMany({ _id: fixture.userId });
 }
@@ -172,10 +215,44 @@ describe('Workspace snapshot contract', () => {
             .expect(200);
 
         expect(response.body.workflow.id).toBe(fixture.workflowId);
+        expect(response.body.workspaceContext).toEqual(expect.objectContaining({
+            scopeType: 'workflow',
+            scopeId: fixture.workflowId,
+            status: 'active',
+            manifests: expect.objectContaining({
+                packageJson: expect.any(Boolean),
+                packageLockJson: expect.any(Boolean),
+                requirementsTxt: expect.any(Boolean),
+                pyprojectToml: expect.any(Boolean)
+            })
+        }));
+        expect(response.body.runtimeCompatibility).toEqual(expect.objectContaining({
+            checkedAt: expect.any(String),
+            mode: expect.any(String),
+            securityLevel: expect.any(String),
+            executionReady: expect.any(Boolean),
+            preferredRunner: expect.any(String),
+            summary: expect.any(String)
+        }));
         expect(response.body.edges).toContainEqual(expect.objectContaining({
             source: `node-${fixture.sourceInstanceId}`,
             target: `node-${fixture.targetInstanceId}`,
             type: 'smoothstep'
+        }));
+        expect(response.body.toolRuns).toContainEqual(expect.objectContaining({
+            executionId: fixture.toolRunExecutionId,
+            toolId: fixture.prototypeId,
+            workflowId: fixture.workflowId,
+            agentInstanceId: fixture.sourceInstanceId,
+            agentPrototypeId: fixture.prototypeId,
+            launchContext: 'workflow_run',
+            status: 'completed',
+            runtime: 'python',
+            runner: 'docker_rootless',
+            outputs: expect.objectContaining({
+                stdout: 'ok',
+                result: expect.objectContaining({ restored: true })
+            })
         }));
 
         const restoredInstance = response.body.agentInstances.find((instance: any) => instance.id === fixture.sourceInstanceId);
@@ -198,6 +275,14 @@ describe('Workspace snapshot contract', () => {
 
         expect(response.body.success).toBe(true);
         expect(response.body.reloadedData.workflow.id).toBe(fixture.workflowId);
+        expect(response.body.reloadedData.toolRuns).toContainEqual(expect.objectContaining({
+            executionId: fixture.toolRunExecutionId,
+            toolId: fixture.prototypeId,
+            workflowId: fixture.workflowId,
+            agentInstanceId: fixture.sourceInstanceId,
+            agentPrototypeId: fixture.prototypeId,
+            status: 'completed'
+        }));
         expect(response.body.reloadedData.edges).toContainEqual(expect.objectContaining({
             source: `node-${fixture.sourceInstanceId}`,
             target: `node-${fixture.targetInstanceId}`,

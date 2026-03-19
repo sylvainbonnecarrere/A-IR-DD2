@@ -85,6 +85,53 @@ export type { IAgentTemplate, ITemplate } from './AgentTemplate.model';
 
 export { UserFunction } from './UserFunction.model';
 export type { IUserFunction, FunctionLanguage, FunctionOrigin } from './UserFunction.model';
+export { Workspace } from './Workspace.model';
+export type {
+    IWorkspace,
+    IWorkspaceRuntimeRoots,
+    IWorkspaceManifests,
+    IWorkspaceQuotas,
+    WorkspaceScopeType,
+    WorkspaceStatus,
+    WorkspaceHealthStatus
+} from './Workspace.model';
+export { UserTool } from './UserTool.model';
+export type {
+    IUserTool,
+    IUserToolVersion,
+    IUserToolDependencies,
+    IUserToolPolicy,
+    UserToolScopeType,
+    UserToolRuntime,
+    UserToolStatus,
+    UserToolTrustLevel,
+    UserToolSourceMode,
+    UserToolBuildStatus,
+    UserToolValidationStatus,
+    UserToolNetworkMode
+} from './UserTool.model';
+export { UserToolRun } from './UserToolRun.model';
+export type {
+    IUserToolRun,
+    IUserToolRunArtifact,
+    IUserToolRunOutputs,
+    IUserToolRunPolicySnapshot,
+    IUserToolRunTiming,
+    IUserToolRunResourceUsage,
+    IUserToolRunError,
+    UserToolRunLaunchContext,
+    UserToolRunStatus,
+    UserToolRunRuntime,
+    UserToolRunRunner,
+    UserToolRunNetworkMode,
+    UserToolRunArtifactKind
+} from './UserToolRun.model';
+export { SecretMetadata } from './SecretMetadata.model';
+export type {
+    ISecretMetadata,
+    SecretMetadataScopeType,
+    SecretMetadataStatus
+} from './SecretMetadata.model';
 
 // ============================================
 // MODÈLES CONFIGURATION LLM

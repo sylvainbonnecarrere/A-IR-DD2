@@ -10,6 +10,15 @@ import { CanonicalRobotIdEnum } from '../types/robotIds';
 
 const router = Router();
 
+const toolSelectionSchema = z.object({
+    toolId: z.string(),
+    versionRef: z.object({
+        versionTag: z.string().optional(),
+        versionNumber: z.number().optional(),
+        workspaceId: z.string().nullable().optional()
+    }).optional()
+});
+
 // Schema validation
 // ⭐ J4.5: Robot IDs must match frontend RobotId enum in types.ts
 // ⭐ J4.5: Allow empty strings for role/systemPrompt to match frontend flexibility
@@ -22,7 +31,8 @@ const createAgentPrototypeSchema = z.object({
     capabilities: z.array(z.string()).default([]),
     historyConfig: z.object({}).passthrough().optional(),
     tools: z.array(z.object({}).passthrough()).optional(),       // legacy (rétrocompat)
-    functionIds: z.array(z.string()).optional(),                 // V2 — références ObjectId UserFunction
+    functionIds: z.array(z.string()).optional(),                 // V2 — ids stables de tools, alias frontend vers user_tools
+    toolSelections: z.array(toolSelectionSchema).optional(),     // V2 cible — refs versionnées
     outputConfig: z.object({}).passthrough().optional(),
     robotId: CanonicalRobotIdEnum,
     workflowId: z.string().optional(), // ⭐ V2: Optional workflow scope
@@ -104,13 +114,21 @@ router.post('/',
             const user = req.user as IUser;
 
             // C3 FIX: Extraire functionIds et mapper vers tools (ObjectId[])
-            const { functionIds, tools, ...rest } = req.body;
+            const { functionIds, toolSelections, tools, ...rest } = req.body;
             const prototypeData: Record<string, any> = { userId: user.id, ...rest };
+            const canonicalFunctionIds = Array.isArray(functionIds) && functionIds.length > 0
+                ? functionIds
+                : Array.isArray(toolSelections)
+                    ? toolSelections.map((selection: { toolId: string }) => selection.toolId).filter(Boolean)
+                    : [];
 
-            // V2: fonctions sélectionnées via FunctionSelector → ObjectId refs
-            if (functionIds && functionIds.length > 0) {
-                prototypeData.tools = functionIds.map((id: string) => new mongoose.Types.ObjectId(id));
-            } else if (!functionIds && tools && Array.isArray(tools)) {
+            // V2: functionIds transporte des ids stables de tools compatibles legacy/cible
+            if (canonicalFunctionIds.length > 0) {
+                prototypeData.tools = canonicalFunctionIds.map((id: string) => new mongoose.Types.ObjectId(id));
+                prototypeData.toolSelections = Array.isArray(toolSelections) && toolSelections.length > 0
+                    ? toolSelections
+                    : canonicalFunctionIds.map((toolId: string) => ({ toolId }));
+            } else if (!functionIds && !toolSelections && tools && Array.isArray(tools)) {
                 // Rétrocompat: si tools contient des objets legacy (non-ObjectId), les mettre en legacyTools
                 prototypeData.legacyTools = tools;
             }
@@ -122,6 +140,7 @@ router.post('/',
             // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
             const responseObj: Record<string, any> = prototype.toObject();
             responseObj.functionIds = (prototype.tools || []).map((id: any) => id.toString());
+            responseObj.toolSelections = prototype.toolSelections || responseObj.functionIds.map((toolId: string) => ({ toolId }));
 
             res.status(201).json(responseObj);
         } catch (error) {
@@ -161,7 +180,7 @@ router.put('/:id',
             }
 
             // ⭐ SECURITY FIX: Whitelist allowed fields to prevent mass assignment
-            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, tools, functionIds, outputConfig, robotId, workflowId, localLLMProfileId } = req.body;
+            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, tools, functionIds, toolSelections, outputConfig, robotId, workflowId, localLLMProfileId } = req.body;
 
             // Update only whitelisted fields (userId never modifiable)
             if (name !== undefined) prototype.name = name;
@@ -171,9 +190,18 @@ router.put('/:id',
             if (llmModel !== undefined) prototype.llmModel = llmModel;
             if (capabilities !== undefined) prototype.capabilities = capabilities;
             if (historyConfig !== undefined) prototype.historyConfig = historyConfig;
-            // C3 FIX: functionIds (V2) prend la priorité sur tools (legacy)
-            if (functionIds !== undefined) {
-                prototype.tools = functionIds.map((id: string) => new mongoose.Types.ObjectId(id));
+            // C3 FIX: functionIds (V2) prend la priorité sur tools (legacy) et reste l'alias frontend canonique
+            if (functionIds !== undefined || toolSelections !== undefined) {
+                const canonicalFunctionIds = Array.isArray(functionIds)
+                    ? functionIds
+                    : Array.isArray(toolSelections)
+                        ? toolSelections.map((selection: { toolId: string }) => selection.toolId).filter(Boolean)
+                        : [];
+
+                prototype.tools = canonicalFunctionIds.map((id: string) => new mongoose.Types.ObjectId(id));
+                prototype.toolSelections = Array.isArray(toolSelections)
+                    ? toolSelections
+                    : canonicalFunctionIds.map((toolId: string) => ({ toolId }));
             } else if (tools !== undefined) {
                 // Rétrocompat: stocker en legacyTools si ce sont des objets (pas des ObjectId strings)
                 prototype.legacyTools = tools;
@@ -188,6 +216,7 @@ router.put('/:id',
             // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
             const responseObj: Record<string, any> = prototype.toObject();
             responseObj.functionIds = (prototype.tools || []).map((id: any) => id.toString());
+            responseObj.toolSelections = prototype.toolSelections || responseObj.functionIds.map((toolId: string) => ({ toolId }));
 
             res.json(responseObj);
         } catch (error) {

@@ -36,6 +36,11 @@ interface APIResponse<T = any> {
  * Backend: llmModel, robotId, capabilities (string array)
  */
 function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string, workflowId?: string): Record<string, any> {
+  const toolSelections = agentData.toolSelections?.length ? agentData.toolSelections : undefined;
+  const functionIds = agentData.functionIds?.length
+    ? agentData.functionIds
+    : toolSelections?.map(selection => selection.toolId);
+
   const payload: Record<string, any> = {
     name: agentData.name || '',
     role: agentData.role || '',
@@ -46,7 +51,8 @@ function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string,
     historyConfig: agentData.historyConfig || undefined,
     // C3 FIX: Envoyer functionIds (V2) au lieu de tools (legacy)
     // tools legacy omis intentionnellement — le backend les stocke en legacyTools
-    functionIds: agentData.functionIds?.length ? agentData.functionIds : undefined,
+    functionIds,
+    toolSelections,
     outputConfig: agentData.outputConfig || undefined,
     robotId: robotId // Frontend uses 'creator_id', backend expects 'robotId'
   };
@@ -70,6 +76,14 @@ function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string,
  * Frontend: model, creator_id, id
  */
 export function mapAPIResponseToAgent(apiData: any): Agent {
+  const toolSelections = Array.isArray(apiData.toolSelections)
+    ? apiData.toolSelections
+    : [];
+  const functionIds = apiData.functionIds
+    || toolSelections.map((selection: any) => selection.toolId).filter(Boolean)
+    || (apiData.tools || []).map((id: any) => id.toString()).filter(Boolean)
+    || [];
+
   return {
     id: apiData._id || apiData.id,
     name: apiData.name || '',
@@ -82,7 +96,8 @@ export function mapAPIResponseToAgent(apiData: any): Agent {
     tools: apiData.legacyTools || undefined, // legacy tools (non-ObjectId objects)
     // C3/C4/C5 FIX: mapper functionIds depuis la réponse API
     // apiData.functionIds est ajouté par les handlers backend (tools.map(id.toString()))
-    functionIds: apiData.functionIds || (apiData.tools || []).map((id: any) => id.toString()).filter(Boolean) || [],
+    functionIds,
+    toolSelections,
     outputConfig: apiData.outputConfig,
     creator_id: apiData.robotId, // Backend uses 'robotId', frontend expects 'creator_id'
     created_at: apiData.createdAt || new Date().toISOString(),
@@ -161,6 +176,7 @@ export async function updateAgentPrototype(
     if (agentData.historyConfig !== undefined) payload.historyConfig = agentData.historyConfig;
     if (agentData.tools !== undefined) payload.tools = agentData.tools;
     if (agentData.functionIds !== undefined) payload.functionIds = agentData.functionIds; // C3 FIX
+    if (agentData.toolSelections !== undefined) payload.toolSelections = agentData.toolSelections;
     if (agentData.outputConfig !== undefined) payload.outputConfig = agentData.outputConfig;
     if (agentData.localLLMProfileId !== undefined) payload.localLLMProfileId = agentData.localLLMProfileId;
     if (robotId) payload.robotId = robotId;
