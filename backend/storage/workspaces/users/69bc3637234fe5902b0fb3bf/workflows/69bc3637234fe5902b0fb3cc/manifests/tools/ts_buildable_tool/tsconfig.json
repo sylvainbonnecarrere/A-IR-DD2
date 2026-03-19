@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "esModuleInterop": true,
+    "strict": false,
+    "skipLibCheck": true
+  },
+  "include": [
+    "C:\\AITest\\A-IR-DD2\\PersistAIRDD2\\A-IR-DD2\\backend\\storage\\workspaces\\users\\69bc3637234fe5902b0fb3bf\\workflows\\69bc3637234fe5902b0fb3cc\\source\\tools\\ts_buildable_tool.ts"
+  ]
+}

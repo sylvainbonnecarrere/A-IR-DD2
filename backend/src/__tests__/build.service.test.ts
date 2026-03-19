@@ -1,0 +1,228 @@
+import os from 'os';
+import path from 'path';
+import { promises as fs } from 'fs';
+import { User } from '../models/User.model';
+import { Workflow } from '../models/Workflow.model';
+import { UserFunction } from '../models/UserFunction.model';
+import { UserTool } from '../models/UserTool.model';
+import { Workspace } from '../models/Workspace.model';
+import { BuildPreparationError, BuildService } from '../services/build.service';
+
+async function createOwnedWorkflowFixture() {
+    const suffix = Date.now().toString();
+    const user = await User.create({
+        email: `build-service-${suffix}@test.com`,
+        password: 'hashedpassword12345',
+        username: `buildservice${suffix}`
+    });
+
+    const workflow = await Workflow.create({
+        userId: user._id,
+        name: `Build Workspace ${suffix}`,
+        isActive: true,
+        isDefault: true,
+        canvasState: { zoom: 1, panX: 0, panY: 0 }
+    });
+
+    return { user, workflow };
+}
+
+describe('BuildService', () => {
+    const buildService = new BuildService();
+    const originalWorkspaceStoragePath = process.env.WORKSPACE_STORAGE_PATH;
+
+    beforeEach(() => {
+        process.env.WORKSPACE_STORAGE_PATH = path.join(
+            os.tmpdir(),
+            `airdd2-j5-build-tests-${process.pid}`
+        );
+    });
+
+    afterEach(async () => {
+        if (originalWorkspaceStoragePath === undefined) {
+            delete process.env.WORKSPACE_STORAGE_PATH;
+        } else {
+            process.env.WORKSPACE_STORAGE_PATH = originalWorkspaceStoragePath;
+        }
+
+        await Workspace.deleteMany({});
+        await UserTool.deleteMany({});
+        await UserFunction.deleteMany({});
+        await Workflow.deleteMany({});
+        await User.deleteMany({});
+    });
+
+    it('prepares a workflow-scoped typescript function into workspace source, manifests and build roots', async () => {
+        const { user, workflow } = await createOwnedWorkflowFixture();
+
+        const fn = await UserFunction.create({
+            name: 'ts_buildable_tool',
+            description: 'TypeScript buildable tool',
+            language: 'typescript',
+            origin: 'custom',
+            userId: user._id,
+            workflowId: workflow._id,
+            inputSchema: {},
+            outputSchema: {},
+            codeInline: 'function run(args) { return { echoed: args.value ?? null }; }',
+            dependencies: { python: [], npm: ['zod@3.22.4'] },
+            isEnabled: true,
+            isReadonly: false,
+            version: 2,
+            tags: []
+        });
+
+        const result = await buildService.prepareFunction(fn._id.toString(), user.id);
+
+        expect(result.status).toBe('ready');
+        expect(result.sourcePath).toContain(path.join('source', 'tools', 'ts_buildable_tool.ts'));
+        expect(result.manifestPaths).toEqual(expect.arrayContaining([
+            expect.stringContaining(path.join('manifests', 'tools', 'ts_buildable_tool', 'package.json')),
+            expect.stringContaining(path.join('manifests', 'tools', 'ts_buildable_tool', 'tsconfig.json'))
+        ]));
+        expect(result.artifactPaths).toEqual([
+            expect.stringContaining(path.join('build', 'tools', 'ts_buildable_tool', 'index.js'))
+        ]);
+
+        const emittedArtifact = await fs.readFile(result.artifactPaths[0], 'utf-8');
+        expect(emittedArtifact).toContain('function run(args)');
+
+        const persistedFunction = await UserFunction.findById(fn._id).lean();
+        expect(persistedFunction?.codePath).toBe(path.join('tools', 'ts_buildable_tool.ts'));
+
+        const buildStatus = await buildService.getBuildStatus(fn._id.toString(), user.id);
+        expect(buildStatus?.status).toBe('ready');
+        expect(buildStatus?.functionId).toBe(fn._id.toString());
+    });
+
+    it('prepares a workflow-scoped python function into manifests and build roots without using run-time install', async () => {
+        const { user, workflow } = await createOwnedWorkflowFixture();
+
+        const fn = await UserFunction.create({
+            name: 'py_buildable_tool',
+            description: 'Python buildable tool',
+            language: 'python',
+            origin: 'custom',
+            userId: user._id,
+            workflowId: workflow._id,
+            inputSchema: {},
+            outputSchema: {},
+            codeInline: 'def run(args):\n    return {"echoed": args.get("value")}',
+            dependencies: { python: ['httpx==0.27.0'], npm: [] },
+            isEnabled: true,
+            isReadonly: false,
+            version: 1,
+            tags: []
+        });
+
+        const result = await buildService.prepareFunction(fn._id.toString(), user.id);
+
+        expect(result.status).toBe('ready');
+        expect(result.language).toBe('python');
+        expect(result.manifestPaths).toEqual([
+            expect.stringContaining(path.join('manifests', 'tools', 'py_buildable_tool', 'requirements.txt'))
+        ]);
+        expect(result.artifactPaths).toEqual([
+            expect.stringContaining(path.join('build', 'tools', 'py_buildable_tool', 'py_buildable_tool.py'))
+        ]);
+
+        const requirements = await fs.readFile(result.manifestPaths[0], 'utf-8');
+        expect(requirements.trim()).toBe('httpx==0.27.0');
+
+        const emittedArtifact = await fs.readFile(result.artifactPaths[0], 'utf-8');
+        expect(emittedArtifact).toContain('def run(args):');
+    });
+
+    it('blocks runtime preparation for dependency-bearing functions until an explicit build has been completed', async () => {
+        const { user, workflow } = await createOwnedWorkflowFixture();
+
+        const fn = await UserFunction.create({
+            name: 'guarded_ts_tool',
+            description: 'Function guarded by build preparation',
+            language: 'typescript',
+            origin: 'custom',
+            userId: user._id,
+            workflowId: workflow._id,
+            inputSchema: {},
+            outputSchema: {},
+            codeInline: 'function run(args) { return { ok: true, args }; }',
+            dependencies: { python: [], npm: ['zod@3.22.4'] },
+            isEnabled: true,
+            isReadonly: false,
+            version: 1,
+            tags: []
+        });
+
+        await expect(buildService.ensureBuildReadyForRun(fn._id.toString(), user.id))
+            .rejects
+            .toThrow(BuildPreparationError);
+
+        await buildService.prepareFunction(fn._id.toString(), user.id);
+
+        await expect(buildService.ensureBuildReadyForRun(fn._id.toString(), user.id))
+            .resolves
+            .toBeUndefined();
+    });
+
+    it('prepares a versioned user tool and marks that version as built', async () => {
+        const { user, workflow } = await createOwnedWorkflowFixture();
+
+        const tool = await UserTool.create({
+            ownerUserId: user._id,
+            workspaceId: null,
+            scopeType: 'user',
+            workflowId: workflow._id,
+            name: 'tool_buildable_v2',
+            description: 'Versioned buildable tool',
+            runtime: 'typescript',
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: {
+                versionTag: 'v2',
+                contentHash: 'hash-v2',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'function run(args) { return { echoed: args.value ?? null }; }',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: user._id,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            },
+            versions: [{
+                versionTag: 'v2',
+                contentHash: 'hash-v2',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'function run(args) { return { echoed: args.value ?? null }; }',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: user._id,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            }],
+            inputSchema: {},
+            outputSchema: {},
+            tags: [],
+            dependencies: { python: [], npm: ['zod@3.22.4'] },
+            policy: { networkMode: 'none', writablePaths: [], secretAliases: [] },
+            isReadonly: false,
+            isEnabled: true
+        });
+
+        const result = await buildService.prepareToolVersion(tool._id.toString(), user.id, 'v2');
+
+        expect(result.toolId).toBe(tool._id.toString());
+        expect(result.toolVersionTag).toBe('v2');
+        expect(result.artifactPaths).toEqual([
+            expect.stringContaining(path.join('build', 'tools', 'tool_buildable_v2_v2', 'index.js'))
+        ]);
+
+        const refreshed = await UserTool.findById(tool._id).lean();
+        expect(refreshed?.currentVersion.buildStatus).toBe('built');
+
+        await expect(buildService.ensureBuildReadyForTool(tool._id.toString(), user.id, 'v2'))
+            .resolves
+            .toBeUndefined();
+    });
+});

@@ -1,31 +1,14 @@
-/**
- * Service — Sandbox d'exécution sécurisée des fonctions (Tools V2)
- *
- * Stratégie d'exécution selon le langage :
- *   - Python  : sous-processus vers `backend/python/runner.py`
- *               (timeout 15s, sortie JSON stdout, erreurs stderr)
- *   - TypeScript : sous-processus Node.js avec environnement réduit
- *
- * Design Patterns :
- *   - Strategy  : exécution différente selon le langage
- *   - Factory   : SandboxService instanciable directement (sans DI pour V1)
- *
- * Sécurité :
- *   - Seules les fonctions isEnabled:true sont exécutables
- *   - Seules les fonctions natives ou appartenant à userId sont accessibles
- *   - Timeout global géré via Promise.race + child_process.kill
- */
-
 import { spawn } from 'child_process';
-import path from 'path';
 import mongoose from 'mongoose';
 import { UserFunction, IUserFunction } from '../models/UserFunction.model';
-
-// Utilisation de __dirname CommonJS (voir pythonExecutor.ts)
-declare const __dirname: string;
-
-const PYTHON_TIMEOUT_MS = 15_000;
-const PYTHON_RUNNER_PATH = path.join(__dirname, '../../python/runner.py');
+import { UserTool } from '../models/UserTool.model';
+import { syncUserToolMirrorFromLegacyFunction } from './userToolMirror.service';
+import { BuildPreparationError, BuildService } from './build.service';
+import { RuntimeHealthService } from './runtimeHealth.service';
+import { ExecutionOrchestrator } from './runtime/ExecutionOrchestrator';
+import type { SandboxExecutionMetadata, SandboxExecutionResourceUsage } from './runtime/execution.types';
+import { RuntimeNotReadyError } from './runtime/errors';
+import type { IUserToolPolicy } from '../models/UserTool.model';
 
 export interface SandboxResult {
     success: boolean;
@@ -34,6 +17,11 @@ export interface SandboxResult {
     stderr?: string;
     durationMs: number;
     timedOut?: boolean;
+    executionId?: string;
+    runner?: string;
+    exitCode?: number;
+    metadata?: SandboxExecutionMetadata;
+    resourceUsage?: SandboxExecutionResourceUsage;
 }
 
 export interface SyntaxCheckResult {
@@ -41,25 +29,37 @@ export interface SyntaxCheckResult {
     errors: Array<{ line?: number; message: string }>;
 }
 
+interface SandboxToolSelection {
+    toolId: string;
+    versionRef?: {
+        versionTag?: string;
+        versionNumber?: number;
+        workspaceId?: string | null;
+    };
+}
+
+interface VersionedExecutionTarget extends IUserFunction {
+    toolVersionTag?: string;
+    toolContentHash?: string;
+    toolBuildStatus?: 'not_built' | 'building' | 'built' | 'failed';
+    policySnapshot?: IUserToolPolicy;
+}
+
 export class SandboxService {
     // C9.1: Exécutable Python détecté dynamiquement (python3 ou python selon l'OS)
     private pythonExecutable: string = 'python3';
     private pythonDetected: boolean = false;
+    private readonly buildService = new BuildService();
+    private readonly runtimeHealthService = new RuntimeHealthService();
+    private readonly executionOrchestrator = new ExecutionOrchestrator();
 
     /**
      * Vérifie la disponibilité du sandbox Python.
      * Détecte l'exécutable python3 ou python disponible sur l'OS courant.
      * Windows utilise souvent 'python', Linux/Mac 'python3'.
      */
-    async checkHealth(): Promise<{
-        python: { available: boolean; version?: string; executable: string };
-        typescript: { available: boolean; engine: 'node-subprocess' };
-    }> {
-        const pythonResult = await this._detectPython();
-        return {
-            python: pythonResult,
-            typescript: { available: true, engine: 'node-subprocess' }
-        };
+    async checkHealth() {
+        return this.runtimeHealthService.getHealthReport();
     }
 
     /**
@@ -103,19 +103,22 @@ export class SandboxService {
     async runFunction(
         functionId: string,
         userId: string,
-        testArgs: Record<string, unknown> = {}
+        testArgs: Record<string, unknown> = {},
+        toolSelection?: SandboxToolSelection
     ): Promise<SandboxResult> {
         // 1. Charger la fonction depuis la BDD
         // C9.1 FIX: S'assurer que Python est détecté avant execution
         await this._ensurePythonDetected();
 
-        const fn = await UserFunction.findOne({
-            _id: functionId,
-            $or: [
-                { userId: null },
-                { userId: new mongoose.Types.ObjectId(userId) }
-            ]
-        }).lean<IUserFunction>();
+        const fn = toolSelection
+            ? await this.resolveVersionedExecutionTarget(toolSelection, userId)
+            : await UserFunction.findOne({
+                _id: functionId,
+                $or: [
+                    { userId: null },
+                    { userId: new mongoose.Types.ObjectId(userId) }
+                ]
+            }).lean<IUserFunction>();
 
         if (!fn) {
             throw new Error(`Fonction introuvable ou accès non autorisé (id: ${functionId})`);
@@ -127,11 +130,110 @@ export class SandboxService {
             );
         }
 
-        // 2. Déléguer selon le langage
-        if (fn.language === 'python') {
-            return this._runPython(fn, testArgs);
-        } else {
-            return this._runTypescript(fn, testArgs);
+        try {
+            if (toolSelection) {
+                await this.buildService.ensureBuildReadyForTool(
+                    toolSelection.toolId,
+                    userId,
+                    toolSelection.versionRef?.versionTag
+                );
+            } else {
+                await this.buildService.ensureBuildReadyForRun(functionId, userId);
+            }
+        } catch (error) {
+            if (error instanceof BuildPreparationError) {
+                throw error;
+            }
+            throw error;
+        }
+
+        await this.ensureRuntimeReadyForRun(fn.language);
+
+        await syncUserToolMirrorFromLegacyFunction(fn).catch((error) => {
+            console.warn('[SandboxService] user_tools mirror sync warning:', error instanceof Error ? error.message : String(error));
+        });
+
+        return this.executionOrchestrator.execute({
+            fn,
+            userId,
+            args: testArgs,
+            launchContext: 'editor_test'
+        });
+    }
+
+    private async resolveVersionedExecutionTarget(
+        toolSelection: SandboxToolSelection,
+        userId: string
+    ): Promise<VersionedExecutionTarget | null> {
+        if (!mongoose.Types.ObjectId.isValid(toolSelection.toolId)) {
+            return null;
+        }
+
+        const tool = await UserTool.findOne({
+            _id: toolSelection.toolId,
+            $or: [
+                { ownerUserId: null },
+                { ownerUserId: new mongoose.Types.ObjectId(userId) }
+            ]
+        }).lean();
+
+        if (!tool) {
+            return null;
+        }
+
+        const requestedVersionTag = toolSelection.versionRef?.versionTag;
+        const resolvedVersion = requestedVersionTag
+            ? tool.versions.find((version) => version.versionTag === requestedVersionTag) || null
+            : tool.currentVersion;
+
+        if (!resolvedVersion) {
+            throw new Error(`Version de tool introuvable pour '${tool.name}' (${requestedVersionTag})`);
+        }
+
+        const versionNumber = toolSelection.versionRef?.versionNumber
+            ?? this.parseVersionNumber(resolvedVersion.versionTag);
+
+        return {
+            _id: tool._id,
+            name: tool.name,
+            displayName: tool.displayName,
+            description: tool.description,
+            language: tool.runtime,
+            origin: tool.scopeType === 'native' ? 'native' : 'custom',
+            tags: tool.tags,
+            userId: tool.ownerUserId,
+            workflowId: tool.workflowId,
+            inputSchema: tool.inputSchema,
+            outputSchema: tool.outputSchema,
+            codePath: resolvedVersion.sourcePath ?? undefined,
+            codeInline: resolvedVersion.sourceInline ?? undefined,
+            dependencies: tool.dependencies,
+            isEnabled: tool.isEnabled,
+            isReadonly: tool.isReadonly,
+            version: versionNumber,
+            toolVersionTag: resolvedVersion.versionTag,
+            toolContentHash: resolvedVersion.contentHash,
+            toolBuildStatus: resolvedVersion.buildStatus,
+            policySnapshot: tool.policy,
+            createdAt: tool.createdAt,
+            updatedAt: tool.updatedAt,
+        } as VersionedExecutionTarget;
+    }
+
+    private parseVersionNumber(versionTag?: string): number {
+        if (!versionTag) {
+            return 1;
+        }
+
+        const match = versionTag.match(/(\d+)/);
+        return match ? Number.parseInt(match[1], 10) : 1;
+    }
+
+    private async ensureRuntimeReadyForRun(language: 'python' | 'typescript'): Promise<void> {
+        const { report, readiness } = await this.executionOrchestrator.getPreferredRunnerReadiness(language);
+
+        if (!readiness.ready) {
+            throw new RuntimeNotReadyError(readiness.reason ?? report.summary);
         }
     }
 
@@ -147,102 +249,6 @@ export class SandboxService {
         }
         // TypeScript syntax check stub — à implémenter avec un parser TS en V2
         return { valid: true, errors: [] };
-    }
-
-    // ─── Exécution Python ───────────────────────────────────────────────────
-
-    private _runPython(
-        fn: IUserFunction,
-        args: Record<string, unknown>
-    ): Promise<SandboxResult> {
-        return new Promise((resolve) => {
-            const startTime = Date.now();
-            const argsJson = JSON.stringify(args);
-
-            const pythonArgs = fn.origin === 'native'
-                ? [PYTHON_RUNNER_PATH, fn.name, argsJson]
-                : [PYTHON_RUNNER_PATH, fn.name, argsJson];
-
-            // C9.1 FIX: utiliser l'exécutable détecté (python3 ou python)
-            const proc = spawn(this.pythonExecutable, pythonArgs, {
-                timeout: PYTHON_TIMEOUT_MS,
-                env: {
-                    ...process.env,
-                    SANDBOX_WORKSPACE_DIR: '/sandbox/workspace',
-                    PYTHONIOENCODING: 'utf-8'
-                }
-            });
-
-            let stdout = '';
-            let stderr = '';
-            let timedOut = false;
-
-            proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
-            proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
-
-            // Timeout manuel (double sécurité)
-            const timer = setTimeout(() => {
-                timedOut = true;
-                proc.kill('SIGTERM');
-            }, PYTHON_TIMEOUT_MS);
-
-            proc.on('close', (code: number | null) => {
-                clearTimeout(timer);
-                const durationMs = Date.now() - startTime;
-
-                if (timedOut) {
-                    resolve({
-                        success: false,
-                        output: null,
-                        stdout,
-                        stderr: 'Timeout: la fonction a dépassé 15 secondes',
-                        durationMs,
-                        timedOut: true
-                    });
-                    return;
-                }
-
-                if (code !== 0) {
-                    let errorMessage = stderr;
-                    try {
-                        const parsed = JSON.parse(stderr);
-                        errorMessage = parsed.error || stderr;
-                    } catch { /* keep raw stderr */ }
-
-                    resolve({
-                        success: false,
-                        output: null,
-                        stdout,
-                        stderr: errorMessage,
-                        durationMs
-                    });
-                    return;
-                }
-
-                try {
-                    const output = JSON.parse(stdout);
-                    resolve({ success: true, output, stdout, stderr, durationMs });
-                } catch {
-                    resolve({
-                        success: false,
-                        output: null,
-                        stdout,
-                        stderr: `Impossible de parser la sortie JSON: ${stdout.slice(0, 200)}`,
-                        durationMs
-                    });
-                }
-            });
-
-            proc.on('error', (err: Error) => {
-                clearTimeout(timer);
-                resolve({
-                    success: false,
-                    output: null,
-                    stderr: `Erreur démarrage processus Python: ${err.message}`,
-                    durationMs: Date.now() - startTime
-                });
-            });
-        });
     }
 
     /**
@@ -280,113 +286,4 @@ except SyntaxError as e:
         });
     }
 
-    /**
-    * Exécution TypeScript sandboxée via un sous-processus Node.js à environnement réduit.
-     *
-     * Contrat du code utilisateur :
-     *   - `args` est disponible en global (objet passé à la fonction)
-     *   - `console.log/error/warn` sont capturés dans stdout
-     *   - Si l'utilisateur définit `function run(args) {...}`, son retour devient l'output
-     *   - Sinon, toute valeur assignée à `__result__` en dernière ligne est l'output
-     */
-    private async _runTypescript(
-        fn: IUserFunction,
-        args: Record<string, unknown>
-    ): Promise<SandboxResult> {
-        const startTime = Date.now();
-        const timeoutMs = parseInt(process.env.FUNCTION_SANDBOX_TIMEOUT_MS || '15000');
-        return this._runTypescriptSubprocess(fn, args, timeoutMs, startTime);
-    }
-
-    /**
-     * Exécution TypeScript dans un child process Node.js avec environment vidé.
-     * Protège MongoDB credentials, JWT_SECRET, etc. (process env non transmis).
-     * Timeout piloté par SIGTERM (fiable cross-platform).
-     *
-     * Contrat identique : fonction `run(args)` ou code libre avec `__result__`.
-     */
-    private _runTypescriptSubprocess(
-        fn: IUserFunction,
-        args: Record<string, unknown>,
-        timeoutMs: number,
-        startTime: number
-    ): Promise<SandboxResult> {
-        return new Promise((resolve) => {
-            const argsJson = JSON.stringify(args).replace(/\\/g, '\\\\').replace(/`/g, '\\`');
-
-            // Wrapper minimal : console redirigé, run() appelé ou code libre
-            const wrapper = `
-const args = ${argsJson};
-const __logs = [];
-const console = {
-    log:   (...a) => __logs.push(a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')),
-    error: (...a) => __logs.push(a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')),
-    warn:  (...a) => __logs.push(a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')),
-};
-let __result__ = undefined;
-try {
-    ${fn.codeInline || ''}
-    if (typeof run === 'function') { __result__ = run(args); }
-    process.stdout.write(JSON.stringify({ success: true, output: __result__, stdout: __logs.join('\\n') }));
-} catch(e) {
-    process.stdout.write(JSON.stringify({ success: false, output: null, stderr: e.message, stdout: __logs.join('\\n') }));
-}`;
-
-            const proc = spawn(process.execPath, ['--eval', wrapper], {
-                // Env vidé : aucun accès aux secrets MONGODB_URI / JWT_SECRET / ENCRYPTION_KEY
-                env: {
-                    HOME: process.env.HOME ?? '',
-                    TMP: process.env.TMP ?? '',
-                    TEMP: process.env.TEMP ?? '',
-                    ...(process.platform === 'win32'
-                        ? { USERPROFILE: process.env.USERPROFILE ?? '' }
-                        : {}),
-                }
-            });
-
-            let stdout = '';
-            let stderr = '';
-            let timedOut = false;
-
-            proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-            proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-
-            const timer = setTimeout(() => {
-                timedOut = true;
-                proc.kill('SIGTERM');
-            }, timeoutMs);
-
-            proc.on('close', () => {
-                clearTimeout(timer);
-                const durationMs = Date.now() - startTime;
-
-                if (timedOut) {
-                    resolve({ success: false, output: null, stderr: 'Timeout: exécution TypeScript dépassée', durationMs, timedOut: true });
-                    return;
-                }
-
-                try {
-                    const result = JSON.parse(stdout) as SandboxResult;
-                    resolve({ ...result, durationMs });
-                } catch {
-                    resolve({
-                        success: false,
-                        output: null,
-                        stderr: stderr || `Sortie JSON invalide: ${stdout.slice(0, 200)}`,
-                        durationMs
-                    });
-                }
-            });
-
-            proc.on('error', (err: Error) => {
-                clearTimeout(timer);
-                resolve({
-                    success: false,
-                    output: null,
-                    stderr: `Erreur démarrage sandbox Node: ${err.message}`,
-                    durationMs: Date.now() - startTime
-                });
-            });
-        });
-    }
 }

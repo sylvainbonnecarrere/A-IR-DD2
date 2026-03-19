@@ -16,11 +16,15 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
+import { BuildPreparationError } from '../services/build.service';
+import { RuntimeHealthService } from '../services/runtimeHealth.service';
 import { SandboxService } from '../services/sandbox.service';
+import { RuntimeNotReadyError } from '../services/runtime/errors';
 import { IUser } from '../models/User.model';
 
 const router = Router();
 const sandboxService = new SandboxService();
+const runtimeHealthService = new RuntimeHealthService();
 
 // ─── Schémas de Validation ────────────────────────────────────────────────────
 
@@ -28,6 +32,14 @@ const runFunctionSchema = z.object({
     functionId: z
         .string()
         .regex(/^[a-f\d]{24}$/i, 'functionId doit être un ObjectId MongoDB valide'),
+    toolSelection: z.object({
+        toolId: z.string().regex(/^[a-f\d]{24}$/i, 'toolId doit être un ObjectId MongoDB valide'),
+        versionRef: z.object({
+            versionTag: z.string().optional(),
+            versionNumber: z.number().optional(),
+            workspaceId: z.string().nullable().optional()
+        }).optional()
+    }).optional(),
     testArgs: z
         .record(z.unknown())
         .optional()
@@ -46,7 +58,7 @@ const checkSyntaxSchema = z.object({
 // C9.1: Vérifie la disponibilité du sandbox Python (détection cross-platform)
 router.get('/health', requireAuth, async (_req, res) => {
     try {
-        const health = await sandboxService.checkHealth();
+        const health = await runtimeHealthService.getHealthReport();
         res.json(health);
     } catch (error) {
         console.error('[SandboxRoute] GET /health error:', error);
@@ -58,9 +70,9 @@ router.get('/health', requireAuth, async (_req, res) => {
 router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req, res) => {
     try {
         const user = req.user as IUser;
-        const { functionId, testArgs } = req.body;
+        const { functionId, toolSelection, testArgs } = req.body;
 
-        const result = await sandboxService.runFunction(functionId, user.id, testArgs);
+        const result = await sandboxService.runFunction(functionId, user.id, testArgs, toolSelection);
         res.json(result);
     } catch (error: any) {
         console.error('[SandboxRoute] POST /run error:', error);
@@ -70,6 +82,12 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
         }
         if (error.message?.includes('désactivée') || error.message?.includes('disabled')) {
             return res.status(403).json({ error: error.message });
+        }
+        if (error instanceof BuildPreparationError || error.message?.includes('prepared via the build workflow')) {
+            return res.status(409).json({ error: error.message });
+        }
+        if (error instanceof RuntimeNotReadyError) {
+            return res.status(503).json({ error: error.message });
         }
         if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
             return res.status(408).json({ error: 'Timeout : la fonction a dépassé le délai d\'exécution autorisé' });

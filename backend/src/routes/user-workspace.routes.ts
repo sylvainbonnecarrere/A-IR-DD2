@@ -31,9 +31,13 @@ import { AgentPrototype } from '../models/AgentPrototype.model';
 import { requireAuth } from '../middleware/auth.middleware';
 import { IUser } from '../models/User.model';
 import { WorkflowSelfHealingService } from '../services/workflowSelfHealing.service';
+import { RuntimeCompatibilityService } from '../services/runtimeCompatibility.service';
+import { createWorkspaceManager } from '../services/workspace/WorkspaceManager';
 import { buildWorkspaceSnapshot } from '../utils/workspaceSnapshot';
 
 const router = Router();
+const workspaceManager = createWorkspaceManager();
+const runtimeCompatibilityService = new RuntimeCompatibilityService();
 
 /**
  * GET /api/user/workspace
@@ -54,6 +58,12 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
         // ⭐ SELF-HEALING: Garantir qu'un workflow par défaut existe
         const { workflow: defaultWorkflow, wasCreated, healingActions } = 
             await WorkflowSelfHealingService.ensureDefaultWorkflow(userId.toString());
+
+        const workspaceProvisioning = defaultWorkflow
+            ? await workspaceManager.ensureWorkflowWorkspace(userId.toString(), defaultWorkflow._id.toString())
+            : null;
+        const runtimeCompatibility = await runtimeCompatibilityService.getRuntimeCompatibility();
+        runtimeCompatibilityService.applyResponseHeaders(res, runtimeCompatibility);
         
         // Production-safe logging: only log healing events (important for debugging)
         if (wasCreated && process.env.NODE_ENV === 'development') {
@@ -86,13 +96,25 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
         const response = await buildWorkspaceSnapshot({
             userId: userId.toString(),
             workflow: defaultWorkflow,
+            workspace: workspaceProvisioning
+                ? {
+                    id: workspaceProvisioning.workspaceId,
+                    scopeType: 'workflow',
+                    scopeId: defaultWorkflow!._id,
+                    status: workspaceProvisioning.status,
+                    manifests: workspaceProvisioning.manifests,
+                    lastScanAt: workspaceProvisioning.lastScanAt ?? null
+                }
+                : null,
             wasCreated,
             healingActions,
+            runtimeCompatibility,
             includeLegacyPrototypes: true
         });
 
         console.log('[Workspace] GET - response summary:', {
             hasWorkflow: !!defaultWorkflow,
+            hasWorkspace: !!workspaceProvisioning,
             workflowId: defaultWorkflow?.id,
             workflowWasCreated: wasCreated,
             nodesCount: response.nodes.length,

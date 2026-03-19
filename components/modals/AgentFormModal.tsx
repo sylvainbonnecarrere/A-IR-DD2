@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, Tool, OutputConfig, OutputFormat, RobotId, LocalLLMProfile } from '../../types';
+import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, Tool, OutputConfig, OutputFormat, RobotId, LocalLLMProfile, ToolSelection } from '../../types';
 import { Button, Modal, ToggleSwitch } from '../UI';
 import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels } from '../../llmModels';
 import { useLocalization } from '../../hooks/useLocalization';
@@ -11,6 +11,7 @@ import { isLocalProvider, isLMStudio } from '../../utils/llmProviderUtils';
 import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { API_BASE_URL } from '../../config/api.config';
 import { FunctionSelector } from '../FunctionSelector';
+import { useFunctionStore } from '../../stores/useFunctionStore';
 
 interface AgentFormModalProps {
   onClose: () => void;
@@ -132,6 +133,23 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
   const [isDetectingLocalModel, setIsDetectingLocalModel] = useState(false);
   const [inlineDetectionError, setInlineDetectionError] = useState<string | null>(null);
   const isEditing = !!existingAgent;
+  const availableFunctions = useFunctionStore(state => state.functions);
+
+  const buildToolSelections = useCallback((functionIds: string[]): ToolSelection[] => {
+    return functionIds.map((toolId) => {
+      const matchingFunction = availableFunctions.find((fn) => fn._id === toolId);
+      return {
+        toolId,
+        versionRef: matchingFunction
+          ? {
+              versionTag: matchingFunction.versionTag,
+              versionNumber: matchingFunction.version,
+              workspaceId: matchingFunction.workspaceContext?.workspaceId ?? null,
+            }
+          : undefined,
+      };
+    });
+  }, [availableFunctions]);
 
   // LMStudio uses localEndpoint (plaintext URL); apiKey is kept as a fallback for legacy records
   const lmStudioConfig = llmConfigs.find(c => isLMStudio(c.provider));
@@ -249,7 +267,11 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       setSelectedCapabilities(existingAgent.capabilities);
       setHistoryConfig(prev => ({ ...defaultHistoryConfig, ...prev, ...(existingAgent.historyConfig || {}) }));
       setTools(existingAgent.tools || []);
-      setSelectedFunctionIds(existingAgent.functionIds || []);
+      setSelectedFunctionIds(
+        existingAgent.functionIds
+        || existingAgent.toolSelections?.map(selection => selection.toolId)
+        || []
+      );
       setOutputConfig(existingAgent.outputConfig || defaultOutputConfig);
     }
   }, [isEditing, existingAgent, localLLMProfiles]);
@@ -474,6 +496,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     const capabilitiesForSave = selectedCapabilities.includes(LLMCapability.Chat)
       ? selectedCapabilities
       : [LLMCapability.Chat, ...selectedCapabilities];
+    const toolSelections = buildToolSelections(selectedFunctionIds);
 
     onSave({
       name,
@@ -485,6 +508,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       historyConfig,
       tools,
       functionIds: selectedFunctionIds,
+      toolSelections,
       outputConfig,
       localLLMProfileId: isLMStudio(llmProvider) ? (localLLMProfileId || undefined) : undefined,
       creator_id: existingAgent?.creator_id || RobotId.Archi,

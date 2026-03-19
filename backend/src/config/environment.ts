@@ -48,6 +48,18 @@ export const config = {
 
     bcrypt: {
         rounds: parseInt(process.env.BCRYPT_ROUNDS || '10', 10)
+    },
+
+    runtime: {
+        nodeExecutable: process.env.RUNTIME_NODE_EXECUTABLE || process.execPath || 'node',
+        pythonExecutables: (process.env.RUNTIME_PYTHON_EXECUTABLES || 'python3,python')
+            .split(',')
+            .map(value => value.trim())
+            .filter(Boolean),
+        dockerExecutable: process.env.RUNTIME_DOCKER_EXECUTABLE || 'docker',
+        nodeRuntimeImage: process.env.RUNTIME_NODE_IMAGE || 'airdd2-runtime-node:bookworm-slim',
+        pythonRuntimeImage: process.env.RUNTIME_PYTHON_IMAGE || 'airdd2-runtime-python:3.12-slim',
+        probeTimeoutMs: parseInt(process.env.RUNTIME_PROBE_TIMEOUT_MS || '8000', 10)
     }
 };
 

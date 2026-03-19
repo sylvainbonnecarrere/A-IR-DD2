@@ -546,6 +546,11 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
               result: record.result,
               status: record.status,
               durationMs: record.durationMs,
+              executionId: record.executionId,
+              runner: record.runner,
+              exitCode: record.exitCode,
+              failureKind: record.failureKind,
+              artifacts: record.artifacts,
               timestamp: record.timestamp,
             } as ToolCallRecord,
           };

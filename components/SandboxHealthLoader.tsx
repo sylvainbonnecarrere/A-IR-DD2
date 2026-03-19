@@ -1,5 +1,5 @@
 /**
- * SandboxHealthLoader — Indicateur de santé du sandbox Python (C9.2)
+ * SandboxHealthLoader — Indicateur de readiness du runtime MVP.
  *
  * Interroge GET /api/sandbox/health à l'initialisation de la page Phil/Functions.
  * Affiche un badge d'état compact dans le header sans bloquer l'affichage.
@@ -10,84 +10,95 @@
  *   🔴 Python non détecté — message + lien vers aide
  */
 
-import React, { useEffect, useState } from 'react';
-import { getBackendUrl } from '../config/api.config';
+import React, { useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-
-interface SandboxHealth {
-    python: { available: boolean; version?: string; executable: string };
-    typescript: { available: boolean };
-}
+import { useFunctionStore } from '../stores/useFunctionStore';
 
 export const SandboxHealthLoader: React.FC = () => {
     const { accessToken, isAuthenticated } = useAuth();
-    const [health, setHealth] = useState<SandboxHealth | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [fetchError, setFetchError] = useState(false);
+    const {
+        runtimeHealth,
+        isRuntimeHealthLoading,
+        runtimeHealthError,
+        loadRuntimeHealth,
+    } = useFunctionStore();
 
     useEffect(() => {
         if (!isAuthenticated || !accessToken) {
-            setLoading(false);
             return;
         }
 
-        let cancelled = false;
-
-        fetch(`${getBackendUrl()}/api/sandbox/health`, {
-            headers: { Authorization: `Bearer ${accessToken}` }
-        })
-            .then(r => {
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                return r.json();
-            })
-            .then((data: SandboxHealth) => {
-                if (!cancelled) {
-                    setHealth(data);
-                    setLoading(false);
-                }
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    setFetchError(true);
-                    setLoading(false);
-                }
-            });
-
-        return () => { cancelled = true; };
-    }, [accessToken, isAuthenticated]);
+        void loadRuntimeHealth();
+    }, [accessToken, isAuthenticated, loadRuntimeHealth]);
 
     if (!isAuthenticated) return null;
 
-    if (loading) {
+    if (isRuntimeHealthLoading && !runtimeHealth) {
         return (
             <div className="flex items-center gap-1.5 text-xs text-gray-400">
                 <div className="w-3 h-3 border border-gray-500/40 border-t-cyan-400 rounded-full animate-spin flex-shrink-0" />
-                <span>Vérification sandbox…</span>
+                <span>Vérification runtime…</span>
             </div>
         );
     }
 
-    if (fetchError || !health?.python.available) {
+    if (runtimeHealthError || !runtimeHealth) {
         return (
             <div
                 className="flex items-center gap-1.5 text-xs text-red-400"
-                title="Python non détecté — L'exécution sandbox est désactivée. Installez Python 3 et redémarrez le backend."
+                title={runtimeHealthError || 'Échec de lecture de l\'état runtime.'}
             >
                 <div className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
-                <span>Python non détecté — sandbox désactivé</span>
+                <span>Runtime indisponible</span>
             </div>
         );
     }
 
-    const versionShort = health.python.version?.replace(/^Python\s+/i, '') ?? '';
+    const pythonVersionShort = runtimeHealth.python.version?.replace(/^Python\s+/i, '') ?? '';
+    const canRunPython = runtimeHealth.capabilities.run.python;
+    const canRunTypescript = runtimeHealth.capabilities.run.typescript;
+    const dockerMode = runtimeHealth.runtime.docker.mode;
+    const isDevOnly = runtimeHealth.runtime.docker.securityLevel === 'dev-only';
+    const runtimeModeLabel = dockerMode === 'rootless'
+        ? 'rootless'
+        : dockerMode === 'docker-desktop'
+            ? 'Docker Desktop'
+            : dockerMode === 'rootful-linux'
+                ? 'Docker rootful'
+                : 'mode inconnu';
+
+    if (runtimeHealth.status === 'healthy') {
+        return (
+            <div
+                className="flex items-center gap-1.5 text-xs text-emerald-400"
+                title={`Runtime prêt — ${runtimeHealth.summary}`}
+            >
+                <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                <span>Runtime prêt <span className="text-emerald-500/70">({pythonVersionShort || 'Python OK'} · {runtimeModeLabel})</span></span>
+            </div>
+        );
+    }
+
+    if (runtimeHealth.status === 'degraded') {
+        return (
+            <div
+                className="flex items-center gap-1.5 text-xs text-amber-300"
+                title={runtimeHealth.summary}
+            >
+                <div className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+                <span>{isDevOnly ? 'Runtime dev-only' : 'Runtime partiel'}</span>
+                <span className="text-amber-500/70">({canRunPython || canRunTypescript ? runtimeModeLabel : 'build seulement'})</span>
+            </div>
+        );
+    }
 
     return (
         <div
-            className="flex items-center gap-1.5 text-xs text-emerald-400"
-            title={`Sandbox Python prêt — ${health.python.version} (${health.python.executable})`}
+            className="flex items-center gap-1.5 text-xs text-red-400"
+            title={runtimeHealth.summary}
         >
-            <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-            <span>Sandbox prêt <span className="text-emerald-500/70">({versionShort})</span></span>
+            <div className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+            <span>Run bloqué <span className="text-red-500/70">(runtime non prêt)</span></span>
         </div>
     );
 };

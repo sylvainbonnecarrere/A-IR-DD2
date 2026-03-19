@@ -1,1020 +1,485 @@
-# PLAN 1 — Architecture Applicative, BDD, Sandboxing et Installation
+# PLAN 1 - ARCHITECTURE APPLICATIVE, BDD, SANDBOXING ET INSTALLATION
 
-> Date: 16 mars 2026
-> Statut: Plan directeur structurel
-> Portee: Fondation technique de la feature Tools avant toute refonte detaillee des fonctions natives
-> Sources: `RECOMMANDATION_SANDBOX_2.md`, `REFERENCE_ERREURS_ET_LECONS_TOOLS_V2.md`, `TOOLS_V2.md`
-
----
-
-## 1. Objet du plan
-
-Ce document etablit le **premier plan d'implementation** de la nouvelle architecture Tools.
-
-Il ne traite **pas encore** la reconstruction detaillee de chaque fonction native. Il traite d'abord les fondations qui ont manque lors de la premiere tentative:
-- architecture applicative cible,
-- redesign BDD,
-- sandboxing et orchestration d'execution,
-- installation et validation runtime,
-- impacts sur l'application existante,
-- ordre d'implementation anti-regression.
-
-Ce plan applique explicitement les garde-fous de [REFERENCE_ERREURS_ET_LECONS_TOOLS_V2.md](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/Guides/TODO/PERSONALIZED_FUNCTIONS/Projet/REFERENCE_ERREURS_ET_LECONS_TOOLS_V2.md):
-1. partir des invariants d'execution et de la BDD,
-2. modeliser l'idempotence avant le sandbox,
-3. traiter l'installation comme une partie de l'architecture,
-4. separer workspace, build, runtime et execution,
-5. imposer un contrat d'execution unique pour l'editeur Phil et la carte Bos.
+> Date: 17 mars 2026
+> Statut: plan directeur corrige
+> Portee: premiere partie structurante du projet Tools
+> Sources de verite exclusives: `Guides/TODO/PERSONALIZED_FUNCTIONS/RECOMMANDATION_SANDBOX_1.md` et `Guides/TODO/PERSONALIZED_FUNCTIONS/RECOMMANDATION_SANDBOX_2.md`
 
 ---
 
-## 2. Decision architecturale retenue
+## 1. Statut de ce document
 
-### 2.1 Decision centrale
+Ce document remplace la version precedente du Plan 1.
 
-L'architecture cible abandonne le modele invalide:
-- sandbox central ad hoc,
-- subprocess Python host-dependant comme socle principal,
-- `isolated-vm` comme pivot TypeScript,
-- confusion entre stockage, build et execution,
-- collection `user_functions` comme registre trop large et trop couplant.
+Pour cette premiere partie du projet, les documents suivants ne sont **pas** la source directrice:
 
-Elle adopte a la place le modele suivant:
+1. `Guides/TODO/PERSONALIZED_FUNCTIONS/Projet/TOOLS_V2.md`
+2. les anciens decoupages produits a partir de ce document
+3. toute formulation qui contredit les recommandations sandbox 1 et 2
 
-1. **Workspace persistant** par utilisateur et projet/workflow
-2. **Build isole** pour produire des artefacts executables
-3. **Sandbox d'execution ephemere** par run
-4. **Orchestrateur d'execution** cote backend
-5. **Modele BDD decouple** entre definition, version, run et resultat
-
-### 2.2 Choix de runtime et d'isolation
-
-#### Court terme retenu
-- Docker/OCI rootless durci
-- conteneurs ephemeres par run
-- images distinctes `node` et `python`
-- base `Debian slim`, pas Alpine par defaut
-
-#### Moyen terme vise
-- segmentation par niveau de confiance
-- Docker rootless pour les runs internes de confiance
-- gVisor ou Firecracker pour le code utilisateur non approuve
-
-### 2.3 Separation de responsabilites obligatoire
-
-Le nouveau systeme doit separer strictement:
-1. workspace persistant utilisateur/projet,
-2. environnement de build,
-3. environnement d'execution,
-4. metadonnees de fonction,
-5. executions et resultats,
-6. permissions et secrets.
-
-### 2.4 Hypotheses fermes et non-objectifs
-
-Afin d'eviter toute ambiguite pour l'equipe d'implementation, les hypotheses suivantes sont retenues comme vraies:
-
-1. le scope fonctionnel reste celui de `TOOLS_V2.md`
-2. l'UX validee de Phil est conservee autant que possible
-3. la carte Bos conserve sa presentation actuelle des tool calls, mais sa source de verite change
-4. le support TypeScript et Python reste obligatoire
-5. le MVP d'isolation utilise Docker rootless durci, pas Firecracker
-6. la refonte detaillee des fonctions natives est hors perimetre de ce plan 1
-
-Ne font pas partie de ce plan:
-- le detail d'implementation unitaire de chaque fonction native
-- la conception fine du function calling des LLMs locaux
-- la politique complete de secret broker multi-tenant
-- la generalisation Firecracker a tous les runs
-
-### 2.5 Vocabulaire normatif
-
-Les termes ci-dessous sont utilises avec un sens strict:
-
-- `ToolDefinition` : definition metier stable d'un tool
-- `ToolVersion` : version editable ou publiee d'un tool
-- `BuildArtifact` : resultat buildable/executable produit a partir d'une version
-- `Workspace` : espace persistant utilisateur/workflow/projet
-- `Run` : execution unique et persistable d'un tool
-- `Binding` : liaison prototype/instance vers un tool et sa politique d'usage
-- `Ready` : version techniquement executable dans le runtime cible
-- `Healthy` : runtime/install/process de verification OK
+Le role de ce plan est de transformer les deux recommandations de reference en un plan d'implementation exploitable, sans reinterpretation libre.
 
 ---
 
-## 3. Impact sur la version actuelle de l'application
+## 2. Decisions architecturales retenues
 
-### 3.1 Backend — structures actuellement incompatibles ou partielles
+Les decisions suivantes sont retenues comme obligatoires.
 
-Les composants suivants existent mais ne correspondent plus a l'architecture cible:
+### 2.1 Modele d'execution retenu
 
-- [UserFunction.model.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/models/UserFunction.model.ts)
-  - aujourd'hui: collection centrale unique pour natif + custom + code + dependances + activation
-  - probleme: melange definition, code, activation, scope et execution
-  - consequence: doit etre **decomposee** ou lourdement refondue
+1. ne pas creer un conteneur persistant par utilisateur a l'inscription
+2. creer un **workspace persistant** par utilisateur et par projet ou workflow
+3. executer chaque invocation de tool dans une **sandbox ephemere** dediee
+4. separer explicitement le **workspace**, le **build** et le **run**
+5. detruire systematiquement l'environnement d'execution apres chaque run
 
-- [sandbox.service.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/services/sandbox.service.ts)
-  - aujourd'hui: subprocess Python + pseudo-sandbox TypeScript via `isolated-vm`/fallback
-  - probleme: pas de separation build/run, pas de preflight, pas d'orchestrateur, pas d'idempotence forte
-  - consequence: doit etre **remplace par un Execution Orchestrator**
+### 2.2 Runtime sandbox retenu
 
-- [pythonExecutor.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/pythonExecutor.ts)
-  - aujourd'hui: whitelist/subprocess runner direct
-  - probleme: executeur concret trop bas niveau, pas une couche d'orchestration
-  - consequence: doit etre **repositionne** comme adapter legacy temporaire ou supprime a terme
+1. **Socle runtime de developpement et test**: sandboxes Docker durcies, avec rootless quand l'hote Linux le permet
+2. **Cas Windows / Docker Desktop**: mode acceptable pour developpement local uniquement, avec warning explicite et sans pretendre fournir une securite de production
+3. **Cible de securite de production retenue**: Firecracker microVM pour le code utilisateur non fiable
+4. **Consequence de planification**: la preparation du port Firecracker et de la factory de selection runtime commence des le jalon 6 et ne doit pas etre repoussee a une phase post-developpement
+5. **gVisor n'est pas retenu dans ce plan**: il peut apparaitre dans les recommandations comme option de comparaison, mais il ne fait pas partie du chemin choisi pour ce projet
 
-- [functions.routes.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/routes/functions.routes.ts)
-  - aujourd'hui: CRUD direct sur `user_functions`
-  - consequence: a scinder en plusieurs API metier: definitions, versions, builds, executions, health
+### 2.3 Images et distribution retenues
 
-- [sandbox.routes.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/routes/sandbox.routes.ts)
-  - aujourd'hui: `/run`, `/check`, `/health`
-  - consequence: a refondre pour exposer un contrat d'execution structurel, pas juste un test de snippet
+1. images separees pour Node.js et Python
+2. image de build distincte de l'image de run lorsque necessaire
+3. base recommandee pour les images sandbox: **Debian slim** ou equivalent debuggable
+4. les images sandbox d'execution de code arbitraire ne doivent pas basculer en distroless si cela supprime les capacites d'inspection et de diagnostic attendues pendant le developpement et le durcissement
+5. **Alpine n'est pas le choix par defaut** pour ce plan
 
-- [UserSettings.model.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/models/UserSettings.model.ts)
-  - aujourd'hui: `functionPaths[]` par workflow
-  - probleme: cette responsabilite ne suffit pas pour modeliser workspace/build/runtime
-  - consequence: soit simplifiee a une reference de workspace, soit deplacee vers une nouvelle collection dediee
+### 2.4 Gouvernance d'execution retenue
 
-- [AgentPrototype.model.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/models/AgentPrototype.model.ts)
-- [AgentInstance.model.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/models/AgentInstance.model.ts)
-  - aujourd'hui: references `tools` vers `user_functions`
-  - consequence: devront pointer vers des **definitions/version refs stables**, pas vers un registre trop polymorphe
-
-### 3.2 Frontend — elements a conserver vs refondre
-
-#### A conserver largement
-- [PhilFunctionsPage.tsx](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/components/PhilFunctionsPage.tsx)
-  - l'UX generale et la logique de navigation ont ete validees
-  - a conserver comme shell fonctionnel
-
-- [FunctionEditorTab.tsx](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/components/FunctionEditorTab.tsx)
-  - a conserver comme base UI editor/test
-  - a rebrancher sur un nouveau contrat backend
-
-- [FunctionSelector.tsx](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/components/FunctionSelector.tsx)
-  - a conserver comme base de selection des fonctions dans Archi et Bos
-  - a alimenter via nouvelles APIs et nouveaux DTOs
-
-#### A refondre logiquement
-- le test sandbox depuis Phil
-- la resolution des fonctions executees par les agents sur Bos
-- la persistance et rehydratation des tool calls/resultats dans les chats
-
-### 3.3 Risques de regression si on modifie sans plan
-
-1. casser l'heritage prototype -> instance pour les tools
-2. casser la selection de fonctions dans Archi/Bos
-3. conserver un couplage dangereux entre UI et runtime reel
-4. reintroduire des resolutions singleton ou provider-level au lieu de l'identite d'instance
-5. re-coder un sandbox non fiable avant d'avoir defini les executions et leurs etats
-
-### 3.4 Cartographie de remplacement recommandee
-
-Pour la nouvelle equipe, la regle suivante est imperative:
-
-- a conserver principalement comme facade UI:
-  - `PhilFunctionsPage.tsx`
-  - `FunctionEditorTab.tsx`
-  - `FunctionSelector.tsx`
-
-- a convertir en couche de compatibilite temporaire:
-  - `functions.routes.ts`
-  - `sandbox.routes.ts`
-  - `pythonExecutor.ts`
-
-- a sortir du coeur d'architecture cible:
-  - `sandbox.service.ts`
-  - `user_functions` comme source de verite finale
-
-- a refondre en priorite:
-  - schemas Mongoose des tools
-  - persistance des runs
-  - contrat d'execution editor/workflow
+1. reseau desactive par defaut
+2. utilisateur non root dans les sandboxes
+3. root filesystem en lecture seule autant que possible
+4. quotas CPU, memoire, disque temporaire et pids imposes
+5. timeout strict par run
+6. aucun montage du Docker socket
+7. secrets hors du code utilisateur, injectes au moment du run seulement
+8. logs, resultats et metriques traces depuis le backend
 
 ---
 
-## 4. Architecture cible par domaine
+## 3. Ce que ce plan couvre et ce qu'il ne couvre pas
 
-## 4.1 Domaine A — Workspace persistant
+### 3.1 Ce que ce plan couvre
 
-### Objectif
-Fournir un espace durable par utilisateur et projet/workflow qui stocke:
-- code source,
-- manifests declaratifs,
-- artefacts de sortie,
-- eventuals depots git,
-- metadonnees locales au projet.
+1. architecture applicative cible de la premiere phase Tools
+2. redesign BDD pour workspaces, tools, runs et metadonnees associees
+3. separation workspace / build / run
+4. installation et verification des runtimes Node.js et Python
+5. mise en place du sandboxing MVP avec Docker durci, rootless quand disponible, et mode Docker Desktop documente comme dev-only
+6. definition et preparation immediate de la cible Firecracker pour le code utilisateur non fiable
+7. impact sur le backend, Phil, Archi et Bos
+8. sequence d'implementation anti-regression
 
-### Decision de design
-Le workspace n'est **pas** l'environnement d'execution.
+### 3.2 Ce que ce plan ne couvre pas
 
-### Consequences sur l'existant
-- abandon du simple `functionPaths[]` comme modele suffisant
-- necessite d'un service `WorkspaceManager`
-- necessite de normaliser les repertoires Python et TypeScript
+1. la reconstruction detaillee de chaque fonction native
+2. la politique complete de secret broker multi-tenant
+3. l'implementation immediate de Firecracker dans le MVP
+4. toute architecture reposant sur un conteneur persistant par utilisateur
+5. toute solution basee sur Alpine comme standard des sandboxes utilisateur
 
-### Proposition de structure logique
+---
 
-#### Python
-- `backend/users_functions/{userId}/{workflowId}/...`
+## 4. Invariants d'architecture
 
-#### TypeScript
-- `users_functions/{userId}/{workflowId}/...`
+Les invariants suivants ne doivent jamais etre violes pendant l'implementation.
 
-#### Metadonnees a centraliser en BDD
-- workspace root logique
-- manifests presents
-- quota / statut
-- dernier scan
-- snapshot courant
+1. le workspace persistant n'est pas l'environnement d'execution
+2. l'installation des dependances ne se fait pas a chaud dans le run normal
+3. le backend orchestre, autorise, journalise et limite chaque execution
+4. les agents n'executent jamais directement du code hors gouvernance backend
+5. les tools sont traites comme des capacites gouvernees, pas comme de simples snippets
+6. toute execution doit etre versionnable, observable et destructible apres usage
+7. les parcours valides de Phil, Archi et Bos ne doivent pas etre casses pendant la migration
 
-### Plan d'implementation — Domaine A
+---
 
-#### Etape A1
-Creer une couche backend `WorkspaceManager` responsable de:
-- creation idempotente du workspace,
-- verification d'existence,
-- resolution des chemins,
-- quotas et metadonnees,
-- APIs de lecture/ecriture controlees.
+## 5. Architecture cible
 
-#### Etape A2
-Introduire une collection BDD dediee au workspace au lieu de stocker cette logique dans `user_settings`.
-
-#### Etape A3
-Faire migrer la page Phil et les operations de CRUD de fonction pour qu'elles ne manipulent plus directement un simple `codeInline/codePath` ambigu, mais un workspace resolu.
-
-#### Etape A4
-Ajouter les tests d'idempotence:
-- creation d'un meme workspace 2 fois,
-- recreation apres suppression,
-- reconstruction apres redemarrage applicatif.
-
-### Structure cible de repository — Domaine A
-
-L'equipe d'implementation doit viser cette organisation logique:
+## 5.1 Vue logique
 
 ```text
-backend/
-  src/
-    services/
-      workspace/
-        WorkspaceManager.ts
-        WorkspacePathResolver.ts
-        WorkspaceQuotaService.ts
-    routes/
-      workspaces.routes.ts
-  users_functions/
-    {userId}/
-      {workflowId}/
-        python/
-        manifests/
-        outputs/
-
-users_functions/
-  {userId}/
-    {workflowId}/
-      typescript/
-      manifests/
-      outputs/
+React UI
+  |
+  v
+Backend Node.js / TypeScript
+  |
+  +--> MongoDB
+  |      - workspaces
+  |      - user_tools
+  |      - user_tool_runs
+  |      - secrets_metadata
+  |      - references projets/workflows et agents
+  |
+  +--> Workspace Manager
+  |      - code utilisateur
+  |      - manifests
+  |      - assets
+  |      - sorties de build et output
+  |
+  +--> Tool Registry
+  |      - metadata tool
+  |      - runtime
+  |      - versions
+  |      - schema input/output
+  |      - policy minimale
+  |
+  +--> Build Service
+  |      - installation dependances
+  |      - cache controle
+  |      - artefacts de build
+  |
+  +--> Execution Orchestrator
+         |
+    +--> DockerSandboxRunner (MVP dev/test, rootless si disponible)
+    +--> FirecrackerRunner (cible de production preparee des J6/J7)
+         +--> RuntimeHealthService
+         +--> Policy checks minimaux
+         +--> Observability
 ```
 
-Si un autre emplacement physique est choisi, il faut conserver un `WorkspacePathResolver` unique et testable, et interdire toute logique de chemins dispersee dans les composants ou routes.
+## 5.2 Composants backend obligatoires
+
+1. `WorkspaceManager`
+   - creation idempotente du workspace
+   - resolution de chemins
+   - lecture/ecriture controlees
+   - gestion des manifests et outputs
+
+2. `ToolRegistry`
+   - enregistrement des tools utilisateur
+   - versioning
+   - schemas d'entree et de sortie
+   - metadonnees de runtime et de policy
+
+3. `BuildService`
+   - build isole
+   - installation dependances hors run
+   - production d'artefacts ou sorties preparatoires
+
+4. `ExecutionOrchestrator`
+   - planification et declenchement des runs
+   - application des limites
+   - collecte des logs et resultats
+   - destruction de la sandbox
+
+5. `SandboxRunner`
+   - contrat d'abstraction du moteur d'execution
+   - implementation de developpement: `DockerSandboxRunner`
+   - implementation Linux durcie: variante rootless quand l'hote le permet
+   - implementation cible de production: `FirecrackerRunner`
+
+6. `SandboxRunnerFactory`
+   - selection explicite du runner selon l'environnement
+   - mode Docker Desktop journalise comme `dev-only`
+   - preparation du basculement futur vers Firecracker sans recouplage au legacy
+
+7. `RuntimeHealthService`
+   - verification installation Node.js, Python, Docker, variantes runtime et images runtime
+   - exposition d'un etat exploitable par backend et UI avec `mode`, `securityLevel` et `executionReady`
+   - warning explicite sur Docker Desktop et sur tout runtime non apte a la production
+
+8. `PolicyChecks`
+   - reseau
+   - systeme de fichiers
+   - timeouts
+   - ressources
+   - secrets autorises
 
 ---
 
-## 4.2 Domaine B — Tool Registry et versioning
+## 6. Modele BDD conforme aux recommandations
 
-### Objectif
-Separer la definition fonctionnelle d'un tool de son code et de son execution.
+Ce plan retient une BDD orientee usage, execution et auditabilite.
 
-### Critique de l'etat actuel
-`user_functions` est aujourd'hui trop central:
-- metadata,
-- code,
-- dependances,
-- activation,
-- scope user/workflow,
-- natif/custom.
+### 6.1 Collections et entites minimales
 
-Cela rend les migrations, la validation, le build et l'audit trop fragiles.
+1. `workspaces`
+   - owner
+   - projet ou workflow de rattachement
+   - racine logique
+   - manifests detectes
+   - statut
+   - quotas
+   - dernier scan
 
-### Cible de design
-
-Le modele cible doit distinguer au minimum:
-
-1. **ToolDefinition**
-   - identite metier stable
-   - owner / scope / type / runtime / schema I/O / policy declarative
-
-2. **ToolVersion**
+2. `user_tools`
+   - owner
+   - workspace de rattachement
+   - runtime `typescript | python`
+   - metadata tool
+   - version courante
+   - versions publiees ou brouillons
+   - schema input/output
    - hash de contenu
-   - code source ou reference workspace
-   - manifests
-   - version semantique/interne
+   - policy minimale
    - statut de validation
 
-3. **ToolBuildArtifact**
-   - artefact build produit
-   - runtime cible
-   - lockfile / provenance / digest
-   - compatibilite image runtime
+3. `user_tool_runs`
+   - tool id
+   - version
+   - user
+   - contexte de lancement
+   - inputs valides
+   - outputs et logs references
+   - statut de run
+   - duree et ressources consommees
+   - policy appliquee
+   - runner utilise
 
-4. **ToolActivationBinding**
-   - liaison prototype -> tool
-   - liaison instance -> tool
-   - override/heritage explicite
+4. `secrets_metadata`
+   - alias
+   - owner
+   - scope
+   - rotation
+   - usage trace
 
-### Consequences sur l'existant
-- [AgentPrototype.model.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/models/AgentPrototype.model.ts) doit cesser de pointer simplement vers un registre ambigu
-- [AgentInstance.model.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/models/AgentInstance.model.ts) doit modeliser l'override comme un binding stable et relisable
-- la notion `origin: native|custom` reste utile, mais ne suffit plus comme structure pivot
+5. references existantes a adapter
+   - `AgentPrototype.model.ts`
+   - `AgentInstance.model.ts`
+   - `UserSettings.model.ts`
 
-### Plan d'implementation — Domaine B
+### 6.2 Regles de modelisation retenues
 
-#### Etape B1
-Definir les nouveaux schemas Mongoose et leurs index.
-
-#### Etape B2
-Introduire une strategie de migration depuis `user_functions` vers:
-- definitions,
-- versions,
-- bindings prototype/instance.
-
-#### Etape B3
-Conserver temporairement un adaptateur legacy de lecture pour les objets existants le temps de la migration.
-
-#### Etape B4
-Refactorer les endpoints de Phil/Archi/Bos pour consommer des DTOs derives des nouvelles entites et non plus directement les documents legacy.
-
-#### Etape B5
-Ajouter les contraintes d'integrite:
-- unicite logique de nom par scope,
-- index par owner/workflow,
-- reference stable de version active,
-- prevention des suppressions invalidant des bindings encore actifs.
-
-### Contrat minimum des nouvelles entites — Domaine B
-
-#### `tool_definitions`
-Champs minimums obligatoires:
-- `_id`
-- `ownerType` = `system` | `user`
-- `ownerId?`
-- `workflowScope` = `global_user` | `workflow_scoped` | `system_shared`
-- `workflowId?`
-- `name`
-- `displayName`
-- `runtime` = `python` | `typescript`
-- `origin` = `native` | `user`
-- `inputSchema`
-- `outputSchema`
-- `policyRef?`
-- `trustLevel` = `internal` | `user_private` | `unverified`
-- `createdAt`
-- `updatedAt`
-
-#### `tool_versions`
-Champs minimums obligatoires:
-- `_id`
-- `toolDefinitionId`
-- `versionNumber`
-- `sourceRef`
-- `sourceHash`
-- `manifestRef?`
-- `validationStatus` = `draft` | `validated` | `invalid`
-- `readinessStatus` = `pending` | `ready` | `failed`
-- `createdBy`
-- `createdAt`
-
-#### `tool_bindings`
-Champs minimums obligatoires:
-- `_id`
-- `bindingType` = `prototype` | `instance`
-- `targetId`
-- `toolDefinitionId`
-- `pinnedVersionId?`
-- `enabled`
-- `inheritanceMode` = `inherited` | `added` | `removed` | `overridden`
-- `createdAt`
-- `updatedAt`
+1. `user_functions` n'est plus la cible finale de verite
+2. la migration depuis `user_functions` doit etre additive et reversible
+3. les agents et workflows referencent un tool et une version, pas un blob polymorphe non gouverne
+4. un run est persiste comme unite d'audit et de rehydratation
+5. les outputs de fichiers vont dans le workspace ou dans une zone output controlee, pas dans le conteneur persistant
 
 ---
 
-## 4.3 Domaine C — Build Service
+## 7. Sandboxing et installation
 
-### Objectif
-Ne jamais installer des dependances a chaud dans un run normal.
-Le build produit un artefact versionne a partir d'un manifest declaratif.
+## 7.1 MVP sandboxing
 
-### Consequences sur l'existant
-- [FunctionEditorTab.tsx](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/components/FunctionEditorTab.tsx) ne doit plus directement assimiler "sauver" et "executer"
-- `dependencies` dans le modele actuel ne doivent plus etre un simple tableau informatif
-- les fonctions natives devront plus tard passer par la meme logique de validation et de readiness, meme si leur artefact est preconstruit
+Le MVP doit livrer:
 
-### Cible de design
-- build Node/TS via `esbuild` ou `tsc`
-- build Python via environnement de build isole
-- sortie: artefact versionne, hash, metadata, statut
+1. Docker durci avec sandboxes ephemeres par run
+2. rootless quand l'hote Linux le permet, sans rendre le developpement Windows impossible
+3. `SandboxRunnerFactory` et contrat `SandboxRunner` poses des cette phase
+4. `DockerSandboxRunner` avec flags d'isolation explicites
+5. warning `dev-only` explicite quand l'environnement courant est Docker Desktop
+6. preparation concrete du chemin Firecracker des cette phase, meme si tous les environnements de developpement ne peuvent pas l'executer
+7. user non root
+8. root filesystem read-only autant que possible
+9. `cap-drop=ALL`
+10. `no-new-privileges`
+11. seccomp et AppArmor ou equivalent selon environnement
+12. `--network=none` par defaut
+13. quotas CPU, memoire, pids, tmpfs et timeout
+14. destruction systematique apres run
 
-### Plan d'implementation — Domaine C
+Ce MVP ne doit pas etre confondu avec un niveau de securite de production si l'execution passe par Docker Desktop.
 
-#### Etape C1
-Creer un `BuildService` backend separe du runtime d'execution.
+## 7.2 Installation runtime
 
-#### Etape C2
-Definir les manifests acceptes:
-- TS: `package.json` + lockfile
-- Python: `requirements.txt` dans un premier temps
+Le plan impose:
 
-#### Etape C3
-Mettre en place le cycle:
-- validate static
-- build/install deps
-- artifactize
-- store metadata
-- mark version `ready` ou `failed`
+1. une image runtime Node.js separee
+2. une image runtime Python separee
+3. une image ou un environnement de build distinct si necessaire
+4. des scripts de setup, check et rebuild des runtimes
+5. une verification health avant d'annoncer un tool executable
+6. des images sandbox debuggables et coherentes entre Node.js et Python, avec structure filesystem, UID et conventions d'execution homogenes
+7. pour Node.js sandbox, un Debian slim durci cible est prefere a une image distroless si le container sert a l'execution de code arbitraire et au diagnostic de bugs
 
-#### Etape C4
-Interdire qu'un tool de production lance `npm install` ou `pip install` pendant un run normal.
+## 7.3 Cible Firecracker
 
-### Contrat de build obligatoire — Domaine C
+La cible de securite retenue pour le code utilisateur non fiable est Firecracker.
 
-Chaque build doit produire un resultat persistable contenant au minimum:
-- `buildId`
-- `toolVersionId`
-- `runtime`
-- `startedAt`
-- `finishedAt`
-- `status` = `running` | `succeeded` | `failed`
-- `logsRef?`
-- `artifactRef?`
-- `artifactHash?`
-- `lockfileHash?`
-- `errorSummary?`
+Consequence immediate pour le MVP:
 
-Une version de tool ne peut jamais passer a `ready` sans trace de build associee ou sans politique explicite de bypass pour les natives prepackaged.
+1. l'orchestrateur doit etre concu autour d'un port `SandboxRunner`
+2. une `SandboxRunnerFactory` doit choisir explicitement entre Docker et Firecracker selon l'environnement
+3. Docker ne doit pas etre code comme une dependance structurelle irreversible
+4. le mode Docker Desktop doit etre journalise comme `dev-only` et ne pas etre presente comme securite de production
+5. la preparation du runner Firecracker commence pendant la sequence J6/J7, avec au minimum le contrat, la factory, la detection de disponibilite et un plan d'execution Linux/KVM testable
+6. aucune documentation de ce plan ne doit presenter gVisor comme cible retenue pour ce projet
 
 ---
 
-## 4.4 Domaine D — Execution Orchestrator et sandboxing
+## 8. Impact sur le code existant
 
-### Objectif
-Introduire une vraie orchestration d'execution par run, avec identite, logs, quotas, timeout et destruction automatique du runtime.
+## 8.1 Backend a refondre ou reclasser
 
-### Cible de design
+1. `backend/src/models/UserFunction.model.ts`
+   - source legacy a migrer, pas modele final
 
-#### Composants
-1. `ExecutionOrchestrator`
-2. `SandboxRunner`
-3. `PolicyEngine`
-4. `SecretBroker`
-5. `ObservabilityEmitter`
+2. `backend/src/services/sandbox.service.ts`
+   - coeur actuel a remplacer par `ExecutionOrchestrator`
 
-#### Contrat d'execution commun
-Tout appel, depuis Phil ou Bos, doit passer par le meme contrat:
-- `executionId`
-- `toolDefinitionId`
-- `toolVersionId`
-- `userId`
-- `workflowId`
-- `agentInstanceId?`
-- `source` = `editor_test` | `workflow_run` | `system_validation`
-- `input`
-- `policyRef`
+3. `backend/src/pythonExecutor.ts`
+   - adaptateur legacy transitoire au mieux, pas coeur cible
 
-#### Reponse normalisee
-- `success`
-- `result`
-- `error`
-- `stdout`
-- `stderr`
-- `diagnostics`
-- `durationMs`
-- `exitCode`
-- `executionId`
+4. `backend/src/routes/functions.routes.ts`
+   - a faire evoluer vers des routes outillees `workspaces`, `tools`, `runs`
 
-#### Machine d'etat minimale d'un run
+5. `backend/src/routes/sandbox.routes.ts`
+   - a faire evoluer vers un contrat d'execution structure, pas seulement un test de snippet
 
-Les statuts d'execution autorises sont:
-- `queued`
-- `preflight_failed`
-- `running`
-- `succeeded`
-- `failed`
-- `timed_out`
-- `cancelled`
+6. `backend/src/models/UserSettings.model.ts`
+   - a simplifier vers des references de workspace et preferences, plus `functionPaths[]` comme socle
 
-Transitions autorisees uniquement:
-1. `queued -> preflight_failed`
-2. `queued -> running`
-3. `running -> succeeded`
-4. `running -> failed`
-5. `running -> timed_out`
-6. `queued -> cancelled`
-7. `running -> cancelled`
+7. `backend/src/models/AgentPrototype.model.ts` et `backend/src/models/AgentInstance.model.ts`
+   - a faire pointer vers des references de tools/version compatibles avec le nouveau registry
 
-### Consequences sur l'existant
-- [sandbox.service.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/services/sandbox.service.ts) doit etre remplace
-- [sandbox.routes.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/routes/sandbox.routes.ts) doit devenir une facade vers l'orchestrateur
-- [pythonExecutor.ts](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/backend/src/pythonExecutor.ts) devient legacy ou adaptateur temporaire
-- les agents sur Bos doivent enregistrer les executions et non seulement afficher des blocs UI
+8. `backend/src/services/function.service.ts`
+   - service actuellement centre sur `UserFunction`
+   - a faire evoluer vers le nouveau registry et la nouvelle resolution des references tools pour prototypes et instances
 
-### Choix de sandbox
+9. `backend/src/routes/user-workspace.routes.ts`
+   - endpoint d'hydratation transverse deja critique pour le frontend
+   - doit etre pris en compte dans la migration pour exposer le nouvel etat tools et runs sans casser la rehydratation globale
 
-#### MVP retenu
-- Docker rootless durci
-- container ephemere par run
-- images runtime distinctes `node` et `python`
-- base Debian slim
-- `read-only rootfs`
-- `network=none` par defaut
-- quotas CPU/memoire/pids
-- logs structures
+10. `backend/src/routes/index.ts`
+    - point d'entree de composition des routes
+    - doit etre mis a jour lors de l'introduction des nouvelles routes `tools`, `runs` et de leurs facades de compatibilite
 
-#### Cible securite ulterieure
-- gVisor / Firecracker pour code user non approuve
+11. `backend/src/migrations/004_tools_v2_function_registry.ts`
+    - migration existante deja liee a `user_functions`
+    - doit etre analysee pour eviter de superposer une nouvelle migration incoherente
 
-### Plan d'implementation — Domaine D
+12. `backend/src/seeds/nativeFunctions.seed.ts`
+    - seed existant des fonctions natives
+    - doit etre re-evalue au regard du futur registry et de la separation definition/version/run
 
-#### Etape D1
-Creer l'abstraction `ExecutionOrchestrator` et son interface.
+## 8.2 Frontend a preserver puis rebrancher
 
-#### Etape D2
-Creer un `DockerSandboxRunner` rootless durci.
+1. `components/PhilFunctionsPage.tsx`
+2. `components/FunctionEditorTab.tsx`
+3. `components/FunctionSelector.tsx`
 
-#### Etape D3
-Mettre en place un pre-tool hook obligatoire:
-- validation du contexte,
-- verification version/tool ready,
-- verification policy,
-- verification quotas,
-- verification manifests/runtime.
+4. `stores/useFunctionStore.ts`
+   - store de reference actuel pour le CRUD et le sandbox frontend
+   - devra etre adapte au nouveau contrat API et au nouveau modele de types
 
-#### Etape D4
-Mettre en place un post-tool hook:
-- normalisation resultat/erreur,
-- collecte logs,
-- persistence run,
-- emission websocket.
+5. `types/function.types.ts`
+   - contrat frontend actuel miroir de `IUserFunction`
+   - devra migrer vers les DTOs du nouveau registry et des runs
 
-#### Etape D5
-Refondre les appels de la carte Bos pour qu'un tool call soit une entite persistable, rehydratable et rejouable.
+6. `components/modals/AgentFormModal.tsx` et `components/modals/AgentConfigurationModal.tsx`
+   - utilisent `FunctionSelector` et portent la serialisation des references tools cote prototype et instance
+   - doivent etre prises en compte pour ne pas casser la configuration agent
 
-### Surface API minimale — Domaine D
+7. `types.ts`
+   - contient `functionIds`, `ToolCallRecord` et la structure d'heritage d'instance
+   - devra etre aligne sur les nouvelles references tools/version et sur la nouvelle persistence des runs
 
-La nouvelle equipe ne doit pas improviser les routes. Le minimum attendu est:
+8. `components/RobotPageRouter.tsx`
+   - routeur d'acces a `PhilFunctionsPage`
+   - point d'integration a conserver stable pendant la transition
 
-#### Definitions / versions
-- `GET /api/tools`
-- `POST /api/tools`
-- `GET /api/tools/:definitionId`
-- `PUT /api/tools/:definitionId`
-- `POST /api/tools/:definitionId/versions`
-- `GET /api/tools/:definitionId/versions`
-- `GET /api/tool-versions/:versionId`
+9. projection Bos et hydratation globale
+   - la transition ne touche pas seulement les composants visuels Bos
+   - elle impacte aussi la facon dont les executions sont relues apres refresh et apres hydratation workspace
 
-#### Build
-- `POST /api/tool-versions/:versionId/build`
-- `GET /api/tool-builds/:buildId`
+## 8.3 Couplages metier actuellement sous-documentes mais critiques
 
-#### Runs
-- `POST /api/tool-runs`
-- `GET /api/tool-runs/:executionId`
-- `POST /api/tool-runs/:executionId/cancel`
+1. `services/llm/AgentLoop.ts`
+   - execute aujourd'hui les tools via `/api/sandbox/run`
+   - devra etre rebranche vers le nouveau contrat d'execution sans casser la boucle agent locale
 
-#### Workspaces / health
-- `GET /api/workspaces/:workflowId`
-- `POST /api/workspaces/:workflowId/ensure`
-- `GET /api/tools-runtime/health`
+2. `services/llm/FunctionCallingPromptBuilder.ts`
+   - documente les tools disponibles a partir de `UserFunction`
+   - devra consommer les futures definitions exposees au prompt builder
 
-Ces routes peuvent etre exposees derriere une facade de compatibilite, mais ces primitives doivent exister en backend.
+3. `services/adapters/ILLMAdapter.ts` et usages associes
+   - dependent indirectement du contrat de fonction disponible pour un agent
+   - doivent etre consideres dans la migration du design domain vers le nouveau registry
+
+4. `buildWorkspaceSnapshot` et l'hydratation workspace
+   - le snapshot de rehydratation devra savoir exposer la nouvelle source de verite tools et les runs pertinents sans fuite de secrets
+
+La regle est la suivante:
+
+1. conserver le shell UX valide
+2. changer la source de verite et les contrats backend
+3. ne pas casser les parcours Phil pendant le basculement
+4. faire de Bos une projection de `user_tool_runs`
+5. conserver l'hydratation workspace stable pendant la migration
 
 ---
 
-## 4.5 Domaine E — BDD et idempotence des executions
+## 9. Sequence d'implementation retenue
 
-### Objectif
-Faire de la base la source de verite des executions et de leur cycle de vie.
+## Phase 0 - Cadrage et inventaire
 
-### Collections cibles recommandees
+1. confirmer les invariants issus des recommandations 1 et 2
+2. cartographier les ecarts legacy -> cible
+3. figer les DTOs et le contrat d'execution minimal
+4. inventorier les couplages secondaires: store frontend, modales agent, AgentLoop, hydration workspace, migrations et seeds existants
 
-#### `tool_definitions`
-- metadonnees de tool
-- owner
-- scope
-- runtime
-- schemas I/O
-- permissions declarees
-- niveau de confiance
+## Phase 1 - BDD et registry
 
-#### `tool_versions`
-- contenu source ou reference workspace
-- hash
-- manifest
-- statut validation
-- statut readiness
-- version logique
+1. creer `workspaces`
+2. creer `user_tools`
+3. creer `user_tool_runs`
+4. definir la migration additive depuis `user_functions`
+5. adapter les references agents et workflows
 
-#### `tool_build_artifacts`
-- artefacts produits
-- runtime cible
-- digest image
-- metadata build
+## Phase 2 - Workspace et build
 
-#### `tool_runs`
-- `executionId`
-- refs user/workflow/agent/tool/version
-- input canonicalise
-- resultat ou erreur
-- stdout/stderr
-- status lifecycle
-- duration
-- resource usage
-- retry parent / replay metadata
+1. implementer `WorkspaceManager`
+2. separer les repertoires code, manifests, build et output
+3. implementer `BuildService`
+4. interdire l'installation de dependances dans le run normal
 
-### Modele detaille des `tool_runs`
+## Phase 3 - Runtime et sandbox MVP
 
-Champs minimums a imposer:
-- `_id`
-- `executionId` unique
-- `source` = `editor_test` | `workflow_run` | `system_validation`
-- `userId`
-- `workflowId`
-- `agentInstanceId?`
-- `toolDefinitionId`
-- `toolVersionId`
-- `status`
-- `inputCanonical`
-- `resultPayload?`
-- `errorPayload?`
-- `stdoutRef?`
-- `stderrRef?`
-- `diagnostics?`
-- `startedAt?`
-- `finishedAt?`
-- `durationMs?`
-- `resourceUsage?`
-- `retryOfExecutionId?`
-- `createdAt`
+1. mettre en place les images sandbox Debian slim Node.js et Python, debuggables et durcies
+2. implementer `RuntimeHealthService` avec `mode`, `securityLevel`, `executionReady` et warning `dev-only`
+3. poser `SandboxRunner`, `SandboxRunnerFactory` et `DockerSandboxRunner`
+4. brancher l'orchestrateur sur ce contrat remplaçable
+5. preparer la detection Firecracker/KVM et le point d'extension du futur runner de production
 
-### Regles d'idempotence complementaires
+## Phase 4 - Compatibilite applicative
 
-1. un `executionId` ne doit jamais etre regenere sur retry d'un meme run sans trace de filiation
-2. un run finalise (`succeeded`, `failed`, `timed_out`, `cancelled`, `preflight_failed`) est immuable hors annotations non critiques
-3. les projections UI de Bos et Phil doivent deriver de `tool_runs`, jamais d'un cache frontend seul
-4. les messages de chat affichant un tool call doivent stocker la reference `executionId`
+1. faire evoluer les routes legacy vers des facades de compatibilite
+2. rebrancher Phil
+3. rebrancher Archi et Bos
+4. persister et rehydrater les runs
+5. adapter `useFunctionStore`, `function.types.ts`, `types.ts`, `AgentLoop` et `user-workspace.routes.ts`
 
-#### `tool_bindings`
-- bindings prototype -> definition/version policy
-- bindings instance -> overrides
+## Phase 5 - Validation et durcissement
 
-#### `workspaces`
-- path logique
-- owner/scope
-- manifests
-- snapshots
-- quotas
-- health
-
-#### `secret_policies` / `secrets_metadata` (si active)
-- alias
-- scope
-- permissions
-
-### Consequences sur l'existant
-
-#### `user_functions`
-Ne doit plus etre la source finale. Deux options:
-1. migration complete vers nouvelles collections,
-2. conservation transitoire comme vue legacy/adaptateur.
-
-#### `agent_prototypes.tools`
-Doit evoluer vers un binding reference-safe.
-
-#### `agent_instances.tools`
-Doit sortir du simple tableau de refs pour modeliser:
-- heritage,
-- ajout,
-- retrait,
-- version cible,
-- politique associee.
-
-#### `user_settings.functionPaths`
-Probablement a simplifier ou deplacer vers `workspaces`.
-
-### Invariants d'idempotence obligatoires
-
-1. tout run a un `executionId` unique
-2. une relance ne doit pas dupliquer silencieusement un run deja finalise sans lien explicite
-3. les transitions de statut sont bornees
-4. l'UI peut rehydrater un run sans recomputation
-5. les tool calls du chat sont des projections d'entites persistantes, pas seulement des fragments UI
-
-### Plan d'implementation — Domaine E
-
-#### Etape E1
-Rediger les schemas Mongoose et les transitions d'etat.
-
-#### Etape E2
-Creer les index critiques:
-- par owner/workflow,
-- par `executionId`,
-- par tool/version,
-- par statut/date.
-
-#### Etape E3
-Mettre en place une migration progressive et idempotente depuis les structures actuelles.
-
-#### Etape E4
-Creer les DTOs de projection pour Bos et Phil afin que la rehydratation UI se fasse depuis `tool_runs`.
-
-### Strategie de migration imposee — Domaine E
-
-La migration doit etre additive en 4 temps:
-
-1. creer nouvelles collections et nouvelles routes sans couper les anciennes
-2. dupliquer/ecrire dans ancien + nouveau modele si necessaire pendant une phase transitoire
-3. lire via projections prioritaires sur le nouveau modele avec fallback legacy
-4. supprimer les structures legacy seulement apres validation QA et migration complete
-
-La nouvelle equipe ne doit pas faire de migration big bang.
+1. tests de non regression backend et frontend
+2. tests de charge et d'execution concurrente
+3. tests de securite et d'escape attempts sur la sandbox Docker durcie
+4. validation explicite du comportement `dev-only` sur Docker Desktop et du comportement Linux rootless quand disponible
+5. validation de la preparation Firecracker dans la branche active de developpement, et non comme promesse post-projet
 
 ---
 
-## 4.6 Domaine F — Installation et validation runtime
+## 10. Anti-regressions obligatoires
 
-### Objectif
-Transformer l'installation en composant produit verifiable.
-
-### Problemes actuels a ne plus reproduire
-- runtime Python reel ambigu
-- dependances visibles dans un fichier mais non garanties dans le runtime executeur
-- outils exposes avant validation
-- absence de verification au boot
-
-### Cible de design
-Le demarrage applicatif doit pouvoir verifier:
-1. que les runtimes build et run existent,
-2. que les images sandbox sont presentes ou buildables,
-3. que les dependances natives obligatoires sont installes,
-4. que les imports critiques passent,
-5. que les fonctions natives sont marquees `ready` ou `unhealthy`,
-6. que les routes de health exposent cet etat.
-
-### Consequences sur l'existant
-- `requirements.txt` ne suffit pas comme preuve de disponibilite
-- les fonctions natives ne doivent plus etre "activables" si leur readiness est KO
-- il faut un bootstrap d'installation et des checks de sante au demarrage
-
-### Plan d'implementation — Domaine F
-
-#### Etape F1
-Definir un processus d'installation officiel:
-- prerequis Docker,
-- prebuild images sandbox,
-- init Mongo,
-- verification runtimes,
-- verification manifests.
-
-#### Etape F2
-Creer un `RuntimeHealthService` qui effectue:
-- test des images runtime,
-- test des imports natifs,
-- test des executables build/run,
-- exposition d'un rapport de sante.
-
-#### Etape F3
-Ajouter des scripts idempotents:
-- `setup:tools-runtime`
-- `check:tools-runtime`
-- `build:tool-runtimes`
-- `seed:tool-registry`
-
-#### Etape F4
-Ajouter un test CI bloquant qui verifie qu'aucune fonction native declaree n'est `missing dependency`.
-
-### Sequence d'installation normative — Domaine F
-
-L'installation cible doit suivre cet ordre, sans permutation:
-
-1. initialiser MongoDB
-2. construire les images runtime sandbox
-3. verifier la disponibilite Docker rootless ciblee
-4. creer/valider les workspaces de base
-5. seed des tool definitions systeme
-6. executer les health checks runtime
-7. marquer les versions systeme `ready` ou `unhealthy`
-8. seulement ensuite exposer les tools dans l'UI
-
-### Responsabilites d'installation
-
-- `setup script` : prepare l'environnement
-- `seed script` : installe definitions et metadata systeme
-- `health service` : verifie la readiness runtime
-- `UI` : ne doit jamais rendre une fonction executable sans readiness backend
+1. aucune bascule big bang
+2. aucune suppression immediate de `user_functions`
+3. aucune rupture de Phil sans facade de transition
+4. aucune execution annoncee `ready` sans verification runtime
+5. aucun acces reseau par defaut dans les runs
+6. aucune dependance a Alpine comme standard sandbox
+7. aucune documentation de ce plan ne doit presenter gVisor comme choix retenu
+8. aucune rupture de l'hydratation workspace ou de la boucle AgentLoop pendant la migration
+9. aucune migration ne doit ignorer les seeds et migrations deja presentes autour de `user_functions`
+10. aucune image sandbox d'execution arbitraire ne doit etre basculee en distroless sans justification technique explicite sur le debug, l'observabilite et le risque traite
+11. aucun mode Docker Desktop ne doit etre presente comme securite de production
 
 ---
 
-## 5. Repercussions fonctionnelles sur les pages de l'application
+## 11. Definition of done du Plan 1
 
-## 5.1 Page Phil — Fonctions personnalisees
+Le Plan 1 est considere termine quand les conditions suivantes sont toutes vraies:
 
-### Ce qui reste vrai
-- l'UX globale de la page est conservee
-- l'editeur et la bibliotheque restent les deux points d'entree
-
-### Ce qui change
-- l'editeur ne teste plus un snippet directement dans un pseudo-sandbox legacy
-- il cree/edite une definition + une version de travail
-- le test passe par un run structure `editor_test`
-- les erreurs doivent remonter `stdout/stderr/diagnostics`
-
-### Impact de code
-- [PhilFunctionsPage.tsx](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/components/PhilFunctionsPage.tsx): faible impact UX, fort impact data-loading
-- [FunctionEditorTab.tsx](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/components/FunctionEditorTab.tsx): fort impact backend contract
-
-## 5.2 Page Archi — Prototypage d'agents
-
-### Ce qui change
-- la selection de tools doit porter sur des definitions/version bindings, pas sur des documents `user_functions` trop polymorphes
-- l'heritage prototype -> instance doit etre explicite et persistable
-
-### Impact de code
-- modales prototype a refactorer cote DTO et persistance
-- [FunctionSelector.tsx](c:/AITest/A-IR-DD2/PersistAIRDD2/A-IR-DD2/components/FunctionSelector.tsx) peut etre conserve avec adaptation de source de donnees
-
-## 5.3 Page Bos — Carte du workflow
-
-### Ce qui change
-- les tool calls affiches doivent etre reconstruits depuis des runs persistes
-- les executions doivent garder la structure visuelle actuelle, mais derivee d'une source de verite BDD
-- l'appel depuis un agent doit passer par `tool_runs` et non par un executeur ad hoc
-
-### Impact de code
-- la logique de chat/tool call doit persister davantage qu'un bloc de texte
-- les balises invisibles de rehydratation demandees par le besoin fonctionnel doivent provenir d'identifiants de run et non d'un bricolage frontend
-
----
-
-## 6. Plan de migration par phases
-
-## Phase 0 — Stabilisation et preparation
-
-### But
-Geler les points instables avant refonte profonde.
-
-### Actions
-- conserver l'UX validee de Phil
-- figer les endpoints legacy comme "compat mode"
-- documenter la liste des composants impactes
-- preparer les scripts de migration et de nettoyage test
-
-### Exit criteria
-- liste complete des fichiers impactes approuvee
-- strategie de migration additive validee
-- anciens endpoints tagges `legacy/compat`
-
-## Phase 1 — Fondations BDD + contrat d'execution
-
-### But
-Creer les nouvelles entites et le contrat d'execution commun sans encore rebrancher toute l'UI.
-
-### Livrables
-- schemas Mongoose
-- transitions d'etat des runs
-- DTOs unifies
-- services `WorkspaceManager`, `BuildService`, `ExecutionOrchestrator`, `RuntimeHealthService`
-
-### Exit criteria
-- schemas et index valides
-- machine d'etat des runs implementee
-- DTOs de projection figes
-
-## Phase 2 — Runtime et sandbox MVP
-
-### But
-Rendre executable un run ephemere fiable.
-
-### Livrables
-- images runtime Debian slim
-- Docker rootless durci
-- pre/post hooks
-- logs structures
-- health checks runtime
-
-### Exit criteria
-- un run `editor_test` et un run `workflow_run` passent par le meme orchestrateur
-- les timeouts et quotas sont appliques et testes
-- les logs et erreurs sont normalises
-
-## Phase 3 — Integration Phil
-
-### But
-Brancher l'editeur sur le nouveau systeme.
-
-### Livrables
-- CRUD definition/version
-- test editor via `tool_runs`
-- affichage normalise de resultat/erreur
-
-### Exit criteria
-- l'editeur Phil n'utilise plus `sandbox.service.ts`
-- la console affiche `stdout/stderr/diagnostics/executionId`
-
-## Phase 4 — Integration Archi/Bos
-
-### But
-Rebrancher selection et execution reelles des tools dans les agents.
-
-### Livrables
-- bindings prototype/instance
-- run workflow persistants
-- rehydratation UI depuis BDD
-
-### Exit criteria
-- Archi selectionne des bindings stables
-- Bos rehydrate les tool calls depuis `tool_runs`
-- l'heritage prototype -> instance est teste
-
-## Phase 5 — Nettoyage legacy
-
-### But
-Sortir les anciennes abstractions devenues toxiques.
-
-### Livrables
-- deprecation `sandbox.service.ts`
-- deprecation `pythonExecutor.ts` comme executeur principal
-- migration ou suppression `user_functions` legacy selon strategie retenue
-
-### Exit criteria
-- aucun flux critique ne depend encore des executeurs legacy
-- documentation de suppression/migration finalisee
-
----
-
-## 7. Risques et contre-mesures
-
-### Risque 1 — Refactor BDD trop brutal
-Contre-mesure: migration additive, projections legacy, suppression differée.
-
-### Risque 2 — Bloquer l'editeur pendant la refonte
-Contre-mesure: conserver l'UX, changer uniquement le backend contract par etapes.
-
-### Risque 3 — Refaire une architecture de sandbox avant la readiness runtime
-Contre-mesure: imposer `RuntimeHealthService` et `ToolVersion.status` avant l'execution generalisee.
-
-### Risque 4 — Confusion persistante entre configuration prototype et instance
-Contre-mesure: modeliser explicitement les bindings et l'heritage.
-
-### Risque 5 — Coupler les fonctions natives au meme plan detaille que les fondations
-Contre-mesure: garder la reconstruction des natives dans un **second plan distinct**, comme demande par l'equipe.
-
----
-
-## 8. Definition of Done de ce premier plan
-
-Le premier plan sera considere comme correctement execute par les futurs agents si:
-
-1. le nouveau modele BDD est specifie et migre sans ambiguite
-2. le contrat d'execution est unique entre Phil et Bos
-3. le sandbox n'est plus un service ad hoc mais une couche d'orchestration remplaçable
-4. l'installation et les checks runtime sont industrialises
-5. Archi/Bos/Phil pointent vers les nouvelles projections sans casser l'UX validee
-6. la base permet la rehydratation des tool calls et des executions de facon idempotente
-
-## 8.1 Zones d'ombre traitees par cette revision
-
-Les zones d'ombre suivantes ont ete explicitement levees dans cette revision du plan:
-
-1. definition normative des objets `ToolDefinition`, `ToolVersion`, `BuildArtifact`, `Run`, `Binding`
-2. machine d'etat minimale des runs
-3. structure cible du repository pour `WorkspaceManager`
-4. contrat minimum des collections critiques
-5. surface API minimale attendue
-6. strategie de migration additive et non destructive
-7. sequence d'installation normative
-8. exit criteria par phase
-
-## 8.2 Zones encore volontairement hors perimetre
-
-Restent volontairement hors de ce plan 1, car reservees au plan 2:
-
-1. detail de chaque fonction native systeme
-2. policies fines par tool natif specifique
-3. implementation detaillee du function calling pour Ollama, LMStudio et Jan
-4. taxonomie complete des permissions reseau et secrets par tool natif
-
----
-
-## 9. Suite attendue
-
-Une fois ce plan structurel valide par l'equipe, le **second plan** devra se concentrer exclusivement sur:
-- la reconstruction des fonctions natives,
-- leurs manifests et dependances,
-- leurs protocoles d'erreur,
-- leurs tests,
-- la prise en charge particuliere des LLMs locaux pour le function calling.
-
-Ce second plan ne devra pas reouvrir les choix structurels deja arbitres ici.
+1. le modele `workspace + user_tools + user_tool_runs` est en place ou fige contractuellement
+2. le build est separe du run
+3. le runtime MVP est installable et verifiable sur Docker durci, avec distinction explicite entre `dev-only` et securite de production
+4. le backend orchestre les executions ephemeres via un contrat deja prepare pour Firecracker
+5. Phil, Archi et Bos peuvent etre rebranches sans rupture structurelle
+6. les documents de mission derives du present plan sont alignes sur ces decisions et sur aucune autre source
+7. les couches store frontend, AgentLoop, hydration workspace, modales agent et migrations legacy sont explicitement traitees dans le chantier

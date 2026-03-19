@@ -21,6 +21,9 @@ import localLLMProfilesRoutes from './routes/local-llm-profiles.routes';
 import llmProxyRoutes from './routes/llm-proxy.routes';
 import userSettingsRoutes from './routes/user-settings.routes';
 import userWorkspaceRoutes from './routes/user-workspace.routes';
+import workspacesTransitionRoutes from './routes/workspaces.routes';
+import toolsRoutes from './routes/tools.routes';
+import runsRoutes from './routes/runs.routes';
 import mediaRoutes from './routes/media.routes';
 import functionsRoutes from './routes/functions.routes';
 import sandboxRoutes from './routes/sandbox.routes';
@@ -118,6 +121,9 @@ app.use(userSettingsRoutes);
 
 // User workspace composite routes (Jalon 4 - Phase 4: Hydration)
 app.use('/api/user', userWorkspaceRoutes);
+app.use('/api/workspaces', workspacesTransitionRoutes);
+app.use('/api/tools', toolsRoutes);
+app.use('/api/runs', runsRoutes);
 
 // ⭐ NOUVEAU: Routes média (stockage images, fichiers générés par agents)
 app.use('/api/media', mediaRoutes);

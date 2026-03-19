@@ -21,6 +21,15 @@ interface WorkflowParams {
 // CORRECTION SOLID: mergeParams: true pour hériter des paramètres du parent (:workflowId)
 const router = Router({ mergeParams: true });
 
+const toolSelectionSchema = z.object({
+    toolId: z.string(),
+    versionRef: z.object({
+        versionTag: z.string().optional(),
+        versionNumber: z.number().optional(),
+        workspaceId: z.string().nullable().optional()
+    }).optional()
+});
+
 // Schema validation
 const createAgentInstanceSchema = z.object({
     workflowId: z.string(),
@@ -35,6 +44,7 @@ const createAgentInstanceSchema = z.object({
     capabilities: z.array(z.string()).default([]),
     historyConfig: z.object({}).passthrough().optional(),
     tools: z.array(z.object({}).passthrough()).optional(),
+    toolSelections: z.array(toolSelectionSchema).optional(),
     outputConfig: z.object({}).passthrough().optional(),
     robotId: CanonicalRobotIdEnum,
     
@@ -62,7 +72,8 @@ const createAgentInstanceSchema = z.object({
     // ⭐ J6: functionInheritance — héritage des fonctions depuis le prototype
     functionInheritance: z.object({
         inheritFromPrototype: z.boolean(),
-        overrideFunctionIds: z.array(z.string()).optional()
+        overrideFunctionIds: z.array(z.string()).optional(),
+        overrideToolSelections: z.array(toolSelectionSchema).optional()
     }).optional()
 });
 
@@ -247,6 +258,9 @@ router.post('/from-prototype', requireAuth,
           : ['Chat'];
         
         const finalTools = Array.isArray(prototype.tools) ? prototype.tools : [];
+        const finalToolSelections = Array.isArray((prototype as any).toolSelections) && (prototype as any).toolSelections.length > 0
+            ? (prototype as any).toolSelections
+            : finalTools.map((toolId: mongoose.Types.ObjectId) => ({ toolId: toolId.toString() }));
         
         // 4. PHASE 2 - HistoryConfig: Use frontend config if provided
         const finalHistoryConfig = configuration_json?.historyConfig || prototype.historyConfig || {};
@@ -300,6 +314,7 @@ router.post('/from-prototype', requireAuth,
             historyConfig: finalHistoryConfig,  // ⭐ PHASE 2: From frontend configuration_json
             outputConfig: finalOutputConfig,  // ⭐ PHASE 2: From frontend configuration_json
             tools: finalTools,
+            toolSelections: finalToolSelections,
             robotId: finalRobotId,
             // ⭐ LOCAL LLM: Persist localLLMProfileId for correct endpoint resolution
             localLLMProfileId: finalLocalLLMProfileId,
@@ -316,7 +331,8 @@ router.post('/from-prototype', requireAuth,
             // ⭐ J6: functionInheritance — hériter les fonctions du prototype par défaut
             functionInheritance: {
                 inheritFromPrototype: true,
-                overrideFunctionIds: []
+                overrideFunctionIds: [],
+                overrideToolSelections: []
             },
 
             // initialisation contenu et métriques
@@ -456,9 +472,12 @@ router.put('/:id',
                 if (Array.isArray(configuration_json.capabilities)) {
                     instance.capabilities = configuration_json.capabilities;
                 }
+                if (Array.isArray(configuration_json.toolSelections)) {
+                    instance.toolSelections = configuration_json.toolSelections;
+                }
                 // ⭐ ARCHITECTURE NOTE — dual storage:
-                //   instance.tools (ObjectId[]) = V2 function registry refs from prototype (set at creation)
-                //   functionInheritance.overrideFunctionIds (String[]) = instance-level override IDs
+                //   instance.tools (ObjectId[]) = stable tool IDs mirrored across legacy/cible
+                //   functionInheritance.overrideFunctionIds (String[]) = instance-level override IDs in the same ID space
                 //   These serve DIFFERENT purposes and are NOT the same field.
                 //
                 //   DO NOT overwrite instance.tools from configuration_json.tools here because:
@@ -481,6 +500,11 @@ router.put('/:id',
                 // J6: Function Inheritance
                 if (configuration_json.functionInheritance !== undefined) {
                     instance.functionInheritance = configuration_json.functionInheritance;
+                    const overrideToolSelections = Array.isArray(configuration_json.functionInheritance.overrideToolSelections)
+                        ? configuration_json.functionInheritance.overrideToolSelections
+                        : Array.isArray(configuration_json.functionInheritance.overrideFunctionIds)
+                            ? configuration_json.functionInheritance.overrideFunctionIds.map((toolId: string) => ({ toolId }))
+                            : [];
                     // ⭐ SYNC: When override mode is active, also update instance.tools with ObjectId refs
                     // so the V2 function registry is consistent for runtime execution.
                     if (
@@ -490,6 +514,16 @@ router.put('/:id',
                         instance.tools = configuration_json.functionInheritance.overrideFunctionIds
                             .filter((id: string) => mongoose.Types.ObjectId.isValid(id))
                             .map((id: string) => new mongoose.Types.ObjectId(id));
+                        instance.toolSelections = overrideToolSelections;
+                    } else if (configuration_json.functionInheritance.inheritFromPrototype !== false) {
+                        const prototype = instance.prototypeId
+                            ? await AgentPrototype.findOne({ _id: instance.prototypeId, userId: user.id }).select('tools toolSelections')
+                            : null;
+                        const inheritedToolIds = Array.isArray(prototype?.tools) ? prototype.tools : [];
+                        instance.tools = inheritedToolIds;
+                        instance.toolSelections = Array.isArray((prototype as any)?.toolSelections) && (prototype as any).toolSelections.length > 0
+                            ? (prototype as any).toolSelections
+                            : inheritedToolIds.map((toolId: mongoose.Types.ObjectId) => ({ toolId: toolId.toString() }));
                     }
                 }
                 // ⭐ LOCAL LLM: Persist localLLMProfileId (which local LLM profile to use)

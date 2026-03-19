@@ -22,7 +22,7 @@ const ORIGIN_BADGE: Record<FunctionOrigin, string> = {
 };
 
 export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds, onChange, readOnly = false, filterDisabled = false }) => {
-  const { functions, isLoading, loadFunctions } = useFunctionStore();
+  const { functions, isLoading, loadFunctions, runtimeCompatibility } = useFunctionStore();
   const { isAuthenticated } = useAuth();
   const [search, setSearch] = useState('');
 
@@ -115,6 +115,18 @@ export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds,
           placeholder="Rechercher une fonction..."
           className="w-full p-2 text-sm bg-gray-800 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500/50 text-gray-200 placeholder-gray-500"
         />
+      )}
+
+      {runtimeCompatibility && (
+        <div className={`rounded-lg border px-3 py-2 text-[11px] ${
+          runtimeCompatibility.executionReady
+            ? runtimeCompatibility.securityLevel === 'dev-only'
+              ? 'border-amber-500/30 bg-amber-950/20 text-amber-200'
+              : 'border-emerald-500/20 bg-emerald-950/10 text-emerald-200'
+            : 'border-red-500/30 bg-red-950/20 text-red-200'
+        }`}>
+          <span className="font-medium">Runtime:</span> {runtimeCompatibility.warning || runtimeCompatibility.summary}
+        </div>
       )}
 
       {/* Function list */}

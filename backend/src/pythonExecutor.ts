@@ -12,10 +12,13 @@ import path from 'path';
 import mongoose from 'mongoose';
 import { UserFunction, IUserFunction } from './models/UserFunction.model';
 import { WHITELISTED_PYTHON_TOOLS } from './config';
+import { syncUserToolMirrorFromLegacyFunction } from './services/userToolMirror.service';
+import { ExecutionOrchestrator } from './services/runtime/ExecutionOrchestrator';
 
 // Path to the Tools V2 runner.py (J7.3)
 const PYTHON_RUNNER_PATH = path.join(__dirname, '../python/runner.py');
 const PYTHON_TIMEOUT_MS = 15_000;
+const executionOrchestrator = new ExecutionOrchestrator();
 
 // The manual calculation of __dirname using ESM features (import.meta.url) has been removed.
 // This project is configured as a CommonJS module (see tsconfig.json),
@@ -116,59 +119,21 @@ export const executeFunctionById = async (
         throw new Error(`Function '${fn.name}' is disabled.`);
     }
 
-    // --- 2. Build sandboxed env context ---
-    const workspaceRoot = process.env.WORKSPACE_ROOT ?? '/sandbox';
-    const env = {
-        ...process.env,
-        SANDBOX_WORKSPACE_DIR: `${workspaceRoot}/users/${userId}/workspace`,
-        FUNCTION_USER_ID: userId,
-        FUNCTION_AGENT_ID: agentId ?? '',
-        PYTHONIOENCODING: 'utf-8'
-    };
-
-    // --- 3. Spawn runner.py ---
-    return new Promise((resolve, reject) => {
-        const argsJson = JSON.stringify(args);
-        const proc = spawn('python3', [PYTHON_RUNNER_PATH, fn.name, argsJson], { env });
-
-        let stdout = '';
-        let stderr = '';
-        let timedOut = false;
-
-        proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
-        proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
-
-        const timer = setTimeout(() => {
-            timedOut = true;
-            proc.kill('SIGTERM');
-        }, PYTHON_TIMEOUT_MS);
-
-        proc.on('close', (code: number | null) => {
-            clearTimeout(timer);
-
-            if (timedOut) {
-                return reject(new Error(`Function '${fn.name}' timed out after ${PYTHON_TIMEOUT_MS / 1000}s.`));
-            }
-
-            if (code !== 0) {
-                let errorMessage = stderr;
-                try {
-                    const parsed = JSON.parse(stderr);
-                    errorMessage = parsed.error ?? stderr;
-                } catch { /* keep raw stderr */ }
-                return reject(new Error(errorMessage || `Function '${fn.name}' failed with exit code ${code}.`));
-            }
-
-            try {
-                resolve(JSON.parse(stdout));
-            } catch {
-                reject(new Error(`Could not parse JSON output from function '${fn.name}': ${stdout.slice(0, 300)}`));
-            }
-        });
-
-        proc.on('error', (err: Error) => {
-            clearTimeout(timer);
-            reject(new Error(`Failed to start Python process for '${fn.name}': ${err.message}`));
-        });
+    await syncUserToolMirrorFromLegacyFunction(fn).catch((error) => {
+        console.warn('[pythonExecutor] user_tools mirror sync warning:', error instanceof Error ? error.message : String(error));
     });
+
+    const result = await executionOrchestrator.execute({
+        fn,
+        userId,
+        args,
+        launchContext: agentId ? 'workflow_run' : 'system_validation',
+        agentInstanceId: agentId
+    });
+
+    if (!result.success) {
+        throw new Error(result.stderr || `Function '${fn.name}' failed.`);
+    }
+
+    return result.output as object;
 };

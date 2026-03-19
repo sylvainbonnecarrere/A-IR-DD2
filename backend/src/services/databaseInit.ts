@@ -19,6 +19,11 @@
 
 import mongoose from 'mongoose';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
+import {
+  getRepairOnlyProtectedFields,
+  getUserToolStartupSyncPhase,
+  syncUserToolsFromLegacyFunctionsOnStartup
+} from './userToolStartupSync.service';
 
 /**
  * Define MongoDB collection schemas with validation rules
@@ -258,6 +263,97 @@ const COLLECTION_SCHEMAS = {
         }
       }
     }
+  },
+
+  workspaces: {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        additionalProperties: true,
+        properties: {
+          _id: { bsonType: 'objectId' },
+          ownerUserId: { bsonType: 'objectId' },
+          scopeType: { bsonType: 'string' },
+          scopeId: { bsonType: 'objectId' },
+          logicalRoot: { bsonType: 'string' },
+          runtimeRoots: { bsonType: 'object' },
+          manifests: { bsonType: 'object' },
+          status: { bsonType: 'string' },
+          createdAt: { bsonType: 'date' },
+          updatedAt: { bsonType: 'date' }
+        }
+      }
+    }
+  },
+
+  user_tools: {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        additionalProperties: true,
+        properties: {
+          _id: { bsonType: 'objectId' },
+          ownerUserId: { bsonType: ['objectId', 'null'] },
+          workspaceId: { bsonType: ['objectId', 'null'] },
+          workflowId: { bsonType: ['objectId', 'null'] },
+          scopeType: { bsonType: 'string' },
+          name: { bsonType: 'string' },
+          runtime: { bsonType: 'string' },
+          status: { bsonType: 'string' },
+          currentVersion: { bsonType: 'object' },
+          versions: { bsonType: 'array' },
+          isEnabled: { bsonType: 'bool' },
+          isReadonly: { bsonType: 'bool' },
+          createdAt: { bsonType: 'date' },
+          updatedAt: { bsonType: 'date' }
+        }
+      }
+    }
+  },
+
+  user_tool_runs: {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        additionalProperties: true,
+        properties: {
+          _id: { bsonType: 'objectId' },
+          executionId: { bsonType: 'string' },
+          ownerUserId: { bsonType: 'objectId' },
+          toolId: { bsonType: 'objectId' },
+          workflowId: { bsonType: ['objectId', 'null'] },
+          agentPrototypeId: { bsonType: ['objectId', 'null'] },
+          agentInstanceId: { bsonType: ['objectId', 'null'] },
+          launchContext: { bsonType: 'string' },
+          status: { bsonType: 'string' },
+          runtime: { bsonType: 'string' },
+          runner: { bsonType: 'string' },
+          inputs: { bsonType: 'object' },
+          createdAt: { bsonType: 'date' },
+          updatedAt: { bsonType: 'date' }
+        }
+      }
+    }
+  },
+
+  secrets_metadata: {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        additionalProperties: true,
+        properties: {
+          _id: { bsonType: 'objectId' },
+          ownerUserId: { bsonType: 'objectId' },
+          alias: { bsonType: 'string' },
+          scopeType: { bsonType: 'string' },
+          scopeId: { bsonType: ['objectId', 'null'] },
+          provider: { bsonType: ['string', 'null'] },
+          status: { bsonType: 'string' },
+          createdAt: { bsonType: 'date' },
+          updatedAt: { bsonType: 'date' }
+        }
+      }
+    }
   }
 };
 
@@ -308,7 +404,66 @@ const INDEX_DEFINITIONS = {
   user_functions: [
     { spec: { userId: 1, workflowId: 1, isEnabled: 1 }, options: { name: 'idx_user_workflow_enabled' } },
     { spec: { origin: 1, isEnabled: 1 }, options: { name: 'idx_origin_enabled' } },
-    { spec: { name: 1, userId: 1 }, options: { unique: true, sparse: true, name: 'idx_name_user_unique' } }
+    { spec: { name: 1, userId: 1 }, options: { unique: true, sparse: false, name: 'idx_name_user_unique' } }
+  ],
+  workspaces: [
+    { spec: { ownerUserId: 1, scopeType: 1, scopeId: 1 }, options: { unique: true, name: 'uq_workspace_owner_scope' } },
+    { spec: { ownerUserId: 1, status: 1, updatedAt: -1 }, options: { name: 'idx_workspace_owner_status_updated' } }
+  ],
+  user_tools: [
+    {
+      spec: { scopeType: 1, name: 1 },
+      options: {
+        unique: true,
+        partialFilterExpression: { scopeType: 'native', ownerUserId: null },
+        name: 'uq_user_tools_native_name'
+      }
+    },
+    {
+      spec: { ownerUserId: 1, workflowId: 1, name: 1 },
+      options: {
+        unique: true,
+        partialFilterExpression: { scopeType: 'user' },
+        name: 'uq_user_tools_owner_workflow_name'
+      }
+    },
+    {
+      spec: { ownerUserId: 1, workflowId: 1, isEnabled: 1, status: 1, name: 1 },
+      options: { name: 'idx_user_tools_owner_workflow_enabled_status_name' }
+    },
+    {
+      spec: { workspaceId: 1, updatedAt: -1 },
+      options: {
+        partialFilterExpression: { workspaceId: { $type: 'objectId' } },
+        name: 'idx_user_tools_workspace_updated'
+      }
+    }
+  ],
+  user_tool_runs: [
+    { spec: { executionId: 1 }, options: { unique: true, name: 'uq_user_tool_runs_execution_id' } },
+    { spec: { ownerUserId: 1, createdAt: -1 }, options: { name: 'idx_user_tool_runs_owner_created' } },
+    {
+      spec: { ownerUserId: 1, workflowId: 1, createdAt: -1 },
+      options: {
+        partialFilterExpression: { workflowId: { $type: 'objectId' } },
+        name: 'idx_user_tool_runs_owner_workflow_created'
+      }
+    },
+    { spec: { toolId: 1, createdAt: -1 }, options: { name: 'idx_user_tool_runs_tool_created' } },
+    {
+      spec: { ownerUserId: 1, status: 1, updatedAt: -1 },
+      options: {
+        partialFilterExpression: { status: { $in: ['queued', 'running'] } },
+        name: 'idx_user_tool_runs_active_watchdog'
+      }
+    }
+  ],
+  secrets_metadata: [
+    {
+      spec: { ownerUserId: 1, scopeType: 1, scopeId: 1, alias: 1 },
+      options: { unique: true, name: 'uq_secrets_metadata_owner_scope_alias' }
+    },
+    { spec: { ownerUserId: 1, status: 1, updatedAt: -1 }, options: { name: 'idx_secrets_metadata_owner_status_updated' } }
   ]
 };
 
@@ -396,6 +551,7 @@ export async function initializeDatabase(): Promise<void> {
 
     // ─── Toujours seeder les fonctions natives (idempotent) ───────────────
     await seedNativeFunctions(db);
+    await syncUserToolsFromLegacyFunctions(db);
 
     console.info('🎯 Database initialization complete!');
   } catch (error) {
@@ -630,6 +786,31 @@ async function seedNativeFunctions(db: any): Promise<void> {
   } catch (err) {
     // Non-bloquant : log mais ne crashe pas le démarrage
     console.warn('⚠️  seedNativeFunctions warning:', err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function syncUserToolsFromLegacyFunctions(db: any): Promise<void> {
+  try {
+    const phase = getUserToolStartupSyncPhase();
+    const summary = await syncUserToolsFromLegacyFunctionsOnStartup(db);
+
+    if (summary.created > 0 || summary.updated > 0) {
+      console.info(
+        `🔁 startup sync user_functions -> user_tools [${summary.phase}] scanned=${summary.scanned} created=${summary.created} updated=${summary.updated} skipped=${summary.skippedExisting}`
+      );
+    } else {
+      console.debug(
+        `  ✓ startup sync user_tools déjà convergent [${summary.phase}] scanned=${summary.scanned} skipped=${summary.skippedExisting}`
+      );
+    }
+
+    if (phase === 'repair-only') {
+      console.info(
+        `🛡️ startup sync repair-only protège les champs cibles: ${getRepairOnlyProtectedFields().join(', ')}`
+      );
+    }
+  } catch (err) {
+    console.warn('⚠️  syncUserToolsFromLegacyFunctions warning:', err instanceof Error ? err.message : String(err));
   }
 }
 

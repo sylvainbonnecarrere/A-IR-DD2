@@ -47,7 +47,7 @@ export interface IUserFunction extends Document {
     outputSchema: object;                   // JSON Schema v7
 
     // --- Code source ---
-    codePath?: string;                      // Chemin relatif depuis WORKSPACE_ROOT (fonctions custom)
+    codePath?: string;                      // Legacy path hint; workflow-scoped custom functions are progressively resolved from Workspace.runtimeRoots.sourceRoot
     codeInline?: string;                    // Code inline pour les natifs ou petites fonctions
 
     // --- Dépendances ---

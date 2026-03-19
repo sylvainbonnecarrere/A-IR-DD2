@@ -24,6 +24,17 @@ export interface IPersistenceConfig {
     retentionDays?: number;        // Durée de conservation en jours
 }
 
+export interface IToolSelectionVersionRef {
+    versionTag?: string;
+    versionNumber?: number;
+    workspaceId?: string | null;
+}
+
+export interface IToolSelection {
+    toolId: string;
+    versionRef?: IToolSelectionVersionRef;
+}
+
 export interface IAgentPrototype extends Document {
     userId: mongoose.Types.ObjectId;
     workflowId?: mongoose.Types.ObjectId; // ⭐ V2: Scope prototype to a specific workflow
@@ -36,6 +47,7 @@ export interface IAgentPrototype extends Document {
     historyConfig?: object;
     // ⭐ Tools V2: Références vers user_functions (rétrocompat : legacyTools conservé)
     tools?: mongoose.Types.ObjectId[];     // Références vers user_functions._id
+    toolSelections?: IToolSelection[];     // Références versionnées vers user_tools
     legacyTools?: object[];               // Ancien format inline (migration rétrocompat)
     outputConfig?: object;
     robotId: string;
@@ -57,6 +69,15 @@ const PersistenceConfigSchema = new Schema<IPersistenceConfig>({
         type: String, 
         enum: ['db', 'local', 'cloud'], 
         default: 'db' 
+    }
+}, { _id: false });
+
+const ToolSelectionSchema = new Schema<IToolSelection>({
+    toolId: { type: String, required: true, trim: true },
+    versionRef: {
+        versionTag: { type: String, required: false, trim: true },
+        versionNumber: { type: Number, required: false },
+        workspaceId: { type: String, required: false, default: null }
     }
 }, { _id: false });
 
@@ -110,6 +131,7 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
         type: Schema.Types.ObjectId,
         ref: 'UserFunction'
     }],
+    toolSelections: [ToolSelectionSchema],
     // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)
     legacyTools: [Schema.Types.Mixed],
     outputConfig: Schema.Types.Mixed,

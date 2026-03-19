@@ -2,8 +2,10 @@ import { AgentInstance } from '../models/AgentInstance.model';
 import { AgentJournal } from '../models/AgentJournal.model';
 import { AgentPrototype } from '../models/AgentPrototype.model';
 import { LLMConfig } from '../models/LLMConfig.model';
+import { UserToolRun } from '../models/UserToolRun.model';
 import UserSettings from '../models/UserSettings.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
+import type { RuntimeCompatibilityContext } from '../services/runtimeCompatibility.service';
 import { transformAgentInstanceForFrontend } from './transforms';
 
 interface SnapshotWorkflowLike {
@@ -24,7 +26,36 @@ interface SnapshotWorkflowLike {
     lastSavedAt?: Date;
 }
 
+interface SnapshotWorkspaceLike {
+    _id?: { toString(): string };
+    id?: string;
+    scopeType: 'project' | 'workflow';
+    scopeId: { toString(): string } | string;
+    status: 'active' | 'missing' | 'corrupted' | 'archived';
+    manifests?: {
+        packageJson?: boolean;
+        packageLockJson?: boolean;
+        requirementsTxt?: boolean;
+        pyprojectToml?: boolean;
+    };
+    lastScanAt?: Date | null;
+}
+
 export interface WorkspaceSnapshot {
+    runtimeCompatibility?: RuntimeCompatibilityContext;
+    workspaceContext?: {
+        id: string;
+        scopeType: 'project' | 'workflow';
+        scopeId: string;
+        status: 'active' | 'missing' | 'corrupted' | 'archived';
+        manifests: {
+            packageJson: boolean;
+            packageLockJson: boolean;
+            requirementsTxt: boolean;
+            pyprojectToml: boolean;
+        };
+        lastScanAt?: Date | null;
+    };
     workflow: {
         id: string;
         name: string;
@@ -85,6 +116,43 @@ export interface WorkspaceSnapshot {
         capabilities: Record<string, boolean>;
         updatedAt: Date;
     }>;
+    toolRuns: Array<{
+        id: string;
+        executionId: string;
+        toolId: string;
+        toolVersionTag: string;
+        toolContentHash: string;
+        workflowId?: string;
+        agentPrototypeId?: string;
+        agentInstanceId?: string;
+        launchContext: 'editor_test' | 'workflow_run' | 'system_validation';
+        status: 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out';
+        runtime: 'typescript' | 'python';
+        runner: 'docker_sandbox' | 'docker_rootless' | 'firecracker';
+        inputs: Record<string, unknown>;
+        outputs?: {
+            result?: unknown;
+            stdout?: string;
+            stderr?: string;
+            artifacts?: Array<{
+                path: string;
+                kind: 'file' | 'json' | 'log';
+            }>;
+        };
+        error?: {
+            code?: string;
+            message: string;
+            retryable?: boolean;
+        };
+        timing: {
+            queuedAt?: Date | null;
+            startedAt?: Date | null;
+            finishedAt?: Date | null;
+            durationMs?: number | null;
+        };
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
     userSettings: {
         language: string;
         theme: string;
@@ -101,6 +169,8 @@ export interface WorkspaceSnapshot {
 interface BuildWorkspaceSnapshotOptions {
     userId: string;
     workflow: SnapshotWorkflowLike | null;
+    workspace?: SnapshotWorkspaceLike | null;
+    runtimeCompatibility?: RuntimeCompatibilityContext;
     wasCreated?: boolean;
     healingActions?: string[];
     includeLegacyPrototypes?: boolean;
@@ -143,6 +213,29 @@ function transformAgentPrototypeForFrontend(proto: any) {
     };
 }
 
+function transformUserToolRunForFrontend(run: any) {
+    return {
+        id: run._id?.toString() || run.id,
+        executionId: run.executionId,
+        toolId: run.toolId?.toString() || '',
+        toolVersionTag: run.toolVersionTag,
+        toolContentHash: run.toolContentHash,
+        workflowId: run.workflowId?.toString(),
+        agentPrototypeId: run.agentPrototypeId?.toString(),
+        agentInstanceId: run.agentInstanceId?.toString(),
+        launchContext: run.launchContext,
+        status: run.status,
+        runtime: run.runtime,
+        runner: run.runner,
+        inputs: run.inputs || {},
+        outputs: run.outputs || undefined,
+        error: run.error || undefined,
+        timing: run.timing || {},
+        createdAt: run.createdAt,
+        updatedAt: run.updatedAt
+    };
+}
+
 function buildChatMessagesByInstance(entries: any[]) {
     const journalByInstance: Record<string, any[]> = {};
 
@@ -171,6 +264,8 @@ function buildChatMessagesByInstance(entries: any[]) {
 export async function buildWorkspaceSnapshot({
     userId,
     workflow,
+    workspace = null,
+    runtimeCompatibility,
     wasCreated = false,
     healingActions = [],
     includeLegacyPrototypes = true
@@ -188,13 +283,18 @@ export async function buildWorkspaceSnapshot({
             : { workflowId })
         : { workflowId: { $exists: false } };
 
-    const [agentInstances, edges, journalEntries, agentPrototypes, llmConfigs, userSettings] = await Promise.all([
+    const userToolRunFilter = workflowId
+        ? { ownerUserId: userId, workflowId }
+        : { ownerUserId: userId };
+
+    const [agentInstances, edges, journalEntries, agentPrototypes, llmConfigs, userSettings, toolRuns] = await Promise.all([
         workflowId ? AgentInstance.find({ workflowId }) : Promise.resolve([]),
         workflowId ? WorkflowEdge.find({ workflowId }) : Promise.resolve([]),
         workflowId ? AgentJournal.find({ workflowId, type: 'chat' }).sort({ timestamp: 1 }) : Promise.resolve([]),
         AgentPrototype.find({ userId, ...prototypeWorkflowFilter }).sort({ name: 1 }),
         LLMConfig.find({ userId }),
-        UserSettings.findOne({ userId })
+        UserSettings.findOne({ userId }),
+        UserToolRun.find(userToolRunFilter).sort({ createdAt: -1 }).limit(200)
     ]);
 
     const chatMessagesByInstance = buildChatMessagesByInstance(journalEntries);
@@ -213,6 +313,20 @@ export async function buildWorkspaceSnapshot({
     });
 
     return {
+        runtimeCompatibility,
+        workspaceContext: workspace ? {
+            id: workspace._id?.toString() || workspace.id || '',
+            scopeType: workspace.scopeType,
+            scopeId: typeof workspace.scopeId === 'string' ? workspace.scopeId : workspace.scopeId.toString(),
+            status: workspace.status,
+            manifests: {
+                packageJson: !!workspace.manifests?.packageJson,
+                packageLockJson: !!workspace.manifests?.packageLockJson,
+                requirementsTxt: !!workspace.manifests?.requirementsTxt,
+                pyprojectToml: !!workspace.manifests?.pyprojectToml
+            },
+            lastScanAt: workspace.lastScanAt ?? null
+        } : undefined,
         workflow: workflow && workflowId ? {
             id: workflowId,
             name: workflow.name,
@@ -249,6 +363,7 @@ export async function buildWorkspaceSnapshot({
             capabilities: config.capabilities || {},
             updatedAt: config.updatedAt
         })),
+        toolRuns: toolRuns.map(transformUserToolRunForFrontend),
         userSettings: {
             language: userSettings?.preferences?.language || 'fr',
             theme: userSettings?.preferences?.theme || 'dark'

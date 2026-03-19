@@ -47,11 +47,13 @@ export interface IUserSettings extends Document {
     // User Preferences only
     preferences: UserPreferences;
 
-    // ⭐ Tools V2: chemins filesystem des fonctions custom par workflow
+    // Legacy compatibility only.
+    // J4: Workspace.logicalRoot/runtimeRoots becomes the target authority for persistent paths.
+    // This field remains transitional for read/write compatibility until legacy consumers are removed.
     functionPaths?: {
         workflowId: string;
-        pythonPath: string;  // ex: "users/{userId}/{workflowId}/functions"
-        tsPath: string;      // ex: "users_functions/{userId}/{workflowId}"
+        pythonPath: string;
+        tsPath: string;
     }[];
 
     // Sync tracking
@@ -97,7 +99,7 @@ const userSettingsSchema = new Schema(
             default: null
         },
 
-        // ⭐ Tools V2: mapping workflowId -> chemins filesystem (Open/Closed Pattern)
+        // Legacy compatibility only. Do not treat this mapping as the target source of truth.
         functionPaths: [{
             workflowId: { type: String, required: true },
             pythonPath: { type: String, required: true },
