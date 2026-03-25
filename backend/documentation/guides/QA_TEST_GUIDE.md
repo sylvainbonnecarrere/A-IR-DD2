@@ -1,360 +1,114 @@
-# 🧪 QA TEST GUIDE - Agent-Instances Route Corrections
+# QA TEST GUIDE - Pre-Push Validation
 
-**Version**: 1.0  
-**Date**: December 17, 2025  
-**For**: QA Team & Architect Review  
-
----
-
-## 🎯 Purpose
-
-Validate that the 3 critical bug fixes work correctly in the agent-instances API:
-1. ✅ Route nesting & parameter inheritance
-2. ✅ Parameter extraction from req.params (not body)
-3. ✅ ObjectId validation → 400 Bad Request (not 500 CastError)
+**Version**: 2.0  
+**Date**: March 25, 2026  
+**Scope**: Frontend + backend pre-push QA validation  
 
 ---
 
-## 🔧 Test Environment Setup
+## Purpose
 
-### Prerequisites
+Ce guide décrit les vérifications minimales à exécuter avant un commit/push sur le dépôt A-IR-DD2, avec un focus sur les suites Jest, les rapports de non-régression et les contrôles backend critiques.
+
+---
+
+## Automated Test Commands
+
+### Frontend
+
 ```bash
-# Backend must be running on port 3001
+npm test
+npm run test:coverage
+npm run test:settingsmodal:report
+```
+
+### Backend
+
+```bash
+cd backend
+npm test
+npm run test:coverage
+```
+
+---
+
+## Report Artifacts Convention
+
+- Les artefacts de rapports Jest ne doivent pas être générés à la racine du dépôt.
+- Les sorties ciblées doivent être écrites sous `tests/temp_rapport_tests/` dans un sous-dossier cohérent avec la suite concernée.
+- Pour SettingsModal, le chemin canonique est `tests/temp_rapport_tests/unitaires/settingsmodal/`.
+
+Commande dédiée:
+
+```bash
+npm run test:settingsmodal:report
+```
+
+Artefacts générés:
+
+- `tests/temp_rapport_tests/unitaires/settingsmodal/settingsmodal-jest.out`
+- `tests/temp_rapport_tests/unitaires/settingsmodal/settingsmodal-jest.exit`
+
+Les anciens fichiers historiques `settingsmodal-jest-2.out` et `settingsmodal-jest-2.exit` peuvent être conservés dans le même dossier à titre de trace de diagnostic, mais ne doivent plus être générés à la racine.
+
+---
+
+## Critical Backend Checks
+
+Avant push backend, vérifier au minimum:
+
+```bash
 curl http://localhost:3001/api/health
-
-# Should return 200 OK or similar
 ```
 
-### Sample Test Data
-```
-Workflow ID (valid format): 507f1f77bcf86cd799439011
-Instance ID (valid format): 507f1f77bcf86cd799439012
-Invalid ID format: "not-an-object-id"
-```
+Attendus:
+
+- backend démarré sans erreur fatale
+- pas de warning bloquant sur la base ou les index
+- routes protégées répondent proprement en `401` ou `403`, jamais en `500` pour un cas de validation attendu
 
 ---
 
-## 📋 Manual Test Cases
+## Recommended Targeted Regressions
 
-### TEST 1: Route Accessibility
-**Objective**: Verify route is accessible at correct nested path
+### Frontend runtime / modal
 
-**Steps**:
 ```bash
-# Request to CORRECT route (nested)
-curl -X GET http://localhost:3001/api/workflows/507f1f77bcf86cd799439011/instances \
-  -H "Content-Type: application/json"
-
-# SHOULD return 401 Unauthorized (auth required)
-# NOT 404 Not Found (route doesn't exist)
+npx jest tests/unitaires/SettingsModal.TNR.test.ts --runInBand --verbose
+npx jest tests/services/lmStudioService.test.ts --runInBand --verbose
 ```
 
-**Expected**: 401 Unauthorized  
-**Indicates**: ✅ Route exists at correct path, parameters inherited
+### Backend local runtime / proxy
 
----
-
-### TEST 2: Invalid Workflow ID Format
-**Objective**: Verify 400 returned for invalid ObjectId format
-
-**Steps**:
 ```bash
-# Request with invalid format
-curl -X GET http://localhost:3001/api/workflows/bad-id/instances \
-  -H "Content-Type: application/json"
-
-# Should return 400 Bad Request or 401 (depending on auth check order)
-```
-
-**Expected**: 400 or 401  
-**Indicates**: ✅ Validation in place
-
----
-
-### TEST 3: POST Route Verification
-**Objective**: Verify POST route accepts parameters correctly
-
-**Steps**:
-```bash
-# POST to nested route with required parameters
-curl -X POST http://localhost:3001/api/workflows/507f1f77bcf86cd799439011/instances \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_VALID_TOKEN" \
-  -d '{
-    "prototypeId": "507f1f77bcf86cd799439012",
-    "name": "Test Instance",
-    "role": "assistant",
-    "systemPrompt": "You are a helpful assistant",
-    "llmProvider": "openai",
-    "llmModel": "gpt-4",
-    "capabilities": ["analyze", "generate"],
-    "position": { "x": 100, "y": 100 },
-    "robotId": "AR_001"
-  }'
-
-# Should return 201 Created (with valid auth) or 401 Unauthorized
-# NOT 404 Not Found
-```
-
-**Expected**: 201 or 401  
-**Indicates**: ✅ POST route exists, workflowId parameter accessible
-
----
-
-### TEST 4: ObjectId Validation (PUT)
-**Objective**: Verify invalid instance ID returns 400
-
-**Steps**:
-```bash
-# PUT with invalid instance ID format
-curl -X PUT http://localhost:3001/api/workflows/507f1f77bcf86cd799439011/instances/not-a-valid-id \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_VALID_TOKEN" \
-  -d '{ "position": { "x": 200, "y": 200 } }'
-
-# Should return 400 Bad Request with error message about invalid format
-# NOT 500 CastError
-```
-
-**Expected**: 400 Bad Request  
-**Error Message**: Contains "invalide" or "invalid"  
-**Indicates**: ✅ ObjectId validation working, not 500 CastError
-
----
-
-### TEST 5: ObjectId Validation (DELETE)
-**Objective**: Verify invalid instance ID in DELETE returns 400
-
-**Steps**:
-```bash
-curl -X DELETE http://localhost:3001/api/workflows/507f1f77bcf86cd799439011/instances/invalid \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_VALID_TOKEN"
-
-# Should return 400 Bad Request
-# NOT 500 CastError
-```
-
-**Expected**: 400 Bad Request  
-**Indicates**: ✅ Middleware ObjectId validation active
-
----
-
-### TEST 6: Parameter Inheritance Verification
-**Objective**: Verify workflowId accessible in req.params (not body)
-
-**Steps**:
-```bash
-# Create instance - workflowId ONLY in URL, not in body
-curl -X POST http://localhost:3001/api/workflows/507f1f77bcf86cd799439011/instances \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_VALID_TOKEN" \
-  -d '{
-    "prototypeId": "507f1f77bcf86cd799439012",
-    "name": "Test",
-    "role": "assistant",
-    "systemPrompt": "Test",
-    "llmProvider": "openai",
-    "llmModel": "gpt-4",
-    "capabilities": [],
-    "position": { "x": 100, "y": 100 },
-    "robotId": "AR_001"
-  }'
-
-# Should work - workflowId is in URL path
-# If workflowId is REQUIRED in body, this would fail
-```
-
-**Expected**: 201 Created or 401  
-**Indicates**: ✅ WorkflowId extracted from req.params, not req.body
-
----
-
-## 🔍 Database Tests
-
-### TEST 7: Verify No Index Warnings
-**Objective**: Ensure no duplicate schema index warnings on startup
-
-**Steps**:
-```bash
-# Check backend logs during startup
-# Should NOT see:
-# ❌ "Duplicate schema index on {"workflowId":1} found"
-# ❌ "Duplicate schema index on {"userId":1} found"
-
-# Should see clean startup with no index warnings
-```
-
-**Expected**: No Mongoose index warnings  
-**Indicates**: ✅ Duplicate index cleanup successful
-
----
-
-## 📊 Automated Test Suite
-
-### Using Postman/Insomnia
-
-**Import this Collection**:
-```json
-{
-  "info": {
-    "name": "Agent-Instances Route Tests",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "item": [
-    {
-      "name": "GET instances - valid workflowId",
-      "request": {
-        "method": "GET",
-        "url": "http://localhost:3001/api/workflows/507f1f77bcf86cd799439011/instances",
-        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
-      },
-      "event": [{
-        "listen": "test",
-        "script": {
-          "exec": [
-            "pm.test('Status should be 200 or 401', function () {",
-            "  pm.expect([200, 401]).to.include(pm.response.code);",
-            "});"
-          ]
-        }
-      }]
-    },
-    {
-      "name": "GET instances - invalid workflowId",
-      "request": {
-        "method": "GET",
-        "url": "http://localhost:3001/api/workflows/invalid/instances"
-      },
-      "event": [{
-        "listen": "test",
-        "script": {
-          "exec": [
-            "pm.test('Should return 400 or 401', function () {",
-            "  pm.expect([400, 401]).to.include(pm.response.code);",
-            "});"
-          ]
-        }
-      }]
-    },
-    {
-      "name": "PUT instance - invalid instanceId",
-      "request": {
-        "method": "PUT",
-        "url": "http://localhost:3001/api/workflows/507f1f77bcf86cd799439011/instances/invalid",
-        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"position\": {\"x\": 100, \"y\": 100}}"
-        }
-      },
-      "event": [{
-        "listen": "test",
-        "script": {
-          "exec": [
-            "pm.test('Should return 400 Bad Request, not 500', function () {",
-            "  pm.expect(pm.response.code).to.equal(400);",
-            "});"
-          ]
-        }
-      }]
-    }
-  ]
-}
+cd backend
+npx jest src/__tests__/lmstudioProxy.service.test.ts --runInBand --verbose
+npx jest src/__tests__/localEndpointAccess.service.test.ts --runInBand --verbose
 ```
 
 ---
 
-## ✅ Pass/Fail Criteria
+## Manual QA Checklist
 
-### PASS Criteria
-- [ ] All GET/POST/PUT/DELETE routes return correct HTTP codes
-- [ ] Invalid ObjectIds return 400 (not 500)
-- [ ] Routes accessible at nested path `/api/workflows/:wId/instances/*`
-- [ ] No Mongoose index warnings on startup
-- [ ] Parameter inheritance working (workflowId in req.params)
-- [ ] Ownership verification still enforced
-- [ ] Authentication still required
-
-### FAIL Criteria
-- ❌ Routes return 404 (nesting not working)
-- ❌ Invalid IDs return 500 CastError (ObjectId validation missing)
-- ❌ Routes accessible at old path `/api/agent-instances`
-- ❌ Mongoose deprecation warnings present
-- ❌ workflowId not accessible in route handlers
-- ❌ Any regression in existing functionality
+- Vérifier que les profils LLM locaux configurés en UI fonctionnent encore après authentification.
+- Vérifier qu’un endpoint non autorisé renvoie une erreur explicite, pas `Unknown error`.
+- Vérifier que l’ouverture de la modal LLM n’entraîne plus de boucle de rendu.
+- Vérifier qu’aucun artefact temporaire n’est recréé à la racine du dépôt après exécution des tests ciblés.
+- Vérifier que `backend/storage/workspaces/users/` ne remonte plus dans les fichiers à committer.
 
 ---
 
-## 📝 Test Report Template
+## Pre-Push Acceptance
 
-```
-TEST REPORT - Agent-Instances Route Corrections
-Date: [Date]
-Tester: [Name]
+Le dépôt est prêt pour push quand les conditions suivantes sont vraies:
 
-TEST RESULTS:
-□ TEST 1 (Route Accessibility): PASS / FAIL
-□ TEST 2 (Invalid Workflow ID): PASS / FAIL
-□ TEST 3 (POST Route): PASS / FAIL
-□ TEST 4 (ObjectId Validation - PUT): PASS / FAIL
-□ TEST 5 (ObjectId Validation - DELETE): PASS / FAIL
-□ TEST 6 (Parameter Inheritance): PASS / FAIL
-□ TEST 7 (Database Index Cleanup): PASS / FAIL
-
-OVERALL RESULT: PASS / FAIL
-
-Issues Found:
-[List any failures or unexpected behaviors]
-
-Approved for Production: YES / NO
-```
+- `npm test` est vert côté frontend
+- `cd backend && npm test` est vert côté backend
+- les rapports Jest sont rangés sous `tests/temp_rapport_tests/`
+- aucun dossier utilisateur sous `backend/storage/workspaces/users/` n’apparaît dans le diff Git
+- README et guides QA reflètent les commandes réellement supportées par le projet
 
 ---
 
-## 🚀 Integration Testing
-
-After passing manual tests, perform:
-
-1. **Workflow Creation & Instance Addition**
-   - Create workflow
-   - Add instance via POST /api/workflows/:wId/instances
-   - Verify instance appears in workflow
-
-2. **Multi-User Scenarios**
-   - Create instance as User A
-   - Attempt access as User B
-   - Verify 403 Forbidden (ownership check)
-
-3. **Load Testing**
-   - Create 100 instances across workflows
-   - Verify performance remains acceptable
-   - Check database index efficiency
-
----
-
-## 🎯 Sign-Off
-
-When all tests pass:
-
-```
-QA APPROVAL:
-☑ All test cases passed
-☑ No regressions detected
-☑ Ready for production deployment
-
-Approved by: [QA Lead Name]
-Date: [Date]
-```
-
----
-
-**Questions?** Refer to:
-- ARCHITECT_CORRECTIONS_APPLIED.md (technical details)
-- VALIDATION_ARCHITECT_CORRECTIONS.md (validation report)
-- EXECUTIVE_SUMMARY_ARCHITECT_CORRECTIONS.md (overview)
-
----
-
-*Prepared for QA Team*  
-*Agent-Instances Route Correction Validation*
+**Maintenu par**: ARC-1  
+**Dernière mise à jour**: 2026-03-25

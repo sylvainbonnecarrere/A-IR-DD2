@@ -22,6 +22,7 @@ import { useLocalization } from '../hooks/useLocalization';
 import { useJournalQueue } from '../hooks/useJournalQueue';
 import { useAuth } from '../hooks/useAuth';
 import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
+import { buildBosHydrationFingerprint, hydrateToolMessagesFromPersistedRuns } from '../services/bosRunProjectionService';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -175,6 +176,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const bosHydrationFingerprintRef = useRef<string>('');
 
   // Get messages from store
   const messages = getNodeMessages(id);
@@ -187,6 +189,32 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isMinimized]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fingerprint = buildBosHydrationFingerprint(messages);
+
+    if (!fingerprint || bosHydrationFingerprintRef.current === fingerprint) {
+      return;
+    }
+
+    bosHydrationFingerprintRef.current = fingerprint;
+
+    const rehydrateToolMessages = async () => {
+      const hydratedMessages = await hydrateToolMessagesFromPersistedRuns(messages);
+      if (cancelled || hydratedMessages === messages) {
+        return;
+      }
+      bosHydrationFingerprintRef.current = buildBosHydrationFingerprint(hydratedMessages);
+      setNodeMessages(id, hydratedMessages);
+    };
+
+    void rehydrateToolMessages();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, messages, setNodeMessages]);
 
   const handleToggleMinimize = () => {
     if (onToggleNodeMinimize) {
@@ -477,7 +505,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             summarizationHistory,
             undefined, // tools
             undefined, // outputConfig
-            summarizationRuntime.credential // endpoint for LMStudio
+            summarizationRuntime.credential, // endpoint for LMStudio
+            accessToken ?? undefined
           );
 
           const summaryMessage: ChatMessage = {
@@ -504,7 +533,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       const adapter = createAdapter(
         effectiveAgent.llmProvider as LLMProvider,
         agentConfig,
-        effectiveAgent.model
+        effectiveAgent.model,
+        accessToken ?? undefined
       );
 
       if (adapter) {
@@ -540,6 +570,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             isError: record.status === 'error',
             toolCallRecord: {
               id: record.id,
+              toolId: record.toolId,
               functionId: record.functionId,
               functionName: record.functionName,
               arguments: record.arguments,
@@ -584,7 +615,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         effectiveAgent.tools,
         effectiveAgent.outputConfig,
         credential, // For endpoints (will be used for LMStudio, ignored for cloud)
-        { webFetch: webFetchEnabled, webSearch: webSearchEnabled } // Native tools config
+        { webFetch: webFetchEnabled, webSearch: webSearchEnabled }, // Native tools config
+        accessToken ?? undefined
       );
 
       let currentResponse = '';

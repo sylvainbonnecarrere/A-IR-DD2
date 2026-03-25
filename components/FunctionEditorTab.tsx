@@ -210,11 +210,11 @@ const RuntimeStatusBanner: React.FC<RuntimeStatusBannerProps> = ({ runtimeHealth
     const isDevOnly = runtimeHealth.runtime.docker.securityLevel === 'dev-only';
     const dockerMode = runtimeHealth.runtime.docker.mode;
     const modeDetail = dockerMode === 'docker-desktop'
-        ? 'Docker Desktop · dev-only'
+        ? 'Docker Desktop · dev-only (dev/test)'
         : dockerMode === 'rootless'
             ? 'Docker rootless'
             : dockerMode === 'rootful-linux'
-                ? 'Docker rootful · dev-only'
+                ? 'Docker rootful · dev-only (dev/test)'
                 : 'mode non confirmé';
     if (canRun) {
         return (
@@ -300,6 +300,8 @@ export const FunctionEditorTab: React.FC = () => {
 
     const { addNotification } = useNotifications();
     const fn = getSelectedFunction();
+    const resolvedToolId = fn?.toolId ?? fn?._id;
+    const isWorkflowScopedFunction = Boolean(fn?.workflowId);
 
     const [code, setCode] = useState<string>('');
     const [testArgsStr, setTestArgsStr] = useState<string>('{}');
@@ -349,16 +351,18 @@ export const FunctionEditorTab: React.FC = () => {
         setRunStatusFilter('all');
         setRunSortBy('createdAt');
         setRunSortOrder('desc');
-        if (fn?._id) {
-            void loadBuildStatus(fn._id);
-            void loadFunctionRuns(fn._id, { page: 1, limit: functionRunsPagination.limit, sortBy: 'createdAt', sortOrder: 'desc' });
+        if (resolvedToolId && isWorkflowScopedFunction) {
+            void loadBuildStatus(resolvedToolId);
+        }
+        if (resolvedToolId) {
+            void loadFunctionRuns(resolvedToolId, { page: 1, limit: functionRunsPagination.limit, sortBy: 'createdAt', sortOrder: 'desc' });
         }
         void loadRuntimeHealth();
-    }, [fn?._id]);
+    }, [resolvedToolId, isWorkflowScopedFunction]);
 
     useEffect(() => {
-        if (fn?._id && sandboxResult?.executionId) {
-            void loadFunctionRuns(fn._id, {
+        if (resolvedToolId && sandboxResult?.executionId) {
+            void loadFunctionRuns(resolvedToolId, {
                 page: runPage,
                 limit: functionRunsPagination.limit,
                 status: runStatusFilter === 'all' ? undefined : runStatusFilter,
@@ -366,7 +370,7 @@ export const FunctionEditorTab: React.FC = () => {
                 sortOrder: runSortOrder
             });
         }
-    }, [fn?._id, sandboxResult?.executionId, runPage, runStatusFilter, runSortBy, runSortOrder, functionRunsPagination.limit]);
+    }, [resolvedToolId, sandboxResult?.executionId, runPage, runStatusFilter, runSortBy, runSortOrder, functionRunsPagination.limit]);
 
     // Vérification syntaxique en temps réel (debounce 800ms)
     const handleCodeChange: OnChange = useCallback((value) => {
@@ -453,6 +457,16 @@ export const FunctionEditorTab: React.FC = () => {
     const handleBuild = async () => {
         if (!fn || fn.isReadonly) return;
 
+        if (!isWorkflowScopedFunction) {
+            clearBuildResult();
+            addNotification({
+                type: 'info',
+                title: 'Build indisponible',
+                message: 'Le build est disponible uniquement pour les fonctions custom rattachées à un workflow à ce stade.'
+            });
+            return;
+        }
+
         if (code !== fn.codeInline) {
             const updated = await updateFunction(fn._id, { codeInline: code });
             if (!updated) {
@@ -461,7 +475,7 @@ export const FunctionEditorTab: React.FC = () => {
             }
         }
 
-        const result = await runBuild(fn._id);
+        const result = await runBuild(resolvedToolId ?? fn._id);
         if (result) {
             addNotification({ type: 'success', title: 'Build prêt', message: `Artefacts préparés pour "${fn.name}".` });
         }
@@ -479,8 +493,8 @@ export const FunctionEditorTab: React.FC = () => {
     };
 
     const handleRefreshRuns = useCallback(() => {
-        if (fn?._id) {
-            void loadFunctionRuns(fn._id, {
+        if (resolvedToolId) {
+            void loadFunctionRuns(resolvedToolId, {
                 page: runPage,
                 limit: functionRunsPagination.limit,
                 status: runStatusFilter === 'all' ? undefined : runStatusFilter,
@@ -488,21 +502,21 @@ export const FunctionEditorTab: React.FC = () => {
                 sortOrder: runSortOrder
             });
         }
-    }, [fn?._id, loadFunctionRuns, runPage, runStatusFilter, runSortBy, runSortOrder, functionRunsPagination.limit]);
+    }, [resolvedToolId, loadFunctionRuns, runPage, runStatusFilter, runSortBy, runSortOrder, functionRunsPagination.limit]);
 
     const handleOpenArtifact = useCallback((executionId: string, artifactPath: string) => {
-        if (fn?._id) {
-            void loadArtifactPreview(fn._id, executionId, artifactPath);
+        if (resolvedToolId) {
+            void loadArtifactPreview(resolvedToolId, executionId, artifactPath);
         }
-    }, [fn?._id, loadArtifactPreview]);
+    }, [resolvedToolId, loadArtifactPreview]);
 
     const handleDownloadArtifact = useCallback(async (executionId: string, artifactPath: string) => {
-        if (!fn?._id) {
+        if (!resolvedToolId) {
             return;
         }
 
         try {
-            const response = await toolRepository.downloadArtifact(fn._id, executionId, artifactPath);
+            const response = await toolRepository.downloadArtifact(resolvedToolId, executionId, artifactPath);
 
             const url = window.URL.createObjectURL(response.data);
             const anchor = document.createElement('a');
@@ -519,12 +533,12 @@ export const FunctionEditorTab: React.FC = () => {
                 message: error.response?.data?.error || `Impossible de télécharger ${artifactPath}.`
             });
         }
-    }, [fn?._id, addNotification]);
+    }, [resolvedToolId, addNotification]);
 
     const handleChangeRunPage = useCallback((page: number) => {
         setRunPage(page);
-        if (fn?._id) {
-            void loadFunctionRuns(fn._id, {
+        if (resolvedToolId) {
+            void loadFunctionRuns(resolvedToolId, {
                 page,
                 limit: functionRunsPagination.limit,
                 status: runStatusFilter === 'all' ? undefined : runStatusFilter,
@@ -532,13 +546,13 @@ export const FunctionEditorTab: React.FC = () => {
                 sortOrder: runSortOrder
             });
         }
-    }, [fn?._id, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy, runSortOrder]);
+    }, [resolvedToolId, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy, runSortOrder]);
 
     const handleChangeRunStatusFilter = useCallback((status: 'all' | 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out') => {
         setRunStatusFilter(status);
         setRunPage(1);
-        if (fn?._id) {
-            void loadFunctionRuns(fn._id, {
+        if (resolvedToolId) {
+            void loadFunctionRuns(resolvedToolId, {
                 page: 1,
                 limit: functionRunsPagination.limit,
                 status: status === 'all' ? undefined : status,
@@ -546,13 +560,13 @@ export const FunctionEditorTab: React.FC = () => {
                 sortOrder: runSortOrder
             });
         }
-    }, [fn?._id, loadFunctionRuns, functionRunsPagination.limit, runSortBy, runSortOrder]);
+    }, [resolvedToolId, loadFunctionRuns, functionRunsPagination.limit, runSortBy, runSortOrder]);
 
     const handleChangeRunSortBy = useCallback((sortBy: FunctionRunSortField) => {
         setRunSortBy(sortBy);
         setRunPage(1);
-        if (fn?._id) {
-            void loadFunctionRuns(fn._id, {
+        if (resolvedToolId) {
+            void loadFunctionRuns(resolvedToolId, {
                 page: 1,
                 limit: functionRunsPagination.limit,
                 status: runStatusFilter === 'all' ? undefined : runStatusFilter,
@@ -560,13 +574,13 @@ export const FunctionEditorTab: React.FC = () => {
                 sortOrder: runSortOrder
             });
         }
-    }, [fn?._id, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortOrder]);
+    }, [resolvedToolId, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortOrder]);
 
     const handleChangeRunSortOrder = useCallback((sortOrder: FunctionRunSortOrder) => {
         setRunSortOrder(sortOrder);
         setRunPage(1);
-        if (fn?._id) {
-            void loadFunctionRuns(fn._id, {
+        if (resolvedToolId) {
+            void loadFunctionRuns(resolvedToolId, {
                 page: 1,
                 limit: functionRunsPagination.limit,
                 status: runStatusFilter === 'all' ? undefined : runStatusFilter,
@@ -574,10 +588,10 @@ export const FunctionEditorTab: React.FC = () => {
                 sortOrder
             });
         }
-    }, [fn?._id, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy]);
+    }, [resolvedToolId, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy]);
 
     const handleCleanupRuns = useCallback(async () => {
-        if (!fn?._id) {
+        if (!resolvedToolId) {
             return;
         }
 
@@ -586,7 +600,7 @@ export const FunctionEditorTab: React.FC = () => {
             return;
         }
 
-        const result = await cleanupFunctionRuns(fn._id, {
+        const result = await cleanupFunctionRuns(resolvedToolId, {
             retentionDays: RUN_RETENTION_DAYS,
             retainLatest: RUN_RETAIN_LATEST
         });
@@ -606,7 +620,7 @@ export const FunctionEditorTab: React.FC = () => {
             message: `${result.deletedRuns} run(s) supprimé(s), ${result.deletedArtifacts.length} artefact(s) nettoyé(s).`
         });
 
-        void loadFunctionRuns(fn._id, {
+        void loadFunctionRuns(resolvedToolId, {
             page: 1,
             limit: functionRunsPagination.limit,
             status: runStatusFilter === 'all' ? undefined : runStatusFilter,
@@ -614,7 +628,7 @@ export const FunctionEditorTab: React.FC = () => {
             sortOrder: runSortOrder
         });
         setRunPage(1);
-    }, [fn?._id, cleanupFunctionRuns, addNotification, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy, runSortOrder]);
+    }, [resolvedToolId, cleanupFunctionRuns, addNotification, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy, runSortOrder]);
 
     // Pas de fonction sélectionnée
     if (!fn) {
@@ -633,6 +647,10 @@ export const FunctionEditorTab: React.FC = () => {
     const runDisabledReason = runtimeHealthError
         || runtimeHealth?.summary
         || 'Le runtime d\'exécution n\'est pas encore prêt.';
+    const buildDisabled = isBuilding || !isWorkflowScopedFunction;
+    const buildDisabledReason = !isWorkflowScopedFunction
+        ? 'Le build est réservé aux fonctions custom rattachées à un workflow.'
+        : undefined;
 
     return (
         <div className="h-full flex flex-col">
@@ -666,7 +684,8 @@ export const FunctionEditorTab: React.FC = () => {
                     {!fn.isReadonly && (
                         <button
                             onClick={handleBuild}
-                            disabled={isBuilding}
+                            disabled={buildDisabled}
+                            title={buildDisabled ? buildDisabledReason : undefined}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs rounded-lg transition-colors disabled:opacity-50"
                         >
                             {isBuilding ? (

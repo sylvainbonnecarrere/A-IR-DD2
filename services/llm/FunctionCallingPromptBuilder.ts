@@ -9,7 +9,7 @@
  *   so that the LLM learns the calling convention without any API-level tool support.
  */
 
-import type { UserFunction } from '../../types/function.types';
+import type { PromptToolReadModel } from '../../types/function.types';
 
 export interface PromptBuilderOptions {
     /** UI / hint language.  fr → French labels, anything else → English. */
@@ -56,7 +56,7 @@ function schemaToExample(schema: JSONSchema | null | undefined): Record<string, 
     );
 }
 
-function formatFunction(fn: UserFunction, lang: 'fr' | 'en'): string {
+function formatFunction(fn: PromptToolReadModel, lang: 'fr' | 'en'): string {
     const required = (fn.inputSchema as JSONSchema)?.required ?? [];
     const exampleArgs = schemaToExample(fn.inputSchema as JSONSchema);
     const exampleJson = JSON.stringify({ name: fn.name, arguments: exampleArgs }, null, 2);
@@ -89,7 +89,7 @@ function formatFunction(fn: UserFunction, lang: 'fr' | 'en'): string {
  * @returns          A self-contained string ready to be appended to the system prompt.
  */
 export function buildFunctionCallingPrompt(
-    functions: UserFunction[],
+    functions: PromptToolReadModel[],
     options: PromptBuilderOptions = {}
 ): string {
     const { language = 'fr', maxFunctions = 20 } = options;

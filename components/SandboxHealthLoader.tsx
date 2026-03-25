@@ -86,7 +86,7 @@ export const SandboxHealthLoader: React.FC = () => {
                 title={runtimeHealth.summary}
             >
                 <div className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
-                <span>{isDevOnly ? 'Runtime dev-only' : 'Runtime partiel'}</span>
+                <span>{isDevOnly ? 'Runtime dev/test (dev-only)' : 'Runtime partiel'}</span>
                 <span className="text-amber-500/70">({canRunPython || canRunTypescript ? runtimeModeLabel : 'build seulement'})</span>
             </div>
         );

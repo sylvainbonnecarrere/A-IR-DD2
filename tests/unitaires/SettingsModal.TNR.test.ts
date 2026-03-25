@@ -7,6 +7,106 @@
 
 import { LLMProvider, LLMCapability } from '../../types';
 
+jest.mock('../../hooks/useLocalization', () => ({
+    useLocalization: () => ({
+        t: (key: string) => key,
+        locale: 'fr',
+        setLocale: jest.fn(),
+    }),
+}));
+
+jest.mock('../../hooks/useAuth', () => ({
+    useAuth: () => ({
+        user: null,
+        isAuthenticated: false,
+        refreshRuntimeConfigState: jest.fn().mockResolvedValue(undefined),
+    }),
+}));
+
+let llmHookRenderCount = 0;
+
+jest.mock('../../hooks/useLLMConfigs', () => ({
+    useLLMConfigs: () => {
+        llmHookRenderCount += 1;
+        return {
+            configs: [
+                {
+                    id: `runtime-openai-${llmHookRenderCount}`,
+                    provider: 'OpenAI',
+                    enabled: true,
+                    capabilities: { Chat: true },
+                    hasApiKey: false,
+                    hasLocalEndpoint: false,
+                    createdAt: `created-${llmHookRenderCount}`,
+                    updatedAt: `updated-${llmHookRenderCount}`,
+                    apiKey: '',
+                    localEndpoint: '',
+                },
+            ],
+            loading: false,
+            updateConfig: jest.fn(),
+            deleteConfig: jest.fn(),
+        };
+    },
+}));
+
+jest.mock('../../hooks/useSaveMode', () => ({
+    useSaveMode: () => ({
+        saveMode: 'local',
+        setSaveMode: jest.fn(),
+        isLoading: false,
+    }),
+}));
+
+jest.mock('../../hooks/useLocalLLMProfiles', () => ({
+    useLocalLLMProfiles: () => ({
+        profiles: [],
+        loading: false,
+        createProfile: jest.fn(),
+        updateProfile: jest.fn(),
+        deleteProfile: jest.fn(),
+    }),
+}));
+
+jest.mock('../../i18n/locales', () => ({
+    locales: ['fr', 'en'],
+    Locale: {},
+}));
+
+jest.mock('../../utils/llmProviderUtils', () => ({
+    isLocalProvider: jest.fn(() => false),
+    getInputLabel: jest.fn(() => 'API key'),
+    getInputPlaceholder: jest.fn(() => 'placeholder'),
+    getInputType: jest.fn(() => 'password'),
+    getProviderHelperText: jest.fn(() => ''),
+}));
+
+jest.mock('../../components/UI', () => ({
+    Button: ({ children, onClick, disabled, type }: any) => React.createElement(
+        'button',
+        { type: type || 'button', onClick, disabled },
+        children
+    ),
+    ToggleSwitch: ({ checked, onChange }: any) => React.createElement('input', {
+        type: 'checkbox',
+        checked,
+        onChange: (event: any) => onChange(event.target.checked),
+    }),
+}));
+
+jest.mock('../../components/Icons', () => ({
+    CloseIcon: () => React.createElement('span', null, 'close'),
+    PlusIcon: () => React.createElement('span', null, 'plus'),
+}));
+
+jest.mock('../../components/settings/LocalLLMProfileCard', () => ({
+    LocalLLMProfileCard: () => React.createElement('div', null, 'profile-card'),
+}));
+
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { SettingsModal } from '../../components/modals/SettingsModal';
+
 /**
  * Mock de la réponse du backend proxy
  */
@@ -24,6 +124,35 @@ const mockDetectionResult = {
  */
 describe('SettingsModal.handleDetectLMStudio - TNR', () => {
     
+    beforeEach(() => {
+        llmHookRenderCount = 0;
+    });
+
+    test('modal should not loop when hook configs get a new reference on each render', () => {
+        const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+        render(React.createElement(SettingsModal, {
+            llmConfigs: [
+                {
+                    provider: LLMProvider.OpenAI,
+                    enabled: false,
+                    apiKey: '',
+                    capabilities: { [LLMCapability.Chat]: true },
+                },
+            ],
+            onClose: jest.fn(),
+            onSave: jest.fn(),
+        }));
+
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+        expect(llmHookRenderCount).toBeLessThan(10);
+        expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+            expect.stringContaining('Maximum update depth exceeded')
+        );
+
+        consoleErrorSpy.mockRestore();
+    });
+
     test('endpoint should be properly URL encoded in proxy call', () => {
         const endpoint = 'http://localhost:11434';
         const encoded = encodeURIComponent(endpoint);

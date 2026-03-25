@@ -12,7 +12,7 @@ import { AgentInstance } from '../src/models/AgentInstance.model';
 import { WorkflowEdge } from '../src/models/WorkflowEdge.model';
 import { app } from '../src/server';
 
-const TEST_ONLY_PASSWORD = 'test-only-password-123';
+const TEST_ONLY_PASSWORD = 'Password123';
 
 function buildAgentInstancePayload(workflowId: string, userId: string, overrides: Partial<Record<string, any>> = {}) {
     return {

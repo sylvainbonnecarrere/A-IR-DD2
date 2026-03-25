@@ -13,7 +13,7 @@
  *
  * Design:
  *  - Depends on ILLMAdapter only (Strategy Pattern)
- *  - Tool execution via the backend `/api/functions/execute-by-id` route
+ *  - Tool execution via the backend `/api/sandbox/run` route
  *  - Progress events emitted via onEvent callback (for UI streaming simulation)
  *
  * Security:
@@ -23,16 +23,18 @@
 
 import { API_BASE_URL } from '../../config/api.config';
 import type { ChatMessage, ToolSelection } from '../../types';
-import type { UserFunction } from '../../types/function.types';
+import type { ToolRegistryReadModel, UserFunction } from '../../types/function.types';
 import type { ILLMAdapter, LLMRequest } from '../adapters/ILLMAdapter';
 import type { ParsedToolCall } from './ToolCallParser';
+import { mapUserFunctionToToolRegistry } from '../../types/function.types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface ToolCallRecord {
     /** Unique invocation id (generated each loop). */
     id: string;
-    functionId: string;
+    toolId?: string;
+    functionId?: string;
     functionName: string;
     arguments: Record<string, unknown>;
     result: unknown;
@@ -76,7 +78,7 @@ function generateId(): string {
  * Look up a UserFunction by name from the provided list.
  * Returns null if not found or disabled — guards against prompt-injected names.
  */
-function findFunction(name: string, functions: UserFunction[]): UserFunction | null {
+function findFunction(name: string, functions: ToolRegistryReadModel[]): ToolRegistryReadModel | null {
     return functions.find(f => f.name === name && f.isEnabled) ?? null;
 }
 
@@ -86,7 +88,7 @@ function findFunction(name: string, functions: UserFunction[]): UserFunction | n
  * Response: { success, output, stdout, stderr, durationMs, executionId, runner, exitCode, metadata }
  */
 async function executeFunction(
-    fn: UserFunction,
+    fn: ToolRegistryReadModel,
     args: Record<string, unknown>,
     authToken?: string
 ): Promise<{
@@ -105,13 +107,13 @@ async function executeFunction(
         method: 'POST',
         headers,
         body: JSON.stringify({
-            functionId: fn._id,
+            functionId: fn.legacyFunctionId ?? fn.id,
             toolSelection: {
-                toolId: fn._id,
+                toolId: fn.id,
                 versionRef: {
                     versionTag: fn.versionTag,
-                    versionNumber: fn.version,
-                    workspaceId: fn.workspaceContext?.workspaceId ?? null,
+                    versionNumber: fn.versionNumber,
+                    workspaceId: fn.workspaceId ?? null,
                 },
             } satisfies ToolSelection,
             testArgs: args
@@ -161,20 +163,25 @@ export interface AgentLoopOptions {
 export async function runAgentLoop(
     adapter: ILLMAdapter,
     messages: ChatMessage[],
-    functions: UserFunction[],
+    functions: UserFunction[] | ToolRegistryReadModel[],
     systemPrompt: string,
     options: AgentLoopOptions = {}
 ): Promise<AgentLoopResult> {
     const { authToken, onEvent } = options;
     const toolCallLog: ToolCallRecord[] = [];
     let history: ChatMessage[] = [...messages];
+    const runtimeFunctions: ToolRegistryReadModel[] = functions.map((fn) => (
+        'description' in fn && 'inputSchema' in fn && 'isEnabled' in fn && !('_id' in fn)
+            ? fn as ToolRegistryReadModel
+            : mapUserFunctionToToolRegistry(fn as UserFunction)
+    ));
 
     for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         onEvent?.({ type: 'llm_start', iteration });
 
         const request: LLMRequest = {
             messages: history,
-            functions,
+            functions: runtimeFunctions,
             systemPrompt,
         };
 
@@ -214,7 +221,7 @@ export async function runAgentLoop(
         for (const tc of response.toolCalls) {
             onEvent?.({ type: 'tool_call_start', iteration, toolCall: tc });
 
-            const fn = findFunction(tc.name, functions);
+            const fn = findFunction(tc.name, runtimeFunctions);
 
             let record: ToolCallRecord;
 
@@ -222,6 +229,7 @@ export async function runAgentLoop(
                 // Unknown function — emit an error tool_result and continue
                 record = {
                     id: generateId(),
+                    toolId: undefined,
                     functionId: '',
                     functionName: tc.name,
                     arguments: tc.arguments,
@@ -235,7 +243,8 @@ export async function runAgentLoop(
                     const { result, durationMs, executionId, runner, exitCode, failureKind, artifacts } = await executeFunction(fn, tc.arguments, authToken);
                     record = {
                         id: generateId(),
-                        functionId: fn._id,
+                        toolId: fn.id,
+                        functionId: fn.legacyFunctionId ?? fn.id,
                         functionName: tc.name,
                         arguments: tc.arguments,
                         result,
@@ -251,7 +260,8 @@ export async function runAgentLoop(
                 } catch (err) {
                     record = {
                         id: generateId(),
-                        functionId: fn._id,
+                        toolId: fn.id,
+                        functionId: fn.legacyFunctionId ?? fn.id,
                         functionName: tc.name,
                         arguments: tc.arguments,
                         result: { error: err instanceof Error ? err.message : String(err) },

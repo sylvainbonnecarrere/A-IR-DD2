@@ -27,6 +27,7 @@ import { useAuth } from './useAuth';
 import { GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
+import { useWorkflowStore } from '../stores/useWorkflowStore';
 import type { AgentInstance, V2WorkflowNode, V2WorkflowEdge } from '../types';
 import { API_BASE_URL } from '../config/api.config';
 
@@ -338,7 +339,9 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
     // ⭐ ÉTAPE 2.2: Access stores for reset & hydration
     const designStoreReset = useDesignStore((state) => state.resetAll);
     const runtimeStoreReset = useRuntimeStore((state) => state.resetAll);
+    const workflowStoreReset = useWorkflowStore((state) => state.resetAll);
     const designStoreHydrate = useDesignStore((state) => state.hydrateFromServer);
+    const workflowStoreHydrate = useWorkflowStore((state) => state.hydrateWorkflowFromServer);
     // ⭐ FIX QA: Access setNodeMessages for chat history restoration
     const setNodeMessages = useRuntimeStore((state) => state.setNodeMessages);
     
@@ -367,6 +370,7 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
             console.log('[useWorkspaceHydration] ⭐ Auth state changed - Wiping stores to prevent data leak');
             designStoreReset();
             runtimeStoreReset();
+            workflowStoreReset();
         }
         setPreviousAuthState(isAuthenticated);
 
@@ -465,6 +469,17 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
                         type: e.type
                     })) as V2WorkflowEdge[]
                 });
+
+                if (data.workflow) {
+                    workflowStoreHydrate({
+                        id: data.workflow.id,
+                        name: data.workflow.name,
+                        description: data.workflow.description,
+                        isActive: data.workflow.isActive,
+                        isDefault: data.workflow.isDefault,
+                        canvasState: data.workflow.canvasState,
+                    });
+                }
                 
                 // ⭐ FIX QA: Hydrate chat messages with images into RuntimeStore
                 // Backend now returns chatMessages for each instance
@@ -528,7 +543,7 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
         } finally {
             setIsLoading(false);
         }
-    }, [isAuthenticated, accessToken, authLoading, previousAuthState, designStoreReset, runtimeStoreReset, designStoreHydrate]);
+    }, [isAuthenticated, accessToken, authLoading, previousAuthState, designStoreReset, runtimeStoreReset, workflowStoreReset, designStoreHydrate, workflowStoreHydrate, setNodeMessages]);
 
     /**
      * Auto-hydrate on mount and auth changes

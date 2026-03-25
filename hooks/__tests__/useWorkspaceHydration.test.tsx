@@ -4,6 +4,7 @@ import { useWorkspaceHydration, type UseWorkspaceHydrationResult } from '../useW
 import { useAuth } from '../useAuth';
 import { useDesignStore } from '../../stores/useDesignStore';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
+import { useWorkflowStore } from '../../stores/useWorkflowStore';
 
 jest.mock('../useAuth', () => ({
     useAuth: jest.fn()
@@ -23,6 +24,7 @@ describe('useWorkspaceHydration', () => {
         latestResult = null;
         useDesignStore.getState().resetAll();
         useRuntimeStore.getState().resetAll();
+        useWorkflowStore.getState().resetAll();
         localStorage.clear();
         mockedUseAuth.mockReturnValue({
             isAuthenticated: true,
@@ -42,6 +44,7 @@ describe('useWorkspaceHydration', () => {
         jest.clearAllMocks();
         useDesignStore.getState().resetAll();
         useRuntimeStore.getState().resetAll();
+        useWorkflowStore.getState().resetAll();
         localStorage.clear();
     });
 
@@ -162,6 +165,16 @@ describe('useWorkspaceHydration', () => {
         const runtimeState = useRuntimeStore.getState();
         expect(runtimeState.nodeMessages['instance-1']).toHaveLength(1);
         expect(runtimeState.nodeMessages['instance-1'][0].text).toBe('restored from backend');
+
+        const workflowState = useWorkflowStore.getState();
+        expect(workflowState.currentWorkflow).toEqual(expect.objectContaining({
+            id: 'workflow-1',
+            name: 'Workflow API',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        }));
+        expect(workflowState.getCurrentWorkflowId()).toBe('workflow-1');
     });
 
     it('remains compatible with API payloads that omit additive fields', async () => {
@@ -214,5 +227,125 @@ describe('useWorkspaceHydration', () => {
         expect(designState.agentInstances).toHaveLength(1);
         expect(designState.agentInstances[0].name).toBe('Legacy Agent');
         expect(designState.nodes).toHaveLength(1);
+
+        const workflowState = useWorkflowStore.getState();
+        expect(workflowState.currentWorkflow).toEqual(expect.objectContaining({
+            id: 'workflow-legacy',
+            name: 'Legacy Workflow',
+            isActive: true,
+            isDefault: true
+        }));
+    });
+
+    it('wipes workflow, design, and runtime stores before hydrating a new authenticated session', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                workflow: {
+                    id: 'workflow-auth',
+                    name: 'Authenticated Workflow',
+                    isActive: true,
+                    isDefault: true,
+                    isDirty: false,
+                    canvasState: { zoom: 2, panX: 10, panY: 20 },
+                    createdAt: '2026-03-17T08:00:00.000Z',
+                    updatedAt: '2026-03-17T08:30:00.000Z'
+                },
+                nodes: [],
+                edges: [],
+                agentInstances: [
+                    {
+                        id: 'auth-instance',
+                        name: 'Auth Agent',
+                        position: { x: 20, y: 40 },
+                        llmProvider: 'gemini',
+                        llmModel: 'gemini-2.0-flash',
+                        chatMessages: []
+                    }
+                ],
+                llmConfigs: [],
+                userSettings: {
+                    language: 'fr',
+                    theme: 'dark'
+                },
+                metadata: {
+                    loadedAt: '2026-03-17T08:35:00.000Z',
+                    userId: 'user-auth',
+                    hasWorkflow: true
+                }
+            })
+        });
+
+        mockedUseAuth.mockReturnValue({
+            isAuthenticated: false,
+            accessToken: null,
+            isLoading: false,
+            user: null,
+            login: jest.fn(),
+            register: jest.fn(),
+            logout: jest.fn(),
+            updateUser: jest.fn()
+        } as any);
+
+        useDesignStore.getState().hydrateFromServer({
+            agentInstances: [{
+                id: 'guest-instance',
+                prototypeId: 'guest-prototype',
+                name: 'Guest Agent',
+                position: { x: 1, y: 2 },
+                isMinimized: false,
+                isMaximized: false,
+                configuration_json: null
+            } as any],
+            nodes: [],
+            edges: []
+        });
+        useRuntimeStore.getState().setNodeMessages('guest-instance', [{
+            id: 'guest-msg',
+            sender: 'agent',
+            text: 'guest',
+            timestamp: new Date('2026-03-17T07:00:00.000Z')
+        }]);
+        useWorkflowStore.getState().hydrateWorkflowFromServer({
+            id: 'guest-workflow',
+            name: 'Guest Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const { rerender } = render(<HookProbe />);
+
+        await waitFor(() => expect(latestResult?.source).toBe('localStorage'));
+
+        mockedUseAuth.mockReturnValue({
+            isAuthenticated: true,
+            accessToken: 'auth-token',
+            isLoading: false,
+            user: null,
+            login: jest.fn(),
+            register: jest.fn(),
+            logout: jest.fn(),
+            updateUser: jest.fn()
+        } as any);
+
+        rerender(<HookProbe />);
+
+        await waitFor(() => expect(latestResult?.source).toBe('api'));
+
+        const designState = useDesignStore.getState();
+        expect(designState.agentInstances).toHaveLength(1);
+        expect(designState.agentInstances[0].id).toBe('auth-instance');
+        expect(designState.agentInstances.find((instance) => instance.id === 'guest-instance')).toBeUndefined();
+
+        const runtimeState = useRuntimeStore.getState();
+        expect(runtimeState.nodeMessages['guest-instance']).toBeUndefined();
+
+        const workflowState = useWorkflowStore.getState();
+        expect(workflowState.currentWorkflow).toEqual(expect.objectContaining({
+            id: 'workflow-auth',
+            name: 'Authenticated Workflow'
+        }));
+        expect(workflowState.currentWorkflow?.id).not.toBe('guest-workflow');
     });
 });

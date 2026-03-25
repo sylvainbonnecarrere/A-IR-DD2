@@ -1,5 +1,6 @@
 // Service de proxy sécurisé pour LMStudio
 import { LMSTUDIO_CONFIG } from '../config/lmstudio.config';
+import { isAllowedLocalEndpoint, LOCAL_ENDPOINT_POLICY_ERROR } from '../utils/localEndpointPolicy';
 import type {
     LMStudioHealthResponse,
     LMStudioModelsListResponse,
@@ -7,11 +8,10 @@ import type {
 } from '../types/lmstudio.types';
 
 /**
- * Validation endpoint contre whitelist
- * Sécurité : Seuls les endpoints localhost autorisés
+ * Validation endpoint contre politique locale partagée.
  */
 export function isEndpointAllowed(endpoint: string): boolean {
-    return LMSTUDIO_CONFIG.ALLOWED_ENDPOINTS.includes(endpoint);
+    return isAllowedLocalEndpoint(endpoint);
 }
 
 /**
@@ -35,7 +35,7 @@ export async function fetchWithTimeout(
     } catch (error) {
         clearTimeout(timeoutId);
         if (error instanceof Error && error.name === 'AbortError') {
-            throw new Error('Request timeout exceeded');
+            throw new Error(`Request timeout exceeded after ${timeout}ms`);
         }
         throw error;
     }
@@ -78,7 +78,7 @@ export async function checkLMStudioHealth(
     if (!isEndpointAllowed(endpoint)) {
         return {
             healthy: false,
-            error: 'Endpoint not allowed. Only localhost endpoints are permitted.'
+            error: `Endpoint not allowed. ${LOCAL_ENDPOINT_POLICY_ERROR}`
         };
     }
 
@@ -122,7 +122,7 @@ export async function fetchLMStudioModels(
 ): Promise<LMStudioModelsListResponse> {
     // Validation whitelist
     if (!isEndpointAllowed(endpoint)) {
-        throw new Error('Endpoint not allowed. Only localhost endpoints are permitted.');
+        throw new Error(`Endpoint not allowed. ${LOCAL_ENDPOINT_POLICY_ERROR}`);
     }
 
     try {
@@ -151,12 +151,12 @@ export async function fetchLMStudioModels(
 
 /**
  * Auto-détection de l'endpoint LMStudio disponible
- * Teste les endpoints de la whitelist dans l'ordre
+ * Teste les endpoints de découverte dans l'ordre
  */
 export async function detectAvailableEndpoint(): Promise<string> {
     const errors: string[] = [];
 
-    for (const endpoint of LMSTUDIO_CONFIG.ALLOWED_ENDPOINTS) {
+     for (const endpoint of LMSTUDIO_CONFIG.DISCOVERY_ENDPOINTS) {
         try {
             const health = await checkLMStudioHealth(endpoint);
 
@@ -189,7 +189,7 @@ export async function* streamChatCompletion(
 ): AsyncGenerator<string, void, unknown> {
     // Validation whitelist
     if (!isEndpointAllowed(endpoint)) {
-        throw new Error('Endpoint not allowed. Only localhost endpoints are permitted.');
+        throw new Error(`Endpoint not allowed. ${LOCAL_ENDPOINT_POLICY_ERROR}`);
     }
 
     // Convert system messages for Mistral compatibility
@@ -205,7 +205,8 @@ export async function* streamChatCompletion(
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ...processedBody, stream: true })
-            }
+            },
+            LMSTUDIO_CONFIG.STREAM_FIRST_BYTE_TIMEOUT_MS
         );
 
         if (!response.ok) {
@@ -248,7 +249,7 @@ export async function fetchChatCompletion(
 ): Promise<any> {
     // Validation whitelist
     if (!isEndpointAllowed(endpoint)) {
-        throw new Error('Endpoint not allowed. Only localhost endpoints are permitted.');
+        throw new Error(`Endpoint not allowed. ${LOCAL_ENDPOINT_POLICY_ERROR}`);
     }
 
     // Convert system messages for Mistral compatibility
@@ -264,7 +265,8 @@ export async function fetchChatCompletion(
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ...processedBody, stream: false })
-            }
+            },
+            LMSTUDIO_CONFIG.CHAT_COMPLETION_TIMEOUT_MS
         );
 
         if (!response.ok) {

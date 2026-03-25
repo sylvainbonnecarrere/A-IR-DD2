@@ -80,11 +80,13 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({
     const [artifactPreviewError, setArtifactPreviewError] = useState<string | null>(null);
 
     const isSuccess = toolCall.status === 'success';
+    const resolvedToolId = toolCall.toolId || toolCall.functionId;
     const durationLabel = toolCall.durationMs != null ? `${toolCall.durationMs}ms` : null;
     const exitCodeLabel = toolCall.exitCode != null ? `exit ${toolCall.exitCode}` : null;
+    const persistedStatusLabel = toolCall.persistedRunStatus ?? null;
 
     const handlePreviewArtifact = useCallback(async (artifactPath: string) => {
-        if (!toolCall.functionId || !toolCall.executionId) {
+        if (!resolvedToolId || !toolCall.executionId) {
             setArtifactPreviewError('Aucun contexte d\'exécution disponible pour cet artefact.');
             return;
         }
@@ -93,7 +95,7 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({
         setArtifactPreviewError(null);
         try {
             const { data } = await apiClient.get<FunctionArtifactPreview>(
-                `/api/runs/tool/${toolCall.functionId}/${toolCall.executionId}/artifacts/content`,
+                `/api/runs/tool/${resolvedToolId}/${toolCall.executionId}/artifacts/content`,
                 { params: { path: artifactPath } }
             );
             setArtifactPreview(data);
@@ -103,17 +105,17 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({
         } finally {
             setArtifactPreviewLoading(false);
         }
-    }, [toolCall.executionId, toolCall.functionId]);
+    }, [resolvedToolId, toolCall.executionId]);
 
     const handleDownloadArtifact = useCallback(async (artifactPath: string) => {
-        if (!toolCall.functionId || !toolCall.executionId) {
+        if (!resolvedToolId || !toolCall.executionId) {
             setArtifactPreviewError('Aucun contexte d\'exécution disponible pour cet artefact.');
             return;
         }
 
         try {
             const response = await apiClient.get<Blob>(
-                `/api/runs/tool/${toolCall.functionId}/${toolCall.executionId}/artifacts/download`,
+                `/api/runs/tool/${resolvedToolId}/${toolCall.executionId}/artifacts/download`,
                 {
                     params: { path: artifactPath },
                     responseType: 'blob'
@@ -131,7 +133,7 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({
         } catch (error: any) {
             setArtifactPreviewError(error.response?.data?.error || 'Impossible de télécharger l\'artefact.');
         }
-    }, [toolCall.executionId, toolCall.functionId]);
+    }, [resolvedToolId, toolCall.executionId]);
 
     return (
         <div className="my-1 rounded bg-gray-800/70 border border-cyan-800/40 text-sm">
@@ -150,6 +152,9 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({
                     )}
                     {toolCall.runner && (
                         <span className="text-gray-500 text-xs shrink-0">{toolCall.runner}</span>
+                    )}
+                    {persistedStatusLabel && (
+                        <span className="text-gray-500 text-xs shrink-0">run {persistedStatusLabel}</span>
                     )}
                     {exitCodeLabel && (
                         <span className="text-gray-500 text-xs shrink-0">{exitCodeLabel}</span>
