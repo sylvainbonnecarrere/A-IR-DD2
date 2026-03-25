@@ -88,6 +88,7 @@ const mapToolToUserFunction = (tool: ToolTransitionRecord): UserFunction => {
 
     return {
         _id: tool.legacyFunctionId || tool.id,
+        toolId: tool.id,
         name: tool.name,
         description: tool.description,
         language: tool.runtime,
@@ -197,6 +198,17 @@ class ToolRepository {
                     status: options.status,
                     sortBy: options.sortBy,
                     sortOrder: options.sortOrder,
+                }
+            }
+        );
+    }
+
+    async loadFunctionRunByExecutionId(executionId: string, toolId?: string) {
+        return apiClient.get<FunctionRunRecord>(
+            `/api/runs/executions/${executionId}`,
+            {
+                params: {
+                    toolId,
                 }
             }
         );

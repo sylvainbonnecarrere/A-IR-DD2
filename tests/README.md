@@ -91,11 +91,12 @@ npm test -- --testPathPattern=unitaires     # Tests unitaires
 npm test -- --testPathPattern=fonctionnels  # Tests fonctionnels
 ```
 
-### Frontend (Vitest)
+### Frontend (Jest)
 ```bash
 npm test                                           # Tous les tests
 npm test -- --testPathPattern=non-regression       # TNR
 npm test -- --testPathPattern=unitaires            # Unitaires
+npm run test:settingsmodal:report                  # Rapport SettingsModal dans tests/temp_rapport_tests/
 ```
 
 ## 📊 Couverture de Code
@@ -125,16 +126,15 @@ module.exports = {
 };
 ```
 
-### Vitest (Frontend)
+### Jest (Frontend)
 ```javascript
-// vite.config.ts
-export default defineConfig({
-  test: {
-    globals: true,
-    environment: 'jsdom',
-    include: ['tests/**/*.test.tsx', 'tests/**/*.test.ts']
-  }
-});
+// jest.config.cjs
+module.exports = {
+  preset: 'ts-jest',
+  testEnvironment: 'jsdom',
+  roots: ['<rootDir>/services', '<rootDir>/stores', '<rootDir>/utils', '<rootDir>/hooks', '<rootDir>/contexts', '<rootDir>/components', '<rootDir>/tests'],
+  testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx', '**/?(*.)+(spec|test).ts', '**/?(*.)+(spec|test).tsx', 'tests/**/*.test.ts', 'tests/**/*.test.tsx']
+};
 ```
 
 ## 📝 Standards de Qualité

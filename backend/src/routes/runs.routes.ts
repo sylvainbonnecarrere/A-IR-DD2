@@ -81,6 +81,34 @@ router.get('/tool/:toolId', requireAuth, async (req, res) => {
     }
 });
 
+router.get('/executions/:executionId', requireAuth, async (req, res) => {
+    try {
+        const executionId = String(req.params.executionId || '').trim();
+        if (!executionId) {
+            return res.status(400).json({ error: 'executionId invalide' });
+        }
+
+        const toolId = typeof req.query.toolId === 'string' ? req.query.toolId : undefined;
+        if (toolId) {
+            const idResult = idParamSchema.safeParse(toolId);
+            if (!idResult.success) {
+                return res.status(400).json({ error: 'ID de tool invalide' });
+            }
+        }
+
+        const user = req.user as IUser;
+        const run = await userToolRunQueryService.getRunByExecutionId(user.id, executionId, { toolId });
+        if (!run) {
+            return res.status(404).json({ error: 'Run introuvable' });
+        }
+
+        res.json(run);
+    } catch (error) {
+        console.error('[RunsRoute] GET /executions/:executionId error:', error);
+        res.status(500).json({ error: 'Erreur lors de la récupération du run' });
+    }
+});
+
 router.get('/tool/:toolId/:executionId/artifacts/content', requireAuth, async (req, res) => {
     try {
         const idResult = idParamSchema.safeParse(req.params.toolId);

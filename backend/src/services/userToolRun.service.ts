@@ -163,14 +163,21 @@ export class UserToolRunService {
     }
 
     async markRunning(executionId: string, startedAt: Date = new Date()): Promise<IUserToolRun> {
-        return this.transitionTo(executionId, 'running', {
-            timing: {
-                startedAt,
-                finishedAt: null,
-                durationMs: null
-            },
-            error: null
-        });
+        const run = await this.getRequiredRun(executionId);
+        this.assertTransitionAllowed(run.status, 'running', executionId);
+
+        return this.applyTransition(
+            executionId,
+            run.status,
+            'running',
+            {
+                status: 'running',
+                error: null,
+                'timing.startedAt': startedAt,
+                'timing.finishedAt': null,
+                'timing.durationMs': null
+            }
+        );
     }
 
     async completeRun(executionId: string, data: CompleteUserToolRunData = {}): Promise<IUserToolRun> {
@@ -178,14 +185,19 @@ export class UserToolRunService {
         const run = await this.getRequiredRun(executionId);
         this.assertTransitionAllowed(run.status, 'completed', executionId);
 
-        run.status = 'completed';
-        run.outputs = data.outputs ?? run.outputs ?? null;
-        run.error = null;
-        run.resourceUsage = data.resourceUsage ?? run.resourceUsage;
-        run.timing.finishedAt = finishedAt;
-        run.timing.durationMs = computeDurationMs(run.timing.startedAt ?? null, finishedAt);
-        await run.save();
-        return run;
+        return this.applyTransition(
+            executionId,
+            run.status,
+            'completed',
+            {
+                status: 'completed',
+                outputs: data.outputs ?? run.outputs ?? null,
+                error: null,
+                resourceUsage: data.resourceUsage ?? run.resourceUsage,
+                'timing.finishedAt': finishedAt,
+                'timing.durationMs': computeDurationMs(run.timing.startedAt ?? null, finishedAt)
+            }
+        );
     }
 
     async failRun(executionId: string, data: FailUserToolRunData): Promise<IUserToolRun> {
@@ -193,14 +205,19 @@ export class UserToolRunService {
         const run = await this.getRequiredRun(executionId);
         this.assertTransitionAllowed(run.status, 'failed', executionId);
 
-        run.status = 'failed';
-        run.error = data.error;
-        run.outputs = data.outputs ?? run.outputs ?? null;
-        run.resourceUsage = data.resourceUsage ?? run.resourceUsage;
-        run.timing.finishedAt = finishedAt;
-        run.timing.durationMs = computeDurationMs(run.timing.startedAt ?? null, finishedAt);
-        await run.save();
-        return run;
+        return this.applyTransition(
+            executionId,
+            run.status,
+            'failed',
+            {
+                status: 'failed',
+                error: data.error,
+                outputs: data.outputs ?? run.outputs ?? null,
+                resourceUsage: data.resourceUsage ?? run.resourceUsage,
+                'timing.finishedAt': finishedAt,
+                'timing.durationMs': computeDurationMs(run.timing.startedAt ?? null, finishedAt)
+            }
+        );
     }
 
     async timeoutRun(executionId: string, data: StopUserToolRunData = {}): Promise<IUserToolRun> {
@@ -260,39 +277,52 @@ export class UserToolRunService {
         const run = await this.getRequiredRun(executionId);
         this.assertTransitionAllowed(run.status, status, executionId);
 
-        run.status = status;
-        run.error = data.error ?? run.error ?? null;
-        run.outputs = data.outputs ?? run.outputs ?? null;
-        run.resourceUsage = data.resourceUsage ?? run.resourceUsage;
-        run.timing.finishedAt = finishedAt;
-        run.timing.durationMs = computeDurationMs(run.timing.startedAt ?? null, finishedAt);
-        await run.save();
-        return run;
+        return this.applyTransition(
+            executionId,
+            run.status,
+            status,
+            {
+                status,
+                error: data.error ?? run.error ?? null,
+                outputs: data.outputs ?? run.outputs ?? null,
+                resourceUsage: data.resourceUsage ?? run.resourceUsage,
+                'timing.finishedAt': finishedAt,
+                'timing.durationMs': computeDurationMs(run.timing.startedAt ?? null, finishedAt)
+            }
+        );
     }
 
-    private async transitionTo(
+    private async applyTransition(
         executionId: string,
-        nextStatus: Extract<UserToolRunStatus, 'running'>,
-        patch: {
-            timing?: Partial<IUserToolRun['timing']>;
-            error?: IUserToolRunError | null;
-        }
+        currentStatus: UserToolRunStatus,
+        nextStatus: UserToolRunStatus,
+        patch: Record<string, unknown>
     ): Promise<IUserToolRun> {
-        const run = await this.getRequiredRun(executionId);
-        this.assertTransitionAllowed(run.status, nextStatus, executionId);
+        const updatedRun = await UserToolRun.findOneAndUpdate(
+            {
+                executionId,
+                status: currentStatus
+            },
+            {
+                $set: patch
+            },
+            {
+                new: true
+            }
+        );
 
-        run.status = nextStatus;
-        if (patch.timing) {
-            run.timing = {
-                ...run.timing,
-                ...patch.timing
-            };
+        if (updatedRun) {
+            return updatedRun;
         }
-        if (patch.error !== undefined) {
-            run.error = patch.error;
+
+        const currentRun = await this.getRunByExecutionId(executionId);
+        if (!currentRun) {
+            throw new Error(`UserToolRun not found for executionId '${executionId}'`);
         }
-        await run.save();
-        return run;
+
+        throw new UserToolRunStateError(
+            `Invalid UserToolRun transition for ${executionId}: ${currentRun.status} -> ${nextStatus}`
+        );
     }
 
     private async getRequiredRun(executionId: string): Promise<IUserToolRun> {

@@ -12,6 +12,7 @@ import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { API_BASE_URL } from '../../config/api.config';
 import { FunctionSelector } from '../FunctionSelector';
 import { useFunctionStore } from '../../stores/useFunctionStore';
+import { buildToolSelectionsFromFunctions, deriveSelectedToolIds } from '../../services/toolSelectionResolver';
 
 interface AgentFormModalProps {
   onClose: () => void;
@@ -135,22 +136,6 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
   const isEditing = !!existingAgent;
   const availableFunctions = useFunctionStore(state => state.functions);
 
-  const buildToolSelections = useCallback((functionIds: string[]): ToolSelection[] => {
-    return functionIds.map((toolId) => {
-      const matchingFunction = availableFunctions.find((fn) => fn._id === toolId);
-      return {
-        toolId,
-        versionRef: matchingFunction
-          ? {
-              versionTag: matchingFunction.versionTag,
-              versionNumber: matchingFunction.version,
-              workspaceId: matchingFunction.workspaceContext?.workspaceId ?? null,
-            }
-          : undefined,
-      };
-    });
-  }, [availableFunctions]);
-
   // LMStudio uses localEndpoint (plaintext URL); apiKey is kept as a fallback for legacy records
   const lmStudioConfig = llmConfigs.find(c => isLMStudio(c.provider));
   const lmStudioEndpoint = lmStudioConfig?.localEndpoint || lmStudioConfig?.apiKey;
@@ -267,11 +252,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       setSelectedCapabilities(existingAgent.capabilities);
       setHistoryConfig(prev => ({ ...defaultHistoryConfig, ...prev, ...(existingAgent.historyConfig || {}) }));
       setTools(existingAgent.tools || []);
-      setSelectedFunctionIds(
-        existingAgent.functionIds
-        || existingAgent.toolSelections?.map(selection => selection.toolId)
-        || []
-      );
+      setSelectedFunctionIds(deriveSelectedToolIds(existingAgent.toolSelections, existingAgent.functionIds));
       setOutputConfig(existingAgent.outputConfig || defaultOutputConfig);
     }
   }, [isEditing, existingAgent, localLLMProfiles]);
@@ -496,7 +477,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     const capabilitiesForSave = selectedCapabilities.includes(LLMCapability.Chat)
       ? selectedCapabilities
       : [LLMCapability.Chat, ...selectedCapabilities];
-    const toolSelections = buildToolSelections(selectedFunctionIds);
+    const toolSelections = buildToolSelectionsFromFunctions(selectedFunctionIds, availableFunctions);
 
     onSave({
       name,

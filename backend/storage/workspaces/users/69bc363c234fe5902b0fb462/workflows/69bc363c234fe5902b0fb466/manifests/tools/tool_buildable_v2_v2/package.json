@@ -1,9 +1,0 @@
-{
-  "name": "workspace-tool-tool_buildable_v2_v2",
-  "private": true,
-  "version": "0.0.2",
-  "type": "commonjs",
-  "dependencies": {
-    "zod": "3.22.4"
-  }
-}

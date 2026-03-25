@@ -1,5 +1,7 @@
 // Middleware de validation des requêtes LMStudio
 import { Request, Response, NextFunction } from 'express';
+import { LOCAL_ENDPOINT_POLICY_ERROR } from '../utils/localEndpointPolicy';
+import { isEndpointAccessibleForUser } from '../services/localEndpointAccess.service';
 
 /**
  * Validation des requêtes chat completion
@@ -76,13 +78,13 @@ export function validateChatRequest(
 
 /**
  * Validation de l'endpoint
- * Vérifie que l'endpoint est localhost uniquement (sécurité)
+ * Vérifie que l'endpoint cible reste un endpoint local ou réseau privé autorisé.
  */
 export function validateEndpoint(
     req: Request,
     res: Response,
     next: NextFunction
-): void {
+): void | Promise<void> {
     const endpoint = req.body.endpoint || (req.query.endpoint as string);
 
     // Si pas d'endpoint fourni, laisser passer (default sera utilisé)
@@ -100,22 +102,23 @@ export function validateEndpoint(
         return;
     }
 
-    // Sécurité : Seuls les endpoints localhost autorisés
-    const isLocalhost =
-        endpoint.startsWith('http://localhost') ||
-        endpoint.startsWith('http://127.0.0.1') ||
-        endpoint.startsWith('https://localhost') ||
-        endpoint.startsWith('https://127.0.0.1');
+    const userId = (req.user as { id?: string } | undefined)?.id;
 
-    if (!isLocalhost) {
-        res.status(403).json({
-            error: 'Endpoint forbidden',
-            details: 'Only localhost endpoints are allowed for security reasons'
+    return isEndpointAccessibleForUser(endpoint, userId)
+        .then((isAllowed) => {
+            if (isAllowed) {
+                next();
+                return;
+            }
+
+            res.status(403).json({
+                error: 'Endpoint forbidden',
+                details: LOCAL_ENDPOINT_POLICY_ERROR
+            });
+        })
+        .catch((error) => {
+            next(error);
         });
-        return;
-    }
-
-    next();
 }
 
 /**

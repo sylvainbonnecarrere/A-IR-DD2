@@ -9,7 +9,7 @@
  *   - Provide simple API to components
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import type { LocalLLMProfile } from '../types';
 import * as localLLMProfileService from '../services/localLLMProfileService';
@@ -33,10 +33,13 @@ export function useLocalLLMProfiles(): UseLocalLLMProfilesReturn {
     const [error, setError] = useState<string | null>(null);
     const profiles = localLLMProfiles;
 
-    const serviceOptions = {
-        useApi: isAuthenticated,
-        token: accessToken || undefined
-    };
+    const serviceOptions = useMemo(
+        () => ({
+            useApi: isAuthenticated,
+            token: accessToken || undefined
+        }),
+        [isAuthenticated, accessToken]
+    );
 
     const loadProfiles = useCallback(async () => {
         setLoading(true);

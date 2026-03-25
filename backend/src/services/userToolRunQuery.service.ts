@@ -153,6 +153,30 @@ export class UserToolRunQueryService {
         return this.buildRunListResult(query, options);
     }
 
+    async getRunByExecutionId(
+        ownerUserId: string,
+        executionId: string,
+        options: {
+            toolId?: string;
+        } = {}
+    ): Promise<FunctionRunReadModel | null> {
+        const query: Record<string, unknown> = {
+            executionId,
+            ownerUserId: new mongoose.Types.ObjectId(ownerUserId)
+        };
+
+        if (options.toolId && mongoose.Types.ObjectId.isValid(options.toolId)) {
+            query.toolId = new mongoose.Types.ObjectId(options.toolId);
+        }
+
+        const run = await UserToolRun.findOne(query).lean<IUserToolRun>();
+        if (!run) {
+            return null;
+        }
+
+        return this.mapRunToReadModel(run);
+    }
+
     private async buildRunListResult(
         query: Record<string, unknown>,
         options: {
@@ -180,7 +204,21 @@ export class UserToolRunQueryService {
         const runs = sortedRuns.slice(skip, skip + limit);
 
         return {
-            items: runs.map((run) => ({
+            items: runs.map((run) => this.mapRunToReadModel(run)),
+            pagination: {
+                page: normalizedPage,
+                limit,
+                total,
+                totalPages,
+                status: options.status,
+                sortBy,
+                sortOrder
+            }
+        };
+    }
+
+    private mapRunToReadModel(run: IUserToolRun): FunctionRunReadModel {
+        return {
             executionId: run.executionId,
             status: run.status,
             runtime: run.runtime,
@@ -198,16 +236,6 @@ export class UserToolRunQueryService {
                 }
                 : null,
             resourceUsage: run.resourceUsage
-            })),
-            pagination: {
-                page: normalizedPage,
-                limit,
-                total,
-                totalPages,
-                status: options.status,
-                sortBy,
-                sortOrder
-            }
         };
     }
 

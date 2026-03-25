@@ -36,6 +36,7 @@ const mockedToolRepository = toolRepository as jest.Mocked<typeof toolRepository
 const createStoreState = (overrides: Record<string, unknown> = {}) => ({
     getSelectedFunction: jest.fn(() => ({
         _id: 'fn-1',
+        toolId: 'tool-1',
         name: 'tool_alpha',
         description: 'Editable tool',
         language: 'python',
@@ -195,6 +196,11 @@ describe('FunctionEditorTab J9 commands', () => {
 
         render(<FunctionEditorTab />);
 
+        await waitFor(() => {
+            expect(state.loadBuildStatus).toHaveBeenCalledWith('tool-1');
+            expect(state.loadFunctionRuns).toHaveBeenCalledWith('tool-1', expect.objectContaining({ page: 1 }));
+        });
+
         fireEvent.change(screen.getByTestId('mock-editor-python'), { target: { value: 'print("changed")' } });
         fireEvent.click(screen.getByText('Exécuter'));
 
@@ -206,8 +212,52 @@ describe('FunctionEditorTab J9 commands', () => {
         fireEvent.click(screen.getByText('Préparer build'));
 
         await waitFor(() => {
-            expect(state.runBuild).toHaveBeenCalledWith('fn-1');
+            expect(state.runBuild).toHaveBeenCalledWith('tool-1');
         });
+    });
+
+    it('does not request build status or run builds for non-workflow-scoped functions', async () => {
+        const state = createStoreState({
+            getSelectedFunction: jest.fn(() => ({
+                _id: 'fn-2',
+                toolId: 'tool-2',
+                name: 'tool_beta',
+                description: 'Standalone tool',
+                language: 'typescript',
+                origin: 'custom',
+                userId: null,
+                workflowId: null,
+                inputSchema: {},
+                outputSchema: {},
+                codePath: 'tools/tool_beta.ts',
+                resolvedCodePath: 'tools/tool_beta.ts',
+                codePathRoot: 'workspace_source',
+                codeInline: 'export function run() { return { ok: true }; }',
+                dependencies: [],
+                isEnabled: true,
+                isReadonly: false,
+                version: 1,
+                tags: [],
+                createdAt: '2026-03-19T12:00:00.000Z',
+                updatedAt: '2026-03-19T12:00:00.000Z'
+            }))
+        });
+        mockStore.mockImplementation(() => state);
+
+        render(<FunctionEditorTab />);
+
+        await waitFor(() => {
+            expect(state.loadFunctionRuns).toHaveBeenCalledWith('tool-2', expect.objectContaining({ page: 1 }));
+        });
+        expect(state.loadBuildStatus).not.toHaveBeenCalled();
+
+        const buildButton = screen.getByText('Préparer build');
+        expect(buildButton).toBeDisabled();
+        expect(buildButton).toHaveAttribute('title', 'Le build est réservé aux fonctions custom rattachées à un workflow.');
+
+        fireEvent.click(buildButton);
+
+        expect(state.runBuild).not.toHaveBeenCalled();
     });
 
     it('blocks execution on invalid JSON args and downloads artifacts through the repository', async () => {
@@ -229,7 +279,7 @@ describe('FunctionEditorTab J9 commands', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Télécharger output/result.json' }));
 
         await waitFor(() => {
-            expect(mockedToolRepository.downloadArtifact).toHaveBeenCalledWith('fn-1', 'run-1', 'output/result.json');
+            expect(mockedToolRepository.downloadArtifact).toHaveBeenCalledWith('tool-1', 'run-1', 'output/result.json');
         });
     });
 });

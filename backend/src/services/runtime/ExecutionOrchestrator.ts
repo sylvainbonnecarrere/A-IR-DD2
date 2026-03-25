@@ -30,6 +30,8 @@ export interface ExecutionOrchestratorRequest {
 }
 
 export class ExecutionOrchestrator {
+    private static readonly workspaceExecutionChains = new Map<string, Promise<void>>();
+
     private readonly runtimeHealthService = new RuntimeHealthService();
     private readonly buildService = new BuildService();
     private readonly userToolRunService = new UserToolRunService();
@@ -66,9 +68,8 @@ export class ExecutionOrchestrator {
             executionMetadataPolicy: executionMetadata.policySnapshot,
             launchContext: request.launchContext
         });
-        const artifactBaseline = await this.snapshotOutputArtifacts(executionRequest.workspace);
 
-        await this.userToolRunService.createAndStartRun({
+        await this.userToolRunService.createQueuedRun({
             executionId,
             ownerUserId: request.userId,
             toolId: executionMetadata.toolId,
@@ -83,71 +84,76 @@ export class ExecutionOrchestrator {
             policySnapshot: executionMetadata.policySnapshot
         });
 
-        try {
-            const executionResult = await this.getExecutionRunner(selectedRunnerId).execute(executionRequest);
-            const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
-            const outputs = {
-                result: executionResult.output,
-                stdout: executionResult.stdout,
-                stderr: executionResult.stderr,
-                ...(outputArtifacts.length > 0 ? { artifacts: outputArtifacts } : {})
-            };
+        return this.executeSerializedForWorkspace(executionRequest.workspace, async () => {
+            await this.userToolRunService.markRunning(executionId);
+            const artifactBaseline = await this.snapshotOutputArtifacts(executionRequest.workspace);
 
-            if (executionResult.success) {
-                await this.userToolRunService.completeRun(executionId, {
-                    outputs,
-                    resourceUsage: this.buildResourceUsage(executionResult)
-                });
-            } else if (executionResult.timedOut) {
-                await this.userToolRunService.timeoutRun(executionId, {
-                    error: {
-                        code: this.toPersistedErrorCode(executionResult.metadata?.failureKind),
-                        message: executionResult.stderr || 'Function execution timed out',
-                        retryable: false
-                    },
-                    outputs,
-                    resourceUsage: this.buildResourceUsage(executionResult)
-                });
-            } else {
+            try {
+                const executionResult = await this.getExecutionRunner(selectedRunnerId).execute(executionRequest);
+                const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
+                const outputs = {
+                    result: executionResult.output,
+                    stdout: executionResult.stdout,
+                    stderr: executionResult.stderr,
+                    ...(outputArtifacts.length > 0 ? { artifacts: outputArtifacts } : {})
+                };
+
+                if (executionResult.success) {
+                    await this.userToolRunService.completeRun(executionId, {
+                        outputs,
+                        resourceUsage: this.buildResourceUsage(executionResult)
+                    });
+                } else if (executionResult.timedOut) {
+                    await this.userToolRunService.timeoutRun(executionId, {
+                        error: {
+                            code: this.toPersistedErrorCode(executionResult.metadata?.failureKind),
+                            message: executionResult.stderr || 'Function execution timed out',
+                            retryable: false
+                        },
+                        outputs,
+                        resourceUsage: this.buildResourceUsage(executionResult)
+                    });
+                } else {
+                    await this.userToolRunService.failRun(executionId, {
+                        error: {
+                            code: this.toPersistedErrorCode(executionResult.metadata?.failureKind),
+                            message: executionResult.stderr || 'Function execution failed',
+                            retryable: false
+                        },
+                        outputs,
+                        resourceUsage: this.buildResourceUsage(executionResult)
+                    });
+                }
+
+                return {
+                    ...executionResult,
+                    executionId,
+                    metadata: {
+                        exitCode: executionResult.exitCode,
+                        ...(executionResult.metadata ?? {}),
+                        ...(outputArtifacts.length > 0 ? { artifacts: outputArtifacts } : {})
+                    }
+                };
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
                 await this.userToolRunService.failRun(executionId, {
                     error: {
-                        code: this.toPersistedErrorCode(executionResult.metadata?.failureKind),
-                        message: executionResult.stderr || 'Function execution failed',
+                        code: 'ORCHESTRATOR_ERROR',
+                        message,
                         retryable: false
                     },
-                    outputs,
-                    resourceUsage: this.buildResourceUsage(executionResult)
-                });
-            }
-
-            return {
-                ...executionResult,
-                executionId,
-                metadata: {
-                    exitCode: executionResult.exitCode,
-                    ...(executionResult.metadata ?? {}),
-                    ...(outputArtifacts.length > 0 ? { artifacts: outputArtifacts } : {})
-                }
-            };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
-            await this.userToolRunService.failRun(executionId, {
-                error: {
-                    code: 'ORCHESTRATOR_ERROR',
-                    message,
-                    retryable: false
-                },
-                ...(outputArtifacts.length > 0
-                    ? {
-                        outputs: {
-                            artifacts: outputArtifacts
+                    ...(outputArtifacts.length > 0
+                        ? {
+                            outputs: {
+                                artifacts: outputArtifacts
+                            }
                         }
-                    }
-                    : {})
-            });
-            throw error;
-        }
+                        : {})
+                });
+                throw error;
+            }
+        });
     }
 
     private async buildExecutionRequest(input: ExecutionOrchestratorRequest & {
@@ -251,6 +257,43 @@ export class ExecutionOrchestrator {
 
     private normalizeRunnerId(runnerId: string): ReturnType<DockerSandboxRunner['getRunnerId']> | ReturnType<FirecrackerRunner['getRunnerId']> {
         return runnerId === 'firecracker' ? 'firecracker' : 'docker_sandbox';
+    }
+
+    private async executeSerializedForWorkspace<T>(
+        workspace: WorkspaceProvisioningResult | null,
+        operation: () => Promise<T>
+    ): Promise<T> {
+        const lockKey = this.getWorkspaceExecutionLockKey(workspace);
+        if (!lockKey) {
+            return operation();
+        }
+
+        const previous = ExecutionOrchestrator.workspaceExecutionChains.get(lockKey) ?? Promise.resolve();
+        let releaseCurrent!: () => void;
+        const current = new Promise<void>((resolve) => {
+            releaseCurrent = resolve;
+        });
+        const tail = previous.catch(() => undefined).then(() => current);
+
+        ExecutionOrchestrator.workspaceExecutionChains.set(lockKey, tail);
+        await previous.catch(() => undefined);
+
+        try {
+            return await operation();
+        } finally {
+            releaseCurrent();
+            if (ExecutionOrchestrator.workspaceExecutionChains.get(lockKey) === tail) {
+                ExecutionOrchestrator.workspaceExecutionChains.delete(lockKey);
+            }
+        }
+    }
+
+    private getWorkspaceExecutionLockKey(workspace: WorkspaceProvisioningResult | null): string | null {
+        if (!workspace) {
+            return null;
+        }
+
+        return workspace.workspaceId || workspace.logicalRoot || workspace.runtimeRoots.outputRoot;
     }
 
     private async snapshotOutputArtifacts(workspace: WorkspaceProvisioningResult | null): Promise<Map<string, string>> {

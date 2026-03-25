@@ -17,8 +17,11 @@ import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
 import { FunctionSelector } from '../FunctionSelector';
 import { useFunctionStore } from '../../stores/useFunctionStore';
+import { buildToolSelectionsFromFunctions, deriveSelectedToolIds } from '../../services/toolSelectionResolver';
 
 type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence' | 'links' | 'tasks' | 'logs' | 'errors';
+
+const EMPTY_LOCAL_LLM_PROFILES: LocalLLMProfile[] = [];
 
 /**
  * Modal de Configuration Enrichie par Instance
@@ -30,7 +33,7 @@ type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence'
  * 
  * Rendu au niveau App.tsx pour affichage en vrai plein écran
  */
-export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localLLMProfiles?: LocalLLMProfile[] }> = ({ llmConfigs, localLLMProfiles = [] }) => {
+export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localLLMProfiles?: LocalLLMProfile[] }> = ({ llmConfigs, localLLMProfiles = EMPTY_LOCAL_LLM_PROFILES }) => {
     const { t } = useLocalization();
     const { getResolvedInstance, updateInstanceConfig, updateAgentInstance } = useDesignStore();
     const { configModalInstanceId, setConfigModalInstanceId } = useRuntimeStore();
@@ -47,22 +50,6 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
     const [inheritFromPrototype, setInheritFromPrototype] = useState(true);
     const [overrideFunctionIds, setOverrideFunctionIds] = useState<string[]>([]);
     const availableFunctions = useFunctionStore(state => state.functions);
-
-    const buildToolSelections = useMemo(() => {
-        return (functionIds: string[]): ToolSelection[] => functionIds.map((toolId) => {
-            const matchingFunction = availableFunctions.find((fn) => fn._id === toolId);
-            return {
-                toolId,
-                versionRef: matchingFunction
-                    ? {
-                        versionTag: matchingFunction.versionTag,
-                        versionNumber: matchingFunction.version,
-                        workspaceId: matchingFunction.workspaceContext?.workspaceId ?? null,
-                    }
-                    : undefined,
-            };
-        });
-    }, [availableFunctions]);
 
     // Récupérer l'instance et le prototype (peut être null)
     const resolved = configModalInstanceId ? getResolvedInstance(configModalInstanceId) : null;
@@ -158,11 +145,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         // J6: Load function inheritance state
         const fi = instanceConfig?.functionInheritance;
         setInheritFromPrototype(fi?.inheritFromPrototype !== false);
-        setOverrideFunctionIds(
-            fi?.overrideFunctionIds
-            || fi?.overrideToolSelections?.map(selection => selection.toolId)
-            || []
-        );
+        setOverrideFunctionIds(deriveSelectedToolIds(fi?.overrideToolSelections, fi?.overrideFunctionIds));
 
         setHasChanges(false);
     }, [configModalInstanceId, getResolvedInstance, localLLMProfiles]);
@@ -178,8 +161,8 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         );
         
         // Only update if capabilities actually changed
-        const currentCaps = JSON.stringify(editedConfig.capabilities?.sort());
-        const newCaps = JSON.stringify(newCapabilities.sort());
+        const currentCaps = JSON.stringify([...(editedConfig.capabilities || [])].sort());
+        const newCaps = JSON.stringify([...newCapabilities].sort());
         
         if (currentCaps !== newCaps) {
             setEditedConfig(prev => ({
@@ -226,11 +209,11 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             functionInheritance: {
                 inheritFromPrototype,
                 overrideFunctionIds: inheritFromPrototype ? [] : overrideFunctionIds,
-                overrideToolSelections: inheritFromPrototype ? [] : buildToolSelections(overrideFunctionIds),
+                overrideToolSelections: inheritFromPrototype ? [] : buildToolSelectionsFromFunctions(overrideFunctionIds, availableFunctions),
             },
             toolSelections: inheritFromPrototype
-                ? (prototype.toolSelections || buildToolSelections(prototype.functionIds || []))
-                : buildToolSelections(overrideFunctionIds),
+                ? (prototype.toolSelections || buildToolSelectionsFromFunctions(prototype.functionIds || [], availableFunctions))
+                : buildToolSelectionsFromFunctions(overrideFunctionIds, availableFunctions),
             // Preserve runtime data (logs, errors, tasks, links)
             logs: instance.configuration_json?.logs || [],
             errors: instance.configuration_json?.errors || [],

@@ -5,19 +5,21 @@
 // 
 // Architecture:
 // - Configuration Phase: Backend proxy validates endpoint + probes capabilities
-// - Runtime Phase: Frontend calls directly to local LLM endpoint (zero-latency)
+// - Runtime Phase: Frontend also calls the backend proxy so browser/runtime quirks
+//   do not break localhost LLM execution (CORS, aborted signals, extension/network policies)
 //
 // Why this architecture?
-// - Performance: Direct calls eliminate proxy latency for frequent chat operations
-// - Robustness: Backend validates config once during setup
-// - SOLID: Single Responsibility - Backend validates, Frontend executes
-// - OpenAI Compatible: All local LLMs use /v1/chat/completions interface
+// - Robustness: one transport path for all local providers (LM Studio, Ollama, Jan)
+// - Security: backend keeps the localhost whitelist and timeout policy
+// - Compatibility: browser no longer talks directly to arbitrary local ports
+// - OpenAI Compatible: proxy still targets /v1/chat/completions on the backend side
 import { ChatMessage, Tool, ToolCall, OutputConfig } from '../types';
 import { buildLMStudioProxyUrl } from '../config/api.config';
 
 interface LMStudioConfig {
     endpoint: string;
     apiKey?: string;
+    authToken?: string;
     timeout: number;
 }
 
@@ -39,6 +41,8 @@ interface LMStudioModelInfo {
     };
 }
 
+const LOCAL_LLM_RUNTIME_TIMEOUT_MS = 600000;
+
 // Default configuration for local LLM deployment
 const DEFAULT_CONFIG: LMStudioConfig = {
     endpoint: 'http://localhost:3928', // LMStudio default port
@@ -48,8 +52,14 @@ const DEFAULT_CONFIG: LMStudioConfig = {
 const getHeaders = (config: LMStudioConfig) => {
     return {
         'Content-Type': 'application/json',
-        'User-Agent': 'A-IR-DD2/1.0'
+        'User-Agent': 'A-IR-DD2/1.0',
+        ...(config.authToken ? { Authorization: `Bearer ${config.authToken}` } : {})
     };
+};
+
+const formatEmulatedToolResultMessage = (msg: ChatMessage) => {
+    const toolLabel = msg.toolName || msg.toolCallId || 'tool';
+    return `[TOOL RESULT: ${toolLabel}]\n${msg.text}`;
 };
 
 const formatMessages = (history?: ChatMessage[], systemInstruction?: string) => {
@@ -87,7 +97,11 @@ const formatMessages = (history?: ChatMessage[], systemInstruction?: string) => 
                 messages.push({ role: 'assistant', content: msg.text });
             }
         } else if (msg.sender === 'tool' || msg.sender === 'tool_result') {
-            messages.push({ role: 'tool', tool_call_id: msg.toolCallId, content: msg.text });
+            // Local providers use prompt-based tool calling emulation, not native tool roles.
+            messages.push({
+                role: 'user',
+                content: formatEmulatedToolResultMessage(msg)
+            });
         }
     });
 
@@ -101,8 +115,15 @@ const detectLocalEndpoint = async (): Promise<string> => {
 };
 
 const createApiError = async (response: Response, endpoint: string): Promise<Error> => {
-    const errorData = await response.json().catch(() => ({ error: { message: response.statusText } }));
-    return new Error(`LMStudio API error (${endpoint}): ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+    const errorData = await response.json().catch(() => ({ error: response.statusText, details: response.statusText }));
+    const resolvedMessage =
+        errorData?.error?.message ||
+        errorData?.error ||
+        errorData?.details ||
+        response.statusText ||
+        'Unknown error';
+
+    return new Error(`LMStudio API error (${endpoint}): ${response.status} - ${resolvedMessage}`);
 };
 
 const fetchWithTimeout = async (url: string, options: RequestInit, timeout: number = 30000) => {
@@ -292,12 +313,14 @@ export const generateContentStream = async function* (
     history?: ChatMessage[],
     tools?: Tool[],
     outputConfig?: OutputConfig,
-    apiKey?: string
+    apiKey?: string,
+    authToken?: string
 ) {
     const config: LMStudioConfig = {
         endpoint: endpoint || DEFAULT_CONFIG.endpoint,
         apiKey,
-        timeout: 120000  // ⭐ 120s — local models (Ollama/LMStudio) can be slow to load
+        authToken,
+        timeout: LOCAL_LLM_RUNTIME_TIMEOUT_MS
     };
 
     console.log(`[LMStudio] generateContentStream - endpoint: ${config.endpoint}, model: ${model}`);
@@ -345,13 +368,14 @@ export const generateContentStream = async function* (
     }
 
     try {
-        // OPTION C HYBRID: Runtime Phase - Direct call to local LLM endpoint (not via backend proxy)
-        // Configuration was validated by backend during setup, now frontend calls directly
-        const directUrl = `${config.endpoint}/v1/chat/completions`;
-        const response = await fetchWithTimeout(directUrl, {
+        const proxyUrl = buildLMStudioProxyUrl('chat');
+        const response = await fetchWithTimeout(proxyUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+            headers,
+            body: JSON.stringify({
+                ...body,
+                endpoint: config.endpoint
+            })
         }, config.timeout);
 
         if (!response.ok) throw await createApiError(response, config.endpoint);
@@ -447,12 +471,14 @@ export const generateContent = async (
     history?: ChatMessage[],
     tools?: Tool[],
     outputConfig?: OutputConfig,
-    apiKey?: string
+    apiKey?: string,
+    authToken?: string
 ): Promise<{ text: string; toolCalls?: ToolCall[] }> => {
     const config: LMStudioConfig = {
         endpoint: endpoint || DEFAULT_CONFIG.endpoint,
         apiKey,
-        timeout: 30000
+        authToken,
+        timeout: LOCAL_LLM_RUNTIME_TIMEOUT_MS
     };
 
     console.log(`[LMStudio] generateContent - endpoint: ${config.endpoint}, model: ${model}`);
@@ -500,13 +526,14 @@ export const generateContent = async (
     }
 
     try {
-        // OPTION C HYBRID: Runtime Phase - Direct call to local LLM endpoint (not via backend proxy)
-        // Configuration was validated by backend during setup, now frontend calls directly
-        const directUrl = `${config.endpoint}/v1/chat/completions`;
-        const response = await fetchWithTimeout(directUrl, {
+        const proxyUrl = buildLMStudioProxyUrl('chat');
+        const response = await fetchWithTimeout(proxyUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+            headers,
+            body: JSON.stringify({
+                ...body,
+                endpoint: config.endpoint
+            })
         }, config.timeout);
 
         if (!response.ok) throw await createApiError(response, config.endpoint);

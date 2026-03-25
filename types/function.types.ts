@@ -1,8 +1,8 @@
 /**
- * Types — Fonctions Personnalisées (Tools V2) côté Frontend
+ * Types — Tools V2 côté frontend
  *
- * Miroir des types backend IUserFunction.
- * Source de vérité côté frontend — utilisée par le store, les composants et les services.
+ * Types de lecture et de compatibilité utilisés par le store, les composants et les services.
+ * `UserFunction` reste un read model transitoire pendant la convergence vers le registry outillé et versionné.
  */
 
 export type FunctionLanguage = 'python' | 'typescript';
@@ -25,6 +25,7 @@ export interface RuntimeCompatibilityContext {
 
 export interface UserFunction {
     _id: string;
+    toolId?: string;
     name: string;
     description: string;
     language: FunctionLanguage;
@@ -78,20 +79,23 @@ export interface ToolTransitionRecord {
     workflowId?: string | null;
     workspaceId?: string | null;
     status: 'draft' | 'ready' | 'disabled' | 'deprecated';
-    trustLevel: 'trusted' | 'user' | 'restricted';
-    currentVersion: number;
-    versions: Array<{
-        tag: string;
-        contentHash: string;
-        createdAt: string | Date;
-        createdBy?: string | null;
-        changelog?: string | null;
-    }>;
+    trustLevel: 'internal' | 'user_private' | 'unverified';
+    currentVersion: ToolVersionRecord;
+    versions: ToolVersionRecord[];
     inputSchema: Record<string, unknown>;
     outputSchema: Record<string, unknown>;
     tags: string[];
-    dependencies: unknown;
-    policy: unknown;
+    dependencies: {
+        npm?: string[];
+        python?: string[];
+    };
+    policy: {
+        networkMode?: 'none' | 'restricted';
+        writablePaths?: string[];
+        secretAliases?: string[];
+        timeoutSeconds?: number;
+        maxMemoryMb?: number;
+    };
     isReadonly: boolean;
     isEnabled: boolean;
     compatibilityAliases: {
@@ -100,6 +104,53 @@ export interface ToolTransitionRecord {
     workspaceContext?: UserFunction['workspaceContext'];
     createdAt: string | Date;
     updatedAt: string | Date;
+}
+
+export interface ToolVersionRecord {
+    versionTag: string;
+    versionNumber?: number;
+        contentHash: string;
+        sourceMode?: 'inline' | 'path';
+        sourcePath?: string | null;
+        sourceInline?: string | null;
+        entrypoint?: string | null;
+        createdAt: string | Date;
+        createdBy?: string | null;
+    buildStatus?: 'not_built' | 'building' | 'built' | 'failed';
+    validationStatus?: 'unknown' | 'valid' | 'invalid';
+    changelog?: string | null;
+}
+
+export interface ToolRegistryReadModel {
+    id: string;
+    legacyFunctionId?: string;
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+    isEnabled: boolean;
+    versionTag?: string;
+    versionNumber?: number;
+    workspaceId?: string | null;
+}
+
+export type PromptToolReadModel = ToolRegistryReadModel;
+
+export function mapUserFunctionToToolRegistry(fn: UserFunction): ToolRegistryReadModel {
+    return {
+        id: fn.toolId ?? fn._id,
+        legacyFunctionId: fn._id,
+        name: fn.name,
+        description: fn.description,
+        inputSchema: fn.inputSchema,
+        isEnabled: fn.isEnabled,
+        versionTag: fn.versionTag,
+        versionNumber: fn.version,
+        workspaceId: fn.workspaceContext?.workspaceId ?? null,
+    };
+}
+
+export function mapUserFunctionToPromptTool(fn: UserFunction): PromptToolReadModel {
+    return mapUserFunctionToToolRegistry(fn);
 }
 
 export interface ToolWorkspaceSummary {

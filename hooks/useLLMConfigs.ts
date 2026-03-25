@@ -17,7 +17,7 @@
  *   await updateConfig('OpenAI', { apiKey: '...', enabled: true });
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import type { ILLMConfigUI } from '../types';
 import * as llmConfigService from '../services/llmConfigService';
@@ -64,13 +64,19 @@ export function useLLMConfigs(): UseLLMConfigsReturn {
   // State
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const configs = mapRuntimeConfigsToUiConfigs(runtimeLLMConfigs);
+  const configs = useMemo(
+    () => mapRuntimeConfigsToUiConfigs(runtimeLLMConfigs),
+    [runtimeLLMConfigs]
+  );
 
   // Options para le service
-  const serviceOptions = {
-    useApi: isAuthenticated,
-    token: accessToken || undefined
-  };
+  const serviceOptions = useMemo(
+    () => ({
+      useApi: isAuthenticated,
+      token: accessToken || undefined
+    }),
+    [isAuthenticated, accessToken]
+  );
 
   // Monitor auth state changes
   /**
@@ -181,7 +187,7 @@ export function useLLMConfigs(): UseLLMConfigsReturn {
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [serviceOptions]
   );
 
   /**

@@ -132,4 +132,65 @@ describe('UserToolRunService', () => {
             })
         ).rejects.toBeInstanceOf(UserToolRunStateError);
     });
+
+    it('persists burst queued runs independently for the same user and tool', async () => {
+        const baseData = buildCreateData();
+        const burstRuns = Array.from({ length: 10 }, (_, index) => ({
+            ...baseData,
+            executionId: `run-burst-${index}-${new mongoose.Types.ObjectId().toString()}`,
+            inputs: { prompt: `run ${index}` }
+        }));
+
+        await Promise.all(burstRuns.map((runData) => service.createQueuedRun(runData)));
+
+        const persistedRuns = await service.listRuns({
+            ownerUserId: baseData.ownerUserId,
+            toolId: baseData.toolId,
+            statuses: ['queued'],
+            limit: 20
+        });
+
+        expect(persistedRuns).toHaveLength(10);
+        expect(persistedRuns.map((run) => run.executionId).sort()).toEqual(burstRuns.map((run) => run.executionId).sort());
+    });
+
+    it('allows only one terminal transition to win under concurrent updates on the same run', async () => {
+        const createData = buildCreateData();
+
+        await service.createQueuedRun(createData);
+        await service.markRunning(createData.executionId, new Date('2026-03-17T14:00:00.000Z'));
+
+        const [completionAttempt, failureAttempt] = await Promise.allSettled([
+            service.completeRun(createData.executionId, {
+                outputs: { stdout: 'done', result: { ok: true } },
+                finishedAt: new Date('2026-03-17T14:00:05.000Z')
+            }),
+            service.failRun(createData.executionId, {
+                error: {
+                    code: 'RACE_FAIL',
+                    message: 'Concurrent failure should lose once completion wins',
+                    retryable: false
+                },
+                finishedAt: new Date('2026-03-17T14:00:06.000Z')
+            })
+        ]);
+
+        const fulfilled = [completionAttempt, failureAttempt].filter((result) => result.status === 'fulfilled');
+        const rejected = [completionAttempt, failureAttempt].filter((result) => result.status === 'rejected');
+
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(1);
+        expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(UserToolRunStateError);
+
+        const persisted = await service.getRunByExecutionId(createData.executionId);
+        expect(persisted?.status === 'completed' || persisted?.status === 'failed').toBe(true);
+
+        if (persisted?.status === 'completed') {
+            expect(persisted.outputs).toEqual(expect.objectContaining({ stdout: 'done' }));
+        }
+
+        if (persisted?.status === 'failed') {
+            expect(persisted.error).toEqual(expect.objectContaining({ code: 'RACE_FAIL' }));
+        }
+    });
 });

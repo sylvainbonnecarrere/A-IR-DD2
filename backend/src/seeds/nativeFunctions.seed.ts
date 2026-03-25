@@ -109,7 +109,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
     // ─────────────────────────────────────────────────────────────────
     {
         name: 'edit_py',
-        description: "Effectue une modification ciblée dans un fichier en remplaçant une chaîne de texte exacte. Opère dans le workspace sandbox de l'utilisateur.",
+        description: "Effectue une modification ciblée dans un fichier en remplaçant une chaîne de texte exacte. Opère dans le workspace persistant de l'utilisateur.",
         language: 'python',
         origin: 'native',
         userId: null,
@@ -118,7 +118,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
             type: 'object',
             required: ['file_path', 'old_str', 'new_str'],
             properties: {
-                file_path: { type: 'string', description: "Chemin du fichier relatif au workspace sandbox" },
+                file_path: { type: 'string', description: "Chemin du fichier relatif au workspace persistant" },
                 old_str: { type: 'string', description: "Chaîne exacte à remplacer (doit être unique dans le fichier)" },
                 new_str: { type: 'string', description: "Nouveau contenu de remplacement" }
             }
@@ -146,7 +146,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
     // ─────────────────────────────────────────────────────────────────
     {
         name: 'ls_py',
-        description: "Liste le contenu d'un répertoire dans le workspace sandbox. Retourne les fichiers et dossiers avec leurs métadonnées.",
+        description: "Liste le contenu d'un répertoire dans le workspace persistant. Retourne les fichiers et dossiers avec leurs métadonnées.",
         language: 'python',
         origin: 'native',
         userId: null,
@@ -155,7 +155,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
             type: 'object',
             required: ['directory_path'],
             properties: {
-                directory_path: { type: 'string', description: "Chemin du répertoire relatif au workspace sandbox" },
+                directory_path: { type: 'string', description: "Chemin du répertoire relatif au workspace persistant" },
                 recursive: { type: 'boolean', default: false, description: "Lister récursivement les sous-dossiers" },
                 show_hidden: { type: 'boolean', default: false, description: "Inclure les fichiers cachés (commençant par .)" },
                 filter_pattern: { type: 'string', description: "Pattern glob pour filtrer les résultats (ex: '*.py')" }
@@ -203,7 +203,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
             type: 'object',
             required: ['file_path', 'edits'],
             properties: {
-                file_path: { type: 'string', description: "Chemin du fichier relatif au workspace sandbox" },
+                file_path: { type: 'string', description: "Chemin du fichier relatif au workspace persistant" },
                 edits: {
                     type: 'array',
                     description: "Liste ordonnée des remplacements à appliquer",
@@ -241,7 +241,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
     // ─────────────────────────────────────────────────────────────────
     {
         name: 'read_py',
-        description: "Lit et retourne le contenu d'un fichier dans le workspace sandbox. Supporte la lecture partielle par plage de lignes.",
+        description: "Lit et retourne le contenu d'un fichier dans le workspace persistant. Supporte la lecture partielle par plage de lignes.",
         language: 'python',
         origin: 'native',
         userId: null,
@@ -250,7 +250,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
             type: 'object',
             required: ['file_path'],
             properties: {
-                file_path: { type: 'string', description: "Chemin du fichier relatif au workspace sandbox" },
+                file_path: { type: 'string', description: "Chemin du fichier relatif au workspace persistant" },
                 start_line: { type: 'number', description: "Ligne de début (1-indexé, optionnel)" },
                 end_line: { type: 'number', description: "Ligne de fin inclusive (optionnel)" },
                 encoding: { type: 'string', default: 'utf-8', description: "Encodage du fichier" }
@@ -471,7 +471,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
     // ─────────────────────────────────────────────────────────────────
     {
         name: 'write_py',
-        description: "Crée ou écrase un fichier dans le workspace sandbox avec le contenu fourni. Crée les répertoires parents si nécessaire.",
+        description: "Crée ou écrase un fichier dans le workspace persistant avec le contenu fourni. Crée les répertoires parents si nécessaire.",
         language: 'python',
         origin: 'native',
         userId: null,
@@ -480,7 +480,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
             type: 'object',
             required: ['file_path', 'content'],
             properties: {
-                file_path: { type: 'string', description: "Chemin du fichier relatif au workspace sandbox" },
+                file_path: { type: 'string', description: "Chemin du fichier relatif au workspace persistant" },
                 content: { type: 'string', description: "Contenu du fichier" },
                 encoding: { type: 'string', default: 'utf-8' },
                 overwrite: { type: 'boolean', default: true, description: "Permet d'écraser un fichier existant" },

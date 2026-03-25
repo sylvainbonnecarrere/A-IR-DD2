@@ -47,6 +47,7 @@ describe('ToolCallBlock', () => {
                 defaultExpanded
                 toolCall={{
                     id: 'tool-call-1',
+                    toolId: 'tool-1',
                     functionId: 'fn-1',
                     functionName: 'demo_tool',
                     arguments: { foo: 'bar' },
@@ -62,7 +63,7 @@ describe('ToolCallBlock', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Prévisualiser output/report.json' }));
 
         await waitFor(() => {
-            expect(mockedApiClient.get).toHaveBeenCalledWith('/api/runs/tool/fn-1/exec-1/artifacts/content', {
+            expect(mockedApiClient.get).toHaveBeenCalledWith('/api/runs/tool/tool-1/exec-1/artifacts/content', {
                 params: { path: 'output/report.json' }
             });
         });
@@ -81,6 +82,7 @@ describe('ToolCallBlock', () => {
                 defaultExpanded
                 toolCall={{
                     id: 'tool-call-2',
+                    toolId: 'tool-1',
                     functionId: 'fn-1',
                     functionName: 'demo_tool',
                     arguments: {},
@@ -96,7 +98,7 @@ describe('ToolCallBlock', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Télécharger output/report.json' }));
 
         await waitFor(() => {
-            expect(mockedApiClient.get).toHaveBeenCalledWith('/api/runs/tool/fn-1/exec-1/artifacts/download', {
+            expect(mockedApiClient.get).toHaveBeenCalledWith('/api/runs/tool/tool-1/exec-1/artifacts/download', {
                 params: { path: 'output/report.json' },
                 responseType: 'blob'
             });
@@ -105,5 +107,35 @@ describe('ToolCallBlock', () => {
         expect(createObjectURL).toHaveBeenCalled();
         expect(appendSpy).toHaveBeenCalled();
         expect(removeSpy).toHaveBeenCalled();
+    });
+
+    it('falls back to legacy functionId when canonical toolId is absent', async () => {
+        mockedApiClient.get.mockResolvedValueOnce({ data: new Blob(['artifact']) } as any);
+
+        render(
+            <ToolCallBlock
+                defaultExpanded
+                toolCall={{
+                    id: 'tool-call-3',
+                    functionId: 'fn-legacy',
+                    functionName: 'demo_tool',
+                    arguments: {},
+                    result: { ok: true },
+                    status: 'success',
+                    executionId: 'exec-legacy',
+                    artifacts: [{ path: 'output/report.json', kind: 'json' }],
+                    timestamp: new Date('2026-03-18T10:00:00.000Z')
+                }}
+            />
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Télécharger output/report.json' }));
+
+        await waitFor(() => {
+            expect(mockedApiClient.get).toHaveBeenCalledWith('/api/runs/tool/fn-legacy/exec-legacy/artifacts/download', {
+                params: { path: 'output/report.json' },
+                responseType: 'blob'
+            });
+        });
     });
 });

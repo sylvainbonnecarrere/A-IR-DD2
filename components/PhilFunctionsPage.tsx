@@ -11,6 +11,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useFunctionStore } from '../stores/useFunctionStore';
+import { useDesignStore } from '../stores/useDesignStore';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useAuth } from '../hooks/useAuth';
 import { FunctionEditorTab } from './FunctionEditorTab';
@@ -49,13 +50,16 @@ const RuntimeCompatibilityBanner: React.FC<{ runtimeCompatibility: RuntimeCompat
             : runtimeCompatibility.mode === 'rootful-linux'
                 ? 'Docker rootful'
                 : 'mode inconnu';
+    const securityLabel = runtimeCompatibility.securityLevel === 'dev-only'
+        ? 'dev-only (dev/test)'
+        : runtimeCompatibility.securityLevel;
 
     return (
         <div className={`mx-4 mt-3 rounded-lg border px-3 py-2 text-xs ${toneClass}`}>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-semibold">Compatibilité runtime</span>
                 <span>{modeLabel}</span>
-                <span>niveau {runtimeCompatibility.securityLevel}</span>
+                <span>niveau {securityLabel}</span>
                 <span>runner {runtimeCompatibility.preferredRunner}</span>
             </div>
             <div className="mt-1 text-[11px] opacity-90">
@@ -215,6 +219,8 @@ const FunctionLibraryTab: React.FC = () => {
 
     const { addNotification } = useNotifications();
     const { isAuthenticated } = useAuth();
+    const currentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
+    const activeWorkflow = useDesignStore((state) => state.getActiveWorkflow());
     const [isCreating, setIsCreating] = useState(false);
     const [newFnName, setNewFnName] = useState('');
     const [newFnDesc, setNewFnDesc] = useState('');
@@ -243,9 +249,9 @@ const FunctionLibraryTab: React.FC = () => {
 
     useEffect(() => {
         if (isAuthenticated) {
-            loadFunctions();
+            loadFunctions(currentWorkflowId ?? undefined);
         }
-    }, [loadFunctions, isAuthenticated]);
+    }, [loadFunctions, isAuthenticated, currentWorkflowId]);
 
     // ── Bannière invité ──────────────────────────────────────────────────────
     if (!isAuthenticated) {
@@ -308,6 +314,15 @@ const FunctionLibraryTab: React.FC = () => {
     };
 
     const handleCreate = async () => {
+        if (!currentWorkflowId) {
+            addNotification({
+                type: 'error',
+                title: 'Workflow requis',
+                message: 'Sélectionnez un workflow actif avant de créer une fonction personnalisée.'
+            });
+            return;
+        }
+
         setNameTouched(true);
         setDescTouched(true);
         if (nameError || descError) {
@@ -318,6 +333,7 @@ const FunctionLibraryTab: React.FC = () => {
             name: nameValue,
             description: descValue,
             language: newFnLang,
+            workflowId: currentWorkflowId,
             codeInline: newFnLang === 'python'
                 ? `# Votre fonction ${nameValue}\n\n\ndef run(context, args):\n    \"\"\"\n    ${descValue}\n    \"\"\"\n    # TODO: Implémentez votre logique ici\n    return {"result": "ok"}\n`
                 : `// Votre fonction ${nameValue}\n// Accès aux arguments : args.param_name, args.limit, etc.\nexport function run(\n  context: { userId: string; agentId?: string; workflowId?: string; depth: number },\n  args: { [key: string]: unknown }  // Ex: { user_name: string; limit?: number }\n): unknown {\n  // TODO: Implémentez votre logique ici\n  return { result: "ok" };\n}\n`
@@ -375,7 +391,9 @@ const FunctionLibraryTab: React.FC = () => {
                 {/* Create Button */}
                 <button
                     onClick={() => setIsCreating(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-gray-900 font-semibold rounded-lg text-sm transition-colors flex-shrink-0"
+                    disabled={!currentWorkflowId}
+                    title={!currentWorkflowId ? 'Sélectionnez un workflow actif pour créer une fonction.' : undefined}
+                    className="flex items-center gap-2 px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed text-gray-900 font-semibold rounded-lg text-sm transition-colors flex-shrink-0"
                 >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -389,6 +407,7 @@ const FunctionLibraryTab: React.FC = () => {
                 <span>{filteredFns.length} fonction{filteredFns.length !== 1 ? 's' : ''}</span>
                 <span className="text-cyan-500/70">{nativeCount} native{nativeCount !== 1 ? 's' : ''}</span>
                 <span className="text-purple-400/70">{customCount} custom</span>
+                <span className="text-gray-400/80">workflow {activeWorkflow?.name ?? 'non sélectionné'}</span>
             </div>
 
             <RuntimeCompatibilityBanner runtimeCompatibility={runtimeCompatibility} />

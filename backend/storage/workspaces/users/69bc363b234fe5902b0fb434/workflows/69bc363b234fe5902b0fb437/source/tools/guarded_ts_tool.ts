@@ -1,1 +1,0 @@
-function run(args) { return { ok: true, args }; }

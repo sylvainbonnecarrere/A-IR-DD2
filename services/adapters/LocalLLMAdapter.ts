@@ -30,6 +30,8 @@ export interface LocalLLMAdapterConfig {
     model: string;
     /** Optional bearer token */
     apiKey?: string;
+    /** Optional authenticated session token for backend proxy authorization */
+    authToken?: string;
     /** fr | en — language for FC prompt fragment (default: fr) */
     promptLanguage?: 'fr' | 'en';
 }
@@ -41,6 +43,7 @@ export class LocalLLMAdapter implements ILLMAdapter {
     private readonly endpoint: string;
     private readonly model: string;
     private readonly apiKey?: string;
+    private readonly authToken?: string;
     private readonly promptLanguage: 'fr' | 'en';
 
     constructor(provider: LLMProvider, config: LocalLLMAdapterConfig) {
@@ -48,6 +51,7 @@ export class LocalLLMAdapter implements ILLMAdapter {
         this.endpoint = config.endpoint;
         this.model = config.model;
         this.apiKey = config.apiKey;
+        this.authToken = config.authToken;
         this.promptLanguage = config.promptLanguage ?? 'fr';
     }
 
@@ -66,7 +70,8 @@ export class LocalLLMAdapter implements ILLMAdapter {
             request.messages,
             undefined,          // no native tools — we use prompt engineering
             request.outputConfig,
-            this.apiKey
+            this.apiKey,
+            this.authToken
         );
 
         // 3. Collect full text from stream

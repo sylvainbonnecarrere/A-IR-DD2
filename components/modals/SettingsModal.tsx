@@ -22,6 +22,74 @@ interface LLMConfigWithHasKey extends LLMConfig {
   hasLocalEndpoint?: boolean; // For authenticated mode - indicates if endpoint exists
 }
 
+function areCapabilitiesEqual(
+  left: LLMConfigWithHasKey['capabilities'],
+  right: LLMConfigWithHasKey['capabilities']
+): boolean {
+  const leftEntries = Object.entries(left || {}).sort(([a], [b]) => a.localeCompare(b));
+  const rightEntries = Object.entries(right || {}).sort(([a], [b]) => a.localeCompare(b));
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([key, value], index) => {
+    const [rightKey, rightValue] = rightEntries[index];
+    return key === rightKey && value === rightValue;
+  });
+}
+
+function areConfigsEqual(left: LLMConfigWithHasKey[], right: LLMConfigWithHasKey[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((config, index) => {
+    const other = right[index];
+    return (
+      config.provider === other.provider &&
+      config.enabled === other.enabled &&
+      (config.apiKey || '') === (other.apiKey || '') &&
+      (config.localEndpoint || '') === (other.localEndpoint || '') &&
+      config.hasApiKey === other.hasApiKey &&
+      config.hasLocalEndpoint === other.hasLocalEndpoint &&
+      areCapabilitiesEqual(config.capabilities, other.capabilities)
+    );
+  });
+}
+
+function areProfilesEqual(left: LocalLLMProfile[], right: LocalLLMProfile[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((profile, index) => {
+    const other = right[index];
+    return (
+      profile.id === other.id &&
+      profile.name === other.name &&
+      profile.endpoint === other.endpoint &&
+      profile.enabled === other.enabled &&
+      profile.detectedModel === other.detectedModel &&
+      areCapabilitiesEqual(profile.capabilities, other.capabilities)
+    );
+  });
+}
+
+function areSetsEqual(left: Set<string>, right: Set<string>): boolean {
+  if (left.size !== right.size) {
+    return false;
+  }
+
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 
 export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: SettingsModalProps) => {
   const [currentLLMConfigs, setCurrentLLMConfigs] = useState<LLMConfigWithHasKey[]>(JSON.parse(JSON.stringify(propConfigs)));
@@ -73,7 +141,9 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
         } as LLMConfigWithHasKey;
       });
       
-      setCurrentLLMConfigs(mergedConfigs);
+      setCurrentLLMConfigs(prev => (
+        areConfigsEqual(prev, mergedConfigs) ? prev : mergedConfigs
+      ));
     }
   }, [hookLoading, hookConfigs, propConfigs]);
 
@@ -83,25 +153,35 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
     if (hookProfiles.length > 0) {
       // Normal case: use loaded profiles as draft
-      setLocalProfiles(hookProfiles);
-      setOriginalProfileIds(new Set(hookProfiles.map(p => p.id)));
+      setLocalProfiles(prev => (
+        areProfilesEqual(prev, hookProfiles) ? prev : hookProfiles
+      ));
+
+      const nextOriginalIds = new Set(hookProfiles.map(p => p.id));
+      setOriginalProfileIds(prev => (
+        areSetsEqual(prev, nextOriginalIds) ? prev : nextOriginalIds
+      ));
     } else {
       // Cold start OR migration: check if legacy single endpoint exists
       const localConfig = currentLLMConfigs.find(c => isLocalProvider(c.provider));
       const legacyEndpoint = localConfig?.localEndpoint;
       if (legacyEndpoint && !legacyEndpoint.includes('•')) {
         // Idempotent migration: show legacy endpoint as "Premier LLM"
-        setLocalProfiles([{
+        const migratedProfiles = [{
           id: '',
           name: 'Premier LLM',
           endpoint: legacyEndpoint,
           capabilities: {} as LocalLLMProfile['capabilities'],
           enabled: true
-        }]);
+        }];
+
+        setLocalProfiles(prev => (
+          areProfilesEqual(prev, migratedProfiles) ? prev : migratedProfiles
+        ));
       } else {
-        setLocalProfiles([]);
+        setLocalProfiles(prev => (prev.length === 0 ? prev : []));
       }
-      setOriginalProfileIds(new Set());
+      setOriginalProfileIds(prev => (prev.size === 0 ? prev : new Set()));
     }
   }, [hookProfiles, hookProfilesLoading]);
 

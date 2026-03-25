@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useFunctionStore } from '../stores/useFunctionStore';
 import { useAuth } from '../hooks/useAuth';
 import type { FunctionLanguage, FunctionOrigin } from '../types/function.types';
+import { buildSelectableToolCatalog } from '../services/toolSelectionResolver';
 
 interface FunctionSelectorProps {
   selectedIds: string[];
@@ -26,6 +27,11 @@ export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds,
   const { isAuthenticated } = useAuth();
   const [search, setSearch] = useState('');
 
+  const selectableCatalog = useMemo(
+    () => buildSelectableToolCatalog(functions, selectedIds),
+    [functions, selectedIds]
+  );
+
   useEffect(() => {
     if (isAuthenticated) loadFunctions();
   }, [isAuthenticated]); // loadFunctions stable Zustand ref — retirer des deps pour éviter boucle
@@ -36,9 +42,9 @@ export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds,
   //   - disabled ones → grayed out, not selectable (user must enable in Phil first)
   const baseList = useMemo(
     () => readOnly || filterDisabled
-      ? functions.filter(f => selectedIds.includes(f._id))
-      : functions, // Show ALL functions — enabled AND disabled
-    [functions, readOnly, filterDisabled, selectedIds]
+      ? selectableCatalog.filter(f => f.selected)
+      : selectableCatalog,
+    [selectableCatalog, readOnly, filterDisabled]
   );
 
   const filtered = useMemo(() => {
@@ -53,13 +59,18 @@ export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds,
   }, [baseList, search]);
 
   const handleToggle = (id: string) => {
-    // Only allow toggling enabled functions (disabled ones need to be enabled in Phil first)
-    const fn = functions.find(f => f._id === id);
+    // Accept canonical tool ids and legacy function ids during the transition.
+    const fn = functions.find(f => (f.toolId ?? f._id) === id || f._id === id);
     if (!fn?.isEnabled) return;
+
+    const canonicalId = fn.toolId ?? fn._id;
+    const knownIds = new Set([canonicalId, fn._id]);
+    const isAlreadySelected = selectedIds.some(selectedId => knownIds.has(selectedId));
+
     onChange(
-      selectedIds.includes(id)
-        ? selectedIds.filter(sid => sid !== id)
-        : [...selectedIds, id]
+      isAlreadySelected
+        ? selectedIds.filter(selectedId => !knownIds.has(selectedId))
+        : [...selectedIds, canonicalId]
     );
   };
 
@@ -137,13 +148,13 @@ export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds,
           </p>
         )}
         {filtered.map(fn => {
-          const isSelected = selectedIds.includes(fn._id);
+          const isSelected = fn.selected;
           const isDisabled = !fn.isEnabled;
           return (
             <button
-              key={fn._id}
+              key={fn.id}
               type="button"
-              onClick={() => !readOnly && handleToggle(fn._id)}
+              onClick={() => !readOnly && handleToggle(fn.id)}
               title={isDisabled ? 'Cette fonction est désactivée. Activez-la depuis Phil → Fonctions.' : undefined}
               className={`w-full flex items-start gap-3 p-2.5 rounded-lg text-left transition-colors border ${
                 isDisabled
@@ -178,6 +189,11 @@ export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds,
                   <span className={`text-sm font-medium ${isSelected && !isDisabled ? 'text-cyan-300' : 'text-gray-200'}`}>
                     {fn.name}
                   </span>
+                  {fn.versionTag && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700">
+                      {fn.versionTag}
+                    </span>
+                  )}
                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${LANG_BADGE[fn.language]}`}>
                     {fn.language}
                   </span>

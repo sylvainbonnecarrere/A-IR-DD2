@@ -200,4 +200,36 @@ describe('RuntimeHealthService', () => {
         expect(report.runtime.runners.preferred).toBe('docker_sandbox');
         expect(report.runtime.runners.firecracker.available).toBe(false);
     });
+
+    it('marks Firecracker as the preferred runtime trajectory when KVM is available', async () => {
+        const runner = new FakeCommandRunner({
+            'node --version': { exitCode: 0, stdout: 'v22.14.0\n' },
+            'python3 --version': { exitCode: 0, stdout: 'Python 3.12.6\n' },
+            'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"29.1.3"\n' },
+            'docker info --format {{json .Rootless}}': { exitCode: 0, stdout: 'true\n' },
+            'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
+            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' }
+        });
+
+        const service = new RuntimeHealthService({
+            runner,
+            runtimeConfig: {
+                nodeExecutable: 'node',
+                pythonExecutables: ['python3', 'python'],
+                dockerExecutable: 'docker'
+            },
+            kvmAvailable: async () => true
+        });
+
+        const report = await service.getHealthReport();
+
+        expect(report.status).toBe('healthy');
+        expect(report.runtime.runners.preferred).toBe('firecracker');
+        expect(report.runtime.runners.firecracker).toEqual(expect.objectContaining({
+            available: true,
+            status: 'healthy',
+            detail: 'KVM disponible: le branchement Firecracker peut être préparé sur cet hôte Linux.'
+        }));
+        expect(report.summary).toContain('Firecracker préparable');
+    });
 });

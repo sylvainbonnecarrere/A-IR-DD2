@@ -413,6 +413,23 @@ describe('Function run routes', () => {
         }));
     });
 
+    it('returns a single target run by executionId without pagination', async () => {
+        const fixture = await createFixture();
+
+        const response = await request(app)
+            .get('/api/runs/executions/utr-function-runs-1')
+            .query({ toolId: fixture.fn.id })
+            .set('Authorization', `Bearer ${fixture.accessToken}`)
+            .expect(200);
+
+        expect(response.body).toEqual(expect.objectContaining({
+            executionId: 'utr-function-runs-1',
+            runner: 'docker_sandbox',
+            status: 'completed'
+        }));
+        expect(response.body).not.toHaveProperty('pagination');
+    });
+
     it('cleans up old runs via the target runs route', async () => {
         const fixture = await createFixture();
 

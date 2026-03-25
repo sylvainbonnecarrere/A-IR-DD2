@@ -39,7 +39,8 @@ const LOCAL_PROVIDERS: LLMProvider[] = [LLMProvider.LMStudio];
 export function createAdapter(
     provider: LLMProvider,
     config: LLMConfig | null,
-    model: string
+    model: string,
+    authToken?: string
 ): ILLMAdapter | null {
     if (!LOCAL_PROVIDERS.includes(provider)) {
         // Native function-calling provider — use existing streaming path
@@ -54,5 +55,6 @@ export function createAdapter(
         endpoint,
         model,
         apiKey: (config as any)?.apiKey,
+        authToken,
     });
 }

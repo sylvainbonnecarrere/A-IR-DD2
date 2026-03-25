@@ -9,7 +9,7 @@
  */
 
 import type { LLMProvider, ChatMessage, OutputConfig } from '../../types';
-import type { UserFunction } from '../../types/function.types';
+import type { ToolRegistryReadModel } from '../../types/function.types';
 import type { ParsedToolCall } from '../llm/ToolCallParser';
 
 // ─── Value objects ───────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ export interface LLMRequest {
     /** Full conversation history (user + agent + tool + tool_result). */
     messages: ChatMessage[];
     /** Functions made available to the LLM for this turn. */
-    functions: UserFunction[];
+    functions: ToolRegistryReadModel[];
     /** Base system prompt (without FC additions). */
     systemPrompt?: string;
     /** Optional output constraints (JSON schema, format, …). */
