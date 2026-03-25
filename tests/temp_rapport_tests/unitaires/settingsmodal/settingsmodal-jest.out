@@ -1,0 +1,35 @@
+PASS tests/unitaires/SettingsModal.TNR.test.ts
+  SettingsModal.handleDetectLMStudio - TNR
+    √ modal should not loop when hook configs get a new reference on each render (110 ms)
+    √ endpoint should be properly URL encoded in proxy call (2 ms)
+    √ proxy URL should follow correct format (1 ms)
+    √ fetch should use 15 second timeout for full probe suite (1 ms)
+    √ detection result should have required fields (4 ms)
+    √ detected capabilities should map to LLMCapability enum (1 ms)
+    √ should handle unhealthy endpoint response (1 ms)
+    √ LMStudio provider should be LMStudio enum value
+    √ detection button should be disabled without endpoint
+    √ detection button should be enabled with endpoint
+    √ detection button should be disabled while detection in progress
+  Detection Response Parsing - TNR
+    √ should parse JSON response from backend
+    √ should gracefully handle malformed JSON (17 ms)
+    √ response must have all required fields (1 ms)
+  Backend Route Contract - TNR
+    √ backend should always return 200 status code
+    √ unhealthy response should include error field (1 ms)
+    √ healthy response should include modelId
+    √ capabilities field should never be null (1 ms)
+  Configuration Persistence - TNR
+    √ should be able to save detected configuration (2 ms)
+    √ should be able to retrieve saved configuration (1 ms)
+  User Feedback - TNR
+    √ should show success notification with detected capabilities (1 ms)
+    √ should show error notification on detection failure (1 ms)
+    √ should indicate loading state during detection
+
+Test Suites: 1 passed, 1 total
+Tests:       23 passed, 23 total
+Snapshots:   0 total
+Time:        2.232 s
+Ran all test suites matching tests/unitaires/SettingsModal.TNR.test.ts.

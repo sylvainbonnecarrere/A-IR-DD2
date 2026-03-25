@@ -662,8 +662,8 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                       // Call parent handler if provided
                       onImageGenerated?.(nodeId, imageBase64);
                     }}
-                    onOpenImageModificationPanel={(nodeId: string, sourceImage: string, mimeType?: string) => {
-                      onOpenImageModificationPanel?.(nodeId, sourceImage, mimeType);
+                    onOpenImageModificationPanel={(nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => {
+                      onOpenImageModificationPanel?.(nodeId, sourceImage, agent, agentInstance, mimeType);
                     }}
                     hideSlideOver={true}
                   />

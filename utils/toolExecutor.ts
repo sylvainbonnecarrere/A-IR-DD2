@@ -1,5 +1,6 @@
 // utils/toolExecutor.ts
 import { ToolCall } from '../types';
+import { API_BASE_URL } from '../config/api.config';
 
 // Mock function for getting weather
 const get_weather = (location: string): object => {
@@ -20,7 +21,7 @@ const get_current_time = (): object => {
 };
 
 const executePythonToolOnBackend = async (toolName: string, args: object): Promise<object> => {
-    const backendUrl = 'http://localhost:3001/api/execute-python-tool';
+    const backendUrl = `${API_BASE_URL}/api/execute-python-tool`;
     
     try {
         const response = await fetch(backendUrl, {

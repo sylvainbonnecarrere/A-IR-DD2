@@ -14,6 +14,7 @@ describe('LLMConfig Model', () => {
             username: `llmconfigtest${Date.now()}`
         });
         testUserId = user._id as mongoose.Types.ObjectId;
+        await LLMConfig.syncIndexes();
     }, 30000); // Timeout 30s
 
     beforeEach(async () => {
@@ -76,7 +77,7 @@ describe('LLMConfig Model', () => {
                 enabled: true
             });
 
-            const plainKey = 'sk-test123456789';
+            const plainKey = 'openai-test-key-placeholder';
             await config.setApiKey(plainKey);
 
             // Vérifier que clé est chiffrée (format: iv:salt:authTag:encryptedData)
@@ -92,7 +93,7 @@ describe('LLMConfig Model', () => {
                 enabled: true
             });
 
-            const plainKey = 'sk-ant-test-secret-key-123';
+            const plainKey = 'anthropic-test-key-placeholder';
             await config.setApiKey(plainKey);
             await config.save();
 
@@ -154,11 +155,14 @@ describe('LLMConfig Model', () => {
                 enabled: true
             });
 
-            await config.setApiKey('sk-test-original');
+            await config.setApiKey('gemini-test-key-placeholder');
             await config.save();
 
             // Altération malveillante
-            config.apiKeyEncrypted = 'iv:salt:tag:fakeciphertext';
+            const originalEncrypted = config.apiKeyEncrypted as string;
+            const [ivHex, saltHex, authTagHex, encryptedData] = originalEncrypted.split(':');
+            const tamperedEncryptedData = `${encryptedData.slice(0, -1)}${encryptedData.endsWith('0') ? '1' : '0'}`;
+            config.apiKeyEncrypted = [ivHex, saltHex, authTagHex, tamperedEncryptedData].join(':');
             await config.save();
 
             // Déchiffrement doit échouer (méthode synchrone)

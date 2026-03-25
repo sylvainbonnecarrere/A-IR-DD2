@@ -6,16 +6,22 @@ import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../contexts/NotificationContext';
-import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, PersistenceConfig, defaultPersistenceConfig, LocalLLMProfile } from '../../types';
+import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, PersistenceConfig, defaultPersistenceConfig, LocalLLMProfile, ToolSelection } from '../../types';
 import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels, getCapabilitiesForLLM } from '../../llmModels';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
 import { initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
 import { API_BASE_URL } from '../../config/api.config';
+import { buildGovernanceHeaders } from '../../utils/governanceHeaders';
 import { isLocalProvider, isLMStudio } from '../../utils/llmProviderUtils';
 import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
+import { FunctionSelector } from '../FunctionSelector';
+import { useFunctionStore } from '../../stores/useFunctionStore';
+import { buildToolSelectionsFromFunctions, deriveSelectedToolIds } from '../../services/toolSelectionResolver';
 
 type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence' | 'links' | 'tasks' | 'logs' | 'errors';
+
+const EMPTY_LOCAL_LLM_PROFILES: LocalLLMProfile[] = [];
 
 /**
  * Modal de Configuration Enrichie par Instance
@@ -27,7 +33,7 @@ type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence'
  * 
  * Rendu au niveau App.tsx pour affichage en vrai plein écran
  */
-export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localLLMProfiles?: LocalLLMProfile[] }> = ({ llmConfigs, localLLMProfiles = [] }) => {
+export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localLLMProfiles?: LocalLLMProfile[] }> = ({ llmConfigs, localLLMProfiles = EMPTY_LOCAL_LLM_PROFILES }) => {
     const { t } = useLocalization();
     const { getResolvedInstance, updateInstanceConfig, updateAgentInstance } = useDesignStore();
     const { configModalInstanceId, setConfigModalInstanceId } = useRuntimeStore();
@@ -39,6 +45,11 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
     const [hasChanges, setHasChanges] = useState(false);
     const [editedName, setEditedName] = useState('');
     const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+
+    // J6: Function Inheritance
+    const [inheritFromPrototype, setInheritFromPrototype] = useState(true);
+    const [overrideFunctionIds, setOverrideFunctionIds] = useState<string[]>([]);
+    const availableFunctions = useFunctionStore(state => state.functions);
 
     // Récupérer l'instance et le prototype (peut être null)
     const resolved = configModalInstanceId ? getResolvedInstance(configModalInstanceId) : null;
@@ -130,7 +141,12 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             ...(prototypePersistence || {}),
             ...(instancePersistence || {})
         });
-        
+
+        // J6: Load function inheritance state
+        const fi = instanceConfig?.functionInheritance;
+        setInheritFromPrototype(fi?.inheritFromPrototype !== false);
+        setOverrideFunctionIds(deriveSelectedToolIds(fi?.overrideToolSelections, fi?.overrideFunctionIds));
+
         setHasChanges(false);
     }, [configModalInstanceId, getResolvedInstance, localLLMProfiles]);
 
@@ -145,8 +161,8 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         );
         
         // Only update if capabilities actually changed
-        const currentCaps = JSON.stringify(editedConfig.capabilities?.sort());
-        const newCaps = JSON.stringify(newCapabilities.sort());
+        const currentCaps = JSON.stringify([...(editedConfig.capabilities || [])].sort());
+        const newCaps = JSON.stringify([...newCapabilities].sort());
         
         if (currentCaps !== newCaps) {
             setEditedConfig(prev => ({
@@ -189,6 +205,15 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         const configToSave = {
             ...editedConfig,
             historyConfig: prepareHistoryConfigForSave(editedConfig.historyConfig || {}, enabledProvidersList),
+            // J6: Function inheritance
+            functionInheritance: {
+                inheritFromPrototype,
+                overrideFunctionIds: inheritFromPrototype ? [] : overrideFunctionIds,
+                overrideToolSelections: inheritFromPrototype ? [] : buildToolSelectionsFromFunctions(overrideFunctionIds, availableFunctions),
+            },
+            toolSelections: inheritFromPrototype
+                ? (prototype.toolSelections || buildToolSelectionsFromFunctions(prototype.functionIds || [], availableFunctions))
+                : buildToolSelectionsFromFunctions(overrideFunctionIds, availableFunctions),
             // Preserve runtime data (logs, errors, tasks, links)
             logs: instance.configuration_json?.logs || [],
             errors: instance.configuration_json?.errors || [],
@@ -204,10 +229,9 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             try {
                 const response = await fetch(`${API_BASE_URL}/api/agent-instances/${instance.id}`, {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${accessToken}`
-                    },
+                    headers: buildGovernanceHeaders(accessToken, {
+                        'Content-Type': 'application/json'
+                    }),
                     body: JSON.stringify({
                         configuration_json: configToSave,
                         name: editedName,
@@ -314,7 +338,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                     <TabButton
                         active={activeTab === 'fonctions'}
                         onClick={() => setActiveTab('fonctions')}
-                        badge={editedConfig.tools?.length}
+                        badge={inheritFromPrototype ? (prototype.functionIds?.length || undefined) : (overrideFunctionIds.length || undefined)}
                     >
                         {t('agentConfig_tab_functions')}
                     </TabButton>
@@ -388,8 +412,11 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
 
                     {activeTab === 'fonctions' && (
                         <FunctionsTab
-                            config={editedConfig}
-                            onChange={handleConfigChange}
+                            inheritFromPrototype={inheritFromPrototype}
+                            overrideFunctionIds={overrideFunctionIds}
+                            prototypeFunctionIds={prototype.functionIds || []}
+                            onInheritChange={(val) => { setInheritFromPrototype(val); setHasChanges(true); }}
+                            onOverrideChange={(ids) => { setOverrideFunctionIds(ids); setHasChanges(true); }}
                             t={t}
                         />
                     )}
@@ -1250,50 +1277,49 @@ const HistoryTab: React.FC<{
 
 // Functions Tab Component
 const FunctionsTab: React.FC<{
-    config: any;
-    onChange: (field: string, value: any) => void;
+    inheritFromPrototype: boolean;
+    overrideFunctionIds: string[];
+    prototypeFunctionIds: string[];
+    onInheritChange: (val: boolean) => void;
+    onOverrideChange: (ids: string[]) => void;
     t: (key: string) => string;
-}> = ({ config, onChange, t }) => {
-    const [toolsJsonInput, setToolsJsonInput] = useState(JSON.stringify(config.tools || [], null, 2));
-    const [toolsError, setToolsError] = useState('');
-
-    const handleToolsJsonChange = (value: string) => {
-        setToolsJsonInput(value);
-        try {
-            const parsed = JSON.parse(value);
-            if (Array.isArray(parsed)) {
-                onChange('tools', parsed);
-                setToolsError('');
-            } else {
-                setToolsError('Les outils doivent être un tableau JSON');
-            }
-        } catch (e) {
-            setToolsError('JSON invalide : ' + (e as Error).message);
-        }
-    };
-
+}> = ({ inheritFromPrototype, overrideFunctionIds, prototypeFunctionIds, onInheritChange, onOverrideChange }) => {
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
+            {/* Toggle héritage */}
             <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
-                <h3 className="text-lg font-semibold text-white mb-4">{t('agentConfig_functions_editorLabel')}</h3>
-                <p className="text-sm text-gray-400 mb-3">
-                    {config.tools?.length || 0} outil(s) configuré(s)
-                </p>
-                <textarea
-                    value={toolsJsonInput}
-                    onChange={(e) => handleToolsJsonChange(e.target.value)}
-                    rows={20}
-                    className={`w-full px-3 py-2 bg-gray-800 border rounded text-white font-mono text-xs resize-vertical focus:outline-none ${toolsError ? 'border-red-500' : 'border-gray-600 focus:border-cyan-500'
-                        }`}
-                    placeholder='[{"name": "tool_name", "description": "...", "parameters": {...}}]'
+                <ToggleSwitch
+                    label="Hériter les fonctions du prototype"
+                    checked={inheritFromPrototype}
+                    onChange={onInheritChange}
                 />
-                {toolsError && (
-                    <p className="mt-2 text-sm text-red-400">⚠️ {toolsError}</p>
-                )}
-                <p className="mt-3 text-xs text-gray-500">
-                    💡 {t('agentConfig_functions_pythonNote')}
+                <p className="mt-2 text-xs text-gray-400">
+                    {inheritFromPrototype
+                        ? `Les fonctions définies sur le prototype sont utilisées automatiquement (${prototypeFunctionIds.length} fonction(s)).`
+                        : 'Personnalisez les fonctions pour cette instance en ignorant le prototype.'}
                 </p>
             </div>
+
+            {/* Sélecteur ou affichage hérité */}
+            {inheritFromPrototype ? (
+                prototypeFunctionIds.length > 0 ? (
+                    <FunctionSelector
+                        selectedIds={prototypeFunctionIds}
+                        onChange={() => {}}
+                        readOnly
+                    />
+                ) : (
+                    <div className="bg-gray-900/50 p-6 rounded-lg border border-gray-700 text-center">
+                        <p className="text-sm text-gray-400">Aucune fonction définie sur le prototype.</p>
+                        <p className="text-xs text-gray-500 mt-1">Désactivez l'héritage pour personnaliser les fonctions de cette instance.</p>
+                    </div>
+                )
+            ) : (
+                <FunctionSelector
+                    selectedIds={overrideFunctionIds}
+                    onChange={onOverrideChange}
+                />
+            )}
         </div>
     );
 };

@@ -6,9 +6,11 @@ import { AgentPrototype } from '../models/AgentPrototype.model';
 import { Workflow } from '../models/Workflow.model';
 import { AgentJournal } from '../models/AgentJournal.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
+import { requireRobotGovernance } from '../middleware/robot-governance.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 import { transformAgentInstanceForFrontend } from '../utils/transforms';
+import { CanonicalRobotIdEnum } from '../types/robotIds';
 
 // Type pour les paramètres de route hérités (via mergeParams)
 interface WorkflowParams {
@@ -18,6 +20,15 @@ interface WorkflowParams {
 
 // CORRECTION SOLID: mergeParams: true pour hériter des paramètres du parent (:workflowId)
 const router = Router({ mergeParams: true });
+
+const toolSelectionSchema = z.object({
+    toolId: z.string(),
+    versionRef: z.object({
+        versionTag: z.string().optional(),
+        versionNumber: z.number().optional(),
+        workspaceId: z.string().nullable().optional()
+    }).optional()
+});
 
 // Schema validation
 const createAgentInstanceSchema = z.object({
@@ -33,8 +44,9 @@ const createAgentInstanceSchema = z.object({
     capabilities: z.array(z.string()).default([]),
     historyConfig: z.object({}).passthrough().optional(),
     tools: z.array(z.object({}).passthrough()).optional(),
+    toolSelections: z.array(toolSelectionSchema).optional(),
     outputConfig: z.object({}).passthrough().optional(),
-    robotId: z.enum(['AR_001', 'BOS_001', 'COM_001', 'PHIL_001', 'TIM_001']),
+    robotId: CanonicalRobotIdEnum,
     
     // ⭐ FIX QA: Add persistenceConfig to validation schema for media storage
     persistenceConfig: z.object({
@@ -45,7 +57,7 @@ const createAgentInstanceSchema = z.object({
         saveTasks: z.boolean().optional(),
         saveMedia: z.boolean().optional(),
         mediaStorage: z.enum(['db', 'local', 'cloud']).optional(), // ⭐ FIX: Use 'db' not 'database'
-        cloudStorageConfig: z.object({}).passthrough().optional()
+        cloudStorageConfig: z.object({}).passthrough().nullable().optional()
     }).optional(),
 
     // Canvas properties
@@ -55,7 +67,14 @@ const createAgentInstanceSchema = z.object({
     }),
     isMinimized: z.boolean().default(false),
     isMaximized: z.boolean().default(false),
-    zIndex: z.number().default(0)
+    zIndex: z.number().default(0),
+
+    // ⭐ J6: functionInheritance — héritage des fonctions depuis le prototype
+    functionInheritance: z.object({
+        inheritFromPrototype: z.boolean(),
+        overrideFunctionIds: z.array(z.string()).optional(),
+        overrideToolSelections: z.array(toolSelectionSchema).optional()
+    }).optional()
 });
 
 const updateAgentInstanceSchema = createAgentInstanceSchema.partial();
@@ -113,6 +132,11 @@ router.get('/:id',
 router.post('/',
     requireAuth,
     validateRequest(createAgentInstanceSchema),
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'create',
+        resolveTargetRobotId: (req) => req.body?.robotId
+    }),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -160,7 +184,23 @@ router.post('/',
 
 // POST /api/workflows/:workflowId/instances/from-prototype - Créer instance depuis prototype
 // ⭐ MERGE STRATEGY: prototype (source) + body overrides (name, persistenceConfig)
-router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>, res: Response) => {
+router.post('/from-prototype', requireAuth,
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'create',
+        resolveTargetRobotId: async (req) => {
+            const user = req.user as IUser | undefined;
+            const prototypeId = req.body?.prototypeId;
+
+            if (!user?.id || typeof prototypeId !== 'string' || !mongoose.Types.ObjectId.isValid(prototypeId)) {
+                return undefined;
+            }
+
+            const prototype = await AgentPrototype.findOne({ _id: prototypeId, userId: user.id }).select('robotId');
+            return prototype?.robotId;
+        }
+    }),
+    async (req, res) => {
     try {
         const user = req.user as IUser;
         const { workflowId } = req.params;
@@ -218,10 +258,15 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
           : ['Chat'];
         
         const finalTools = Array.isArray(prototype.tools) ? prototype.tools : [];
+        const finalToolSelections = Array.isArray((prototype as any).toolSelections) && (prototype as any).toolSelections.length > 0
+            ? (prototype as any).toolSelections
+            : finalTools.map((toolId: mongoose.Types.ObjectId) => ({ toolId: toolId.toString() }));
         
         // 4. PHASE 2 - HistoryConfig: Use frontend config if provided
         const finalHistoryConfig = configuration_json?.historyConfig || prototype.historyConfig || {};
         const finalOutputConfig = configuration_json?.outputConfig || prototype.outputConfig || {};
+        // ⭐ LOCAL LLM: Resolve localLLMProfileId (frontend takes precedence over prototype)
+        const finalLocalLLMProfileId = configuration_json?.localLLMProfileId ?? (prototype as any).localLLMProfileId ?? null;
         
         // 5. PersistenceConfig: merge prototype config avec overrides
         const prototypePersistenceConfig = prototype.persistenceConfig || {
@@ -269,7 +314,10 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
             historyConfig: finalHistoryConfig,  // ⭐ PHASE 2: From frontend configuration_json
             outputConfig: finalOutputConfig,  // ⭐ PHASE 2: From frontend configuration_json
             tools: finalTools,
+            toolSelections: finalToolSelections,
             robotId: finalRobotId,
+            // ⭐ LOCAL LLM: Persist localLLMProfileId for correct endpoint resolution
+            localLLMProfileId: finalLocalLLMProfileId,
 
             // Canvas properties
             position,
@@ -279,6 +327,13 @@ router.post('/from-prototype', requireAuth, async (req: Request<WorkflowParams>,
 
             // persistenceConfig avec overrides
             persistenceConfig: finalPersistenceConfig,
+
+            // ⭐ J6: functionInheritance — hériter les fonctions du prototype par défaut
+            functionInheritance: {
+                inheritFromPrototype: true,
+                overrideFunctionIds: [],
+                overrideToolSelections: []
+            },
 
             // initialisation contenu et métriques
             content: [],
@@ -353,6 +408,18 @@ router.put('/:id',
         return instance ? instance.userId.toString() : null;
     }),
     validateRequest(updateAgentInstanceSchema),
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'modify',
+        resolveTargetRobotId: async (req) => {
+            if (typeof req.body?.robotId === 'string') {
+                return req.body.robotId;
+            }
+
+            const instance = await AgentInstance.findById(req.params.id).select('robotId');
+            return instance?.robotId;
+        }
+    }),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -401,12 +468,26 @@ router.put('/:id',
                     instance.llmModel = configuration_json.model; // Note: frontend sends 'model', schema uses 'llmModel'
                 }
                 
-                // ARRAYS: Capabilities + tools
+                // ARRAYS: Capabilities
                 if (Array.isArray(configuration_json.capabilities)) {
                     instance.capabilities = configuration_json.capabilities;
                 }
-                if (Array.isArray(configuration_json.tools)) {
-                    instance.tools = configuration_json.tools;
+                if (Array.isArray(configuration_json.toolSelections)) {
+                    instance.toolSelections = configuration_json.toolSelections;
+                }
+                // ⭐ ARCHITECTURE NOTE — dual storage:
+                //   instance.tools (ObjectId[]) = stable tool IDs mirrored across legacy/cible
+                //   functionInheritance.overrideFunctionIds (String[]) = instance-level override IDs in the same ID space
+                //   These serve DIFFERENT purposes and are NOT the same field.
+                //
+                //   DO NOT overwrite instance.tools from configuration_json.tools here because:
+                //   - configuration_json.tools may contain legacy Tool objects (schema: {name, description, parameters})
+                //     which are NOT valid ObjectId refs and would corrupt the V2 function registry links.
+                //   - The canonical way to override functions for an instance is via functionInheritance below.
+                //
+                //   instance.tools is updated only via functionInheritance.overrideFunctionIds sync (see below).
+                if (Array.isArray(configuration_json.legacyTools)) {
+                    instance.legacyTools = configuration_json.legacyTools;
                 }
                 
                 // OBJECTS: HistoryConfig + OutputConfig
@@ -415,6 +496,39 @@ router.put('/:id',
                 }
                 if (configuration_json.outputConfig !== undefined) {
                     instance.outputConfig = configuration_json.outputConfig;
+                }
+                // J6: Function Inheritance
+                if (configuration_json.functionInheritance !== undefined) {
+                    instance.functionInheritance = configuration_json.functionInheritance;
+                    const overrideToolSelections = Array.isArray(configuration_json.functionInheritance.overrideToolSelections)
+                        ? configuration_json.functionInheritance.overrideToolSelections
+                        : Array.isArray(configuration_json.functionInheritance.overrideFunctionIds)
+                            ? configuration_json.functionInheritance.overrideFunctionIds.map((toolId: string) => ({ toolId }))
+                            : [];
+                    // ⭐ SYNC: When override mode is active, also update instance.tools with ObjectId refs
+                    // so the V2 function registry is consistent for runtime execution.
+                    if (
+                        configuration_json.functionInheritance.inheritFromPrototype === false &&
+                        Array.isArray(configuration_json.functionInheritance.overrideFunctionIds)
+                    ) {
+                        instance.tools = configuration_json.functionInheritance.overrideFunctionIds
+                            .filter((id: string) => mongoose.Types.ObjectId.isValid(id))
+                            .map((id: string) => new mongoose.Types.ObjectId(id));
+                        instance.toolSelections = overrideToolSelections;
+                    } else if (configuration_json.functionInheritance.inheritFromPrototype !== false) {
+                        const prototype = instance.prototypeId
+                            ? await AgentPrototype.findOne({ _id: instance.prototypeId, userId: user.id }).select('tools toolSelections')
+                            : null;
+                        const inheritedToolIds = Array.isArray(prototype?.tools) ? prototype.tools : [];
+                        instance.tools = inheritedToolIds;
+                        instance.toolSelections = Array.isArray((prototype as any)?.toolSelections) && (prototype as any).toolSelections.length > 0
+                            ? (prototype as any).toolSelections
+                            : inheritedToolIds.map((toolId: mongoose.Types.ObjectId) => ({ toolId: toolId.toString() }));
+                    }
+                }
+                // ⭐ LOCAL LLM: Persist localLLMProfileId (which local LLM profile to use)
+                if (configuration_json.localLLMProfileId !== undefined) {
+                    instance.localLLMProfileId = configuration_json.localLLMProfileId;
                 }
                 
                 // PRESERVE RUNTIME DATA: Never overwrite logs, errors, tasks, links from frontend
@@ -662,6 +776,14 @@ router.delete('/:id',
     requireOwnershipAsync(async (req) => {
         const instance = await AgentInstance.findById(req.params.id);
         return instance ? instance.userId.toString() : null;
+    }),
+    requireRobotGovernance({
+        governedType: 'agent',
+        operation: 'delete',
+        resolveTargetRobotId: async (req) => {
+            const instance = await AgentInstance.findById(req.params.id).select('robotId');
+            return instance?.robotId;
+        }
     }),
     async (req, res) => {
         try {

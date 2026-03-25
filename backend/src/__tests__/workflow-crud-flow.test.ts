@@ -24,6 +24,7 @@ app.use(express.json());
 app.use(passport.initialize());
 
 // Monter les routes
+app.use('/api/workflows/:workflowId/instances', agentInstancesRoutes);
 app.use('/api/workflows', workflowsRoutes);
 app.use('/api/agent-prototypes', agentPrototypesRoutes);
 app.use('/api/agent-instances', agentInstancesRoutes);
@@ -82,20 +83,19 @@ describe('Workflow CRUD Flow - Cycle de vie complet', () => {
     describe('Flow 1: Création workflow → Ajout instances → Save → Load', () => {
         it('Étape 3: Ajouter première instance au workflow', async () => {
             const response = await request(app)
-                .post('/api/agent-instances/from-prototype')
+                .post(`/api/workflows/${workflowId}/instances/from-prototype`)
                 .set('Authorization', `Bearer ${accessToken}`)
                 .send({
-                    workflowId,
                     prototypeId,
                     position: { x: 100, y: 100 }
                 })
                 .expect(201);
 
-            expect(response.body).toHaveProperty('_id');
+            expect(response.body).toHaveProperty('id');
             expect(response.body.workflowId).toBe(workflowId);
             expect(response.body.name).toBe('Agent Assistant');
 
-            instance1Id = response.body._id;
+            instance1Id = response.body.id;
         });
 
         // TODO: Étape 4 - Blocage: deuxième POST /from-prototype retourne 404 au lieu de 201

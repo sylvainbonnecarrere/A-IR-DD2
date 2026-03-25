@@ -24,6 +24,7 @@ import { useAutoSave } from '../hooks/useAutoSave';
 import { Agent, WorkflowNode, LLMConfig, AgentInstance } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
+import { useAuth } from '../contexts/AuthContext';
 
 interface WorkflowCanvasProps {
   nodes?: WorkflowNode[];
@@ -92,25 +93,15 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     onSaveComplete
   } = props;
 
+  const { isAuthenticated } = useAuth();
+
   // ⭐ SELF-HEALING: Get real workflow ID from store (falls back to prop)
   const { getCurrentWorkflowId } = useWorkflowStore();
   const storeWorkflowId = getCurrentWorkflowId();
   const workflowId = storeWorkflowId || workflowIdProp || 'default-workflow';
-  
-  // Log warning if using placeholder ID
-  useEffect(() => {
-    if (workflowId === 'default-workflow') {
-      console.warn('[WorkflowCanvas] ⚠️ Using placeholder workflowId - persistence may fail for authenticated users');
-    }
-  }, [workflowId]);
 
   // Hook de thème jour/nuit
   const theme = useDayNightTheme();
-
-  // ⭐ REACT FLOW FIX: Memoize nodeTypes to prevent React Flow warning
-  // Even though NODE_TYPES is defined globally, React Flow's internal useMemo
-  // detects reference changes during component renders. This explicitly stabilizes it.
-  const memoizedNodeTypes = useMemo(() => NODE_TYPES, []);
 
   // Hook React Flow pour fitView
   const reactFlowInstance = useReactFlow();
@@ -429,6 +420,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   // Sinon, largeur = 100% du workflow canvas
   const maximizedWidth = isMediaPanelActive ? 'calc(100vw - 650px)' : 'calc(100vw - 100px)';
   const maximizedHeight = 'calc(100vh - 150px)';
+  const effectiveWorkflowId = workflowId === 'default-workflow' && isAuthenticated ? undefined : workflowId;
 
   return (
     <WorkflowCanvasProvider value={contextValue}>
@@ -457,7 +449,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onPaneClick={handlePaneClick}
-          nodeTypes={memoizedNodeTypes}
+          nodeTypes={NODE_TYPES}
           style={{ background: 'transparent' }}
           defaultViewport={{ x: 0, y: 0, zoom: 0.7 }}
           proOptions={{ hideAttribution: true }}
@@ -543,7 +535,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           {/* Le bouton gère lui-même sa visibilité via useSaveMode (isManualSave && isAuthenticated) */}
           <div className="workflow-save-button-fixed">
             <SavePrototypeButton
-              workflowId={workflowId}
+              workflowId={effectiveWorkflowId}
               workflowName={workflowName}
               canvasState={{
                 zoom: reactFlowInstance.getZoom(),

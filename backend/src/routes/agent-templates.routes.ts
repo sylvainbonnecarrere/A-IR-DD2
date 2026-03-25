@@ -4,6 +4,7 @@ import { AgentTemplate } from '../models/AgentTemplate.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
+import { CanonicalRobotIdEnum } from '../types/robotIds';
 
 const router = Router();
 
@@ -19,7 +20,7 @@ const createAgentTemplateSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(1000).optional(),
   category: z.enum(['assistant', 'specialist', 'automation', 'analysis']),
-  robotId: z.enum(['AR_001', 'BOS_001', 'COM_001', 'PHIL_001', 'TIM_001']),
+  robotId: CanonicalRobotIdEnum,
   icon: z.string().optional(),
   sourcePrototypeId: z.string().optional(),
   tags: z.array(z.string()).optional(),

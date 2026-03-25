@@ -186,7 +186,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       variables: {},
       created_at: now,
       updated_at: now,
-      creator_id: 'archi' as RobotId,
+      creator_id: RobotId.Archi,
       isDefault: workflowData.isDefault,
       isActive: workflowData.isActive,
       canvasState: workflowData.canvasState

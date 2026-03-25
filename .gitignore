@@ -102,6 +102,7 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 *.db
+backend/storage/workspaces/users/**
 
 # Uploads et fichiers utilisateur
 uploads/

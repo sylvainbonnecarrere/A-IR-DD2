@@ -52,6 +52,31 @@ passport.use(
 export const requireAuth = passport.authenticate('jwt', { session: false });
 
 /**
+ * Middleware: Authentification optionnelle
+ * - Pas de header Authorization -> continue sans req.user
+ * - Token valide -> injecte req.user
+ * - Token invalide -> 401 explicite
+ */
+export const optionalAuth = (req: Request, res: Response, next: NextFunction) => {
+    passport.authenticate('jwt', { session: false }, (error: unknown, user: IUser | false) => {
+        if (error) {
+            return next(error as Error);
+        }
+
+        const authHeader = req.headers.authorization;
+        if (authHeader && !user) {
+            return res.status(401).json({ error: 'Token d\'authentification invalide' });
+        }
+
+        if (user) {
+            req.user = user;
+        }
+
+        next();
+    })(req, res, next);
+};
+
+/**
  * Middleware: Vérifie que l'utilisateur a l'un des rôles requis
  * @param roles Tableau de rôles autorisés (ex: ['admin', 'user'])
  */

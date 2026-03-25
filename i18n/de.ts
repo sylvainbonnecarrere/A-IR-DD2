@@ -371,6 +371,7 @@ export default {
     archi_prototyping_header: 'ARCHI • Prototyper',
     bos_supervision_header: 'BOS • Supervisor',
     com_connections_header: 'COM • Konnektor',
+    com_connections_desc: 'Verwaltung von Verbindungen und externen Diensten',
     phil_data_header: 'PHIL • Datenspezialist',
     tim_events_header: 'TIM • Zeitmanager',
     archi_prototyping_desc: 'Erstellung und Orchestrierung von Agenten',

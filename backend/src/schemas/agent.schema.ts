@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { CanonicalRobotIdEnum } from '../types/robotIds';
 
 // ============================================
 // SOUS-SCHÉMAS
@@ -53,13 +54,7 @@ export const AgentOutputConfigSchema = z.object({
 /**
  * Robots créateurs autorisés (V2 Architecture)
  */
-export const RobotCreatorEnum = z.enum([
-    'AR_001',   // Archi - Agent prototypes
-    'BOS_001',  // Bos - Workflow supervision
-    'COM_001',  // Com - API connections
-    'PHIL_001', // Phil - Data transformation
-    'TIM_001'   // Tim - Event triggers
-]);
+export const RobotCreatorEnum = CanonicalRobotIdEnum;
 
 /**
  * Schéma pour créer un nouvel agent prototype

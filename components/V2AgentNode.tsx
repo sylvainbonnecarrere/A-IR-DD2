@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
-import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, AgentInstance } from '../types';
+import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, AgentInstance, ToolCallRecord } from '../types';
 import { Button } from './UI';
 import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon, MaximizeIcon } from './Icons';
 import { ConfirmationModal } from './modals/ConfirmationModal';
@@ -8,14 +8,21 @@ import { ConfirmationModal } from './modals/ConfirmationModal';
 import { WebSearchGroundingPanel } from './panels/WebSearchGroundingPanel';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useDesignStore } from '../stores/useDesignStore';
+import { useFunctionStore } from '../stores/useFunctionStore';
 import { useWorkflowCanvasContext } from '../contexts/WorkflowCanvasContext';
 import * as llmService from '../services/llmService';
+import { createAdapter } from '../services/adapters/AdapterFactory';
+import { runAgentLoop } from '../services/llm/AgentLoop';
+import { ToolCallBlock } from './workflow/ToolCallBlock';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
 import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
-import { isLLMConfigured, getEffectiveCredential, isLocalProvider } from '../utils/llmProviderUtils';
+import { isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
 import { useLocalization } from '../hooks/useLocalization';
 import { useJournalQueue } from '../hooks/useJournalQueue';
+import { useAuth } from '../hooks/useAuth';
+import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
+import { buildBosHydrationFingerprint, hydrateToolMessagesFromPersistedRuns } from '../services/bosRunProjectionService';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -142,12 +149,17 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     onOpenImagePanel,
     onOpenImageModificationPanel,
     onOpenVideoPanel,
-    onOpenMapsPanel,
-    onOpenFullscreen
+    onOpenMapsPanel,    onOpenFullscreen
   } = useWorkflowCanvasContext();
 
   // Design store for agent data (not node operations)
   const { selectAgent } = useDesignStore();
+
+  // J8 — Functions available for AgentLoop (emulated FC for local LLMs)
+  const allFunctions = useFunctionStore(state => state.functions);
+
+  // C1 FIX: Auth token pour les appels sandbox (requireAuth)
+  const { accessToken } = useAuth();
 
   // Local states
   const [userInput, setUserInput] = useState('');
@@ -164,10 +176,12 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const bosHydrationFingerprintRef = useRef<string>('');
 
   // Get messages from store
   const messages = getNodeMessages(id);
   const isLoading = isNodeExecuting(id);
+  const agentRuntime = resolveAgentRuntimeConfig(effectiveAgent, llmConfigs, localLLMProfiles);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -175,6 +189,32 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isMinimized]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fingerprint = buildBosHydrationFingerprint(messages);
+
+    if (!fingerprint || bosHydrationFingerprintRef.current === fingerprint) {
+      return;
+    }
+
+    bosHydrationFingerprintRef.current = fingerprint;
+
+    const rehydrateToolMessages = async () => {
+      const hydratedMessages = await hydrateToolMessagesFromPersistedRuns(messages);
+      if (cancelled || hydratedMessages === messages) {
+        return;
+      }
+      bosHydrationFingerprintRef.current = buildBosHydrationFingerprint(hydratedMessages);
+      setNodeMessages(id, hydratedMessages);
+    };
+
+    void rehydrateToolMessages();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, messages, setNodeMessages]);
 
   const handleToggleMinimize = () => {
     if (onToggleNodeMinimize) {
@@ -283,7 +323,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   const handleWebSearchGrounding = async () => {
     if (!agent || !userInput.trim()) return;
 
-    const agentConfig = llmConfigs?.find(c => c.provider === agent.llmProvider);
+    const agentConfig = resolveAgentRuntimeConfig(agent, llmConfigs, localLLMProfiles).config;
     // ⭐ SOLID: Use centralized validation function
     if (!isLLMConfigured(agentConfig, agent.llmProvider)) {
       console.error('LLM not configured for web search grounding');
@@ -395,7 +435,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     });
 
     // Get LLM config
-    const agentConfig = llmConfigs?.find(c => c.provider === effectiveAgent.llmProvider);
+    const agentConfig = agentRuntime.config;
 
     // ⭐ SOLID: Use centralized validation function (works for both local and cloud)
     if (!isLLMConfigured(agentConfig, effectiveAgent.llmProvider)) {
@@ -437,7 +477,13 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
         if (shouldSummarize) {
           setLoadingMessage(t('agentNode_history_summarizing'));
-          const summarizationConfig = llmConfigs.find(c => c.provider === historyConfig.llmProvider);
+          const summarizationRuntime = resolveHistoryRuntimeConfig(
+            historyConfig,
+            llmConfigs,
+            localLLMProfiles,
+            effectiveAgent.localLLMProfileId
+          );
+          const summarizationConfig = summarizationRuntime.config;
 
           if (!summarizationConfig) {
             throw new Error(`Summarization LLM ${historyConfig.llmProvider} not configured.`);
@@ -453,13 +499,14 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
           const { text: summary } = await llmService.generateContent(
             summarizationConfig.provider,
-            summarizationConfig.apiKey,
+            summarizationRuntime.credential,
             historyConfig.model,
             historyConfig.systemPrompt,
             summarizationHistory,
             undefined, // tools
             undefined, // outputConfig
-            summarizationConfig.apiKey // endpoint for LMStudio
+            summarizationRuntime.credential, // endpoint for LMStudio
+            accessToken ?? undefined
           );
 
           const summaryMessage: ChatMessage = {
@@ -480,19 +527,85 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       }
       // Stream LLM response
       // ⭐ NEW: Resolve local endpoint from profile if available, fallback to llm_configs
-      const resolveLocalEndpoint = (): string => {
-        if (effectiveAgent.localLLMProfileId) {
-          const profile = localLLMProfiles?.find(p => p.id === effectiveAgent.localLLMProfileId);
-          if (profile?.endpoint) return profile.endpoint;
+      const credential = agentRuntime.credential;
+
+      // ─── J8: AgentLoop path for local LLMs (emulated function calling) ──────
+      const adapter = createAdapter(
+        effectiveAgent.llmProvider as LLMProvider,
+        agentConfig,
+        effectiveAgent.model,
+        accessToken ?? undefined
+      );
+
+      if (adapter) {
+        // Local LLM path: use AgentLoop with emulated FC via FunctionCallingPromptBuilder
+        const enabledFunctions = allFunctions.filter(f => f.isEnabled);
+        setLoadingMessage(t('loading'));
+
+        const loopResult = await runAgentLoop(
+          adapter,
+          conversationHistoryForAPI,
+          enabledFunctions,
+          effectiveAgent.systemPrompt ?? '',
+          {
+            authToken: accessToken ?? undefined,  // C1 FIX: JWT pour requireAuth sandbox
+            onEvent: (event) => {
+              if (event.type === 'tool_call_start') {
+                setLoadingMessage(`🔧 ${event.toolCall?.name ?? '…'}`);
+              } else if (event.type === 'llm_start') {
+                setLoadingMessage(t('loading'));
+              }
+            }
+          }
+        );
+
+        // Add tool call messages for each executed function
+        for (const record of loopResult.toolCallLog) {
+          const toolChatMsg: ChatMessage = {
+            id: record.id,
+            sender: 'tool',
+            text: `${record.functionName}(${JSON.stringify(record.arguments)})`,
+            toolName: record.functionName,
+            timestamp: record.timestamp,
+            isError: record.status === 'error',
+            toolCallRecord: {
+              id: record.id,
+              toolId: record.toolId,
+              functionId: record.functionId,
+              functionName: record.functionName,
+              arguments: record.arguments,
+              result: record.result,
+              status: record.status,
+              durationMs: record.durationMs,
+              executionId: record.executionId,
+              runner: record.runner,
+              exitCode: record.exitCode,
+              failureKind: record.failureKind,
+              artifacts: record.artifacts,
+              timestamp: record.timestamp,
+            } as ToolCallRecord,
+          };
+          addNodeMessage(id, toolChatMsg);
         }
-        // Fallback: legacy behavior
-        return agentConfig?.localEndpoint || agentConfig?.apiKey || '';
-      };
 
-      const credential = isLocalProvider(effectiveAgent.llmProvider)
-        ? resolveLocalEndpoint()
-        : getEffectiveCredential(agentConfig, effectiveAgent.llmProvider);
-
+        // Add final agent response
+        if (loopResult.finalResponse.trim()) {
+          const agentMsg: ChatMessage = {
+            id: generateMessageId('agent'),
+            sender: 'agent',
+            text: loopResult.finalResponse,
+            timestamp: new Date(),
+          };
+          addNodeMessage(id, agentMsg);
+          persistJournalEntry('chat', {
+            role: 'agent',
+            content: loopResult.finalResponse,
+            llmProvider: effectiveAgent.llmProvider,
+            modelUsed: effectiveAgent.model,
+          });
+        }
+      } else {
+      // ─── Standard streaming path (native providers — zero regression) ────────
       const stream = llmService.generateContentStream(
         effectiveAgent.llmProvider,
         credential, // Use getEffectiveCredential (works for both apiKey and localEndpoint)
@@ -502,7 +615,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         effectiveAgent.tools,
         effectiveAgent.outputConfig,
         credential, // For endpoints (will be used for LMStudio, ignored for cloud)
-        { webFetch: webFetchEnabled, webSearch: webSearchEnabled } // Native tools config
+        { webFetch: webFetchEnabled, webSearch: webSearchEnabled }, // Native tools config
+        accessToken ?? undefined
       );
 
       let currentResponse = '';
@@ -636,15 +750,19 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
           }
 
           // Generate a follow-up response using the tool results as context
+          // ⭐ FIX: Use `credential` (resolved from localLLMProfileId) — NOT agentConfig.apiKey
+          // agentConfig is a singleton find(provider===X) which returns the FIRST matching config,
+          // causing endpoint cross-contamination when 2+ local LLM agents share the same provider type.
+          // `credential` was already resolved above via resolveLocalEndpoint() for this specific agent.
           const followUpStream = llmService.generateContentStream(
             effectiveAgent.llmProvider,
-            agentConfig.apiKey,
+            credential,
             effectiveAgent.model,
             effectiveAgent.systemPrompt,
             messagesWithoutToolResults,
             effectiveAgent.tools,
             effectiveAgent.outputConfig,
-            agentConfig.apiKey // endpoint for LMStudio
+            credential // endpoint for LMStudio — same agent-specific credential
           );
 
           let followUpResponse = '';
@@ -696,6 +814,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
           }
         }
       }
+      } // end else (standard streaming path)
 
     } catch (error) {
       const errorMessage: ChatMessage = {
@@ -775,9 +894,15 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     const isUser = message.sender === 'user';
     const isError = message.isError;
     const isToolResult = message.sender === 'tool_result';
+    const isToolCall = message.sender === 'tool';
 
     return (
       <div key={message.id} className={`mb-3 ${isUser ? 'ml-4' : 'mr-4'}`}>
+        {/* J9 — ToolCallBlock for Tools V2 function invocations */}
+        {isToolCall && message.toolCallRecord && (
+          <ToolCallBlock toolCall={message.toolCallRecord} defaultExpanded={false} />
+        )}
+
         {/* Tool result message */}
         {isToolResult && (
           <div className="mb-2 p-2 bg-gray-800 rounded-lg border border-gray-600">
@@ -794,7 +919,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         )}
 
         {/* Regular message */}
-        {!isToolResult && (
+        {!isToolResult && !isToolCall && (
           <div className={`
             inline-block max-w-[90%] p-3 rounded-lg text-sm
             ${isUser

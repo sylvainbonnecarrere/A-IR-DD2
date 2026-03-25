@@ -24,6 +24,7 @@
 import { GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
 import { PersistenceConfig } from '../types';
 import { API_BASE_URL } from '../config/api.config';
+import { buildGovernanceHeaders } from '../utils/governanceHeaders';
 
 // ============================================
 // TYPES
@@ -283,10 +284,9 @@ export async function createAgentInstance(
 
         const response = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/instances/from-prototype`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${options.accessToken}`
-            },
+            headers: buildGovernanceHeaders(options.accessToken, {
+                'Content-Type': 'application/json'
+            }),
             body: JSON.stringify({
                 prototypeId: data.prototypeId,
                 position: data.position,
@@ -359,10 +359,9 @@ export async function saveAgentInstance(
 
         const response = await fetch(`${API_BASE_URL}/api/agent-instances/${data.id}`, {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${options.accessToken}`
-            },
+            headers: buildGovernanceHeaders(options.accessToken, {
+                'Content-Type': 'application/json'
+            }),
             body: JSON.stringify(data)
         });
 

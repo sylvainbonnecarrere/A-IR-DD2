@@ -9,7 +9,7 @@
  *   - Provide simple API to components
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import type { LocalLLMProfile } from '../types';
 import * as localLLMProfileService from '../services/localLLMProfileService';
@@ -19,58 +19,50 @@ interface UseLocalLLMProfilesReturn {
     loading: boolean;
     error: string | null;
     loadProfiles: () => Promise<void>;
-    createProfile: (data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }) => Promise<LocalLLMProfile>;
-    updateProfile: (id: string, data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }) => Promise<LocalLLMProfile>;
-    deleteProfile: (id: string) => Promise<void>;
+    createProfile: (data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }, syncAfterWrite?: boolean) => Promise<LocalLLMProfile>;
+    updateProfile: (id: string, data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }, syncAfterWrite?: boolean) => Promise<LocalLLMProfile>;
+    deleteProfile: (id: string, syncAfterWrite?: boolean) => Promise<void>;
     clearError: () => void;
 }
 
 export function useLocalLLMProfiles(): UseLocalLLMProfilesReturn {
     const auth = useAuth();
-    const { isAuthenticated, accessToken } = auth;
+    const { isAuthenticated, accessToken, localLLMProfiles, refreshRuntimeConfigState } = auth;
 
-    const [profiles, setProfiles] = useState<LocalLLMProfile[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const profiles = localLLMProfiles;
 
-    const serviceOptions = {
-        useApi: isAuthenticated,
-        token: accessToken || undefined
-    };
+    const serviceOptions = useMemo(
+        () => ({
+            useApi: isAuthenticated,
+            token: accessToken || undefined
+        }),
+        [isAuthenticated, accessToken]
+    );
 
     const loadProfiles = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
-            const data = await localLLMProfileService.getAllProfiles(serviceOptions);
-            setProfiles(data);
+            await refreshRuntimeConfigState();
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : 'Erreur inconnue';
             setError(errorMsg);
         } finally {
             setLoading(false);
         }
-    }, [isAuthenticated, accessToken]);
-
-    // Clear profiles from memory when logout happens to prevent data bleeding
-    useEffect(() => {
-        if (!isAuthenticated && profiles.length > 0) {
-            setProfiles([]);
-        }
-    }, [isAuthenticated]);
-
-    // Load profiles when auth state changes
-    useEffect(() => {
-        void loadProfiles();
-    }, [isAuthenticated, accessToken, loadProfiles]);
+    }, [refreshRuntimeConfigState]);
 
     const createProfile = useCallback(
-        async (data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }): Promise<LocalLLMProfile> => {
+        async (data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }, syncAfterWrite = true): Promise<LocalLLMProfile> => {
             setLoading(true);
             setError(null);
             try {
                 const result = await localLLMProfileService.createProfile(data, serviceOptions);
-                setProfiles(prev => [...prev, result].sort((a, b) => a.name.localeCompare(b.name)));
+                if (syncAfterWrite) {
+                    await refreshRuntimeConfigState();
+                }
                 return result;
             } catch (err) {
                 const errorMsg = err instanceof Error ? err.message : 'Erreur inconnue';
@@ -80,16 +72,18 @@ export function useLocalLLMProfiles(): UseLocalLLMProfilesReturn {
                 setLoading(false);
             }
         },
-        [isAuthenticated, accessToken]
+        [refreshRuntimeConfigState, serviceOptions]
     );
 
     const updateProfile = useCallback(
-        async (id: string, data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }): Promise<LocalLLMProfile> => {
+        async (id: string, data: { name: string; endpoint: string; capabilities?: Record<string, boolean>; enabled?: boolean; detectedModel?: string | null }, syncAfterWrite = true): Promise<LocalLLMProfile> => {
             setLoading(true);
             setError(null);
             try {
                 const result = await localLLMProfileService.updateProfile(id, data, serviceOptions);
-                setProfiles(prev => prev.map(p => p.id === id ? result : p).sort((a, b) => a.name.localeCompare(b.name)));
+                if (syncAfterWrite) {
+                    await refreshRuntimeConfigState();
+                }
                 return result;
             } catch (err) {
                 const errorMsg = err instanceof Error ? err.message : 'Erreur inconnue';
@@ -99,16 +93,18 @@ export function useLocalLLMProfiles(): UseLocalLLMProfilesReturn {
                 setLoading(false);
             }
         },
-        [isAuthenticated, accessToken]
+        [refreshRuntimeConfigState, serviceOptions]
     );
 
     const deleteProfile = useCallback(
-        async (id: string): Promise<void> => {
+        async (id: string, syncAfterWrite = true): Promise<void> => {
             setLoading(true);
             setError(null);
             try {
                 await localLLMProfileService.deleteProfile(id, serviceOptions);
-                setProfiles(prev => prev.filter(p => p.id !== id));
+                if (syncAfterWrite) {
+                    await refreshRuntimeConfigState();
+                }
             } catch (err) {
                 const errorMsg = err instanceof Error ? err.message : 'Erreur inconnue';
                 setError(errorMsg);
@@ -117,7 +113,7 @@ export function useLocalLLMProfiles(): UseLocalLLMProfilesReturn {
                 setLoading(false);
             }
         },
-        [isAuthenticated, accessToken]
+        [refreshRuntimeConfigState, serviceOptions]
     );
 
     const clearError = useCallback(() => {

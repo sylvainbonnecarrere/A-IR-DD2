@@ -9,7 +9,16 @@ declare const __dirname: string;
 
 import { spawn } from 'child_process';
 import path from 'path';
+import mongoose from 'mongoose';
+import { UserFunction, IUserFunction } from './models/UserFunction.model';
 import { WHITELISTED_PYTHON_TOOLS } from './config';
+import { syncUserToolMirrorFromLegacyFunction } from './services/userToolMirror.service';
+import { ExecutionOrchestrator } from './services/runtime/ExecutionOrchestrator';
+
+// Path to the Tools V2 runner.py (J7.3)
+const PYTHON_RUNNER_PATH = path.join(__dirname, '../python/runner.py');
+const PYTHON_TIMEOUT_MS = 15_000;
+const executionOrchestrator = new ExecutionOrchestrator();
 
 // The manual calculation of __dirname using ESM features (import.meta.url) has been removed.
 // This project is configured as a CommonJS module (see tsconfig.json),
@@ -68,4 +77,63 @@ export const executePythonTool = (toolName: string, args: object): Promise<objec
              reject(new Error(`Failed to start python process for '${toolName}'. Is Python 3 installed and in your PATH?`));
         });
     });
+};
+
+/**
+ * J7.4 — Execute a UserFunction (Tools V2) identified by its MongoDB _id.
+ *
+ * Flow:
+ *  1. Load IUserFunction from DB (ownership: native OR belongs to userId)
+ *  2. Validate enabled status
+ *  3. Spawn runner.py with function name + args JSON
+ *  4. Return parsed FunctionResult payload
+ *
+ * @param fnId    ObjectId string of the UserFunction document
+ * @param args    Key/value map of function arguments
+ * @param userId  Authenticated user id (for ownership gate)
+ * @param agentId Optional agent id for context (audit / logging)
+ */
+export const executeFunctionById = async (
+    fnId: string,
+    args: Record<string, unknown>,
+    userId: string,
+    agentId?: string
+): Promise<object> => {
+    // --- 1. Load from DB with ownership gate ---
+    if (!mongoose.Types.ObjectId.isValid(fnId)) {
+        throw new Error(`Invalid function id: ${fnId}`);
+    }
+
+    const fn = await UserFunction.findOne({
+        _id: new mongoose.Types.ObjectId(fnId),
+        $or: [
+            { userId: null },                                 // native / shared
+            { userId: new mongoose.Types.ObjectId(userId) }  // user-owned
+        ]
+    }).lean<IUserFunction>();
+
+    if (!fn) {
+        throw new Error(`Function '${fnId}' not found or access denied for user '${userId}'.`);
+    }
+    if (!fn.isEnabled) {
+        throw new Error(`Function '${fn.name}' is disabled.`);
+    }
+
+    await syncUserToolMirrorFromLegacyFunction(fn).catch((error) => {
+        console.warn('[pythonExecutor] user_tools mirror sync warning:', error instanceof Error ? error.message : String(error));
+    });
+
+    const result = await executionOrchestrator.execute({
+        fn,
+        userId,
+        args,
+        launchContext: agentId ? 'workflow_run' : 'system_validation',
+        agentInstanceId: agentId
+    });
+
+    if (!result.success) {
+        throw new Error(result.stderr || `Function '${fn.name}' failed.`);
+    }
+
+    return result.output as object;
 };

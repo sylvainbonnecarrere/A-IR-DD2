@@ -17,10 +17,11 @@
  *   await updateConfig('OpenAI', { apiKey: '...', enabled: true });
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import type { ILLMConfigUI } from '../types';
 import * as llmConfigService from '../services/llmConfigService';
+import { mapRuntimeConfigsToUiConfigs } from '../services/runtimeConfigRepository';
 
 interface UseLLMConfigsReturn {
   // Data
@@ -40,9 +41,10 @@ interface UseLLMConfigsReturn {
       localEndpoint?: string; // For local providers (plaintext URL)
       enabled: boolean;
       capabilities?: Record<string, boolean>;
-    }
+    },
+    syncAfterWrite?: boolean
   ) => Promise<ILLMConfigUI>;
-  deleteConfig: (provider: string) => Promise<void>;
+  deleteConfig: (provider: string, syncAfterWrite?: boolean) => Promise<void>;
   validateProvider: (provider: string) => Promise<{
     valid: boolean;
     enabled: boolean;
@@ -57,42 +59,26 @@ interface UseLLMConfigsReturn {
 
 export function useLLMConfigs(): UseLLMConfigsReturn {
   const auth = useAuth();
-  const { isAuthenticated, accessToken } = auth;
+  const { isAuthenticated, accessToken, runtimeLLMConfigs, refreshRuntimeConfigState } = auth;
   
   // State
-  const [configs, setConfigs] = useState<ILLMConfigUI[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const configs = useMemo(
+    () => mapRuntimeConfigsToUiConfigs(runtimeLLMConfigs),
+    [runtimeLLMConfigs]
+  );
 
   // Options para le service
-  const serviceOptions = {
-    useApi: isAuthenticated,
-    token: accessToken || undefined
-  };
+  const serviceOptions = useMemo(
+    () => ({
+      useApi: isAuthenticated,
+      token: accessToken || undefined
+    }),
+    [isAuthenticated, accessToken]
+  );
 
   // Monitor auth state changes
-  useEffect(() => {
-    // Auth state changed - configs will be reloaded if needed
-  }, [isAuthenticated, accessToken]);
-
-  /**
-   * ⭐ CRITICAL: Clear configs from memory when logout happens
-   * Prevents authenticated user configs from bleeding into guest mode
-   * This must happen BEFORE loadConfigs() is called with guest options
-   */
-  useEffect(() => {
-    if (!isAuthenticated && configs.length > 0) {
-      setConfigs([]);
-    }
-  }, [isAuthenticated]);
-
-  /**
-   * Charge toutes les configs au montage et quand l'auth change
-   */
-  useEffect(() => {
-    void loadConfigs();
-  }, [isAuthenticated, accessToken]);
-
   /**
    * Charge toutes les configs LLM
    */
@@ -100,15 +86,14 @@ export function useLLMConfigs(): UseLLMConfigsReturn {
     setLoading(true);
     setError(null);
     try {
-      const data = await llmConfigService.getAllLLMConfigs(serviceOptions);
-      setConfigs(data);
+      await refreshRuntimeConfigState();
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Erreur inconnue';
       setError(errorMsg);
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, accessToken]);
+  }, [refreshRuntimeConfigState]);
 
   /**
    * Récupère une config spécifique
@@ -116,14 +101,14 @@ export function useLLMConfigs(): UseLLMConfigsReturn {
   const getConfig = useCallback(
     async (provider: string): Promise<ILLMConfigUI | null> => {
       try {
-        return await llmConfigService.getLLMConfig(provider, serviceOptions);
+        return configs.find(c => c.provider === provider) || null;
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Erreur inconnue';
         setError(errorMsg);
         return null;
       }
     },
-    [isAuthenticated, accessToken]
+    [configs]
   );
 
   /**
@@ -137,7 +122,8 @@ export function useLLMConfigs(): UseLLMConfigsReturn {
         localEndpoint?: string; // For local providers (plaintext URL)
         enabled: boolean;
         capabilities?: Record<string, boolean>;
-      }
+      },
+      syncAfterWrite = true
     ): Promise<ILLMConfigUI> => {
       setLoading(true);
       setError(null);
@@ -149,17 +135,9 @@ export function useLLMConfigs(): UseLLMConfigsReturn {
           serviceOptions
         );
 
-        // Update local state
-        setConfigs(prev => {
-          const index = prev.findIndex(c => c.provider === provider);
-          if (index >= 0) {
-            const updated = [...prev];
-            updated[index] = result;
-            return updated;
-          } else {
-            return [...prev, result];
-          }
-        });
+        if (syncAfterWrite) {
+          await refreshRuntimeConfigState();
+        }
 
         return result;
       } catch (err) {
@@ -170,21 +148,21 @@ export function useLLMConfigs(): UseLLMConfigsReturn {
         setLoading(false);
       }
     },
-    [isAuthenticated, accessToken]
+    [refreshRuntimeConfigState, serviceOptions]
   );
 
   /**
    * Supprime une config
    */
   const deleteConfig = useCallback(
-    async (provider: string): Promise<void> => {
+    async (provider: string, syncAfterWrite = true): Promise<void> => {
       setLoading(true);
       setError(null);
       try {
         await llmConfigService.deleteLLMConfig(provider, serviceOptions);
-
-        // Update local state
-        setConfigs(prev => prev.filter(c => c.provider !== provider));
+        if (syncAfterWrite) {
+          await refreshRuntimeConfigState();
+        }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Erreur inconnue';
         setError(errorMsg);
@@ -193,7 +171,7 @@ export function useLLMConfigs(): UseLLMConfigsReturn {
         setLoading(false);
       }
     },
-    [isAuthenticated, accessToken]
+    [refreshRuntimeConfigState, serviceOptions]
   );
 
   /**
@@ -209,7 +187,7 @@ export function useLLMConfigs(): UseLLMConfigsReturn {
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [serviceOptions]
   );
 
   /**

@@ -3,6 +3,7 @@ import { SlideOver, Button } from '../UI';
 import { LLMConfig, WorkflowNode, ChatMessage, MapSource } from '../../types';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import * as llmService from '../../services/llmService';
+import { resolveAgentRuntimeConfig } from '../../services/runtimeConfigResolver';
 
 interface MapsGroundingConfigPanelProps {
     isOpen: boolean;
@@ -35,12 +36,13 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
     preloadedResults,
     hideSlideOver = false
 }) => {
-    const { addNodeMessage } = useRuntimeStore();
+    const { addNodeMessage, localLLMProfiles } = useRuntimeStore();
     const mapContainerRef = useRef<HTMLDivElement>(null);
 
     const node = workflowNodes.find(n => n.id === nodeId);
     const agent = node?.agent;
-    const agentConfig = llmConfigs.find(c => c.provider === agent?.llmProvider);
+    const agentRuntime = resolveAgentRuntimeConfig(agent || null, llmConfigs, localLLMProfiles);
+    const agentConfig = agentRuntime.config;
 
     const [query, setQuery] = useState('');
     const [useUserLocation, setUseUserLocation] = useState(false);
@@ -198,7 +200,7 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
             // Call Maps API
             const result = await llmService.generateContentWithMaps(
                 agent.llmProvider,
-                agentConfig.apiKey,
+                agentRuntime.credential,
                 agent.model,
                 query,
                 agent.systemInstruction,

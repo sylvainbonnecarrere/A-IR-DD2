@@ -67,11 +67,13 @@ describe('UserRepository', () => {
       expect(result).toEqual(mockUser);
       expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
         userId,
-        expect.objectContaining({
+        {
           $set: expect.objectContaining({
-            defaultWorkflowId: expect.any(Object)
+            defaultWorkflowId: workflowId,
+            lastActiveWorkflowId: workflowId,
+            updatedAt: expect.any(Date)
           })
-        }),
+        },
         { new: true }
       );
     });

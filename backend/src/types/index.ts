@@ -7,3 +7,9 @@ export * from './persistence';
 
 // Types LM Studio
 export * from './lmstudio.types';
+
+// Robot ID contract
+export * from './robotIds';
+
+// Runtime health contract
+export * from './runtimeHealth.types';

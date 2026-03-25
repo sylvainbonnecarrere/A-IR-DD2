@@ -10,9 +10,28 @@
  */
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { act } from 'react-dom/test-utils';
+import { act } from 'react';
 import { AuthProvider, useAuth } from '../../contexts/AuthContext';
 import React from 'react';
+
+const TEST_ONLY_PASSWORD = 'test-only-password-123';
+
+jest.mock('../../utils/apiClient', () => ({
+    __esModule: true,
+    default: {
+        post: jest.fn().mockResolvedValue({ data: [] }),
+    },
+}));
+
+jest.mock('../../services/localLLMProfileService', () => ({
+    __esModule: true,
+    getAllProfiles: jest.fn().mockResolvedValue([]),
+}));
+
+jest.mock('../../services/llmConfigService', () => ({
+    __esModule: true,
+    getAllLLMConfigs: jest.fn().mockResolvedValue([]),
+}));
 
 // Mock localStorage
 const localStorageMock = (() => {
@@ -40,13 +59,14 @@ global.fetch = jest.fn();
 
 // Test component to access context
 const TestComponent = () => {
-    const { user, isAuthenticated, isLoading, login, logout } = useAuth();
+    const { user, isAuthenticated, isLoading, sessionStatus, login, logout } = useAuth();
     return (
         <div>
             <div data-testid="loading">{isLoading ? 'loading' : 'ready'}</div>
+            <div data-testid="session-status">{sessionStatus}</div>
             <div data-testid="auth-status">{isAuthenticated ? 'authenticated' : 'guest'}</div>
             <div data-testid="user-email">{user?.email || 'no-user'}</div>
-            <button onClick={() => login('test@example.com', 'password123')}>
+            <button onClick={() => login('test@example.com', TEST_ONLY_PASSWORD)}>
                 Login
             </button>
             <button onClick={logout}>Logout</button>
@@ -71,6 +91,7 @@ describe('AuthContext', () => {
             await waitFor(() => {
                 expect(screen.getByTestId('auth-status')).toHaveTextContent('guest');
                 expect(screen.getByTestId('user-email')).toHaveTextContent('no-user');
+                expect(screen.getByTestId('session-status')).toHaveTextContent('ready');
             });
         });
 
@@ -188,6 +209,39 @@ describe('AuthContext', () => {
             await waitFor(() => {
                 expect(screen.getByTestId('auth-status')).toHaveTextContent('guest');
                 expect(localStorage.getItem('auth_data_v1')).toBeNull();
+                expect(screen.getByTestId('session-status')).toHaveTextContent('degraded');
+            });
+        });
+
+        test('should mark session as degraded when auth:session-degraded event is dispatched', async () => {
+            const mockAuthData = {
+                user: { id: '123', email: 'test@example.com', role: 'user' },
+                accessToken: 'mock-access-token',
+                refreshToken: 'mock-refresh-token',
+            };
+
+            localStorage.setItem('auth_data_v1', JSON.stringify(mockAuthData));
+
+            render(
+                <AuthProvider>
+                    <TestComponent />
+                </AuthProvider>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('auth-status')).toHaveTextContent('authenticated');
+            });
+
+            act(() => {
+                const event = new CustomEvent('auth:session-degraded', {
+                    detail: { message: 'Session expirée. Veuillez vous reconnecter.' }
+                });
+                window.dispatchEvent(event);
+            });
+
+            await waitFor(() => {
+                expect(screen.getByTestId('auth-status')).toHaveTextContent('guest');
+                expect(screen.getByTestId('session-status')).toHaveTextContent('degraded');
             });
         });
     });

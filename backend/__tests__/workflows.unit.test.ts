@@ -8,9 +8,15 @@ import mongoose from 'mongoose';
 import { Workflow, IWorkflow } from '../src/models/Workflow.model';
 import { User, IUser } from '../src/models/User.model';
 
+const TEST_ONLY_PASSWORD = 'test-only-password-123';
+
 describe('❌ Workflows Unit Tests - Phase 1', () => {
     let testUser: IUser;
     let testUserId: string;
+
+    beforeAll(async () => {
+        await Workflow.syncIndexes();
+    });
     
     beforeEach(async () => {
         // Clean up collections
@@ -20,7 +26,7 @@ describe('❌ Workflows Unit Tests - Phase 1', () => {
         // Create test user
         testUser = new User({
             email: 'test-workflows@example.com',
-            password: 'TestPassword123'
+            password: TEST_ONLY_PASSWORD
         });
         await testUser.save();
         testUserId = testUser._id.toString();
@@ -61,7 +67,7 @@ describe('❌ Workflows Unit Tests - Phase 1', () => {
                 
                 // Note: This test validates the index behavior
                 // Actual enforcement depends on MongoDB index enforcement
-                await expect(wf2.save()).rejects.toThrow();
+                await expect(wf2.save()).rejects.toThrow(/E11000|duplicate key/i);
             });
         });
         
@@ -122,19 +128,17 @@ describe('❌ Workflows Unit Tests - Phase 1', () => {
     
     describe('3. Workflow Indexes', () => {
         it('should have composite index on userId + isDefault', async () => {
-            const indexes = await Workflow.collection.getIndexes() as unknown as any[];
-            const hasIndex = indexes.some(idx => {
-                const key = (idx as any).key || {};
-                return key.userId === 1 && key.isDefault === 1;
+            const indexes = Workflow.schema.indexes();
+            const hasIndex = indexes.some(([key, options]) => {
+                return key.userId === 1 && key.isDefault === 1 && options?.unique === true;
             });
             expect(hasIndex).toBe(true);
         });
         
-        it('should have index on userId + createdAt', async () => {
-            const indexes = await Workflow.collection.getIndexes() as unknown as any[];
-            const hasIndex = indexes.some(idx => {
-                const key = (idx as any).key || {};
-                return key.userId === 1 && key.createdAt === -1;
+        it('should have index on userId + updatedAt', async () => {
+            const indexes = Workflow.schema.indexes();
+            const hasIndex = indexes.some(([key]) => {
+                return key.userId === 1 && key.updatedAt === -1;
             });
             expect(hasIndex).toBe(true);
         });
@@ -166,7 +170,11 @@ describe('❌ Workflows Unit Tests - Phase 1', () => {
             await workflow.save();
             
             const saved = await Workflow.findById(workflow._id);
-            expect(saved?.canvasState).toEqual({
+            expect({
+                zoom: saved?.canvasState.zoom,
+                panX: saved?.canvasState.panX,
+                panY: saved?.canvasState.panY
+            }).toMatchObject({
                 zoom: 1,
                 panX: 0,
                 panY: 0

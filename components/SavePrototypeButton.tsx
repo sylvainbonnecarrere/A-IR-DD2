@@ -44,7 +44,7 @@ const REQUEST_TIMEOUT_MS = 10000;
 
 interface SavePrototypeButtonProps {
     /** Current workflow ID */
-    workflowId: string;
+    workflowId?: string;
     /** Current canvas state */
     canvasState?: {
         zoom: number;
@@ -84,6 +84,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
 
     // ⚠️ VISIBILITY GATE: Only render for authenticated users with manual save mode
     const shouldRender = isAuthenticated && isManualSave;
+    const hasValidWorkflowId = !!workflowId && workflowId !== 'default-workflow';
 
     /**
      * ⭐ REFACTORED: Persister les journaux avec protections anti-boucle infinie
@@ -252,6 +253,14 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
             return;
         }
 
+        if (!hasValidWorkflowId) {
+            console.warn('[SavePrototypeButton] Manual save skipped: no valid workflow ID available yet');
+            setButtonState('error');
+            setTimeout(() => setButtonState('idle'), 2500);
+            onSaveComplete?.(false);
+            return;
+        }
+
         setButtonState('saving');
 
         try {
@@ -311,6 +320,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
         persistJournals,
         buttonState,
         shouldRender,
+        hasValidWorkflowId,
         onSaveComplete
     ]);
 

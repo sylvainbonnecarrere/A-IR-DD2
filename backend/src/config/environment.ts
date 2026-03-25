@@ -1,17 +1,23 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
+const isTestEnvironment = process.env.NODE_ENV === 'test';
+
 // Charger .env - chercher à partir du répertoire src et remonter
 // src est à src/, donc ../ = backend/, ../../ = racine du projet
 const envPath = path.resolve(__dirname, '../../.env');
-console.log(`📁 Loading .env from: ${envPath}`);
+if (!isTestEnvironment) {
+    console.log(`📁 Loading .env from: ${envPath}`);
+}
 
 const result = dotenv.config({ 
     path: envPath
 });
 
 if (result.error) {
-    console.warn('⚠️  .env file not found - using environment variables');
+    if (!isTestEnvironment) {
+        console.warn('⚠️  .env file not found - using environment variables');
+    }
 }
 
 /**
@@ -42,6 +48,18 @@ export const config = {
 
     bcrypt: {
         rounds: parseInt(process.env.BCRYPT_ROUNDS || '10', 10)
+    },
+
+    runtime: {
+        nodeExecutable: process.env.RUNTIME_NODE_EXECUTABLE || process.execPath || 'node',
+        pythonExecutables: (process.env.RUNTIME_PYTHON_EXECUTABLES || 'python3,python')
+            .split(',')
+            .map(value => value.trim())
+            .filter(Boolean),
+        dockerExecutable: process.env.RUNTIME_DOCKER_EXECUTABLE || 'docker',
+        nodeRuntimeImage: process.env.RUNTIME_NODE_IMAGE || 'airdd2-runtime-node:bookworm-slim',
+        pythonRuntimeImage: process.env.RUNTIME_PYTHON_IMAGE || 'airdd2-runtime-python:3.12-slim',
+        probeTimeoutMs: parseInt(process.env.RUNTIME_PROBE_TIMEOUT_MS || '8000', 10)
     }
 };
 
@@ -65,7 +83,9 @@ export function validateConfig(): void {
         process.exit(1);
     }
 
-    console.log('✅ Configuration validated');
+    if (!isTestEnvironment) {
+        console.log('✅ Configuration validated');
+    }
 }
 
 export default config;

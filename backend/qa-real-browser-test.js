@@ -6,58 +6,48 @@
  */
 
 const API_BASE = 'http://localhost:3001';
+const TEST_ACCOUNT_EMAIL = process.env.QA_TEST_EMAIL || 'test@test.fr';
+const TEST_ACCOUNT_PASSWORD = process.env.QA_TEST_PASSWORD || '';
 
-// First, we need to get a real auth token by logging in as test@test.fr
+// First, we need to get a real auth token by logging in with a dedicated QA account
 async function realBrowserTest() {
     console.log('\n' + '='.repeat(70));
     console.log('PHASE 2.3 REAL BROWSER TEST: Exact User Flow Simulation');
     console.log('='.repeat(70));
 
     try {
+        if (!TEST_ACCOUNT_PASSWORD) {
+            console.error('❌ Missing QA_TEST_PASSWORD environment variable');
+            console.error('   Example: $env:QA_TEST_PASSWORD="your-test-password"');
+            return;
+        }
+
         // ========================================
-        // STEP 1: Login as existing test@test.fr
+        // STEP 1: Login as configured QA account
         // ========================================
-        console.log('\n[REAL TEST] STEP 1: Login as test@test.fr (the existing account)');
+        console.log(`\n[REAL TEST] STEP 1: Login as ${TEST_ACCOUNT_EMAIL}`);
         
-        // Try password 'Test123!@#' (from documentation)
         const loginRes = await fetch(`${API_BASE}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                email: 'test@test.fr', 
-                password: ''  // Try documented password
+                email: TEST_ACCOUNT_EMAIL,
+                password: TEST_ACCOUNT_PASSWORD
             })
         });
 
         if (!loginRes.ok) {
-            console.error('❌ Login with Test123!@# failed:', loginRes.status);
-            
-            // Try alternative password
-            console.log('[REAL TEST] Trying alternative password: Test1234');
-            const loginRes2 = await fetch(`${API_BASE}/api/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    email: 'test@test.fr', 
-                    password: 'Test1234'
-                })
-            });
-            
-            if (!loginRes2.ok) {
-                console.error('❌ Login with Test1234 failed:', loginRes2.status);
-                const err = await loginRes2.text();
-                console.error('   Error:', err);
-                return;
-            }
-            
-            var { accessToken, user } = await loginRes2.json();
-        } else {
-            var { accessToken, user } = await loginRes.json();
+            console.error('❌ Login failed:', loginRes.status);
+            const err = await loginRes.text();
+            console.error('   Error:', err);
+            return;
         }
+
+        var { accessToken, user } = await loginRes.json();
 
         console.log('✅ Logged in as:', user.email);
         console.log('   User ID:', user.id);
-        console.log('   Token:', accessToken.substring(0, 50) + '...');
+        console.log('   Auth token received');
 
         // ========================================
         // STEP 2: Call /api/user/workspace (what works)

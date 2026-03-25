@@ -81,6 +81,11 @@ LLMConfigSchema.methods.getDecryptedApiKey = function (): string {
 
 // Method: Encrypt and store API key
 LLMConfigSchema.methods.setApiKey = function (plainKey: string): void {
+    if (!plainKey || plainKey.trim() === '') {
+        this.apiKeyEncrypted = '';
+        return;
+    }
+
     this.apiKeyEncrypted = encrypt(plainKey, this.userId.toString());
 };
 

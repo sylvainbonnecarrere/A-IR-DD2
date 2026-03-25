@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, Tool, OutputConfig, OutputFormat, RobotId, LocalLLMProfile } from '../../types';
+import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, Tool, OutputConfig, OutputFormat, RobotId, LocalLLMProfile, ToolSelection } from '../../types';
 import { Button, Modal, ToggleSwitch } from '../UI';
 import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels } from '../../llmModels';
-import { CloseIcon, PlusIcon } from '../Icons';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { validateAgentCapabilities, type CapabilityValidationResult } from '../../utils/lmStudioCapabilityValidator';
@@ -11,6 +10,9 @@ import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { isLocalProvider, isLMStudio } from '../../utils/llmProviderUtils';
 import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { API_BASE_URL } from '../../config/api.config';
+import { FunctionSelector } from '../FunctionSelector';
+import { useFunctionStore } from '../../stores/useFunctionStore';
+import { buildToolSelectionsFromFunctions, deriveSelectedToolIds } from '../../services/toolSelectionResolver';
 
 interface AgentFormModalProps {
   onClose: () => void;
@@ -25,55 +27,6 @@ const defaultHistoryConfig: Omit<HistoryConfig, 'llmProvider' | 'model'> = {
   role: 'Archiviste Concis',
   systemPrompt: 'Résume la conversation suivante de manière factuelle et concise, en conservant les points clés et les décisions prises. Le résumé servira de mémoire pour un autre agent IA.',
   limits: { char: 5000, word: 1000, token: 800, sentence: 50, message: 20 }
-};
-
-const newToolTemplate: Tool = {
-  name: 'new_tool_name',
-  description: 'A brief description of what this tool does.',
-  parameters: {
-    type: 'object',
-    properties: {
-      param1: {
-        type: 'string',
-        description: 'Description for parameter 1.'
-      }
-    },
-    required: ['param1']
-  },
-  outputSchema: {
-    type: 'object',
-    properties: {
-      result: {
-        type: 'string',
-        description: 'The result of the tool execution.'
-      }
-    },
-    required: ['result']
-  }
-};
-
-const defaultWeatherTool: Tool = {
-  name: 'get_weather',
-  description: 'Obtient la météo actuelle pour un lieu donné.',
-  parameters: {
-    type: "object",
-    properties: {
-      location: {
-        type: "string",
-        description: "La ville pour laquelle obtenir la météo, par exemple, Paris."
-      }
-    },
-    required: ["location"]
-  },
-  outputSchema: {
-    type: 'object',
-    properties: {
-      location: { type: 'string' },
-      temperature: { type: 'string' },
-      condition: { type: 'string' }
-    },
-    required: ['location', 'temperature', 'condition']
-  }
 };
 
 
@@ -157,6 +110,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     return [...new Set(defaultCaps)];
   });
   const [tools, setTools] = useState<Tool[]>([]);
+  const [selectedFunctionIds, setSelectedFunctionIds] = useState<string[]>([]);
   const [outputConfig, setOutputConfig] = useState<OutputConfig>(defaultOutputConfig);
   const [historyConfig, setHistoryConfig] = useState<HistoryConfig>(() => {
     const availableModels = getAvailableModels(enabledLLMProvider);
@@ -180,6 +134,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
   const [isDetectingLocalModel, setIsDetectingLocalModel] = useState(false);
   const [inlineDetectionError, setInlineDetectionError] = useState<string | null>(null);
   const isEditing = !!existingAgent;
+  const availableFunctions = useFunctionStore(state => state.functions);
 
   // LMStudio uses localEndpoint (plaintext URL); apiKey is kept as a fallback for legacy records
   const lmStudioConfig = llmConfigs.find(c => isLMStudio(c.provider));
@@ -297,6 +252,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       setSelectedCapabilities(existingAgent.capabilities);
       setHistoryConfig(prev => ({ ...defaultHistoryConfig, ...prev, ...(existingAgent.historyConfig || {}) }));
       setTools(existingAgent.tools || []);
+      setSelectedFunctionIds(deriveSelectedToolIds(existingAgent.toolSelections, existingAgent.functionIds));
       setOutputConfig(existingAgent.outputConfig || defaultOutputConfig);
     }
   }, [isEditing, existingAgent, localLLMProfiles]);
@@ -377,7 +333,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
             tools,
             outputConfig,
             historyConfig,
-            creator_id: 'archi' as RobotId,
+            creator_id: RobotId.Archi,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           };
@@ -491,61 +447,11 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     
     const isCurrentlySelected = selectedCapabilities.includes(capability);
 
-    if (capability === LLMCapability.FunctionCalling) {
-      if (!isCurrentlySelected) { // Turning it ON
-        if (tools.length === 0) {
-          setTools([defaultWeatherTool]);
-        }
-      } else { // Turning it OFF
-        setTools([]);
-      }
-    }
-
     setSelectedCapabilities(prev =>
       isCurrentlySelected
         ? prev.filter(c => c !== capability)
         : [...prev, capability]
     );
-  };
-
-  const handleToolChange = (index: number, field: keyof Tool, value: any) => {
-    const newTools = [...tools];
-    if (field === 'parameters' || field === 'outputSchema') {
-      const key = `${field}-${index}`;
-      try {
-        if (value.trim() === '') {
-          newTools[index] = { ...newTools[index], [field]: {} };
-          setSchemaErrors(prev => ({ ...prev, [key]: null }));
-          return;
-        }
-        const parsedSchema = JSON.parse(value);
-        if (typeof parsedSchema !== 'object' || Array.isArray(parsedSchema) || parsedSchema === null) {
-          throw new Error(t('agentForm_error_jsonNotObject'));
-        }
-        newTools[index] = { ...newTools[index], [field]: parsedSchema };
-        setSchemaErrors(prev => ({ ...prev, [key]: null }));
-      } catch (e) {
-        newTools[index] = { ...newTools[index], [field]: value };
-        const errorMessage = e instanceof Error ? e.message : 'JSON invalide';
-        setSchemaErrors(prev => ({ ...prev, [key]: errorMessage }));
-      }
-    } else {
-      newTools[index] = { ...newTools[index], [field]: value };
-    }
-    setTools(newTools);
-  };
-
-
-  const addTool = () => setTools([...tools, { ...newToolTemplate, name: `new_tool_${tools.length}` }]);
-  const removeTool = (index: number) => {
-    setTools(tools.filter((_, i) => i !== index));
-    // Also clear any errors associated with the removed tool
-    setSchemaErrors(prev => {
-      const newErrors = { ...prev };
-      delete newErrors[`parameters-${index}`];
-      delete newErrors[`outputSchema-${index}`];
-      return newErrors;
-    });
   };
 
   const hasSchemaErrors = Object.values(schemaErrors).some(err => err !== null);
@@ -571,6 +477,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     const capabilitiesForSave = selectedCapabilities.includes(LLMCapability.Chat)
       ? selectedCapabilities
       : [LLMCapability.Chat, ...selectedCapabilities];
+    const toolSelections = buildToolSelectionsFromFunctions(selectedFunctionIds, availableFunctions);
 
     onSave({
       name,
@@ -581,6 +488,8 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       capabilities: capabilitiesForSave,
       historyConfig,
       tools,
+      functionIds: selectedFunctionIds,
+      toolSelections,
       outputConfig,
       localLLMProfileId: isLMStudio(llmProvider) ? (localLLMProfileId || undefined) : undefined,
       creator_id: existingAgent?.creator_id || RobotId.Archi,
@@ -1073,48 +982,10 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
             </div>
           )}
           {activeTab === 'fonctions' && (
-            <div className="space-y-4">
-              {tools.map((tool, index) => (
-                <div key={index} className="p-3 bg-gray-900/50 rounded-lg space-y-2 relative">
-                  <Button variant="ghost" className="absolute top-1 right-1 p-1 h-6 w-6 text-red-400" onClick={() => removeTool(index)}><CloseIcon width={14} height={14} /></Button>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-400 mb-1">{t('agentForm_functions_toolNameLabel')}</label>
-                      <input type="text" value={tool.name} onChange={(e) => handleToolChange(index, 'name', e.target.value)} className="w-full p-1.5 text-sm bg-gray-700 border border-gray-600 rounded-md" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-400 mb-1">{t('agentForm_functions_descriptionLabel')}</label>
-                      <input type="text" value={tool.description} onChange={(e) => handleToolChange(index, 'description', e.target.value)} className="w-full p-1.5 text-sm bg-gray-700 border border-gray-600 rounded-md" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-400 mb-1">{t('agentForm_functions_parametersLabel')}</label>
-                      <textarea
-                        value={typeof tool.parameters === 'string' ? tool.parameters : JSON.stringify(tool.parameters, null, 2)}
-                        onChange={(e) => handleToolChange(index, 'parameters', e.target.value)}
-                        rows={6}
-                        className={`w-full p-1.5 font-mono text-xs bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 ${schemaErrors[`parameters-${index}`] ? 'border-red-500' : 'border-gray-600'}`}
-                      />
-                      {schemaErrors[`parameters-${index}`] && <p className="text-xs text-red-400 mt-1">{schemaErrors[`parameters-${index}`]}</p>}
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-400 mb-1">{t('agentForm_functions_outputSchemaLabel')}</label>
-                      <textarea
-                        value={typeof tool.outputSchema === 'string' ? tool.outputSchema : JSON.stringify(tool.outputSchema, null, 2)}
-                        onChange={(e) => handleToolChange(index, 'outputSchema', e.target.value)}
-                        rows={6}
-                        className={`w-full p-1.5 font-mono text-xs bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 ${schemaErrors[`outputSchema-${index}`] ? 'border-red-500' : 'border-gray-600'}`}
-                        placeholder={`{ "type": "object", "properties": { ... } }`}
-                      />
-                      {schemaErrors[`outputSchema-${index}`] && <p className="text-xs text-red-400 mt-1">{schemaErrors[`outputSchema-${index}`]}</p>}
-                    </div>
-                  </div>
-                </div>
-              ))}
-              <p className="text-xs text-gray-400 pt-2">{t('agentForm_functions_pythonNote')}</p>
-              <Button type="button" variant="secondary" onClick={addTool} className="flex items-center gap-2"><PlusIcon /> {t('agentForm_functions_addTool')}</Button>
-            </div>
+            <FunctionSelector
+              selectedIds={selectedFunctionIds}
+              onChange={setSelectedFunctionIds}
+            />
           )}
         </div>
 

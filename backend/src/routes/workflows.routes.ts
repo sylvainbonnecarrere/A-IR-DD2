@@ -5,12 +5,11 @@ import { Workflow } from '../models/Workflow.model';
 import { AgentInstance } from '../models/AgentInstance.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
 import { User, IUser } from '../models/User.model';
-import { AgentPrototype } from '../models/AgentPrototype.model';
 import { WorkflowNodeV2 } from '../models/WorkflowNodeV2.model'; // ⭐ PERF: Top-level import instead of dynamic require
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { WorkflowSelfHealingService } from '../services/workflowSelfHealing.service';
-import { transformAgentInstanceForFrontend } from '../utils/transforms';
+import { buildWorkspaceSnapshot } from '../utils/workspaceSnapshot';
 
 // ⭐ V2 IMPORTS - Nouvelle architecture de persistance (Jalon 1-2)
 import {
@@ -406,11 +405,12 @@ router.post('/:id/select',
     async (req, res) => {
         try {
             const user = req.user as IUser;
+            const userId = user.id || user._id?.toString();
             const workflowId = req.params.id;
             
             const workflow = await Workflow.findOne({
                 _id: workflowId,
-                userId: user.id
+                userId
             });
             
             if (!workflow) {
@@ -419,7 +419,7 @@ router.post('/:id/select',
             
             // ⭐ Disable others, enable this one + set isDefault
             await Workflow.updateMany(
-                { userId: user.id, _id: { $ne: workflowId } },
+                { userId, _id: { $ne: workflowId } },
                 { isActive: false, isDefault: false }
             );
             
@@ -434,37 +434,29 @@ router.post('/:id/select',
             
             // ⭐ Update User lastActiveWorkflowId + defaultWorkflowId
             await User.findByIdAndUpdate(
-                user.id,
+                userId,
                 { lastActiveWorkflowId: workflow._id, defaultWorkflowId: workflow._id }
             );
             
-            // ⭐ J7: Fetch agents + edges + prototypes (V2: scoped by workflowId)
-            const [agents, edges, agentPrototypes] = await Promise.all([
-                AgentInstance.find({ workflowId }),
-                WorkflowEdge.find({ workflowId }),
-                AgentPrototype.find({ userId: user.id, workflowId }).sort({ name: 1 })
-            ]);
-            
             const updatedWorkflow = await Workflow.findById(workflowId);
+            const workspaceSnapshot = await buildWorkspaceSnapshot({
+                userId,
+                workflow: updatedWorkflow,
+                includeLegacyPrototypes: true
+            });
             
             // ⭐ Production-safe: Only log in development
             if (process.env.NODE_ENV === 'development') {
               console.log('[Workflows] SELECT - Workflow activated:', {
                 workflowId: workflowId,
-                agentsCount: agents?.length || 0
+                agentsCount: workspaceSnapshot.agentInstances.length
               });
             }
             
             res.json({
                 success: true,
                 workflow: updatedWorkflow,
-                reloadedData: {
-                    agents: (agents || []).map(transformAgentInstanceForFrontend),
-                    nodes: [],  // ⭐ J7: Positions in AgentInstance, not WorkflowNodeV2
-                    edges: edges || [],
-                    agentPrototypes: agentPrototypes || [],  // ⭐ V2: Prototypes for switch hydration
-                    canvasState: workflow.canvasState
-                }
+                reloadedData: workspaceSnapshot
             });
             
         } catch (error) {
