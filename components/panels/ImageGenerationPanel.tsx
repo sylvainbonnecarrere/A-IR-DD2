@@ -4,6 +4,8 @@ import { Button, SlideOver } from '../UI';
 import * as llmService from '../../services/llmService';
 import { useLocalization } from '../../hooks/useLocalization';
 import { fileToBase64 } from '../../utils/fileUtils';
+import { useRuntimeStore } from '../../stores/useRuntimeStore';
+import { resolveAgentRuntimeConfig } from '../../services/runtimeConfigResolver';
 
 interface ImageGenerationPanelProps {
     isOpen: boolean;
@@ -36,10 +38,12 @@ export const ImageGenerationPanel = ({
     const [error, setError] = useState<string | null>(null);
     const { t } = useLocalization();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const localLLMProfiles = useRuntimeStore(state => state.localLLMProfiles);
 
     // ⭐ UNIFIED DATA SOURCE: Source-agnostic (props FIRST priority, lookup fallback)
     const agent = agentProp || workflowNodes.find(n => n.id === nodeId)?.agent;
-    const agentConfig = agent ? llmConfigs.find(c => c.provider === agent.llmProvider) : null;
+    const agentRuntime = resolveAgentRuntimeConfig(agent || null, llmConfigs, localLLMProfiles);
+    const agentConfig = agentRuntime.config;
 
     React.useEffect(() => {
         if (!isOpen) {
@@ -69,7 +73,7 @@ export const ImageGenerationPanel = ({
         setError(null);
         setGeneratedImage(null);
 
-        const result = await llmService.generateImage(agentConfig.provider, agentConfig.apiKey, prompt, agent.model);
+        const result = await llmService.generateImage(agentConfig.provider, agentRuntime.credential, prompt, agent.model);
 
         if (result.image) {
             setGeneratedImage(result.image);

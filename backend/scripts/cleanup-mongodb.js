@@ -7,7 +7,19 @@
 
 const { MongoClient } = require('mongodb');
 
-const MONGODB_URI = 'mongodb://admin:SecurePassword123!@localhost:27017/a-ir-dd2-dev?authSource=admin';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/a-ir-dd2-dev';
+
+function resolveDatabaseName(connectionString) {
+    try {
+        const normalized = connectionString.startsWith('mongodb://') || connectionString.startsWith('mongodb+srv://')
+            ? connectionString
+            : `mongodb://${connectionString}`;
+        const url = new URL(normalized);
+        return url.pathname.replace(/^\//, '') || 'a-ir-dd2-dev';
+    } catch {
+        return 'a-ir-dd2-dev';
+    }
+}
 
 async function cleanupDatabase() {
     const client = new MongoClient(MONGODB_URI);
@@ -16,7 +28,7 @@ async function cleanupDatabase() {
         console.log('🔗 Connexion à MongoDB...');
         await client.connect();
 
-        const db = client.db('a-ir-dd2-dev');
+        const db = client.db(resolveDatabaseName(MONGODB_URI));
         
         console.log('📋 Collections actuelles:');
         const collections = await db.listCollections().toArray();

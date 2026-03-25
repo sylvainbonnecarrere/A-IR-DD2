@@ -22,6 +22,7 @@
 
 import { GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
 import { API_BASE_URL } from '../config/api.config';
+import { buildGovernanceHeaders } from '../utils/governanceHeaders';
 
 /**
  * Persistence options for all operations
@@ -137,10 +138,9 @@ export const WorkspacePersistenceService = {
         const promises = nodes.map(node => 
             fetch(`${API_BASE_URL}/api/workflows/${workflowId}/instances/${node.agentId}`, {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${options.accessToken}`
-                },
+                headers: buildGovernanceHeaders(options.accessToken, {
+                    'Content-Type': 'application/json'
+                }),
                 body: JSON.stringify({ position: node.position })
             })
         );

@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { CANONICAL_ROBOT_IDS, CANONICAL_ROBOT_IDS_LABEL } from '../types';
 
 /**
  * ⭐ PERSISTENCE CONFIG: Configuration granulaire par agent
@@ -23,6 +24,17 @@ export interface IPersistenceConfig {
     retentionDays?: number;        // Durée de conservation en jours
 }
 
+export interface IToolSelectionVersionRef {
+    versionTag?: string;
+    versionNumber?: number;
+    workspaceId?: string | null;
+}
+
+export interface IToolSelection {
+    toolId: string;
+    versionRef?: IToolSelectionVersionRef;
+}
+
 export interface IAgentPrototype extends Document {
     userId: mongoose.Types.ObjectId;
     workflowId?: mongoose.Types.ObjectId; // ⭐ V2: Scope prototype to a specific workflow
@@ -33,7 +45,10 @@ export interface IAgentPrototype extends Document {
     llmModel: string;
     capabilities: string[];
     historyConfig?: object;
-    tools?: object[];
+    // ⭐ Tools V2: Références vers user_functions (rétrocompat : legacyTools conservé)
+    tools?: mongoose.Types.ObjectId[];     // Références vers user_functions._id
+    toolSelections?: IToolSelection[];     // Références versionnées vers user_tools
+    legacyTools?: object[];               // Ancien format inline (migration rétrocompat)
     outputConfig?: object;
     robotId: string;
     isPrototype: true;
@@ -54,6 +69,15 @@ const PersistenceConfigSchema = new Schema<IPersistenceConfig>({
         type: String, 
         enum: ['db', 'local', 'cloud'], 
         default: 'db' 
+    }
+}, { _id: false });
+
+const ToolSelectionSchema = new Schema<IToolSelection>({
+    toolId: { type: String, required: true, trim: true },
+    versionRef: {
+        versionTag: { type: String, required: false, trim: true },
+        versionNumber: { type: Number, required: false },
+        workspaceId: { type: String, required: false, default: null }
     }
 }, { _id: false });
 
@@ -102,15 +126,22 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
         type: String
     }],
     historyConfig: Schema.Types.Mixed,
-    tools: [Schema.Types.Mixed],
+    // ⭐ Tools V2: tableau de références ObjectId vers user_functions
+    tools: [{
+        type: Schema.Types.ObjectId,
+        ref: 'UserFunction'
+    }],
+    toolSelections: [ToolSelectionSchema],
+    // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)
+    legacyTools: [Schema.Types.Mixed],
     outputConfig: Schema.Types.Mixed,
     robotId: {
         type: String,
         required: true,
         enum: {
             // ⭐ J4.5: Must match frontend RobotId enum in types.ts
-            values: ['AR_001', 'BO_002', 'CO_003', 'PH_004', 'TI_005'],
-            message: 'RobotId invalide. Seuls AR_001, BO_002, CO_003, PH_004, TI_005 sont autorisés'
+            values: [...CANONICAL_ROBOT_IDS],
+            message: `RobotId invalide. Seuls ${CANONICAL_ROBOT_IDS_LABEL} sont autorisés`
         }
         // Removed: index: true (used in composite index with userId)
     },

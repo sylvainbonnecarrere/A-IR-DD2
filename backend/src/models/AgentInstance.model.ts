@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { CANONICAL_ROBOT_IDS } from '../types';
 
 // ============================================
 // PERSISTENCE CONFIG (copie de AgentPrototype)
@@ -25,6 +26,17 @@ export interface IPersistenceConfig {
         endpoint?: string;
     } | null;
     retentionDays?: number;        // Durée de conservation en jours
+}
+
+export interface IToolSelectionVersionRef {
+    versionTag?: string;
+    versionNumber?: number;
+    workspaceId?: string | null;
+}
+
+export interface IToolSelection {
+    toolId: string;
+    versionRef?: IToolSelectionVersionRef;
 }
 
 // ============================================
@@ -123,8 +135,17 @@ export interface IAgentInstance extends Document {
     llmModel: string;
     capabilities: string[];
     historyConfig?: object;
-    tools?: object[];
+    // ⭐ Tools V2: références vers user_functions + héritage prototype
+    tools?: mongoose.Types.ObjectId[];   // Références vers user_functions._id
+    toolSelections?: IToolSelection[];   // Références versionnées effectives pour cette instance
+    legacyTools?: object[];              // Ancien format inline (migration rétrocompat)
+    functionInheritance?: {
+        inheritFromPrototype: boolean;   // true par défaut
+        overrideFunctionIds?: string[]; // Si inheritFromPrototype = false
+        overrideToolSelections?: IToolSelection[];
+    };
     outputConfig?: object;
+    localLLMProfileId?: string;   // Which LocalLLMProfile is used for this instance
     robotId: string;
 
     // Canvas properties
@@ -214,12 +235,47 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         type: String
     }],
     historyConfig: Schema.Types.Mixed,
-    tools: [Schema.Types.Mixed],
+    // ⭐ Tools V2: tableau de références ObjectId vers user_functions
+    tools: [{
+        type: Schema.Types.ObjectId,
+        ref: 'UserFunction'
+    }],
+    toolSelections: [{
+        toolId: { type: String, required: true, trim: true },
+        versionRef: {
+            versionTag: { type: String, required: false, trim: true },
+            versionNumber: { type: Number, required: false },
+            workspaceId: { type: String, required: false, default: null }
+        },
+        _id: false
+    }],
+    // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)
+    legacyTools: [Schema.Types.Mixed],
+    // ⭐ Tools V2: configuration d'héritage des fonctions depuis le prototype
+    functionInheritance: {
+        inheritFromPrototype: { type: Boolean, default: true },
+        overrideFunctionIds: [{ type: String }],
+        overrideToolSelections: [{
+            toolId: { type: String, required: true, trim: true },
+            versionRef: {
+                versionTag: { type: String, required: false, trim: true },
+                versionNumber: { type: Number, required: false },
+                workspaceId: { type: String, required: false, default: null }
+            },
+            _id: false
+        }],
+        _id: false
+    },
     outputConfig: Schema.Types.Mixed,
+    // ⭐ LOCAL LLM: Profil LLM local sélectionné pour cette instance
+    localLLMProfileId: {
+        type: String,
+        default: null
+    },
     robotId: {
         type: String,
         required: true,
-        enum: ['AR_001', 'BOS_001', 'COM_001', 'PHIL_001', 'TIM_001']
+        enum: [...CANONICAL_ROBOT_IDS]
     },
 
     // Canvas properties

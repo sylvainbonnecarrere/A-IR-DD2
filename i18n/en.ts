@@ -404,6 +404,7 @@ export default {
     archi_prototyping_header: 'ARCHI • Prototyper',
     bos_supervision_header: 'BOS • Supervisor',
     com_connections_header: 'COM • Connector',
+    com_connections_desc: 'Manage connections and external services',
     phil_data_header: 'PHIL • Data Specialist',
     tim_events_header: 'TIM • Time Manager',
     archi_prototyping_desc: 'Agent creation and orchestration',

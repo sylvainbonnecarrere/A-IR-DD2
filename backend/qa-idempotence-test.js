@@ -15,8 +15,8 @@
  */
 
 const API_BASE = 'http://localhost:3001';
-const USER_EMAIL = 'phase2test@test.fr';
-const USER_PASSWORD = 'TestPassword123!';
+const USER_EMAIL = process.env.QA_TEST_EMAIL || 'phase2test@test.fr';
+const USER_PASSWORD = process.env.QA_TEST_PASSWORD || 'test-only-password-123';
 
 async function test() {
     console.log('\n' + '='.repeat(60));

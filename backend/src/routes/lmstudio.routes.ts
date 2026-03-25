@@ -15,12 +15,14 @@ import {
     validateChatOptions
 } from '../middleware/validateLMStudioRequest';
 import { logLMStudioRequest, errorHandler } from '../middleware/logger';
+import { optionalAuth } from '../middleware/auth.middleware';
 
 const router = Router();
 
 // Appliquer les middlewares globaux à toutes les routes LMStudio
 router.use(lmstudioRateLimiter); // Rate limiting global
 router.use(logLMStudioRequest);   // Logging des requêtes
+router.use(optionalAuth);         // Optional auth for profile-based endpoint authorization
 router.use(validateEndpoint);     // Validation endpoint localhost
 
 /**
@@ -199,6 +201,8 @@ router.post(
                 res.setHeader('Cache-Control', 'no-cache');
                 res.setHeader('Connection', 'keep-alive');
                 res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+                res.flushHeaders?.();
+                res.write(': connected\n\n');
 
                 try {
                     // Stream depuis LMStudio vers frontend

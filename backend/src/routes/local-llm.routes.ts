@@ -10,12 +10,16 @@ import { Router, Request, Response } from 'express';
 import { detectLocalLLMCapabilities } from '../services/localLLMService';
 import { lmstudioRateLimiter } from '../middleware/rateLimiter';
 import { logLMStudioRequest } from '../middleware/logger';
+import { LOCAL_ENDPOINT_POLICY_ERROR } from '../utils/localEndpointPolicy';
+import { optionalAuth } from '../middleware/auth.middleware';
+import { isEndpointAccessibleForUser } from '../services/localEndpointAccess.service';
 
 const router = Router();
 
 // Appliquer middlewares
 router.use(lmstudioRateLimiter);
 router.use(logLMStudioRequest);
+router.use(optionalAuth);
 
 /**
  * GET /api/local-llm/detect-capabilities
@@ -54,6 +58,16 @@ router.get('/detect-capabilities', async (req: Request, res: Response) => {
             return res.status(400).json({
                 error: 'Invalid endpoint URL format',
                 received: endpoint
+            });
+        }
+
+        const userId = (req.user as { id?: string } | undefined)?.id;
+        if (!(await isEndpointAccessibleForUser(endpoint, userId))) {
+            return res.status(403).json({
+                healthy: false,
+                capabilities: [],
+                detectedAt: new Date().toISOString(),
+                error: LOCAL_ENDPOINT_POLICY_ERROR
             });
         }
 

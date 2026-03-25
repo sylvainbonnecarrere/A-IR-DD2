@@ -33,8 +33,11 @@ export function transformAgentInstanceForFrontend(instance: any) {
         systemPrompt,
         capabilities,
         tools,
+        toolSelections,
         historyConfig,
         outputConfig,
+        functionInheritance,
+        localLLMProfileId,
         robotId,
         position,
         ...rest
@@ -51,6 +54,7 @@ export function transformAgentInstanceForFrontend(instance: any) {
         systemPrompt,
         capabilities: capabilities || [],
         tools: tools || [],
+        toolSelections: toolSelections || [],
         historyConfig: historyConfig || {},
         outputConfig: outputConfig || {},
         robotId,
@@ -63,8 +67,8 @@ export function transformAgentInstanceForFrontend(instance: any) {
             saveLinks: false,
             saveTasks: false,
             saveMedia: false,
-            mediaStorage: 'db',
-            cloudStorageConfig: null
+            mediaStorage: 'db'
+            // cloudStorageConfig: intentionally omitted (null would fail Zod validation)
         },
         // ⭐ CRITICAL: Reconstruct configuration_json for frontend
         configuration_json: {
@@ -74,9 +78,13 @@ export function transformAgentInstanceForFrontend(instance: any) {
             systemPrompt: systemPrompt || '',
             capabilities: Array.isArray(capabilities) ? capabilities : [],
             tools: Array.isArray(tools) ? tools : [],
+            toolSelections: Array.isArray(toolSelections) ? toolSelections : [],
             historyConfig: historyConfig || {},
             outputConfig: outputConfig || {},
-            position: position || { x: 0, y: 0 }
+            position: position || { x: 0, y: 0 },
+            functionInheritance: functionInheritance || { inheritFromPrototype: true, overrideFunctionIds: [], overrideToolSelections: [] },
+            // ⭐ LOCAL LLM: Include localLLMProfileId for correct endpoint resolution after reload
+            ...(localLLMProfileId != null && { localLLMProfileId })
         },
         ...remaining
     };

@@ -73,7 +73,7 @@ describe('J4.4 TNR - Security: Guest ↔ Auth Data Isolation', () => {
             localStorage.setItem(GUEST_STORAGE_KEYS.llmConfigs, JSON.stringify({
                 'Mistral': {
                     provider: 'Mistral',
-                    apiKey: 'guest-mistral-key-123',
+                    apiKey: 'mistral-test-key-placeholder',
                     model: 'mistral-medium',
                     enabled: true
                 }

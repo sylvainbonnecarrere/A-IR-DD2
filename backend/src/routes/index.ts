@@ -19,6 +19,9 @@ export { default as llmConfigsRoutes } from './llm-configs.routes';
 export { default as llmProxyRoutes } from './llm-proxy.routes';
 export { default as userSettingsRoutes } from './user-settings.routes';
 export { default as userWorkspaceRoutes } from './user-workspace.routes';
+export { default as workspacesRoutes } from './workspaces.routes';
+export { default as toolsRoutes } from './tools.routes';
+export { default as runsRoutes } from './runs.routes';
 export { default as lmstudioRoutes } from './lmstudio.routes';
 export { default as localLLMRoutes } from './local-llm.routes';
 

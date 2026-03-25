@@ -17,9 +17,10 @@ import { act, renderHook } from '@testing-library/react';
 import { useDesignStore } from '../../stores/useDesignStore';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { GUEST_STORAGE_KEYS } from '../../utils/guestDataUtils';
+import { RobotId } from '../../types';
 
 // Types
-import type { AgentInstance, V2WorkflowNode, V2WorkflowEdge, RobotId } from '../../types';
+import type { AgentInstance, V2WorkflowNode, V2WorkflowEdge } from '../../types';
 
 /**
  * Test Suite 1: Store Reset (Wipe) Functionality
@@ -36,8 +37,10 @@ describe('J4.4 ÉTAPE 2 - Store Reset (Wipe)', () => {
         // Cleanup stores
         const designStore = useDesignStore.getState();
         const runtimeStore = useRuntimeStore.getState();
-        designStore.resetAll();
-        runtimeStore.resetAll();
+        act(() => {
+            designStore.resetAll();
+            runtimeStore.resetAll();
+        });
     });
 
     it('should reset design store completely with resetAll()', () => {
@@ -60,7 +63,7 @@ describe('J4.4 ÉTAPE 2 - Store Reset (Wipe)', () => {
                 type: 'agent',
                 position: { x: 100, y: 200 },
                 data: {
-                    robotId: 'archi' as RobotId,
+                    robotId: RobotId.Archi,
                     label: 'Test Node'
                 }
             }]);
@@ -126,7 +129,9 @@ describe('J4.4 ÉTAPE 2 - Store Reset (Wipe)', () => {
 describe('J4.4 ÉTAPE 2 - Store Hydration', () => {
     beforeEach(() => {
         const designStore = useDesignStore.getState();
-        designStore.resetAll();
+        act(() => {
+            designStore.resetAll();
+        });
     });
 
     it('should hydrate design store with hydrateFromServer()', () => {
@@ -150,7 +155,7 @@ describe('J4.4 ÉTAPE 2 - Store Hydration', () => {
                     type: 'agent' as const,
                     position: { x: 150, y: 250 },
                     data: {
-                        robotId: 'archi' as RobotId,
+                        robotId: RobotId.Archi,
                         label: 'Server Node'
                     }
                 }
@@ -232,8 +237,10 @@ describe('J4.4 ÉTAPE 2 - Auth State Change Flow', () => {
     beforeEach(() => {
         const designStore = useDesignStore.getState();
         const runtimeStore = useRuntimeStore.getState();
-        designStore.resetAll();
-        runtimeStore.resetAll();
+        act(() => {
+            designStore.resetAll();
+            runtimeStore.resetAll();
+        });
         Object.values(GUEST_STORAGE_KEYS).forEach(key => {
             localStorage.removeItem(key);
         });
@@ -241,51 +248,57 @@ describe('J4.4 ÉTAPE 2 - Auth State Change Flow', () => {
 
     it('should wipe then hydrate on login (full flow)', () => {
         // Step 1: Populate with guest data (simulating pre-login state)
-        useDesignStore.getState().setAgentInstances([{
-            id: 'guest-agent',
-            prototypeId: 'proto-guest',
-            name: 'Guest Before Login',
-            position: { x: 50, y: 50 },
-            isMinimized: false,
-            isMaximized: false,
-            configuration_json: null
-        }]);
+        act(() => {
+            useDesignStore.getState().setAgentInstances([{
+                id: 'guest-agent',
+                prototypeId: 'proto-guest',
+                name: 'Guest Before Login',
+                position: { x: 50, y: 50 },
+                isMinimized: false,
+                isMaximized: false,
+                configuration_json: null
+            }]);
 
-        useRuntimeStore.getState().setNodeMessages('guest-node', [{
-            id: 'msg-guest',
-            sender: 'user',
-            text: 'Guest message',
-            timestamp: new Date()
-        }]);
+            useRuntimeStore.getState().setNodeMessages('guest-node', [{
+                id: 'msg-guest',
+                sender: 'user',
+                text: 'Guest message',
+                timestamp: new Date()
+            }]);
+        });
 
         expect(useDesignStore.getState().agentInstances.length).toBe(1);
         expect(Object.keys(useRuntimeStore.getState().nodeMessages).length).toBe(1);
 
         // Step 2: Auth state changes → Wipe (as useWorkspaceHydration would do)
-        useDesignStore.getState().resetAll();
-        useRuntimeStore.getState().resetAll();
+        act(() => {
+            useDesignStore.getState().resetAll();
+            useRuntimeStore.getState().resetAll();
+        });
 
         expect(useDesignStore.getState().agentInstances).toEqual([]);
         expect(useRuntimeStore.getState().nodeMessages).toEqual({});
 
         // Step 3: Hydrate from server (as useWorkspaceHydration would do)
-        useDesignStore.getState().hydrateFromServer({
-            agentInstances: [{
-                id: 'auth-agent',
-                prototypeId: 'proto-auth',
-                name: 'Authenticated User Agent',
-                position: { x: 200, y: 200 },
-                isMinimized: false,
-                isMaximized: false,
-                configuration_json: null
-            }],
-            nodes: [{
-                id: 'auth-node',
-                type: 'agent',
-                position: { x: 200, y: 200 },
-                data: { robotId: 'archi' as RobotId, label: 'Auth Node' }
-            }],
-            edges: []
+        act(() => {
+            useDesignStore.getState().hydrateFromServer({
+                agentInstances: [{
+                    id: 'auth-agent',
+                    prototypeId: 'proto-auth',
+                    name: 'Authenticated User Agent',
+                    position: { x: 200, y: 200 },
+                    isMinimized: false,
+                    isMaximized: false,
+                    configuration_json: null
+                }],
+                nodes: [{
+                    id: 'auth-node',
+                    type: 'agent',
+                    position: { x: 200, y: 200 },
+                    data: { robotId: RobotId.Archi, label: 'Auth Node' }
+                }],
+                edges: []
+            });
         });
 
         // Step 4: Verify clean state with only auth data
@@ -301,24 +314,28 @@ describe('J4.4 ÉTAPE 2 - Auth State Change Flow', () => {
 
     it('should wipe stores on logout (return to guest mode)', () => {
         // Pre-populate with auth data
-        useDesignStore.getState().hydrateFromServer({
-            agentInstances: [{
-                id: 'auth-agent',
-                prototypeId: 'proto-1',
-                name: 'Auth Agent',
-                position: { x: 100, y: 100 },
-                isMinimized: false,
-                isMaximized: false,
-                configuration_json: null
-            }],
-            nodes: [],
-            edges: []
+        act(() => {
+            useDesignStore.getState().hydrateFromServer({
+                agentInstances: [{
+                    id: 'auth-agent',
+                    prototypeId: 'proto-1',
+                    name: 'Auth Agent',
+                    position: { x: 100, y: 100 },
+                    isMinimized: false,
+                    isMaximized: false,
+                    configuration_json: null
+                }],
+                nodes: [],
+                edges: []
+            });
         });
 
         expect(useDesignStore.getState().agentInstances.length).toBe(1);
 
         // Logout → wipe
-        useDesignStore.getState().resetAll();
+        act(() => {
+            useDesignStore.getState().resetAll();
+        });
 
         // State should be clean for guest mode
         const afterLogout = useDesignStore.getState();
@@ -341,7 +358,7 @@ describe('J4.4 ÉTAPE 2 - No Data Leak Validation', () => {
         };
         localStorage.setItem(GUEST_STORAGE_KEYS.workflow, JSON.stringify(guestWorkflow));
         localStorage.setItem(GUEST_STORAGE_KEYS.llmConfigs, JSON.stringify([
-            { provider: 'OpenAI', apiKeyPlaintext: 'sk-guest-key-123' }
+            { provider: 'OpenAI', apiKeyPlaintext: 'openai-guest-test-key-placeholder' }
         ]));
 
         // Verify guest data exists

@@ -27,6 +27,14 @@ export interface UserPreferences {
     language: 'fr' | 'en' | 'de' | 'es' | 'pt';
     theme?: 'dark' | 'light';
     saveMode?: 'auto' | 'manual';
+    // ⭐ Tools V2: préférences agent codeur (page Phil/Functions)
+    codingAgent?: {
+        llmProvider?: string;
+        llmModel?: string;
+        speciality?: 'typescript' | 'python';
+        tsCodingSystemPrompt?: string;
+        pyCodingSystemPrompt?: string;
+    };
 }
 
 /**
@@ -38,6 +46,15 @@ export interface IUserSettings extends Document {
 
     // User Preferences only
     preferences: UserPreferences;
+
+    // Legacy compatibility only.
+    // J4: Workspace.logicalRoot/runtimeRoots becomes the target authority for persistent paths.
+    // This field remains transitional for read/write compatibility until legacy consumers are removed.
+    functionPaths?: {
+        workflowId: string;
+        pythonPath: string;
+        tsPath: string;
+    }[];
 
     // Sync tracking
     lastSync?: Date;
@@ -81,6 +98,14 @@ const userSettingsSchema = new Schema(
             type: Date,
             default: null
         },
+
+        // Legacy compatibility only. Do not treat this mapping as the target source of truth.
+        functionPaths: [{
+            workflowId: { type: String, required: true },
+            pythonPath: { type: String, required: true },
+            tsPath: { type: String, required: true },
+            _id: false
+        }],
 
         // Versioning for conflict resolution
         version: {

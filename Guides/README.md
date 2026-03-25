@@ -41,6 +41,19 @@ Couvre :
 
 ---
 
+### 🧰 [Features/TOOLS/README.md](./Features/TOOLS/README.md)
+**Synthèse Plan 1 Tools - 12 livrables et glossaire**
+
+Couvre :
+- Synthèse des 12 jalons/livrables du Plan 1 Tools
+- Vocabulaire normatif `workspace / build / run / runtime / registry / output / health`
+- Termes ambigus ou faux à purger
+- Fichiers pivot à relire pour assimiler rapidement le chantier
+
+**Public cible** : Architectes, Développeurs, Agents IA travaillant sur le chantier Tools
+
+---
+
 ## 🎯 Utilisation
 
 ### Pour les Agents IA

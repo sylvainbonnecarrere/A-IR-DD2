@@ -94,7 +94,6 @@ WorkflowSchema.index(
     { userId: 1, isDefault: 1 }, 
     { 
         unique: true, 
-        sparse: true,
         partialFilterExpression: { isDefault: true }
     }
 );

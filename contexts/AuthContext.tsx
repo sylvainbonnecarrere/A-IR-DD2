@@ -20,13 +20,22 @@ import React, {
     ReactNode,
     useCallback
 } from 'react';
-import { User, AuthContextType, StoredAuthData, AuthResponse, AuthLoadingState, LLMApiKey } from './types/auth.types';
+import { User, AuthContextType, StoredAuthData, AuthResponse, AuthLoadingState, LLMApiKey, AuthSessionStatus } from './types/auth.types';
+import { LLMConfig, LocalLLMProfile } from '../types';
 import { wipeGuestData, checkGuestDataExists } from '../utils/guestDataUtils';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useLocalizationStore } from '../stores/useLocalizationStore';
+import { useFunctionStore } from '../stores/useFunctionStore';
 import apiClient from '../utils/apiClient';
+import * as llmConfigService from '../services/llmConfigService';
+import * as localLLMProfileService from '../services/localLLMProfileService';
+import {
+    INITIAL_RUNTIME_LLM_CONFIGS,
+    buildRuntimeConfigsFromApiKeys,
+    buildRuntimeConfigsFromUiConfigs,
+} from '../services/runtimeConfigRepository';
 
 import { API_BASE_URL } from '../config/api.config';
 
@@ -56,8 +65,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const [accessToken, setAccessToken] = useState<string | null>(null);
     const [refreshToken, setRefreshToken] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true); // Start true to avoid FOUC
+    const [sessionStatus, setSessionStatus] = useState<AuthSessionStatus>('loading');
     const [error, setError] = useState<string | null>(null);
     const [llmApiKeys, setLlmApiKeys] = useState<LLMApiKey[] | null>(null); // J4.2: Session-only storage
+    const [runtimeLLMConfigs, setRuntimeLLMConfigs] = useState<LLMConfig[]>(INITIAL_RUNTIME_LLM_CONFIGS);
+    const [localLLMProfiles, setLocalLLMProfiles] = useState<LocalLLMProfile[]>([]);
     const [isMounted, setIsMounted] = useState(false); // ⭐ J4.4: Prevent async cleanup errors
 
     /**
@@ -71,12 +83,58 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         };
     }, []);
 
+    const resetStores = useCallback(() => {
+        try {
+            useDesignStore.getState().resetAll();
+            useWorkflowStore.getState().resetAll();
+            useRuntimeStore.getState().resetAll();
+            useLocalizationStore.getState().resetAll();
+            useFunctionStore.getState().resetStore();
+        } catch (err) {
+            // Silent fail - stores may not be initialized
+        }
+    }, []);
+
+    const clearAuthState = useCallback((options?: {
+        sessionStatus?: AuthSessionStatus;
+        error?: string | null;
+        resetStores?: boolean;
+        clearStorage?: boolean;
+    }) => {
+        const {
+            sessionStatus: nextSessionStatus = 'ready',
+            error: nextError = null,
+            resetStores: shouldResetStores = true,
+            clearStorage = true,
+        } = options ?? {};
+
+        setUser(null);
+        setAccessToken(null);
+        setRefreshToken(null);
+        setLlmApiKeys(null);
+        setRuntimeLLMConfigs(INITIAL_RUNTIME_LLM_CONFIGS);
+        setLocalLLMProfiles([]);
+        setError(nextError);
+        setSessionStatus(nextSessionStatus);
+
+        if (clearStorage) {
+            localStorage.removeItem(AUTH_STORAGE_KEY);
+        }
+
+        if (shouldResetStores) {
+            resetStores();
+        }
+    }, [resetStores]);
+
     /**
      * Hydrate auth from localStorage on mount
      * SAFE: Try-catch prevents app crash if localStorage corrupted
      */
     useEffect(() => {
         const hydrateFromStorage = () => {
+            let nextSessionStatus: AuthSessionStatus = 'ready';
+            let nextError: string | null = null;
+
             try {
                 const stored = localStorage.getItem(AUTH_STORAGE_KEY);
                 if (stored) {
@@ -84,6 +142,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
                     // Validate structure
                     if (user && user.id && user.email && accessToken && refreshToken) {
+                        nextSessionStatus = 'restoring-session';
                         if (isMounted) {
                             setUser(user);
                             setAccessToken(accessToken);
@@ -94,13 +153,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                     } else {
                         // Malformed data - clear
                         localStorage.removeItem(AUTH_STORAGE_KEY);
+                        nextSessionStatus = 'degraded';
+                        nextError = 'Session locale invalide. Veuillez vous reconnecter.';
                     }
                 }
             } catch (err) {
                 localStorage.removeItem(AUTH_STORAGE_KEY);
+                nextSessionStatus = 'degraded';
+                nextError = 'Session locale invalide. Veuillez vous reconnecter.';
             } finally {
                 // Always finish loading (fallback to guest mode)
                 if (isMounted) {
+                    setSessionStatus(nextSessionStatus);
+                    setError(nextError);
                     setIsLoading(false);
                 }
             }
@@ -115,22 +180,45 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     useEffect(() => {
         const handleLogoutEvent = (event: Event) => {
             const customEvent = event as CustomEvent;
-            // Logout event received
+            const isExpiredSession = customEvent.detail?.reason !== 'manual_logout';
+            clearAuthState({
+                sessionStatus: isExpiredSession ? 'degraded' : 'ready',
+                error: isExpiredSession
+                    ? customEvent.detail?.message || 'Session expirée. Veuillez vous reconnecter.'
+                    : null,
+            });
+        };
 
-            // Clear auth state
-            setUser(null);
-            setAccessToken(null);
-            setRefreshToken(null);
-            localStorage.removeItem(AUTH_STORAGE_KEY);
-            setError('Session expirée. Veuillez vous reconnecter.');
+        const handleSessionRefreshedEvent = (event: Event) => {
+            const customEvent = event as CustomEvent<{ accessToken?: string }>;
+            const refreshedToken = customEvent.detail?.accessToken;
+            if (!refreshedToken) {
+                return;
+            }
+
+            setAccessToken(refreshedToken);
+            setSessionStatus('ready');
+            setError(null);
+        };
+
+        const handleSessionDegradedEvent = (event: Event) => {
+            const customEvent = event as CustomEvent<{ message?: string }>;
+            clearAuthState({
+                sessionStatus: 'degraded',
+                error: customEvent.detail?.message || 'Session expirée. Veuillez vous reconnecter.',
+            });
         };
 
         window.addEventListener('auth:logout', handleLogoutEvent);
+        window.addEventListener('auth:session-refreshed', handleSessionRefreshedEvent);
+        window.addEventListener('auth:session-degraded', handleSessionDegradedEvent);
 
         return () => {
             window.removeEventListener('auth:logout', handleLogoutEvent);
+            window.removeEventListener('auth:session-refreshed', handleSessionRefreshedEvent);
+            window.removeEventListener('auth:session-degraded', handleSessionDegradedEvent);
         };
-    }, []);
+    }, [clearAuthState]);
 
     /**
      * Save auth data to localStorage and state
@@ -141,6 +229,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setUser(userData);
         setAccessToken(accessToken);
         setRefreshToken(refreshToken);
+        setSessionStatus('ready');
         setError(null);
     }, []);
 
@@ -152,8 +241,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
      * 
      * ⭐ J4.4: Added timeout & mount check to prevent async errors
      */
-    const fetchLLMApiKeys = useCallback(async (token: string, retryCount = 0) => {
-        if (!isMounted) return;
+    const fetchLLMApiKeys = useCallback(async (token: string, retryCount = 0): Promise<LLMApiKey[]> => {
+        if (!isMounted) return [];
 
         // Timeout 5s pour éviter un hang
         const controller = new AbortController();
@@ -173,6 +262,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             if (isMounted) {
                 setLlmApiKeys(keys);
             }
+            return keys;
         } catch (err: any) {
             if (err.name === 'AbortError' || err.code === 'ERR_CANCELED') {
                 console.warn('[AuthContext] Fetch timeout');
@@ -183,17 +273,81 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 if (isMounted) {
                     return fetchLLMApiKeys(token, retryCount + 1);
                 }
-                return;
+                return [];
             } else {
                 console.error('[AuthContext] Fetch error:', err.message);
             }
             if (isMounted) {
                 setLlmApiKeys([]);
             }
+            return [];
         } finally {
             clearTimeout(timeoutId);
         }
     }, [isMounted]);
+
+    const loadLocalLLMProfiles = useCallback(async (token?: string): Promise<LocalLLMProfile[]> => {
+        if (!isMounted) return [];
+
+        try {
+            const profiles = await localLLMProfileService.getAllProfiles({
+                useApi: !!token,
+                token,
+            });
+            if (isMounted) {
+                setLocalLLMProfiles(profiles);
+            }
+            return profiles;
+        } catch (err) {
+            console.error('[AuthContext] Local LLM profile load failed:', err);
+            if (isMounted) {
+                setLocalLLMProfiles([]);
+            }
+            return [];
+        }
+    }, [isMounted]);
+
+    const refreshRuntimeConfigState = useCallback(async (tokenOverride?: string) => {
+        if (!isMounted) return;
+
+        const effectiveToken = tokenOverride ?? accessToken ?? undefined;
+        const shouldUseApi = !!effectiveToken;
+
+        if (shouldUseApi) {
+            const [keys, profiles] = await Promise.all([
+                fetchLLMApiKeys(effectiveToken),
+                loadLocalLLMProfiles(effectiveToken),
+            ]);
+
+            if (!isMounted) return;
+
+            setRuntimeLLMConfigs(buildRuntimeConfigsFromApiKeys(keys));
+            setLocalLLMProfiles(profiles);
+            setSessionStatus('ready');
+            return;
+        }
+
+        try {
+            const [guestConfigs, guestProfiles] = await Promise.all([
+                llmConfigService.getAllLLMConfigs({ useApi: false }),
+                localLLMProfileService.getAllProfiles({ useApi: false }),
+            ]);
+
+            if (!isMounted) return;
+
+            setLlmApiKeys(null);
+            setRuntimeLLMConfigs(buildRuntimeConfigsFromUiConfigs(guestConfigs));
+            setLocalLLMProfiles(guestProfiles);
+            setSessionStatus('ready');
+        } catch (err) {
+            console.error('[AuthContext] Guest runtime config load failed:', err);
+            if (isMounted) {
+                setRuntimeLLMConfigs(INITIAL_RUNTIME_LLM_CONFIGS);
+                setLocalLLMProfiles([]);
+                setSessionStatus('ready');
+            }
+        }
+    }, [accessToken, fetchLLMApiKeys, isMounted, loadLocalLLMProfiles]);
 
     /**     * ⭐ J4.5 FIX: Fetch LLM API keys when accessToken becomes available
      * This handles both:
@@ -201,10 +355,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
      * - Session restore from localStorage (hydrateFromStorage doesn't call fetchLLMApiKeys)
      */
     useEffect(() => {
-        if (accessToken && llmApiKeys === null && isMounted) {
-            fetchLLMApiKeys(accessToken);
-        }
-    }, [accessToken, llmApiKeys, isMounted, fetchLLMApiKeys]);
+        if (!isMounted || isLoading) return;
+        void refreshRuntimeConfigState();
+    }, [accessToken, isMounted, isLoading, refreshRuntimeConfigState, user]);
 
     /**     * Login with email & password
      * POST /api/auth/login
@@ -215,6 +368,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const login = useCallback(async (email: string, password: string) => {
         setError(null);
         setIsLoading(true);
+        setSessionStatus('loading');
 
         try {
             const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
@@ -245,7 +399,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             saveAuthData(userData, accessToken, refreshToken);
 
             // J4.2: Fetch LLM API keys after successful login
-            await fetchLLMApiKeys(accessToken);
+            await refreshRuntimeConfigState(accessToken);
         } catch (err: any) {
             const errorMsg = err.message || 'Connection error';
             setError(errorMsg);
@@ -253,7 +407,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         } finally {
             setIsLoading(false);
         }
-    }, [saveAuthData, fetchLLMApiKeys]);
+    }, [refreshRuntimeConfigState, saveAuthData]);
 
     /**
      * Register with email & password
@@ -264,6 +418,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const register = useCallback(async (email: string, password: string) => {
         setError(null);
         setIsLoading(true);
+        setSessionStatus('loading');
 
         try {
             const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
@@ -288,7 +443,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             saveAuthData(userData, accessToken, refreshToken);
 
             // J4.2: Fetch LLM API keys after successful registration
-            await fetchLLMApiKeys(accessToken);
+            await refreshRuntimeConfigState(accessToken);
         } catch (err: any) {
             const errorMsg = err.message || 'Connection error';
             setError(errorMsg);
@@ -296,7 +451,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         } finally {
             setIsLoading(false);
         }
-    }, [saveAuthData, fetchLLMApiKeys]);
+    }, [refreshRuntimeConfigState, saveAuthData]);
 
     /**
      * Logout - Clear all auth data and RESET ALL STORES
@@ -309,24 +464,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
      * Auth data must NOT persist into guest mode.
      */
     const logout = useCallback(() => {
-        // 1. Clear auth state
-        setUser(null);
-        setAccessToken(null);
-        setRefreshToken(null);
-        setError(null);
-        setLlmApiKeys(null);
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        
-        // 2. ⭐ CRITICAL J4.4: Wipe ALL stores to prevent auth data leak to guest
-        try {
-            useDesignStore.getState().resetAll();
-            useWorkflowStore.getState().resetAll();
-            useRuntimeStore.getState().resetAll();
-            useLocalizationStore.getState().resetAll(); // ⭐ NEW: Reset localization too
-        } catch (err) {
-            // Silent fail - stores may not be initialized
-        }
-    }, []);
+        clearAuthState({ sessionStatus: 'ready', error: null });
+    }, [clearAuthState]);
 
     /**
      * Refresh access token using refresh token
@@ -338,6 +477,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             throw new Error('No refresh token available');
         }
 
+        setSessionStatus('restoring-session');
+
         try {
             const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
                 method: 'POST',
@@ -346,17 +487,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             });
 
             if (!response.ok) {
-                logout(); // Token expired, logout user
+                clearAuthState({
+                    sessionStatus: 'degraded',
+                    error: 'Session expirée. Veuillez vous reconnecter.'
+                });
                 throw new Error('Token refresh failed');
             }
 
             const { accessToken: newAccessToken }: { accessToken: string } = await response.json();
+            const authData: StoredAuthData = {
+                user: user as User,
+                accessToken: newAccessToken,
+                refreshToken,
+            };
+            localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
             setAccessToken(newAccessToken);
+            setSessionStatus('ready');
+            setError(null);
         } catch (err: any) {
-            logout();
+            clearAuthState({
+                sessionStatus: 'degraded',
+                error: 'Session expirée. Veuillez vous reconnecter.'
+            });
             throw err;
         }
-    }, [refreshToken, logout]);
+    }, [clearAuthState, refreshToken, user]);
 
     /**
      * Clear error message
@@ -379,8 +534,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             return;
         }
         console.log('[AuthContext] 🔄 Refreshing LLM API keys...');
-        await fetchLLMApiKeys(accessToken);
-    }, [accessToken, fetchLLMApiKeys]);
+        await refreshRuntimeConfigState(accessToken);
+    }, [accessToken, refreshRuntimeConfigState]);
 
     // Context value
     const value: AuthContextType = {
@@ -389,14 +544,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         refreshToken,
         isAuthenticated: !!user && !!accessToken,
         isLoading,
+        sessionStatus,
         error,
         llmApiKeys, // J4.2: Expose LLM API keys to components
+        runtimeLLMConfigs,
+        localLLMProfiles,
         login,
         register,
         logout,
         refreshAccessToken,
         clearError,
-        refreshLLMApiKeys: refreshLLMApiKeysWrapper // ⭐ J4.6: Use wrapper that captures current accessToken
+        refreshLLMApiKeys: refreshLLMApiKeysWrapper, // ⭐ J4.6: Use wrapper that captures current accessToken
+        refreshRuntimeConfigState,
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

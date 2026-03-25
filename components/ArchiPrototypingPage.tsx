@@ -235,20 +235,30 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       }
     } else {
       // Create new with governance (includes templates with id: 'temp')
+      let createdBackendPrototype: any = null;
+      if (isAuthenticated && accessToken) {
+        const apiResult = await createAgentPrototype(agentData, accessToken, currentRobotId, currentWorkflowId || undefined);
+        if (!apiResult.success || !apiResult.data) {
+          addNotification({
+            type: 'error',
+            title: t('archi_creation_refused'),
+            message: apiResult.error || 'Erreur de gouvernance backend',
+            duration: 5000
+          });
+          return;
+        }
+
+        createdBackendPrototype = apiResult.data;
+      }
+
       const result = addAgent(agentData);
       
       if (result.success && result.agentId) {
-        // ⭐ PERSISTENCE: Si user connecté, sauvegarder aussi dans MongoDB
-        if (isAuthenticated && accessToken) {
-          const apiResult = await createAgentPrototype(agentData, accessToken, currentRobotId, currentWorkflowId || undefined);
-          if (apiResult.success && apiResult.data) {
-            // ⭐ CRITICAL FIX: Capture ObjectId from backend and update local store
-            const backendObjectId = apiResult.data._id || apiResult.data.id;
-            if (backendObjectId && backendObjectId !== result.agentId) {
-              updateAgentId(result.agentId, backendObjectId);
-            }
+        if (createdBackendPrototype) {
+          const backendObjectId = createdBackendPrototype._id || createdBackendPrototype.id;
+          if (backendObjectId && backendObjectId !== result.agentId) {
+            updateAgentId(result.agentId, backendObjectId);
           }
-          // Silent fallback to local ID on API failure - error logged by agentPrototypeAPI
         }
         
         addNotification({
@@ -272,17 +282,22 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
   };
 
   const proceedWithUpdate = async (agentId: string, agentData: Omit<Agent, 'id' | 'creator_id' | 'created_at' | 'updated_at'>) => {
+    if (isAuthenticated && accessToken) {
+      const apiResult = await updateAgentPrototype(agentId, agentData, accessToken, currentRobotId);
+      if (!apiResult.success) {
+        addNotification({
+          type: 'error',
+          title: t('archi_modification_refused'),
+          message: apiResult.error || 'Erreur de gouvernance backend',
+          duration: 5000
+        });
+        return;
+      }
+    }
+
     const result = updateAgent(agentId, agentData);
 
     if (result.success) {
-      // ⭐ PERSISTENCE: Si user connecté, mettre à jour aussi dans MongoDB
-      if (isAuthenticated && accessToken) {
-        const apiResult = await updateAgentPrototype(agentId, agentData, accessToken, currentRobotId);
-        if (!apiResult.success) {
-          // Note: On ne bloque pas - le prototype est mis à jour localement
-        }
-      }
-      
       addNotification({
         type: 'success',
         title: t('archi_prototype_modified'),

@@ -39,7 +39,8 @@ export const generateContentStream = async function* (
     provider: LLMProvider, apiKey: string, model: string,
     systemInstruction?: string, history?: ChatMessage[], tools?: Tool[], outputConfig?: OutputConfig,
     endpoint?: string, // For LMStudio local endpoint
-    nativeToolsConfig?: { webFetch?: boolean; webSearch?: boolean } // For Anthropic native tools
+    nativeToolsConfig?: { webFetch?: boolean; webSearch?: boolean }, // For Anthropic native tools
+    authToken?: string
 ) {
     if (provider === LLMProvider.ArcLLM) {
         throw new Error('ArcLLM does not support generateContentStream. Use generateVideo, generateContentWithMaps, or generateContentWithWebSearch.');
@@ -49,7 +50,7 @@ export const generateContentStream = async function* (
 
     // Handle LMStudio special case with endpoint parameter
     if (provider === LLMProvider.LMStudio) {
-        yield* (service as any).generateContentStream(endpoint || 'http://localhost:3928', model, systemInstruction, history, tools, outputConfig, apiKey);
+        yield* (service as any).generateContentStream(endpoint || 'http://localhost:3928', model, systemInstruction, history, tools, outputConfig, apiKey, authToken);
     } else if (provider === LLMProvider.Anthropic && nativeToolsConfig) {
         // Pass native tools config to Anthropic service
         yield* (service as any).generateContentStream(apiKey, model, systemInstruction, history, tools, outputConfig, nativeToolsConfig);
@@ -61,7 +62,8 @@ export const generateContentStream = async function* (
 export const generateContent = (
     provider: LLMProvider, apiKey: string, model: string,
     systemInstruction?: string, history?: ChatMessage[], tools?: Tool[], outputConfig?: OutputConfig,
-    endpoint?: string // For LMStudio local endpoint
+    endpoint?: string, // For LMStudio local endpoint
+    authToken?: string
 ): Promise<{ text: string }> => {
     if (provider === LLMProvider.ArcLLM) {
         throw new Error('ArcLLM does not support generateContent. Use generateVideo, generateContentWithMaps, or generateContentWithWebSearch.');
@@ -71,7 +73,7 @@ export const generateContent = (
 
     // Handle LMStudio special case with endpoint parameter  
     if (provider === LLMProvider.LMStudio) {
-        return (service as any).generateContent(endpoint || 'http://localhost:3928', model, systemInstruction, history, tools, outputConfig, apiKey);
+        return (service as any).generateContent(endpoint || 'http://localhost:3928', model, systemInstruction, history, tools, outputConfig, apiKey, authToken);
     } else {
         return service.generateContent(apiKey, model, systemInstruction, history, tools, outputConfig);
     }
