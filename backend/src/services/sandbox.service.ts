@@ -7,7 +7,7 @@ import { BuildPreparationError, BuildService } from './build.service';
 import { RuntimeHealthService } from './runtimeHealth.service';
 import { ExecutionOrchestrator } from './runtime/ExecutionOrchestrator';
 import type { SandboxExecutionMetadata, SandboxExecutionResourceUsage } from './runtime/execution.types';
-import { RuntimeNotReadyError } from './runtime/errors';
+import { getSandboxErrorDetailsFromExecutionResult, RuntimeNotReadyError, type SandboxErrorDetails } from './runtime/errors';
 import type { IUserToolPolicy } from '../models/UserTool.model';
 
 export interface SandboxResult {
@@ -22,6 +22,7 @@ export interface SandboxResult {
     exitCode?: number;
     metadata?: SandboxExecutionMetadata;
     resourceUsage?: SandboxExecutionResourceUsage;
+    errorDetails?: SandboxErrorDetails;
 }
 
 export interface SyntaxCheckResult {
@@ -153,12 +154,20 @@ export class SandboxService {
             console.warn('[SandboxService] user_tools mirror sync warning:', error instanceof Error ? error.message : String(error));
         });
 
-        return this.executionOrchestrator.execute({
+        const executionResult = await this.executionOrchestrator.execute({
             fn,
             userId,
             args: testArgs,
             launchContext: 'editor_test'
         });
+
+        const errorDetails = getSandboxErrorDetailsFromExecutionResult(executionResult);
+        return errorDetails
+            ? {
+                ...executionResult,
+                errorDetails
+            }
+            : executionResult;
     }
 
     private async resolveVersionedExecutionTarget(

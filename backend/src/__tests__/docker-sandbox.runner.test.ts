@@ -104,6 +104,13 @@ describe('DockerSandboxRunner', () => {
         expect(call.args.join(' ')).toContain('type=bind,src=C:/sandbox/workspace-root,dst=/persistent-workspace');
         expect(call.timeoutMs).toBe(12000);
         expect(JSON.parse(call.stdin ?? '{}')).toEqual({
+            context: {
+                userId: 'user-1',
+                workflowId: undefined,
+                depth: 0,
+                maxDepth: 8,
+                sessionId: 'utr-test'
+            },
             args: { value: 'hello' },
             code: 'function run(args) { return { echoed: args.value }; }'
         });
@@ -121,7 +128,65 @@ describe('DockerSandboxRunner', () => {
         expect(result.success).toBe(false);
         expect(result.metadata).toEqual(expect.objectContaining({
             exitCode: 0,
-            failureKind: 'sandbox_invalid_output'
+            failureKind: 'sandbox_invalid_output',
+            failureSubsystem: 'sandbox_runtime'
+        }));
+    });
+
+    it('classifies eval syntax failures as wrapper syntax errors', async () => {
+        const processRunner = new FakeDockerProcessRunner({
+            stdout: '',
+            stderr: "[eval]:12\nSyntaxError: Unexpected token ';'",
+            exitCode: 1
+        });
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+
+        const result = await runner.execute(createRequest());
+
+        expect(result.success).toBe(false);
+        expect(result.metadata).toEqual(expect.objectContaining({
+            exitCode: 1,
+            failureKind: 'wrapper_syntax_error',
+            failureSubsystem: 'wrapper'
+        }));
+    });
+
+    it('preserves dependency-missing failures emitted by the sandbox payload', async () => {
+        const processRunner = new FakeDockerProcessRunner({
+            stdout: JSON.stringify({
+                success: false,
+                output: null,
+                stdout: '',
+                stderr: 'ModuleNotFoundError: No module named duckduckgo_search',
+                failureKind: 'dependency_missing',
+                errorType: 'ModuleNotFoundError',
+                traceback: 'Traceback...'
+            }),
+            exitCode: 1
+        });
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+
+        const result = await runner.execute(createRequest({
+            function: {
+                _id: '507f1f77bcf86cd799439011' as any,
+                name: 'web_search_py',
+                language: 'python',
+                origin: 'native',
+                codeInline: undefined,
+                codePath: 'backend/python/native/web_search_py.py'
+            },
+            runtime: 'python',
+            sourceCode: undefined,
+            mode: 'python-native'
+        }));
+
+        expect(result.success).toBe(false);
+        expect(result.metadata).toEqual(expect.objectContaining({
+            exitCode: 1,
+            failureKind: 'dependency_missing',
+            failureSubsystem: 'dependency',
+            errorType: 'ModuleNotFoundError',
+            traceback: 'Traceback...'
         }));
     });
 
@@ -138,7 +203,8 @@ describe('DockerSandboxRunner', () => {
         expect(result.success).toBe(false);
         expect(result.metadata).toEqual(expect.objectContaining({
             exitCode: 125,
-            failureKind: 'runner_image_missing'
+            failureKind: 'runner_image_missing',
+            failureSubsystem: 'runner'
         }));
     });
 
@@ -155,7 +221,8 @@ describe('DockerSandboxRunner', () => {
         expect(result.success).toBe(false);
         expect(result.metadata).toEqual(expect.objectContaining({
             exitCode: 125,
-            failureKind: 'runner_mount_failed'
+            failureKind: 'runner_mount_failed',
+            failureSubsystem: 'runner'
         }));
     });
 
@@ -172,7 +239,8 @@ describe('DockerSandboxRunner', () => {
         expect(result.exitCode).toBe(124);
         expect(result.metadata).toEqual(expect.objectContaining({
             exitCode: 124,
-            failureKind: 'timeout'
+            failureKind: 'timeout',
+            failureSubsystem: 'sandbox_runtime'
         }));
     });
 

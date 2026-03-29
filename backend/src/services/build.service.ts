@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import ts from 'typescript';
 import { UserFunction, type IUserFunction } from '../models/UserFunction.model';
 import { UserTool, type IUserTool, type IUserToolVersion } from '../models/UserTool.model';
+import { ToolPreparationPolicyService, type PreparationPolicyErrorCode } from './toolPreparationPolicy.service';
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
 import type { WorkspaceProvisioningResult } from './workspace/types';
 
@@ -39,7 +40,12 @@ interface BuildStrategy {
     prepare(context: BuildContext): Promise<BuildPreparationResult>;
 }
 
-export class BuildPreparationError extends Error {}
+export class BuildPreparationError extends Error {
+    constructor(message: string, public readonly code: PreparationPolicyErrorCode | 'BUILD_PREPARATION_ERROR' = 'BUILD_PREPARATION_ERROR') {
+        super(message);
+        this.name = 'BuildPreparationError';
+    }
+}
 
 function sanitizeSegment(value: string): string {
     return value.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -170,6 +176,7 @@ class PythonBuildStrategy implements BuildStrategy {
 
 export class BuildService {
     private readonly workspaceManager = createWorkspaceManager();
+    private readonly preparationPolicy = new ToolPreparationPolicyService();
 
     async prepareToolVersion(toolId: string, userId: string, versionTag?: string): Promise<BuildPreparationResult> {
         const { tool, version } = await this.loadBuildableTool(toolId, userId, versionTag);
@@ -231,15 +238,27 @@ export class BuildService {
     }
 
     async ensureBuildReadyForTool(toolId: string, userId: string, versionTag?: string): Promise<void> {
-        const { tool, version } = await this.loadBuildableTool(toolId, userId, versionTag);
-        const hasDeclaredDependencies = (tool.dependencies?.npm?.length ?? 0) > 0 || (tool.dependencies?.python?.length ?? 0) > 0;
-        if (!hasDeclaredDependencies) {
+        const tool = await this.loadOwnedOrNativeTool(toolId, userId);
+        if (!tool) {
+            throw new BuildPreparationError('Tool not found or access denied.', 'TOOL_NOT_FOUND');
+        }
+
+        const version = this.resolveToolVersion(tool, versionTag);
+        const policy = this.preparationPolicy.evaluateToolExecution(tool);
+        if (policy.requirement === 'none') {
+            return;
+        }
+
+        if (policy.requirement === 'platform_provision') {
+            if (version.buildStatus !== 'built') {
+                throw new BuildPreparationError(policy.missingPreparationMessage ?? 'Platform provisioning is required before sandbox execution.', policy.errorCode);
+            }
             return;
         }
 
         const buildStatus = await this.getToolBuildStatus(toolId, userId, version.versionTag);
         if (!buildStatus || buildStatus.status !== 'ready') {
-            throw new BuildPreparationError('This tool version declares dependencies and must be prepared via the build workflow before sandbox execution.');
+            throw new BuildPreparationError(policy.missingPreparationMessage ?? 'This tool version must be prepared before sandbox execution.', policy.errorCode);
         }
     }
 
@@ -293,18 +312,26 @@ export class BuildService {
 
     async ensureBuildReadyForRun(functionId: string, userId: string): Promise<void> {
         const fn = await this.loadOwnedOrNativeFunction(functionId, userId);
-        if (!fn || fn.origin !== 'custom' || !fn.workflowId) {
+        if (!fn) {
             return;
         }
 
-        const hasDeclaredDependencies = (fn.dependencies?.npm?.length ?? 0) > 0 || (fn.dependencies?.python?.length ?? 0) > 0;
-        if (!hasDeclaredDependencies) {
+        const policy = this.preparationPolicy.evaluateFunctionExecution(fn);
+        if (policy.requirement === 'none') {
+            return;
+        }
+
+        if (policy.requirement === 'platform_provision') {
+            const mirroredTool = await this.loadOwnedOrNativeTool(functionId, userId);
+            if (!mirroredTool || mirroredTool.currentVersion.buildStatus !== 'built') {
+                throw new BuildPreparationError(policy.missingPreparationMessage ?? 'Platform provisioning is required before sandbox execution.', policy.errorCode);
+            }
             return;
         }
 
         const buildStatus = await this.getBuildStatus(functionId, userId);
         if (!buildStatus || buildStatus.status !== 'ready') {
-            throw new BuildPreparationError('This function declares dependencies and must be prepared via the build workflow before sandbox execution.');
+            throw new BuildPreparationError(policy.missingPreparationMessage ?? 'This function must be prepared before sandbox execution.', policy.errorCode);
         }
     }
 
@@ -319,11 +346,12 @@ export class BuildService {
     private async loadBuildableTool(toolId: string, userId: string, versionTag?: string): Promise<{ tool: IUserTool; version: IUserToolVersion }> {
         const tool = await this.loadOwnedOrNativeTool(toolId, userId);
         if (!tool) {
-            throw new BuildPreparationError('Tool not found or access denied.');
+            throw new BuildPreparationError('Tool not found or access denied.', 'TOOL_NOT_FOUND');
         }
 
-        if (tool.scopeType !== 'user' || tool.isReadonly) {
-            throw new BuildPreparationError('Only custom editable tools can be prepared by the build workflow.');
+        const policy = this.preparationPolicy.evaluateToolAuthorBuild(tool);
+        if (!policy.allowed) {
+            throw new BuildPreparationError(policy.reason ?? 'Tool cannot be prepared by the author build workflow.', policy.errorCode);
         }
 
         return {
@@ -335,11 +363,12 @@ export class BuildService {
     private async loadBuildableFunction(functionId: string, userId: string): Promise<IUserFunction> {
         const fn = await this.loadOwnedOrNativeFunction(functionId, userId);
         if (!fn) {
-            throw new BuildPreparationError('Function not found or access denied.');
+            throw new BuildPreparationError('Function not found or access denied.', 'FUNCTION_NOT_FOUND');
         }
 
-        if (fn.origin !== 'custom' || fn.isReadonly) {
-            throw new BuildPreparationError('Only custom editable functions can be prepared by the build workflow.');
+        const policy = this.preparationPolicy.evaluateFunctionAuthorBuild(fn);
+        if (!policy.allowed) {
+            throw new BuildPreparationError(policy.reason ?? 'Function cannot be prepared by the author build workflow.', policy.errorCode);
         }
 
         return fn;

@@ -346,6 +346,11 @@ export interface ToolCallRecord {
   runner?: string;
   exitCode?: number;
   failureKind?: string;
+  errorCode?: string;
+  errorSubsystem?: string;
+  retryable?: boolean;
+  deterministicFailure?: boolean;
+  duplicateSuppressed?: boolean;
   persistedRunStatus?: 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out';
   persistedRunUpdatedAt?: string;
   artifacts?: Array<{

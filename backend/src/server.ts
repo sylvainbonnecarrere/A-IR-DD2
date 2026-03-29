@@ -190,9 +190,15 @@ app.post('/api/execute-python-tool', async (req, res) => {
 // Créer le serveur HTTP
 const httpServer = createServer(app);
 
-// Initialiser WebSocket
-const wsManager = new WebSocketManager(httpServer);
-void wsManager;
+let wsManager: WebSocketManager | null = null;
+
+function ensureWebSocketManager(): WebSocketManager {
+  if (!wsManager) {
+    wsManager = new WebSocketManager(httpServer);
+  }
+
+  return wsManager;
+}
 
 let serverStarted = false;
 
@@ -203,6 +209,8 @@ async function startServer() {
   }
 
   try {
+    ensureWebSocketManager();
+
     // Tentative connexion MongoDB (non-bloquante pour Jalon 1)
     try {
       await connectDatabase();
@@ -251,6 +259,11 @@ async function startServer() {
 async function stopServer() {
   if (!serverStarted) {
     return;
+  }
+
+  if (wsManager) {
+    await wsManager.close();
+    wsManager = null;
   }
 
   await new Promise<void>((resolve, reject) => {

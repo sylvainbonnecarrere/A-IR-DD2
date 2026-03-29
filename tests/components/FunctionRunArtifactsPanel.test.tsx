@@ -6,13 +6,20 @@ import type { FunctionArtifactPreview, FunctionRunRecord } from '../../types/fun
 const runs: FunctionRunRecord[] = [
     {
         executionId: 'run-1',
-        status: 'completed',
+        status: 'failed',
         runtime: 'typescript',
         runner: 'docker_sandbox',
         launchContext: 'editor_test',
         createdAt: '2026-03-18T10:00:00.000Z',
         updatedAt: '2026-03-18T10:00:00.000Z',
         timing: { durationMs: 42 },
+        error: {
+            code: 'DEPENDENCY_MISSING',
+            subsystem: 'dependency',
+            failureKind: 'dependency_missing',
+            message: 'Dépendance manquante pour web_search_py',
+            retryable: false
+        },
         outputs: {
             artifacts: [{ path: 'output/result.json', kind: 'json' }]
         }
@@ -84,5 +91,11 @@ describe('FunctionRunArtifactsPanel', () => {
         expect(onPageChange).toHaveBeenCalledWith(2);
         expect(onCleanupRuns).toHaveBeenCalled();
         expect(screen.getByText(/"ok": true/)).toBeInTheDocument();
+        expect(screen.getByText('DEPENDENCY_MISSING')).toBeInTheDocument();
+        expect(screen.getByText('dependency')).toBeInTheDocument();
+        expect(screen.getByText(/failure dependency_missing/)).toBeInTheDocument();
+        expect(screen.getAllByText('Echec d execution')).toHaveLength(2);
+        expect(screen.getByText(/Diagnostic QA: Dependance runtime manquante/)).toBeInTheDocument();
+        expect(screen.getByText(/Action recommandee: Verifier l image runtime ou le provisionnement plateforme des dependances requises./)).toBeInTheDocument();
     });
 });

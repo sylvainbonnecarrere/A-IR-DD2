@@ -4,12 +4,14 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { IUser } from '../models/User.model';
 import { BuildPreparationError, BuildService } from '../services/build.service';
 import { RuntimeCompatibilityService } from '../services/runtimeCompatibility.service';
+import { ToolReadinessService } from '../services/toolReadiness.service';
 import { ToolReadAdapterService } from '../services/toolReadAdapter.service';
 
 const router = Router();
 const runtimeCompatibilityService = new RuntimeCompatibilityService();
 const toolReadAdapterService = new ToolReadAdapterService();
 const buildService = new BuildService();
+const toolReadinessService = new ToolReadinessService();
 
 const idParamSchema = z.string().regex(/^[a-f\d]{24}$/i, 'ID doit être un ObjectId MongoDB valide');
 const buildQuerySchema = z.object({
@@ -41,7 +43,12 @@ router.get('/', requireAuth, async (req, res) => {
             status: queryResult.data.status
         });
 
-        res.json({ items: tools, runtimeCompatibility });
+        const toolsWithReadiness = tools.map((tool) => ({
+            ...tool,
+            readinessStatus: toolReadinessService.evaluateToolReadiness(tool, runtimeCompatibility)
+        }));
+
+        res.json({ items: toolsWithReadiness, runtimeCompatibility });
     } catch (error) {
         console.error('[ToolsRoute] GET / error:', error);
         res.status(500).json({ error: 'Erreur lors de la récupération des tools' });
@@ -64,7 +71,13 @@ router.get('/:id', requireAuth, async (req, res) => {
             return res.status(404).json({ error: 'Tool introuvable' });
         }
 
-        res.json({ tool, runtimeCompatibility });
+        res.json({
+            tool: {
+                ...tool,
+                readinessStatus: toolReadinessService.evaluateToolReadiness(tool, runtimeCompatibility)
+            },
+            runtimeCompatibility
+        });
     } catch (error) {
         console.error('[ToolsRoute] GET /:id error:', error);
         res.status(500).json({ error: 'Erreur lors de la récupération du tool' });

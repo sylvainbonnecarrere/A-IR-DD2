@@ -44,6 +44,11 @@ export interface ToolCallRecord {
     runner?: string;
     exitCode?: number;
     failureKind?: string;
+    errorCode?: string;
+    errorSubsystem?: string;
+    retryable?: boolean;
+    deterministicFailure?: boolean;
+    duplicateSuppressed?: boolean;
     artifacts?: Array<{ path: string; kind: 'file' | 'json' | 'log' }>;
     timestamp: Date;
 }
@@ -68,10 +73,164 @@ export interface AgentLoopEvent {
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 const MAX_ITERATIONS = 10;
+const TOOL_CALL_DEDUP_WINDOW_MS = 30_000;
 
 let _idCounter = 0;
 function generateId(): string {
     return `tc_${Date.now()}_${++_idCounter}`;
+}
+
+type ToolExecutionErrorDetails = {
+    code?: string;
+    subsystem?: string;
+    retryable?: boolean;
+    deterministic?: boolean;
+    failureKind?: string;
+    httpStatus?: number;
+    rawError?: unknown;
+};
+
+class ToolExecutionError extends Error {
+    readonly code?: string;
+    readonly subsystem?: string;
+    readonly retryable: boolean;
+    readonly deterministic: boolean;
+    readonly failureKind?: string;
+    readonly httpStatus?: number;
+    readonly rawError?: unknown;
+
+    constructor(message: string, details: ToolExecutionErrorDetails = {}) {
+        super(message);
+        this.name = 'ToolExecutionError';
+        this.code = details.code;
+        this.subsystem = details.subsystem;
+        this.retryable = details.retryable ?? false;
+        this.deterministic = details.deterministic ?? false;
+        this.failureKind = details.failureKind;
+        this.httpStatus = details.httpStatus;
+        this.rawError = details.rawError;
+    }
+}
+
+function stableSerialize(value: unknown): string {
+    if (Array.isArray(value)) {
+        return `[${value.map((item) => stableSerialize(item)).join(',')}]`;
+    }
+
+    if (value && typeof value === 'object') {
+        return `{${Object.entries(value as Record<string, unknown>)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, nestedValue]) => `${JSON.stringify(key)}:${stableSerialize(nestedValue)}`)
+            .join(',')}}`;
+    }
+
+    return JSON.stringify(value);
+}
+
+function createToolCallSignature(fn: ToolRegistryReadModel, args: Record<string, unknown>): string {
+    return `${fn.id}::${stableSerialize(args)}`;
+}
+
+function isDeterministicHttpFailure(status?: number, code?: string, subsystem?: string, retryable?: boolean): boolean {
+    if (retryable) {
+        return false;
+    }
+
+    if (status === 403 || status === 404 || status === 409) {
+        return true;
+    }
+
+    if (status === 503) {
+        return true;
+    }
+
+    return code === 'RUNTIME_NOT_READY'
+        || subsystem === 'build_preparation'
+        || subsystem === 'runtime_readiness'
+        || subsystem === 'validation';
+}
+
+function toErrorResultPayload(error: ToolExecutionError | Error): Record<string, unknown> {
+    if (error instanceof ToolExecutionError) {
+        return {
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+            ...(error.subsystem ? { subsystem: error.subsystem } : {}),
+            retryable: error.retryable,
+            deterministic: error.deterministic,
+            ...(error.failureKind ? { failureKind: error.failureKind } : {}),
+        };
+    }
+
+    return {
+        error: error.message,
+        retryable: false,
+        deterministic: false,
+    };
+}
+
+function toToolResultHistoryPayload(record: ToolCallRecord): string {
+    return JSON.stringify({
+        tool_results_context: {
+            tool_name: record.functionName,
+            tool_id: record.toolId ?? record.functionId,
+            status: record.status,
+            ...(record.executionId ? { execution_id: record.executionId } : {}),
+            ...(record.errorCode ? { error_code: record.errorCode } : {}),
+            ...(record.errorSubsystem ? { error_subsystem: record.errorSubsystem } : {}),
+            ...(typeof record.retryable === 'boolean' ? { retryable: record.retryable } : {}),
+            ...(typeof record.deterministicFailure === 'boolean' ? { deterministic_failure: record.deterministicFailure } : {}),
+            ...(record.duplicateSuppressed ? { duplicate_suppressed: true } : {}),
+        },
+        input: record.arguments,
+        output: record.result,
+    }, null, 2);
+}
+
+function isDeterministicFailureRecord(record?: ToolCallRecord | null): boolean {
+    return Boolean(record?.status === 'error' && record.deterministicFailure);
+}
+
+function isRecordStillFresh(record: ToolCallRecord, now: number): boolean {
+    return now - record.timestamp.getTime() <= TOOL_CALL_DEDUP_WINDOW_MS;
+}
+
+function buildDuplicateSuppressedRecord(input: {
+    fn: ToolRegistryReadModel;
+    toolCall: ParsedToolCall;
+    previous: ToolCallRecord;
+    reason: string;
+}): ToolCallRecord {
+    const previousResult = typeof input.previous.result === 'object' && input.previous.result !== null
+        ? input.previous.result as Record<string, unknown>
+        : { result: input.previous.result };
+
+    return {
+        id: generateId(),
+        toolId: input.fn.id,
+        functionId: input.fn.legacyFunctionId ?? input.fn.id,
+        functionName: input.toolCall.name,
+        arguments: input.toolCall.arguments,
+        result: {
+            ...previousResult,
+            duplicate_suppressed: true,
+            suppression_reason: input.reason,
+            previous_tool_call_id: input.previous.id,
+        },
+        status: input.previous.status,
+        durationMs: 0,
+        executionId: input.previous.executionId,
+        runner: input.previous.runner,
+        exitCode: input.previous.exitCode,
+        failureKind: input.previous.failureKind,
+        errorCode: input.previous.errorCode,
+        errorSubsystem: input.previous.errorSubsystem,
+        retryable: input.previous.retryable,
+        deterministicFailure: input.previous.deterministicFailure,
+        duplicateSuppressed: true,
+        artifacts: input.previous.artifacts,
+        timestamp: new Date(),
+    };
 }
 
 /**
@@ -121,13 +280,36 @@ async function executeFunction(
     });
 
     if (!response.ok) {
-        const errorText = await response.text().catch(() => `HTTP ${response.status}`);
-        throw new Error(errorText);
+        const errorPayload = await response.json().catch(async () => {
+            const text = await response.text().catch(() => `HTTP ${response.status}`);
+            return { error: text };
+        });
+
+        const errorMessage = typeof errorPayload?.error === 'string'
+            ? errorPayload.error
+            : `HTTP ${response.status}`;
+        const errorDetails = errorPayload?.errorDetails;
+
+        throw new ToolExecutionError(errorMessage, {
+            code: errorDetails?.code,
+            subsystem: errorDetails?.subsystem,
+            retryable: errorDetails?.retryable,
+            deterministic: isDeterministicHttpFailure(response.status, errorDetails?.code, errorDetails?.subsystem, errorDetails?.retryable),
+            httpStatus: response.status,
+            rawError: errorPayload,
+        });
     }
 
     const data = await response.json();
     if (!data.success) {
-        throw new Error(data.stderr || 'Sandbox execution failed');
+        throw new ToolExecutionError(data.errorDetails?.message || data.stderr || 'Sandbox execution failed', {
+            code: data.errorDetails?.code,
+            subsystem: data.errorDetails?.subsystem,
+            retryable: data.errorDetails?.retryable,
+            deterministic: isDeterministicHttpFailure(undefined, data.errorDetails?.code, data.errorDetails?.subsystem, data.errorDetails?.retryable),
+            failureKind: data.errorDetails?.failureKind || data.metadata?.failureKind,
+            rawError: data,
+        });
     }
     return {
         result: data.output ?? {},
@@ -175,6 +357,7 @@ export async function runAgentLoop(
             ? fn as ToolRegistryReadModel
             : mapUserFunctionToToolRegistry(fn as UserFunction)
     ));
+    const recentToolCallsBySignature = new Map<string, ToolCallRecord>();
 
     for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         onEvent?.({ type: 'llm_start', iteration });
@@ -218,6 +401,10 @@ export async function runAgentLoop(
         ];
 
         // Execute tool calls
+        const executedThisIteration = new Map<string, ToolCallRecord>();
+        let duplicateDeterministicSuppressions = 0;
+        let executedSandboxCalls = 0;
+
         for (const tc of response.toolCalls) {
             onEvent?.({ type: 'tool_call_start', iteration, toolCall: tc });
 
@@ -239,6 +426,27 @@ export async function runAgentLoop(
                     timestamp: new Date(),
                 };
             } else {
+                const signature = createToolCallSignature(fn, tc.arguments);
+                const now = Date.now();
+                const previousIterationRecord = executedThisIteration.get(signature);
+                const previousRecentRecord = recentToolCallsBySignature.get(signature);
+
+                if (previousIterationRecord) {
+                    record = buildDuplicateSuppressedRecord({
+                        fn,
+                        toolCall: tc,
+                        previous: previousIterationRecord,
+                        reason: 'duplicate_same_iteration'
+                    });
+                } else if (previousRecentRecord && isRecordStillFresh(previousRecentRecord, now) && isDeterministicFailureRecord(previousRecentRecord)) {
+                    record = buildDuplicateSuppressedRecord({
+                        fn,
+                        toolCall: tc,
+                        previous: previousRecentRecord,
+                        reason: 'duplicate_after_deterministic_failure'
+                    });
+                    duplicateDeterministicSuppressions += 1;
+                } else {
                 try {
                     const { result, durationMs, executionId, runner, exitCode, failureKind, artifacts } = await executeFunction(fn, tc.arguments, authToken);
                     record = {
@@ -257,41 +465,63 @@ export async function runAgentLoop(
                         artifacts,
                         timestamp: new Date(),
                     };
+                    executedSandboxCalls += 1;
                 } catch (err) {
+                    const toolError = err instanceof ToolExecutionError
+                        ? err
+                        : new ToolExecutionError(err instanceof Error ? err.message : String(err));
+
                     record = {
                         id: generateId(),
                         toolId: fn.id,
                         functionId: fn.legacyFunctionId ?? fn.id,
                         functionName: tc.name,
                         arguments: tc.arguments,
-                        result: { error: err instanceof Error ? err.message : String(err) },
+                        result: toErrorResultPayload(toolError),
                         status: 'error',
                         durationMs: 0,
+                        failureKind: toolError.failureKind,
+                        errorCode: toolError.code,
+                        errorSubsystem: toolError.subsystem,
+                        retryable: toolError.retryable,
+                        deterministicFailure: toolError.deterministic,
                         timestamp: new Date(),
                     };
                 }
+                }
+
+                executedThisIteration.set(signature, record);
+                recentToolCallsBySignature.set(signature, record);
             }
 
             toolCallLog.push(record);
             onEvent?.({ type: 'tool_call_done', iteration, toolCall: tc, toolResult: record.result });
 
             // Append tool_result message to history so the LLM can see the output
-            const resultText = typeof record.result === 'string'
-                ? record.result
-                : JSON.stringify(record.result, null, 2);
-
             history = [
                 ...history,
                 {
                     id: record.id,
                     sender: 'tool_result',
-                    text: resultText,
+                    text: toToolResultHistoryPayload(record),
                     toolCallId: record.id,
                     toolName: record.functionName,
                     isError: record.status === 'error',
                     timestamp: record.timestamp,
                 } as ChatMessage,
             ];
+        }
+
+        if (executedSandboxCalls === 0 && duplicateDeterministicSuppressions > 0) {
+            const stopMessage = response.content.trim()
+                ? `${response.content}\n\n[Arrêt de sécurité] Appel d'outil identique bloqué après un échec déterministe déjà observé.`
+                : `[Arrêt de sécurité] Appel d'outil identique bloqué après un échec déterministe déjà observé.`;
+
+            return {
+                finalResponse: stopMessage,
+                toolCallLog,
+                iterations: iteration,
+            };
         }
     }
 

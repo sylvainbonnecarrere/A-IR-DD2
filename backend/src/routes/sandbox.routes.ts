@@ -19,7 +19,7 @@ import { validateRequest } from '../middleware/validation.middleware';
 import { BuildPreparationError } from '../services/build.service';
 import { RuntimeHealthService } from '../services/runtimeHealth.service';
 import { SandboxService } from '../services/sandbox.service';
-import { RuntimeNotReadyError } from '../services/runtime/errors';
+import { buildSandboxErrorDetails, RuntimeNotReadyError } from '../services/runtime/errors';
 import { IUser } from '../models/User.model';
 
 const router = Router();
@@ -78,22 +78,73 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
         console.error('[SandboxRoute] POST /run error:', error);
 
         if (error.message?.includes('introuvable') || error.message?.includes('not found')) {
-            return res.status(404).json({ error: error.message });
+            return res.status(404).json({
+                error: error.message,
+                errorDetails: buildSandboxErrorDetails({
+                    message: error.message,
+                    code: 'SANDBOX_TARGET_NOT_FOUND',
+                    subsystem: 'validation',
+                    retryable: false,
+                })
+            });
         }
         if (error.message?.includes('désactivée') || error.message?.includes('disabled')) {
-            return res.status(403).json({ error: error.message });
+            return res.status(403).json({
+                error: error.message,
+                errorDetails: buildSandboxErrorDetails({
+                    message: error.message,
+                    code: 'SANDBOX_TARGET_DISABLED',
+                    subsystem: 'validation',
+                    retryable: false,
+                })
+            });
         }
         if (error instanceof BuildPreparationError || error.message?.includes('prepared via the build workflow')) {
-            return res.status(409).json({ error: error.message });
+            return res.status(409).json({
+                error: error.message,
+                errorDetails: buildSandboxErrorDetails({
+                    message: error.message,
+                    code: error instanceof BuildPreparationError ? error.code : 'BUILD_PREPARATION_ERROR',
+                    subsystem: 'build_preparation',
+                    retryable: false,
+                })
+            });
         }
         if (error instanceof RuntimeNotReadyError) {
-            return res.status(503).json({ error: error.message });
+            return res.status(503).json({
+                error: error.message,
+                errorDetails: buildSandboxErrorDetails({
+                    message: error.message,
+                    code: 'RUNTIME_NOT_READY',
+                    subsystem: 'runtime_readiness',
+                    retryable: true,
+                })
+            });
         }
         if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
-            return res.status(408).json({ error: 'Timeout : la fonction a dépassé le délai d\'exécution autorisé' });
+            const message = 'Timeout : la fonction a dépassé le délai d\'exécution autorisé';
+            return res.status(408).json({
+                error: message,
+                errorDetails: buildSandboxErrorDetails({
+                    message,
+                    code: 'TIMEOUT',
+                    subsystem: 'sandbox_runtime',
+                    retryable: false,
+                    failureKind: 'timeout',
+                })
+            });
         }
 
-        res.status(500).json({ error: 'Erreur lors de l\'exécution dans le sandbox' });
+        const message = 'Erreur lors de l\'exécution dans le sandbox';
+        res.status(500).json({
+            error: message,
+            errorDetails: buildSandboxErrorDetails({
+                message,
+                code: 'SANDBOX_ROUTE_ERROR',
+                subsystem: 'sandbox_runtime',
+                retryable: false,
+            })
+        });
     }
 });
 

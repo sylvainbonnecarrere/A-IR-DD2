@@ -39,6 +39,50 @@ class FakeCommandRunner implements CommandRunner {
     }
 }
 
+function buildNativeImportProbeScript(modules: string[]): string {
+    return [
+        'import importlib, json, sys',
+        `modules = ${JSON.stringify(modules)}`,
+        'missing = []',
+        'for module in modules:',
+        '    try:',
+        '        importlib.import_module(module)',
+        '    except Exception as exc:',
+        '        missing.append({"module": module, "error": f"{type(exc).__name__}: {exc}"})',
+        'print(json.dumps({"missing": missing}))',
+        'sys.exit(0 if not missing else 2)'
+    ].join('\n');
+}
+
+function buildNativeImportProbeCommand(modules: string[]): string {
+    return [
+        'docker',
+        'run',
+        '--rm',
+        '--network',
+        'none',
+        '--entrypoint',
+        'python',
+        'airdd2-runtime-python:3.12-slim',
+        '-c',
+        buildNativeImportProbeScript(modules)
+    ].join(' ');
+}
+
+function nativeImportProbeResponses(overrides?: Record<string, CommandResponse>): Record<string, CommandResponse> {
+    return {
+        [buildNativeImportProbeCommand(['requests', 'bs4', 'lxml'])]: {
+            exitCode: 0,
+            stdout: '{"missing": []}\n'
+        },
+        [buildNativeImportProbeCommand(['duckduckgo_search'])]: {
+            exitCode: 0,
+            stdout: '{"missing": []}\n'
+        },
+        ...overrides
+    };
+}
+
 describe('RuntimeHealthService', () => {
     it('reports a healthy runtime when Node, Python, Docker rootless, and both images are available', async () => {
         const runner = new FakeCommandRunner({
@@ -47,7 +91,8 @@ describe('RuntimeHealthService', () => {
             'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"27.5.1"\n' },
             'docker info --format {{json .Rootless}}': { exitCode: 0, stdout: 'true\n' },
             'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' }
+            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            ...nativeImportProbeResponses()
         });
 
         const service = new RuntimeHealthService({
@@ -77,6 +122,10 @@ describe('RuntimeHealthService', () => {
         expect(report.capabilities.run.python).toBe(true);
         expect(report.capabilities.run.typescript).toBe(true);
         expect(report.runtime.runners.preferred).toBe('docker_sandbox');
+        expect(report.nativePython).toEqual(expect.objectContaining({
+            available: true,
+            status: 'healthy'
+        }));
     });
 
     it('falls back to python on Windows-style environments and reports missing runtime images', async () => {
@@ -119,7 +168,8 @@ describe('RuntimeHealthService', () => {
             'docker info --format {{json .Rootless}}': { exitCode: 1, stderr: 'template failure' },
             'docker info --format {{json .SecurityOptions}}': { exitCode: 0, stdout: '["name=seccomp","name=rootless"]\n' },
             'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' }
+            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            ...nativeImportProbeResponses()
         });
 
         const service = new RuntimeHealthService({
@@ -146,7 +196,8 @@ describe('RuntimeHealthService', () => {
             'docker info --format {{json .SecurityOptions}}': { exitCode: 0, stdout: '["name=seccomp","name=cgroupns"]\n' },
             'docker info --format {{json .Rootless}}': { exitCode: 1, stderr: 'template failure' },
             'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' }
+            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            ...nativeImportProbeResponses()
         });
 
         const service = new RuntimeHealthService({
@@ -174,7 +225,8 @@ describe('RuntimeHealthService', () => {
             'docker context show': { exitCode: 0, stdout: 'desktop-linux\n' },
             'docker context inspect desktop-linux --format {{.Endpoints.docker.Host}}': { exitCode: 0, stdout: 'npipe:////./pipe/dockerDesktopLinuxEngine\n' },
             'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' }
+            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            ...nativeImportProbeResponses()
         });
 
         const service = new RuntimeHealthService({
@@ -208,7 +260,8 @@ describe('RuntimeHealthService', () => {
             'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"29.1.3"\n' },
             'docker info --format {{json .Rootless}}': { exitCode: 0, stdout: 'true\n' },
             'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' }
+            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            ...nativeImportProbeResponses()
         });
 
         const service = new RuntimeHealthService({
@@ -231,5 +284,51 @@ describe('RuntimeHealthService', () => {
             detail: 'KVM disponible: le branchement Firecracker peut être préparé sur cet hôte Linux.'
         }));
         expect(report.summary).toContain('Firecracker préparable');
+    });
+
+    it('degrades runtime health when a product native critical Python import is missing from the runtime image', async () => {
+        const runner = new FakeCommandRunner({
+            'node --version': { exitCode: 0, stdout: 'v22.14.0\n' },
+            'python3 --version': { exitCode: 0, stdout: 'Python 3.12.6\n' },
+            'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"29.1.3"\n' },
+            'docker info --format {{json .Rootless}}': { exitCode: 0, stdout: 'true\n' },
+            'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
+            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            ...nativeImportProbeResponses({
+                [buildNativeImportProbeCommand(['duckduckgo_search'])]: {
+                    exitCode: 2,
+                    stdout: '{"missing":[{"module":"duckduckgo_search","error":"ModuleNotFoundError: No module named \'duckduckgo_search\'"}]}\n',
+                    stderr: 'ModuleNotFoundError: No module named \'duckduckgo_search\''
+                }
+            })
+        });
+
+        const service = new RuntimeHealthService({
+            runner,
+            runtimeConfig: {
+                nodeExecutable: 'node',
+                pythonExecutables: ['python3', 'python'],
+                dockerExecutable: 'docker'
+            },
+            kvmAvailable: async () => false
+        });
+
+        const report = await service.getHealthReport();
+
+        expect(report.status).toBe('degraded');
+        expect(report.nativePython).toEqual(expect.objectContaining({
+            available: false,
+            status: 'degraded'
+        }));
+        expect(report.nativePython?.summary).toContain('web_search_py');
+        expect(report.nativePython?.probes).toContainEqual(expect.objectContaining({
+            toolName: 'web_search_py',
+            status: 'degraded',
+            imports: [expect.objectContaining({
+                dependency: 'duckduckgo-search',
+                module: 'duckduckgo_search',
+                available: false
+            })]
+        }));
     });
 });

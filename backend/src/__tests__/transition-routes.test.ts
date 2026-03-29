@@ -158,11 +158,292 @@ describe('J8 transition routes', () => {
             id: tool.id,
             legacyFunctionId: tool.id,
             compatibilityAliases: { functionId: tool.id },
+            readinessStatus: expect.objectContaining({
+                requirement: 'none',
+                state: 'ready',
+                runnable: true
+            }),
             workspaceContext: expect.objectContaining({
                 workspaceId: workspaceId.toString(),
                 status: 'active'
             })
         }));
+    });
+
+    it('exposes a unified readiness status for web_search_py when platform provisioning is still missing', async () => {
+        const user = await User.create({
+            email: `transition-route-test-web-search-missing-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionwebsearchmissing${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_search_py',
+            displayName: 'Web Search',
+            description: 'Recherche web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v1',
+                contentHash: 'web-search-v1-missing',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v1',
+                contentHash: 'web-search-v1-missing',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['search', 'native'],
+            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const response = await request(app)
+            .get(`/api/tools/${tool.id}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body.tool).toEqual(expect.objectContaining({
+            id: tool.id,
+            name: 'web_search_py',
+            readinessStatus: expect.objectContaining({
+                requirement: 'platform_provision',
+                state: 'waiting_for_provisioning',
+                prepared: false,
+                runnable: false,
+                dependencyReadiness: 'missing',
+                actionLabel: 'Provisionnement plateforme requis'
+            })
+        }));
+    });
+
+    it('exposes web_search_py readiness from GET /api/tools when platform provisioning is still missing', async () => {
+        const user = await User.create({
+            email: `transition-route-test-web-search-list-missing-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionwebsearchlistmissing${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_search_py',
+            displayName: 'Web Search',
+            description: 'Recherche web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v-list-missing',
+                contentHash: 'web-search-list-missing',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v-list-missing',
+                contentHash: 'web-search-list-missing',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['search', 'native'],
+            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const response = await request(app)
+            .get('/api/tools?runtime=python')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body.items).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: tool.id,
+                name: 'web_search_py',
+                readinessStatus: expect.objectContaining({
+                    requirement: 'platform_provision',
+                    state: 'waiting_for_provisioning',
+                    prepared: false,
+                    runnable: false,
+                    dependencyReadiness: 'missing',
+                    actionLabel: 'Provisionnement plateforme requis'
+                })
+            })
+        ]));
+    });
+
+    it('exposes a unified readiness status for web_search_py when platform provisioning is complete', async () => {
+        const user = await User.create({
+            email: `transition-route-test-web-search-ready-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionwebsearchready${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_search_py',
+            displayName: 'Web Search',
+            description: 'Recherche web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v2',
+                contentHash: 'web-search-v2-ready',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v2',
+                contentHash: 'web-search-v2-ready',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['search', 'native'],
+            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const response = await request(app)
+            .get(`/api/tools/${tool.id}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body.tool).toEqual(expect.objectContaining({
+            id: tool.id,
+            name: 'web_search_py',
+            readinessStatus: expect.objectContaining({
+                requirement: 'platform_provision',
+                state: 'ready',
+                prepared: true,
+                runnable: true,
+                dependencyReadiness: 'satisfied',
+                actionLabel: 'Executable'
+            })
+        }));
+    });
+
+    it('exposes web_search_py readiness from GET /api/tools when platform provisioning is complete', async () => {
+        const user = await User.create({
+            email: `transition-route-test-web-search-list-ready-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionwebsearchlistready${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_search_py',
+            displayName: 'Web Search',
+            description: 'Recherche web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v-list-ready',
+                contentHash: 'web-search-list-ready',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v-list-ready',
+                contentHash: 'web-search-list-ready',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['search', 'native'],
+            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const response = await request(app)
+            .get('/api/tools?runtime=python')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body.items).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: tool.id,
+                name: 'web_search_py',
+                readinessStatus: expect.objectContaining({
+                    requirement: 'platform_provision',
+                    state: 'ready',
+                    prepared: true,
+                    runnable: true,
+                    dependencyReadiness: 'satisfied',
+                    actionLabel: 'Executable'
+                })
+            })
+        ]));
     });
 
     it('returns owner-scoped runs from GET /api/runs', async () => {

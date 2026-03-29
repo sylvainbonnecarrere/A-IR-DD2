@@ -23,6 +23,17 @@ export interface RuntimeCompatibilityContext {
     summary: string;
 }
 
+export interface ToolReadinessStatus {
+    requirement: 'none' | 'author_build' | 'platform_provision';
+    state: 'ready' | 'not_ready' | 'waiting_for_provisioning' | 'waiting_for_build';
+    prepared: boolean;
+    runnable: boolean;
+    dependencyReadiness: 'satisfied' | 'missing' | 'not_required';
+    runtimeReady: boolean;
+    summary: string;
+    actionLabel: string;
+}
+
 export interface UserFunction {
     _id: string;
     toolId?: string;
@@ -44,6 +55,7 @@ export interface UserFunction {
     version: number;
     versionTag?: string;
     tags: string[];
+    readinessStatus?: ToolReadinessStatus;
     runtimeCompatibility?: RuntimeCompatibilityContext;
     workspaceContext?: {
         workspaceId: string;
@@ -101,6 +113,7 @@ export interface ToolTransitionRecord {
     compatibilityAliases: {
         functionId: string;
     };
+    readinessStatus?: ToolReadinessStatus;
     workspaceContext?: UserFunction['workspaceContext'];
     createdAt: string | Date;
     updatedAt: string | Date;
@@ -220,9 +233,21 @@ export interface SandboxRunResult {
     executionId?: string;
     runner?: string;
     exitCode?: number;
+    errorDetails?: {
+        code: string;
+        subsystem: 'runner' | 'wrapper' | 'user_code' | 'dependency' | 'sandbox_runtime' | 'unknown' | 'build_preparation' | 'runtime_readiness' | 'validation';
+        message: string;
+        retryable: boolean;
+        failureKind?: string;
+        errorType?: string;
+        traceback?: string;
+    };
     metadata?: {
         exitCode?: number;
         failureKind?: string;
+        failureSubsystem?: string;
+        errorType?: string;
+        traceback?: string;
         containerWorkspaceDir?: string;
         timeoutMs?: number;
         maxMemoryMb?: number;
@@ -255,6 +280,8 @@ export interface FunctionRunRecord {
     };
     error?: {
         code?: string;
+        subsystem?: 'runner' | 'wrapper' | 'user_code' | 'dependency' | 'sandbox_runtime' | 'unknown' | 'build_preparation' | 'runtime_readiness' | 'validation';
+        failureKind?: string;
         message: string;
         retryable?: boolean;
     } | null;
@@ -369,11 +396,34 @@ export interface RuntimeRunnerHealth {
     detail?: string;
 }
 
+export interface RuntimeNativePythonImportCheck {
+    dependency: string;
+    module: string;
+    available: boolean;
+    detail?: string;
+}
+
+export interface RuntimeNativePythonDependencyProbe {
+    toolName: string;
+    status: RuntimeHealthStatus;
+    summary: string;
+    checkedAt: string;
+    imports: RuntimeNativePythonImportCheck[];
+}
+
+export interface RuntimeNativePythonHealth {
+    available: boolean;
+    status: RuntimeHealthStatus;
+    summary: string;
+    probes: RuntimeNativePythonDependencyProbe[];
+}
+
 export interface RuntimeHealthReport {
     status: RuntimeHealthStatus;
     checkedAt: string;
     summary: string;
     components: RuntimeHealthComponent[];
+    nativePython?: RuntimeNativePythonHealth;
     runtime: {
         node: RuntimeBinaryHealth;
         python: RuntimeBinaryHealth;

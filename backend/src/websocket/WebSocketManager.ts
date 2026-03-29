@@ -209,4 +209,9 @@ export class WebSocketManager {
   public getActiveWorkspaces(): string[] {
     return Array.from(this.connectedUsers.keys());
   }
+
+  public async close(): Promise<void> {
+    this.connectedUsers.clear();
+    await this.io.close();
+  }
 }

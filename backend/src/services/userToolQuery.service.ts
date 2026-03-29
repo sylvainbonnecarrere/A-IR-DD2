@@ -44,6 +44,16 @@ export interface ToolTransitionReadModel {
     compatibilityAliases: {
         functionId: string;
     };
+    readinessStatus?: {
+        requirement: 'none' | 'author_build' | 'platform_provision';
+        state: 'ready' | 'not_ready' | 'waiting_for_provisioning' | 'waiting_for_build';
+        prepared: boolean;
+        runnable: boolean;
+        dependencyReadiness: 'satisfied' | 'missing' | 'not_required';
+        runtimeReady: boolean;
+        summary: string;
+        actionLabel: string;
+    };
     workspaceContext?: ToolWorkspaceContext;
     createdAt: Date;
     updatedAt: Date;
