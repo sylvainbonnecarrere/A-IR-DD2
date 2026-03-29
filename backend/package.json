@@ -13,6 +13,8 @@
     "runtime:setup": "node scripts/runtime/setup-runtime.cjs",
     "runtime:check": "node scripts/runtime/check-runtime.cjs",
     "runtime:rebuild": "node scripts/runtime/rebuild-runtime.cjs",
+    "runtime:scan": "node scripts/runtime/scan-runtime.cjs --fail-on-severity=high",
+    "runtime:maintain": "node scripts/runtime/maintain-runtime.cjs --fail-on-severity=high",
     "migrate:up": "ts-node -r dotenv/config src/migrations/004_tools_v2_function_registry.ts up",
     "migrate:down": "ts-node -r dotenv/config src/migrations/004_tools_v2_function_registry.ts down",
     "seed:functions": "ts-node -r dotenv/config src/seeds/nativeFunctions.seed.ts",

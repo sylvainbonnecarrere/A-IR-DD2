@@ -170,6 +170,85 @@ describe('PhilFunctionsPage runtime compatibility banner', () => {
         });
     });
 
+    it('renders readiness status for native tools in the library and detail panel', () => {
+        mockUseFunctionStore.mockImplementation(() => createStoreState({
+            selectedFunctionId: 'fn-native',
+            getFilteredFunctions: jest.fn(() => ([{
+                _id: 'fn-native',
+                toolId: 'tool-native',
+                name: 'web_search_py',
+                description: 'Recherche web native',
+                language: 'python',
+                origin: 'native',
+                userId: null,
+                workflowId: null,
+                inputSchema: {},
+                outputSchema: {},
+                codePath: 'backend/python/native/web_search_py.py',
+                resolvedCodePath: 'backend/python/native/web_search_py.py',
+                codePathRoot: 'native_repo',
+                codeInline: null,
+                dependencies: ['duckduckgo-search'],
+                isEnabled: true,
+                isReadonly: true,
+                version: 1,
+                readinessStatus: {
+                    requirement: 'platform_provision',
+                    state: 'waiting_for_provisioning',
+                    prepared: false,
+                    runnable: false,
+                    dependencyReadiness: 'missing',
+                    runtimeReady: true,
+                    summary: 'Provisionnement plateforme requis avant execution de cette fonction native.',
+                    actionLabel: 'Provisionnement plateforme requis'
+                },
+                tags: ['search'],
+                createdAt: '2026-03-19T10:00:00.000Z',
+                updatedAt: '2026-03-19T10:00:00.000Z'
+            }])),
+            getSelectedFunction: jest.fn(() => ({
+                _id: 'fn-native',
+                toolId: 'tool-native',
+                name: 'web_search_py',
+                description: 'Recherche web native',
+                language: 'python',
+                origin: 'native',
+                userId: null,
+                workflowId: null,
+                inputSchema: {},
+                outputSchema: {},
+                codePath: 'backend/python/native/web_search_py.py',
+                resolvedCodePath: 'backend/python/native/web_search_py.py',
+                codePathRoot: 'native_repo',
+                codeInline: null,
+                dependencies: ['duckduckgo-search'],
+                isEnabled: true,
+                isReadonly: true,
+                version: 1,
+                readinessStatus: {
+                    requirement: 'platform_provision',
+                    state: 'waiting_for_provisioning',
+                    prepared: false,
+                    runnable: false,
+                    dependencyReadiness: 'missing',
+                    runtimeReady: true,
+                    summary: 'Provisionnement plateforme requis avant execution de cette fonction native.',
+                    actionLabel: 'Provisionnement plateforme requis'
+                },
+                tags: ['search'],
+                createdAt: '2026-03-19T10:00:00.000Z',
+                updatedAt: '2026-03-19T10:00:00.000Z'
+            }))
+        }));
+
+        render(<PhilFunctionsPage />);
+
+        expect(screen.getByText('provisionnement requis')).toBeInTheDocument();
+        expect(screen.getByText('Readiness')).toBeInTheDocument();
+        expect(screen.getByText('Provisionnement plateforme requis')).toBeInTheDocument();
+        expect(screen.getByText('waiting_for_provisioning')).toBeInTheDocument();
+    });
+
     it('disables custom function creation when no workflow is selected', () => {
         mockUseDesignStore.mockImplementation((selector?: (state: ReturnType<typeof createDesignStoreState>) => unknown) => {
             const state = createDesignStoreState({

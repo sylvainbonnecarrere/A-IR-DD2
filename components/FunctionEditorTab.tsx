@@ -16,6 +16,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Editor, { OnChange, OnMount } from '@monaco-editor/react';
 import { FunctionRunArtifactsPanel } from './FunctionRunArtifactsPanel';
 import { toolRepository } from '../services/toolRepository';
+import { formatQaDiagnosticMessage, getQaDiagnosticPresentation, getSandboxResultDiagnostic } from '../utils/toolDiagnostics';
 
 // C8: Définitions de types FunctionContext injectées dans Monaco TypeScript
 const FUNCTION_CONTEXT_TYPES = `
@@ -31,7 +32,7 @@ declare type FunctionResult = unknown;
 `;
 import { useFunctionStore } from '../stores/useFunctionStore';
 import { useNotifications } from '../contexts/NotificationContext';
-import type { BuildPreparationResult, RuntimeHealthReport, SandboxRunResult, FunctionRunSortField, FunctionRunSortOrder } from '../types/function.types';
+import type { BuildPreparationResult, RuntimeHealthReport, SandboxRunResult, FunctionRunSortField, FunctionRunSortOrder, UserFunction, ToolReadinessStatus } from '../types/function.types';
 
 const RUN_RETENTION_DAYS = 14;
 const RUN_RETAIN_LATEST = 20;
@@ -44,9 +45,15 @@ interface SandboxConsoleProps {
 }
 
 const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, error }) => {
+    const diagnostic = getSandboxResultDiagnostic(result);
     const failureKindLabel = result?.metadata?.failureKind
         ? result.metadata.failureKind.replace(/_/g, ' ')
         : null;
+    const errorSubsystemLabel = result?.errorDetails?.subsystem
+        ? result.errorDetails.subsystem.replace(/_/g, ' ')
+        : result?.metadata?.failureSubsystem
+            ? result.metadata.failureSubsystem.replace(/_/g, ' ')
+            : null;
 
     if (isRunning) {
         return (
@@ -81,11 +88,13 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
                 </div>
             )}
 
-            {(result?.resourceUsage?.wallTimeMs != null || result?.resourceUsage?.memoryLimitMb != null || failureKindLabel) && (
+            {(result?.resourceUsage?.wallTimeMs != null || result?.resourceUsage?.memoryLimitMb != null || failureKindLabel || errorSubsystemLabel || result?.errorDetails?.code) && (
                 <div className="px-3 py-2 border-b border-gray-700/40 text-[11px] text-gray-400 flex flex-wrap gap-3">
                     {result?.resourceUsage?.wallTimeMs != null && <span>wall {result.resourceUsage.wallTimeMs}ms</span>}
                     {result?.resourceUsage?.memoryLimitMb != null && <span>mem limit {result.resourceUsage.memoryLimitMb}MB</span>}
                     {failureKindLabel && <span>failure {failureKindLabel}</span>}
+                    {errorSubsystemLabel && <span>subsystem {errorSubsystemLabel}</span>}
+                    {result?.errorDetails?.code && <span>code {result.errorDetails.code}</span>}
                 </div>
             )}
 
@@ -113,7 +122,27 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
                 <div className="px-3 py-2">
                     <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Erreur</div>
                     <pre className="text-red-300 overflow-x-auto whitespace-pre-wrap break-words">
-                        {result?.stderr || error}
+                        {result?.errorDetails?.message || result?.stderr || error}
+                    </pre>
+                </div>
+            )}
+
+            {diagnostic && (
+                <div className="px-3 py-2 border-t border-gray-700/30">
+                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Diagnostic QA</div>
+                    <div className="space-y-1 text-[11px] text-gray-300">
+                        <div>{diagnostic.label}</div>
+                        <div className="text-gray-500">Sous-systeme: {diagnostic.subsystemLabel}</div>
+                        <div className="text-cyan-200">Action recommandee: {diagnostic.recommendedAction}</div>
+                    </div>
+                </div>
+            )}
+
+            {result?.errorDetails?.traceback && (
+                <div className="px-3 py-2 border-t border-gray-700/30">
+                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Traceback</div>
+                    <pre className="text-orange-200 overflow-x-auto whitespace-pre-wrap break-words">
+                        {result.errorDetails.traceback}
                     </pre>
                 </div>
             )}
@@ -184,6 +213,45 @@ interface RuntimeStatusBannerProps {
     language: 'python' | 'typescript';
 }
 
+function summarizeNativePythonHealth(runtimeHealth: RuntimeHealthReport | null): {
+    toneClass: string;
+    summary: string;
+    detail?: string;
+} | null {
+    const nativePythonHealth = runtimeHealth?.nativePython;
+    if (!nativePythonHealth) {
+        return null;
+    }
+
+    if (nativePythonHealth.status === 'healthy') {
+        return {
+            toneClass: 'text-emerald-300',
+            summary: 'Imports critiques natifs Python verifies',
+            detail: nativePythonHealth.summary
+        };
+    }
+
+    if (nativePythonHealth.status === 'degraded') {
+        const failingTools = nativePythonHealth.probes
+            .filter((probe) => probe.status !== 'healthy')
+            .map((probe) => probe.toolName);
+
+        return {
+            toneClass: 'text-amber-300',
+            summary: failingTools.length > 0
+                ? `Imports natifs critiques en echec: ${failingTools.join(', ')}`
+                : 'Verification des imports natifs Python incomplete',
+            detail: nativePythonHealth.summary
+        };
+    }
+
+    return {
+        toneClass: 'text-red-300',
+        summary: 'Health natif Python indisponible',
+        detail: nativePythonHealth.summary
+    };
+}
+
 const RuntimeStatusBanner: React.FC<RuntimeStatusBannerProps> = ({ runtimeHealth, isLoading, error, language }) => {
     if (isLoading && !runtimeHealth) {
         return (
@@ -209,6 +277,9 @@ const RuntimeStatusBanner: React.FC<RuntimeStatusBannerProps> = ({ runtimeHealth
     const canRun = runtimeHealth.capabilities.run[language];
     const isDevOnly = runtimeHealth.runtime.docker.securityLevel === 'dev-only';
     const dockerMode = runtimeHealth.runtime.docker.mode;
+    const nativePythonSummary = language === 'python'
+        ? summarizeNativePythonHealth(runtimeHealth)
+        : null;
     const modeDetail = dockerMode === 'docker-desktop'
         ? 'Docker Desktop · dev-only (dev/test)'
         : dockerMode === 'rootless'
@@ -219,9 +290,16 @@ const RuntimeStatusBanner: React.FC<RuntimeStatusBannerProps> = ({ runtimeHealth
     if (canRun) {
         return (
             <div className={`px-3 py-2 border-b border-gray-700/40 text-xs ${isDevOnly ? 'text-amber-300' : 'text-emerald-300'}`}>
-                Runtime {language === 'python' ? 'Python' : 'TypeScript'} prêt pour l'exécution via {modeDetail}.
+                <div>
+                    Runtime {language === 'python' ? 'Python' : 'TypeScript'} prêt pour l'exécution via {modeDetail}.
+                </div>
                 {runtimeHealth.runtime.docker.warning && (
-                    <span className="text-gray-400"> {runtimeHealth.runtime.docker.warning}</span>
+                    <div className="text-gray-400 mt-1">{runtimeHealth.runtime.docker.warning}</div>
+                )}
+                {nativePythonSummary && (
+                    <div className={`mt-1 ${nativePythonSummary.toneClass}`} title={nativePythonSummary.detail}>
+                        {nativePythonSummary.summary}
+                    </div>
                 )}
             </div>
         );
@@ -229,7 +307,12 @@ const RuntimeStatusBanner: React.FC<RuntimeStatusBannerProps> = ({ runtimeHealth
 
     return (
         <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-amber-300">
-            Exécution bloquée : {runtimeHealth.summary}
+            <div>Exécution bloquée : {runtimeHealth.summary}</div>
+            {nativePythonSummary && (
+                <div className={`mt-1 ${nativePythonSummary.toneClass}`} title={nativePythonSummary.detail}>
+                    {nativePythonSummary.summary}
+                </div>
+            )}
         </div>
     );
 };
@@ -239,9 +322,12 @@ interface TestArgsEditorProps {
     value: string;
     onChange: (v: string) => void;
     isValid: boolean;
+    errorMessage?: string | null;
+    example: string;
+    helperText: string;
 }
 
-const TestArgsEditor: React.FC<TestArgsEditorProps> = ({ value, onChange, isValid }) => (
+const TestArgsEditor: React.FC<TestArgsEditorProps> = ({ value, onChange, isValid, errorMessage, example, helperText }) => (
     <div>
         <label className="block text-xs font-medium text-gray-400 mb-1">
             Arguments de test <span className="text-gray-600">(JSON)</span>
@@ -251,15 +337,147 @@ const TestArgsEditor: React.FC<TestArgsEditorProps> = ({ value, onChange, isVali
             onChange={e => onChange(e.target.value)}
             rows={4}
             spellCheck={false}
+            aria-label="Arguments de test JSON"
             className={`w-full px-3 py-2 bg-gray-900/80 border rounded-lg text-xs font-mono text-gray-300 
                 focus:outline-none resize-none transition-colors ${
                 isValid ? 'border-gray-600/50 focus:border-cyan-500/40' : 'border-red-500/50'
             }`}
-            placeholder='{"param1": "valeur", "param2": 42}'
+            placeholder={example}
         />
-        {!isValid && (
-            <p className="text-red-400 text-xs mt-1">JSON invalide</p>
+        <div className="mt-2 rounded-lg border border-gray-700/40 bg-gray-900/60 p-2.5 text-[11px] text-gray-400 space-y-2">
+            <p>{helperText}</p>
+            <div>
+                <div className="uppercase tracking-wider text-gray-500 mb-1">Exemple valide</div>
+                <pre className="whitespace-pre-wrap break-words text-cyan-200">{example}</pre>
+            </div>
+            <p className="text-gray-500">
+                JSON strict uniquement: utilisez des doubles quotes pour les cles et les chaines, jamais des quotes simples ni la syntaxe objet JavaScript.
+            </p>
+        </div>
+        {!isValid && errorMessage && (
+            <p className="text-red-400 text-xs mt-2 whitespace-pre-wrap">{errorMessage}</p>
         )}
+    </div>
+);
+
+interface FunctionPreparationSummary {
+    categoryLabel: string;
+    scopeLabel: string;
+    preparationLabel: string;
+    toneClass: string;
+    helperText: string;
+}
+
+const mapReadinessToPreparationSummary = (fn: UserFunction, readinessStatus: ToolReadinessStatus): FunctionPreparationSummary => {
+    const categoryLabel = fn.origin === 'native' || fn.isReadonly ? 'Native readonly' : 'Custom editable';
+    const scopeLabel = fn.workflowId ? 'Rattachee a un workflow' : (fn.origin === 'native' ? 'Catalogue plateforme' : 'Hors workflow');
+
+    if (readinessStatus.requirement === 'platform_provision') {
+        return {
+            categoryLabel,
+            scopeLabel,
+            preparationLabel: readinessStatus.state === 'ready'
+                ? 'Provisionnement plateforme confirme'
+                : 'Provisionnement plateforme en attente',
+            toneClass: readinessStatus.state === 'ready'
+                ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-200'
+                : 'border-cyan-500/30 bg-cyan-950/20 text-cyan-200',
+            helperText: `${readinessStatus.summary} ${readinessStatus.actionLabel}.`
+        };
+    }
+
+    if (readinessStatus.requirement === 'author_build') {
+        return {
+            categoryLabel,
+            scopeLabel,
+            preparationLabel: readinessStatus.state === 'ready'
+                ? 'Build auteur confirme'
+                : 'Build auteur requis',
+            toneClass: readinessStatus.state === 'ready'
+                ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-200'
+                : 'border-amber-500/30 bg-amber-950/20 text-amber-200',
+            helperText: `${readinessStatus.summary} ${readinessStatus.actionLabel}.`
+        };
+    }
+
+    return {
+        categoryLabel,
+        scopeLabel,
+        preparationLabel: 'Aucune preparation supplementaire requise',
+        toneClass: readinessStatus.runnable
+            ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-200'
+            : 'border-gray-600/30 bg-gray-900/50 text-gray-300',
+        helperText: `${readinessStatus.summary} ${readinessStatus.actionLabel}.`
+    };
+};
+
+const getTestArgsExample = (language: 'python' | 'typescript') => {
+    if (language === 'python') {
+        return '{\n  "user_name": "Ada",\n  "score": 42\n}';
+    }
+
+    return '{\n  "user_name": "Ada",\n  "is_admin": false\n}';
+};
+
+const getTestArgsHelperText = (language: 'python' | 'typescript') => {
+    if (language === 'python') {
+        return 'Exemple QA Python: la fonction lit des donnees JSON strictes depuis args, par exemple args["user_name"] et args["score"].';
+    }
+
+    return 'Exemple QA TypeScript: la fonction lit des donnees JSON strictes depuis args.user_name et args.is_admin. Avec cet exemple, la reponse attendue est: Bonjour Ada. Ton nom est maintenant enregistre dans ma memoire.';
+};
+
+const buildJsonValidationMessage = (error: unknown) => {
+    const parseMessage = error instanceof Error ? error.message : 'Format JSON invalide.';
+    return `JSON invalide. ${parseMessage}\nExemple valide:\n{\n  "user_name": "Ada"\n}`;
+};
+
+const getPreparationSummary = (fn: UserFunction): FunctionPreparationSummary => {
+    if (fn.readinessStatus) {
+        return mapReadinessToPreparationSummary(fn, fn.readinessStatus);
+    }
+
+    if (fn.origin === 'native' || fn.isReadonly) {
+        return {
+            categoryLabel: 'Native readonly',
+            scopeLabel: fn.workflowId ? 'Exposee dans un workflow' : 'Catalogue plateforme',
+            preparationLabel: 'Preparation plateforme requise',
+            toneClass: 'border-cyan-500/30 bg-cyan-950/20 text-cyan-200',
+            helperText: 'Cette fonction ne suit pas le build auteur. Elle doit etre preparee et provisionnee par la plateforme avant execution fiable.'
+        };
+    }
+
+    if (fn.workflowId) {
+        return {
+            categoryLabel: 'Custom editable',
+            scopeLabel: 'Rattachee a un workflow',
+            preparationLabel: 'Build auteur disponible',
+            toneClass: 'border-amber-500/30 bg-amber-950/20 text-amber-200',
+            helperText: 'Le code peut etre sauvegarde puis prepare via le build auteur avant validation QA approfondie.'
+        };
+    }
+
+    return {
+        categoryLabel: 'Custom editable',
+        scopeLabel: 'Hors workflow',
+        preparationLabel: 'Build auteur indisponible',
+        toneClass: 'border-gray-600/30 bg-gray-900/50 text-gray-300',
+        helperText: 'Le build auteur est reserve aux fonctions custom rattachees a un workflow. Cette fonction peut etre editee et testee, mais pas preparee via ce bouton.'
+    };
+};
+
+interface PreparationStatusCardProps {
+    summary: FunctionPreparationSummary;
+}
+
+const PreparationStatusCard: React.FC<PreparationStatusCardProps> = ({ summary }) => (
+    <div className={`px-3 py-2 border-b border-gray-700/40 text-xs ${summary.toneClass}`}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="font-semibold">Categorie {summary.categoryLabel}</span>
+            <span>{summary.scopeLabel}</span>
+        </div>
+        <div className="mt-1 font-medium">{summary.preparationLabel}</div>
+        <div className="mt-1 text-[11px] opacity-90">{summary.helperText}</div>
     </div>
 );
 
@@ -302,10 +520,12 @@ export const FunctionEditorTab: React.FC = () => {
     const fn = getSelectedFunction();
     const resolvedToolId = fn?.toolId ?? fn?._id;
     const isWorkflowScopedFunction = Boolean(fn?.workflowId);
+    const preparationSummary = fn ? getPreparationSummary(fn) : null;
 
     const [code, setCode] = useState<string>('');
     const [testArgsStr, setTestArgsStr] = useState<string>('{}');
     const [testArgsValid, setTestArgsValid] = useState(true);
+    const [testArgsErrorMessage, setTestArgsErrorMessage] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [syntaxErrors, setSyntaxErrors] = useState<Array<{ line?: number; message: string }>>([]);
     const [isConsolePanelOpen, setIsConsolePanelOpen] = useState(true);
@@ -340,6 +560,7 @@ export const FunctionEditorTab: React.FC = () => {
         clearBuildResult();
         clearArtifactPreview();
         setSyntaxErrors([]);
+        setTestArgsErrorMessage(null);
         // Synchroniser les schémas
         setInputSchemaStr(fn?.inputSchema && Object.keys(fn.inputSchema).length > 0
             ? JSON.stringify(fn.inputSchema, null, 2)
@@ -431,7 +652,12 @@ export const FunctionEditorTab: React.FC = () => {
             addNotification({
                 type: 'error',
                 title: 'Runtime non prêt',
-                message: runtimeHealth?.summary || 'Le runtime d\'exécution n\'est pas prêt.'
+                message: formatQaDiagnosticMessage({
+                    code: 'RUNTIME_NOT_READY',
+                    subsystem: 'runtime_readiness',
+                    message: runtimeHealth?.summary || 'Le runtime d\'execution n\'est pas pret.',
+                    retryable: true
+                })
             });
             return;
         }
@@ -440,9 +666,21 @@ export const FunctionEditorTab: React.FC = () => {
         try {
             testArgs = JSON.parse(testArgsStr);
             setTestArgsValid(true);
-        } catch {
+            setTestArgsErrorMessage(null);
+        } catch (error) {
+            const message = buildJsonValidationMessage(error);
             setTestArgsValid(false);
-            addNotification({ type: 'error', title: 'JSON invalide', message: 'Corrigez les arguments de test.' });
+            setTestArgsErrorMessage(message);
+            addNotification({
+                type: 'error',
+                title: 'JSON invalide',
+                message: formatQaDiagnosticMessage({
+                    code: 'JSON_INVALID',
+                    subsystem: 'validation',
+                    message,
+                    retryable: false
+                })
+            });
             return;
         }
 
@@ -451,7 +689,39 @@ export const FunctionEditorTab: React.FC = () => {
             await updateFunction(fn._id, { codeInline: code });
         }
 
-        await runInSandbox(fn._id, testArgs);
+        const result = await runInSandbox(fn._id, testArgs);
+        if (!result) {
+            addNotification({
+                type: 'error',
+                title: 'Exécution échouée',
+                message: formatQaDiagnosticMessage(undefined, 'Le sandbox n\'a retourne aucun resultat. Consultez la console d\'execution.')
+            });
+            return;
+        }
+
+        const resultDiagnostic = result.success
+            ? null
+            : getQaDiagnosticPresentation(result.errorDetails ?? {
+                code: result.metadata?.failureKind,
+                subsystem: result.metadata?.failureSubsystem,
+                failureKind: result.metadata?.failureKind,
+                message: result.stderr,
+                retryable: false
+            });
+
+        addNotification({
+            type: result.success ? 'success' : 'error',
+            title: result.success ? 'Exécution terminée' : 'Exécution en erreur',
+            message: result.success
+                ? `Résultat disponible pour "${fn.name}" dans la console d'exécution.`
+                : formatQaDiagnosticMessage(result.errorDetails ?? {
+                    code: result.metadata?.failureKind,
+                    subsystem: result.metadata?.failureSubsystem,
+                    failureKind: result.metadata?.failureKind,
+                    message: result.stderr || 'Le sandbox a renvoye une erreur.',
+                    retryable: false
+                }, resultDiagnostic?.label)
+        });
     };
 
     const handleBuild = async () => {
@@ -462,7 +732,12 @@ export const FunctionEditorTab: React.FC = () => {
             addNotification({
                 type: 'info',
                 title: 'Build indisponible',
-                message: 'Le build est disponible uniquement pour les fonctions custom rattachées à un workflow à ce stade.'
+                message: formatQaDiagnosticMessage({
+                    code: 'BUILD_PREPARATION_ERROR',
+                    subsystem: 'build_preparation',
+                    message: 'Le build est disponible uniquement pour les fonctions custom rattachees a un workflow a ce stade.',
+                    retryable: false
+                })
             });
             return;
         }
@@ -470,7 +745,16 @@ export const FunctionEditorTab: React.FC = () => {
         if (code !== fn.codeInline) {
             const updated = await updateFunction(fn._id, { codeInline: code });
             if (!updated) {
-                addNotification({ type: 'error', title: 'Build annulé', message: 'La sauvegarde du code a échoué avant la préparation du build.' });
+                addNotification({
+                    type: 'error',
+                    title: 'Build annulé',
+                    message: formatQaDiagnosticMessage({
+                        code: 'BUILD_PREPARATION_ERROR',
+                        subsystem: 'build_preparation',
+                        message: 'La sauvegarde du code a echoue avant la preparation du build.',
+                        retryable: false
+                    })
+                });
                 return;
             }
         }
@@ -487,8 +771,10 @@ export const FunctionEditorTab: React.FC = () => {
         try {
             JSON.parse(value);
             setTestArgsValid(true);
-        } catch {
+            setTestArgsErrorMessage(null);
+        } catch (error) {
             setTestArgsValid(false);
+            setTestArgsErrorMessage(buildJsonValidationMessage(error));
         }
     };
 
@@ -530,7 +816,12 @@ export const FunctionEditorTab: React.FC = () => {
             addNotification({
                 type: 'error',
                 title: 'Téléchargement impossible',
-                message: error.response?.data?.error || `Impossible de télécharger ${artifactPath}.`
+                message: formatQaDiagnosticMessage({
+                    code: 'SANDBOX_RUNTIME_ERROR',
+                    subsystem: 'sandbox_runtime',
+                    message: error.response?.data?.error || `Impossible de telecharger ${artifactPath}.`,
+                    retryable: false
+                })
             });
         }
     }, [resolvedToolId, addNotification]);
@@ -609,7 +900,12 @@ export const FunctionEditorTab: React.FC = () => {
             addNotification({
                 type: 'error',
                 title: 'Nettoyage impossible',
-                message: 'Le nettoyage des runs a échoué.'
+                message: formatQaDiagnosticMessage({
+                    code: 'SANDBOX_RUNTIME_ERROR',
+                    subsystem: 'sandbox_runtime',
+                    message: 'Le nettoyage des runs a echoue.',
+                    retryable: false
+                })
             });
             return;
         }
@@ -617,7 +913,7 @@ export const FunctionEditorTab: React.FC = () => {
         addNotification({
             type: 'success',
             title: 'Nettoyage terminé',
-            message: `${result.deletedRuns} run(s) supprimé(s), ${result.deletedArtifacts.length} artefact(s) nettoyé(s).`
+            message: `${result.deletedRuns} run(s) supprime(s), ${result.deletedArtifacts.length} artefact(s) nettoye(s).\nAction recommandee: verifier qu'il reste au moins un run de reference pour QA.`
         });
 
         void loadFunctionRuns(resolvedToolId, {
@@ -643,10 +939,13 @@ export const FunctionEditorTab: React.FC = () => {
     }
 
     const monacoLanguage = fn.language === 'python' ? 'python' : 'typescript';
-    const runDisabled = isSandboxRunning || isRuntimeHealthLoading || !runtimeHealth?.capabilities.run[fn.language];
-    const runDisabledReason = runtimeHealthError
-        || runtimeHealth?.summary
-        || 'Le runtime d\'exécution n\'est pas encore prêt.';
+    const readinessBlocked = fn.readinessStatus?.runnable === false;
+    const runDisabled = isSandboxRunning || isRuntimeHealthLoading || !runtimeHealth?.capabilities.run[fn.language] || readinessBlocked;
+    const runDisabledReason = readinessBlocked
+        ? `${fn.readinessStatus?.summary || 'Cette fonction n\'est pas encore exécutable.'} ${fn.readinessStatus?.actionLabel || ''}`.trim()
+        : runtimeHealthError
+            || runtimeHealth?.summary
+            || 'Le runtime d\'exécution n\'est pas encore prêt.';
     const buildDisabled = isBuilding || !isWorkflowScopedFunction;
     const buildDisabledReason = !isWorkflowScopedFunction
         ? 'Le build est réservé aux fonctions custom rattachées à un workflow.'
@@ -776,13 +1075,17 @@ export const FunctionEditorTab: React.FC = () => {
                 </div>
 
                 {/* Panneau droit : Console + Args */}
-                <div className="w-72 flex flex-col border-l border-gray-700/50 flex-shrink-0">
+                <div data-testid="function-editor-sidebar" className="w-72 min-h-0 overflow-y-auto flex flex-col border-l border-gray-700/50 flex-shrink-0">
                     <RuntimeStatusBanner
                         runtimeHealth={runtimeHealth}
                         isLoading={isRuntimeHealthLoading}
                         error={runtimeHealthError}
                         language={fn.language}
                     />
+
+                    {preparationSummary && (
+                        <PreparationStatusCard summary={preparationSummary} />
+                    )}
 
                     <BuildStatusPanel
                         result={buildResult}
@@ -796,11 +1099,14 @@ export const FunctionEditorTab: React.FC = () => {
                             value={testArgsStr}
                             onChange={handleTestArgsChange}
                             isValid={testArgsValid}
+                            errorMessage={testArgsErrorMessage}
+                            example={getTestArgsExample(fn.language)}
+                            helperText={getTestArgsHelperText(fn.language)}
                         />
                     </div>
 
                     {/* Console */}
-                    <div className="flex-1 flex flex-col overflow-hidden">
+                    <div className="min-h-52 flex flex-col overflow-hidden border-t border-gray-700/40">
                         <button
                             onClick={() => setIsConsolePanelOpen(v => !v)}
                             className="flex items-center justify-between px-3 py-2 border-b border-gray-700/40 text-xs text-gray-400 hover:text-gray-300 hover:bg-gray-800/30 transition-colors"
@@ -825,7 +1131,7 @@ export const FunctionEditorTab: React.FC = () => {
                         )}
                     </div>
 
-                    <div className="h-72 border-t border-gray-700/40 overflow-hidden">
+                    <div className="h-72 flex-shrink-0 border-t border-gray-700/40 overflow-hidden">
                         <FunctionRunArtifactsPanel
                             runs={functionRuns}
                             pagination={functionRunsPagination}
@@ -849,7 +1155,7 @@ export const FunctionEditorTab: React.FC = () => {
                     </div>
 
                     {/* Schémas I/O — expandable */}
-                    <div className="border-t border-gray-700/40">
+                    <div className="flex-shrink-0 border-t border-gray-700/40">
                         <button
                             onClick={() => setShowSchemas(v => !v)}
                             className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-400 hover:text-gray-300 hover:bg-gray-800/30 transition-colors"

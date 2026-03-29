@@ -7,24 +7,40 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const backendRoot = path.resolve(__dirname, '../..');
 
-const runtimeImages = [
+const runtimeArtifacts = [
     {
         key: 'node',
+        category: 'runtime',
         label: 'Node.js runtime',
         image: process.env.RUNTIME_NODE_IMAGE || 'airdd2-runtime-node:bookworm-slim',
         dockerfile: path.resolve(backendRoot, 'docker/runtime/node/Dockerfile'),
         context: path.resolve(backendRoot, 'docker/runtime/node'),
-        probeCommand: ['--version']
+        probeCommand: ['node', '--version'],
+        purpose: 'Run-only sandbox image. Package installation is intentionally excluded from normal execution.'
     },
     {
         key: 'python',
+        category: 'runtime',
         label: 'Python runtime',
         image: process.env.RUNTIME_PYTHON_IMAGE || 'airdd2-runtime-python:3.12-slim',
         dockerfile: path.resolve(backendRoot, 'docker/runtime/python/Dockerfile'),
         context: path.resolve(backendRoot, 'docker/runtime/python'),
-        probeCommand: ['python', '--version']
+        probeCommand: ['python', '--version'],
+        purpose: 'Run-only sandbox image. Python dependencies must be provisioned before execution.'
+    },
+    {
+        key: 'python-provisioning',
+        category: 'provisioning',
+        label: 'Python provisioning image',
+        image: process.env.RUNTIME_PYTHON_PROVISIONING_IMAGE || 'airdd2-python-provisioning:3.12-slim',
+        dockerfile: path.resolve(backendRoot, 'docker/runtime/python-provisioning/Dockerfile'),
+        context: path.resolve(backendRoot, 'docker/runtime/python-provisioning'),
+        probeCommand: ['sh', '-lc', 'python3 --version && pip3 --version'],
+        purpose: 'Controlled preparation image. Keeps pip for author-build/platform-provision workflows outside the runtime sandbox.'
     }
 ];
+
+const runtimeImages = runtimeArtifacts.filter((artifact) => artifact.category === 'runtime');
 
 function parseArgs(argv) {
     return new Set(argv.slice(2));
@@ -343,8 +359,120 @@ async function verifyRuntimeImage(spec) {
     };
 }
 
+async function resolveScanner() {
+    const dockerScout = await runCommand('docker', ['scout', 'version'], { timeoutMs: 15000 });
+    if (dockerScout.exitCode === 0 && !dockerScout.timedOut) {
+        return {
+            key: 'docker-scout',
+            label: 'Docker Scout'
+        };
+    }
+
+    const trivy = await runCommand('trivy', ['--version'], { timeoutMs: 15000 });
+    if (trivy.exitCode === 0 && !trivy.timedOut) {
+        return {
+            key: 'trivy',
+            label: 'Trivy'
+        };
+    }
+
+    return null;
+}
+
+async function scanRuntimeImage(spec, options = {}) {
+    const severityList = options.severities || ['critical', 'high'];
+    const scanner = options.scanner || await resolveScanner();
+
+    if (!scanner) {
+        return {
+            image: spec.image,
+            scanned: false,
+            status: 'degraded',
+            summary: 'Aucun scanner local disponible (Docker Scout ou Trivy requis).',
+            detail: 'Installez Docker Scout ou Trivy pour verrouiller le scan local des images runtime.',
+            scanner: null
+        };
+    }
+
+    if (options.dryRun) {
+        const command = scanner.key === 'docker-scout'
+            ? ['docker', 'scout', 'cves', '--only-severity', severityList.join(','), '--exit-code', `local://${spec.image}`].join(' ')
+            : ['trivy', 'image', '--severity', severityList.map((severity) => severity.toUpperCase()).join(','), '--exit-code', '2', spec.image].join(' ');
+        return {
+            image: spec.image,
+            scanned: false,
+            status: 'degraded',
+            summary: `Scan planifié via ${scanner.label}`,
+            detail: command,
+            scanner
+        };
+    }
+
+    const result = scanner.key === 'docker-scout'
+        ? await runCommand('docker', ['scout', 'cves', '--only-severity', severityList.join(','), '--exit-code', `local://${spec.image}`], { timeoutMs: 10 * 60 * 1000 })
+        : await runCommand('trivy', ['image', '--severity', severityList.map((severity) => severity.toUpperCase()).join(','), '--exit-code', '2', spec.image], { timeoutMs: 10 * 60 * 1000 });
+
+    const scanOutput = (result.stdout || result.stderr).trim();
+    const dockerScoutNeedsLogin = scanner.key === 'docker-scout'
+        && /log in with your docker id|docker login/i.test(scanOutput);
+
+    if (dockerScoutNeedsLogin) {
+        const trivy = await runCommand('trivy', ['--version'], { timeoutMs: 15000 });
+        if (trivy.exitCode === 0 && !trivy.timedOut) {
+            return scanRuntimeImage(spec, {
+                ...options,
+                scanner: {
+                    key: 'trivy',
+                    label: 'Trivy'
+                }
+            });
+        }
+
+        return {
+            image: spec.image,
+            scanned: false,
+            status: 'degraded',
+            summary: 'Docker Scout détecté mais non authentifié; aucun scanner de fallback disponible.',
+            detail: 'Exécutez docker login pour activer Docker Scout, ou installez Trivy pour le scan local sans compte Docker.',
+            scanner
+        };
+    }
+
+    if (result.exitCode === 0 && !result.timedOut) {
+        return {
+            image: spec.image,
+            scanned: true,
+            status: 'healthy',
+            summary: `Aucune CVE ${severityList.join('/')} détectée via ${scanner.label}.`,
+            detail: scanOutput,
+            scanner
+        };
+    }
+
+    if (result.exitCode === 2 && !result.timedOut) {
+        return {
+            image: spec.image,
+            scanned: true,
+            status: 'unhealthy',
+            summary: `CVE ${severityList.join('/')} détectées via ${scanner.label}.`,
+            detail: scanOutput,
+            scanner
+        };
+    }
+
+    return {
+        image: spec.image,
+        scanned: false,
+        status: 'unhealthy',
+        summary: `Échec du scan ${scanner.label}.`,
+        detail: describeFailure(result),
+        scanner
+    };
+}
+
 module.exports = {
     backendRoot,
+    runtimeArtifacts,
     runtimeImages,
     parseArgs,
     printOutput,
@@ -353,5 +481,7 @@ module.exports = {
     inspectDockerState,
     imageExists,
     buildRuntimeImage,
-    verifyRuntimeImage
+    verifyRuntimeImage,
+    resolveScanner,
+    scanRuntimeImage
 };

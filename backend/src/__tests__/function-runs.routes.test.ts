@@ -194,6 +194,8 @@ describe('Function run routes', () => {
             error: {
                 message: 'boom',
                 code: 'sandbox_runtime_error',
+                subsystem: 'sandbox_runtime',
+                failureKind: 'sandbox_runtime_error',
                 retryable: false
             },
             policySnapshot: {

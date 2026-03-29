@@ -1,6 +1,7 @@
 import { Dirent, promises as fs } from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
+import ts from 'typescript';
 import type { IUserFunction } from '../../models/UserFunction.model';
 import type { UserToolRunLaunchContext } from '../../models/UserToolRun.model';
 import type { IUserToolRunArtifact } from '../../models/UserToolRun.model';
@@ -19,7 +20,7 @@ import type {
     SandboxExecutionRequest,
     SandboxExecutionResourceUsage
 } from './execution.types';
-import { RuntimeNotReadyError } from './errors';
+import { buildSandboxErrorDetails, inferSandboxFailureSubsystem, RuntimeNotReadyError } from './errors';
 
 export interface ExecutionOrchestratorRequest {
     fn: IUserFunction;
@@ -105,21 +106,19 @@ export class ExecutionOrchestrator {
                     });
                 } else if (executionResult.timedOut) {
                     await this.userToolRunService.timeoutRun(executionId, {
-                        error: {
-                            code: this.toPersistedErrorCode(executionResult.metadata?.failureKind),
-                            message: executionResult.stderr || 'Function execution timed out',
-                            retryable: false
-                        },
+                        error: this.buildPersistedRunError(
+                            executionResult.stderr || 'Function execution timed out',
+                            executionResult.metadata?.failureKind ?? 'timeout'
+                        ),
                         outputs,
                         resourceUsage: this.buildResourceUsage(executionResult)
                     });
                 } else {
                     await this.userToolRunService.failRun(executionId, {
-                        error: {
-                            code: this.toPersistedErrorCode(executionResult.metadata?.failureKind),
-                            message: executionResult.stderr || 'Function execution failed',
-                            retryable: false
-                        },
+                        error: this.buildPersistedRunError(
+                            executionResult.stderr || 'Function execution failed',
+                            executionResult.metadata?.failureKind
+                        ),
                         outputs,
                         resourceUsage: this.buildResourceUsage(executionResult)
                     });
@@ -138,11 +137,12 @@ export class ExecutionOrchestrator {
                 const message = error instanceof Error ? error.message : String(error);
                 const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
                 await this.userToolRunService.failRun(executionId, {
-                    error: {
+                    error: buildSandboxErrorDetails({
                         code: 'ORCHESTRATOR_ERROR',
                         message,
+                        subsystem: 'unknown',
                         retryable: false
-                    },
+                    }),
                     ...(outputArtifacts.length > 0
                         ? {
                             outputs: {
@@ -174,7 +174,8 @@ export class ExecutionOrchestrator {
                 language: input.fn.language,
                 origin: input.fn.origin,
                 codeInline: input.fn.codeInline,
-                codePath: input.fn.codePath
+                codePath: input.fn.codePath,
+                workflowId: input.fn.workflowId
             },
             runtime: input.executionMetadataRuntime,
             launchContext: input.launchContext,
@@ -212,7 +213,9 @@ export class ExecutionOrchestrator {
         }
 
         if (typeof fn.codeInline === 'string') {
-            return fn.codeInline;
+            return fn.language === 'typescript'
+                ? this.transpileTypescriptSource(fn.codeInline, `${fn.name || 'tool'}.ts`)
+                : fn.codeInline;
         }
 
         const resolvedPath = this.resolveSourcePath(fn, workspace);
@@ -220,7 +223,43 @@ export class ExecutionOrchestrator {
             throw new Error(`No source available for function '${fn.name}'.`);
         }
 
-        return fs.readFile(resolvedPath, 'utf-8');
+        const sourceCode = await fs.readFile(resolvedPath, 'utf-8');
+        return fn.language === 'typescript'
+            ? this.transpileTypescriptSource(sourceCode, resolvedPath)
+            : sourceCode;
+    }
+
+    private transpileTypescriptSource(sourceCode: string, sourceName: string): string {
+        const transpiled = ts.transpileModule(sourceCode, {
+            fileName: sourceName,
+            reportDiagnostics: true,
+            compilerOptions: {
+                target: ts.ScriptTarget.ES2020,
+                module: ts.ModuleKind.CommonJS,
+                esModuleInterop: true,
+                strict: false,
+                skipLibCheck: true,
+            }
+        });
+
+        const diagnostics = transpiled.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error) ?? [];
+        if (diagnostics.length > 0) {
+            const formattedMessage = diagnostics
+                .map((diagnostic) => {
+                    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+                    if (diagnostic.file && typeof diagnostic.start === 'number') {
+                        const position = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+                        return `${position.line + 1}:${position.character + 1} ${message}`;
+                    }
+
+                    return message;
+                })
+                .join('\n');
+
+            throw new SyntaxError(`TypeScript transpilation failed: ${formattedMessage}`);
+        }
+
+        return transpiled.outputText;
     }
 
     private resolveSourcePath(fn: Pick<IUserFunction, 'codePath' | 'origin'>, workspace: WorkspaceProvisioningResult | null): string | null {
@@ -404,5 +443,15 @@ export class ExecutionOrchestrator {
 
     private toPersistedErrorCode(failureKind?: SandboxExecutionFailureKind): string | undefined {
         return failureKind ? failureKind.toUpperCase() : undefined;
+    }
+
+    private buildPersistedRunError(message: string, failureKind?: SandboxExecutionFailureKind) {
+        return buildSandboxErrorDetails({
+            message,
+            code: this.toPersistedErrorCode(failureKind),
+            subsystem: inferSandboxFailureSubsystem(failureKind),
+            retryable: false,
+            failureKind,
+        });
     }
 }

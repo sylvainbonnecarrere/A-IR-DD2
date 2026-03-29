@@ -107,6 +107,7 @@ const mapToolToUserFunction = (tool: ToolTransitionRecord): UserFunction => {
         version: parseVersionNumber(tool.currentVersion.versionTag),
         versionTag: tool.currentVersion.versionTag,
         tags: tool.tags,
+        readinessStatus: tool.readinessStatus,
         workspaceContext: workspaceContext ? {
             workspaceId: workspaceContext.workspaceId,
             logicalRoot: workspaceContext.logicalRoot,

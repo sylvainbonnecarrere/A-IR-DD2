@@ -17,9 +17,20 @@ export type SandboxExecutionFailureKind =
     | 'runner_image_missing'
     | 'runner_mount_failed'
     | 'runner_permission_denied'
+    | 'wrapper_syntax_error'
+    | 'user_code_syntax_error'
+    | 'dependency_missing'
     | 'sandbox_runtime_error'
     | 'sandbox_invalid_output'
     | 'sandbox_non_zero_exit'
+    | 'unknown';
+
+export type SandboxExecutionFailureSubsystem =
+    | 'runner'
+    | 'wrapper'
+    | 'user_code'
+    | 'dependency'
+    | 'sandbox_runtime'
     | 'unknown';
 
 export interface SandboxExecutionMetadata {
@@ -28,6 +39,9 @@ export interface SandboxExecutionMetadata {
     timeoutMs?: number;
     maxMemoryMb?: number;
     failureKind?: SandboxExecutionFailureKind;
+    failureSubsystem?: SandboxExecutionFailureSubsystem;
+    errorType?: string;
+    traceback?: string;
     artifacts?: IUserToolRunArtifact[];
 }
 
@@ -36,7 +50,7 @@ export interface SandboxExecutionResourceUsage extends IUserToolRunResourceUsage
 export interface SandboxExecutionRequest {
     executionId: string;
     userId: string;
-    function: Pick<IUserFunction, '_id' | 'name' | 'language' | 'origin' | 'codeInline' | 'codePath'>;
+    function: Pick<IUserFunction, '_id' | 'name' | 'language' | 'origin' | 'codeInline' | 'codePath' | 'workflowId'>;
     runtime: UserToolRunRuntime;
     launchContext: UserToolRunLaunchContext;
     args: Record<string, unknown>;

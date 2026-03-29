@@ -225,4 +225,203 @@ describe('BuildService', () => {
             .resolves
             .toBeUndefined();
     });
+
+    it('rejects author build for native readonly tools with a platform provisioning message', async () => {
+        const { user, workflow } = await createOwnedWorkflowFixture();
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: workflow._id,
+            name: 'native_python_tool',
+            description: 'Native platform managed tool',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v1',
+                contentHash: 'native-hash',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            },
+            versions: [{
+                versionTag: 'v1',
+                contentHash: 'native-hash',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            }],
+            inputSchema: {},
+            outputSchema: {},
+            tags: [],
+            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        await expect(buildService.prepareToolVersion(tool._id.toString(), user.id, 'v1'))
+            .rejects
+            .toThrow('Native readonly tools cannot be prepared by the author build workflow. They require platform provisioning instead.');
+    });
+
+    it('requires platform provisioning for dependency-bearing native tool versions until they are marked built', async () => {
+        const { user, workflow } = await createOwnedWorkflowFixture();
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: workflow._id,
+            name: 'native_versioned_tool',
+            description: 'Native versioned tool requiring platform provisioning',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v3',
+                contentHash: 'native-v3',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            },
+            versions: [{
+                versionTag: 'v3',
+                contentHash: 'native-v3',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            }],
+            inputSchema: {},
+            outputSchema: {},
+            tags: [],
+            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        await expect(buildService.ensureBuildReadyForTool(tool._id.toString(), user.id, 'v3'))
+            .rejects
+            .toThrow('This native tool version declares dependencies and requires platform provisioning before sandbox execution.');
+
+        await UserTool.updateOne(
+            { _id: tool._id, 'versions.versionTag': 'v3' },
+            {
+                $set: {
+                    'currentVersion.buildStatus': 'built',
+                    'versions.$.buildStatus': 'built'
+                }
+            }
+        );
+
+        await expect(buildService.ensureBuildReadyForTool(tool._id.toString(), user.id, 'v3'))
+            .resolves
+            .toBeUndefined();
+    });
+
+    it('requires platform provisioning for dependency-bearing native legacy functions until the mirrored tool is marked built', async () => {
+        const { user, workflow } = await createOwnedWorkflowFixture();
+
+        const fn = await UserFunction.create({
+            name: 'native_legacy_tool',
+            description: 'Legacy native function requiring platform provisioning',
+            language: 'python',
+            origin: 'native',
+            userId: null,
+            workflowId: workflow._id,
+            inputSchema: {},
+            outputSchema: {},
+            codeInline: 'def run(args):\n    return {"ok": True}',
+            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            isEnabled: true,
+            isReadonly: true,
+            version: 1,
+            tags: []
+        });
+
+        await UserTool.create({
+            _id: fn._id,
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: workflow._id,
+            name: fn.name,
+            description: fn.description,
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: '1',
+                contentHash: 'legacy-native-hash',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: fn.codeInline,
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            },
+            versions: [{
+                versionTag: '1',
+                contentHash: 'legacy-native-hash',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: fn.codeInline,
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            }],
+            inputSchema: {},
+            outputSchema: {},
+            tags: [],
+            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        await expect(buildService.ensureBuildReadyForRun(fn._id.toString(), user.id))
+            .rejects
+            .toThrow('This native function declares dependencies and requires platform provisioning before sandbox execution.');
+
+        await UserTool.updateOne(
+            { _id: fn._id, 'versions.versionTag': '1' },
+            {
+                $set: {
+                    'currentVersion.buildStatus': 'built',
+                    'versions.$.buildStatus': 'built'
+                }
+            }
+        );
+
+        await expect(buildService.ensureBuildReadyForRun(fn._id.toString(), user.id))
+            .resolves
+            .toBeUndefined();
+    });
 });

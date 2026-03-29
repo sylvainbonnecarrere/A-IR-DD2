@@ -1,5 +1,6 @@
 import React from 'react';
 import type { FunctionArtifactPreview, FunctionRunRecord, FunctionRunSortField, FunctionRunSortOrder } from '../types/function.types';
+import { getQaDiagnosticPresentation, getRunStatusFilterLabel, getRunStatusLabel } from '../utils/toolDiagnostics';
 
 interface FunctionRunArtifactsPanelProps {
     runs: FunctionRunRecord[];
@@ -124,13 +125,13 @@ export const FunctionRunArtifactsPanel: React.FC<FunctionRunArtifactsPanelProps>
                     onChange={(event) => onStatusFilterChange(event.target.value as 'all' | FunctionRunRecord['status'])}
                     className="rounded border border-gray-700/60 bg-gray-950/70 px-2 py-1 text-[11px] text-gray-300 outline-none"
                 >
-                    <option value="all">Tous les statuts</option>
-                    <option value="completed">completed</option>
-                    <option value="failed">failed</option>
-                    <option value="timed_out">timed_out</option>
-                    <option value="running">running</option>
-                    <option value="queued">queued</option>
-                    <option value="stopped">stopped</option>
+                    <option value="all">{getRunStatusFilterLabel('all')}</option>
+                    <option value="completed">{getRunStatusFilterLabel('completed')}</option>
+                    <option value="failed">{getRunStatusFilterLabel('failed')}</option>
+                    <option value="timed_out">{getRunStatusFilterLabel('timed_out')}</option>
+                    <option value="running">{getRunStatusFilterLabel('running')}</option>
+                    <option value="queued">{getRunStatusFilterLabel('queued')}</option>
+                    <option value="stopped">{getRunStatusFilterLabel('stopped')}</option>
                 </select>
                 <select
                     aria-label="Trier les runs par"
@@ -173,12 +174,15 @@ export const FunctionRunArtifactsPanel: React.FC<FunctionRunArtifactsPanelProps>
                     ) : (
                         <div className="divide-y divide-gray-800/80">
                             {runs.map((run) => (
+                                (() => {
+                                    const diagnostic = run.error ? getQaDiagnosticPresentation(run.error) : null;
+                                    return (
                                 <div key={run.executionId} className="px-3 py-2 space-y-2">
                                     <div className="flex items-start justify-between gap-3">
                                         <div className="min-w-0">
                                             <div className="flex items-center gap-2 text-xs">
                                                 <span className={`font-medium ${run.status === 'completed' ? 'text-green-400' : run.status === 'failed' || run.status === 'timed_out' ? 'text-red-300' : 'text-amber-300'}`}>
-                                                    {run.status}
+                                                    {getRunStatusLabel(run.status)}
                                                 </span>
                                                 <span className="text-gray-500">{run.runner}</span>
                                                 {run.timing.durationMs != null && <span className="text-gray-500">{run.timing.durationMs}ms</span>}
@@ -187,9 +191,28 @@ export const FunctionRunArtifactsPanel: React.FC<FunctionRunArtifactsPanelProps>
                                             <div className="mt-1 text-[11px] text-gray-500">{formatTimestamp(run.createdAt)}</div>
                                         </div>
                                         {run.error?.code && (
-                                            <span className="text-[11px] text-red-300 text-right">{run.error.code}</span>
+                                            <div className="text-right space-y-1">
+                                                <span className="block text-[11px] text-red-300">{run.error.code}</span>
+                                                {run.error.subsystem && (
+                                                    <span className="block text-[11px] text-gray-500">{run.error.subsystem}</span>
+                                                )}
+                                            </div>
                                         )}
                                     </div>
+
+                                    {run.error && (
+                                        <div className="text-[11px] text-gray-400 space-y-1">
+                                            {diagnostic && <div className="text-amber-200">Diagnostic QA: {diagnostic.label}</div>}
+                                            <div className="text-red-200 whitespace-pre-wrap break-words">{run.error.message}</div>
+                                            {diagnostic && <div className="text-cyan-200">Action recommandee: {diagnostic.recommendedAction}</div>}
+                                            {(run.error.failureKind || typeof run.error.retryable === 'boolean') && (
+                                                <div className="flex flex-wrap gap-3 text-gray-500">
+                                                    {run.error.failureKind && <span>failure {run.error.failureKind}</span>}
+                                                    {typeof run.error.retryable === 'boolean' && <span>{run.error.retryable ? 'retryable' : 'non retryable'}</span>}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {(run.outputs?.artifacts?.length ?? 0) > 0 ? (
                                         <div className="flex flex-wrap gap-1.5">
@@ -221,6 +244,8 @@ export const FunctionRunArtifactsPanel: React.FC<FunctionRunArtifactsPanelProps>
                                         <div className="text-[11px] text-gray-600 italic">Aucun artefact enregistré pour ce run.</div>
                                     )}
                                 </div>
+                                    );
+                                })()
                             ))}
                         </div>
                     )}

@@ -97,7 +97,7 @@ interface FunctionStore {
     getFilteredFunctions: () => UserFunction[];
 
     // Sandbox
-    runInSandbox: (functionId: string, testArgs: Record<string, unknown>) => Promise<void>;
+    runInSandbox: (functionId: string, testArgs: Record<string, unknown>) => Promise<SandboxRunResult | null>;
     checkSyntax: (language: 'python' | 'typescript', code: string) => Promise<SyntaxCheckResult | null>;
     clearSandboxResult: () => void;
     loadFunctionRuns: (
@@ -272,11 +272,13 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
         try {
             const { data } = await toolRepository.runInSandbox(functionId, testArgs);
             set({ sandboxResult: data, isSandboxRunning: false });
+            return data;
         } catch (err: any) {
             set({
                 isSandboxRunning: false,
                 sandboxError: err.response?.data?.error || 'Erreur d\'exécution sandbox'
             });
+            return null;
         }
     },
 

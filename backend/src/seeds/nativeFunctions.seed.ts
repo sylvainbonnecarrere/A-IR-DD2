@@ -26,6 +26,9 @@ interface NativeFunctionSeed {
     isReadonly: boolean;
     version: number;
     tags: string[];
+    healthCheck?: {
+        criticalPythonImports?: string[];
+    };
 }
 
 export const nativeFunctionsSeed: NativeFunctionSeed[] = [
@@ -412,6 +415,9 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         codePath: 'backend/python/native/web_fetch_py.py',
         codeInline: null,
         dependencies: ['beautifulsoup4', 'requests', 'lxml'],
+        healthCheck: {
+            criticalPythonImports: ['requests', 'bs4', 'lxml']
+        },
         isEnabled: true,
         isReadonly: true,
         version: 1,
@@ -460,6 +466,9 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         codePath: 'backend/python/native/web_search_py.py',
         codeInline: null,
         dependencies: ['duckduckgo-search'],
+        healthCheck: {
+            criticalPythonImports: ['duckduckgo_search']
+        },
         isEnabled: true,
         isReadonly: true,
         version: 1,

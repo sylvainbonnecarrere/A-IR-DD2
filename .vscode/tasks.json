@@ -1,0 +1,31 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "backend: runtime maintain",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "runtime:maintain"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "backend: runtime scan",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "runtime:scan"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

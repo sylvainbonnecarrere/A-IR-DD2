@@ -227,7 +227,15 @@ export class UserToolRunQueryService {
             createdAt: run.createdAt,
             updatedAt: run.updatedAt,
             timing: run.timing,
-            error: run.error ?? null,
+            error: run.error
+                ? {
+                    code: run.error.code,
+                    subsystem: run.error.subsystem,
+                    failureKind: run.error.failureKind,
+                    message: run.error.message,
+                    retryable: run.error.retryable
+                }
+                : null,
             outputs: run.outputs
                 ? {
                     stdout: run.outputs.stdout,

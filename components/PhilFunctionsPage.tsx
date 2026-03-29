@@ -16,7 +16,7 @@ import { useNotifications } from '../contexts/NotificationContext';
 import { useAuth } from '../hooks/useAuth';
 import { FunctionEditorTab } from './FunctionEditorTab';
 import { SandboxHealthLoader } from './SandboxHealthLoader';
-import type { UserFunction, FunctionOrigin, FunctionLanguage, RuntimeCompatibilityContext } from '../types/function.types';
+import type { UserFunction, FunctionOrigin, FunctionLanguage, RuntimeCompatibilityContext, ToolReadinessStatus } from '../types/function.types';
 
 // ─── Icônes inline ────────────────────────────────────────────────────────────
 const PyIcon = () => (
@@ -31,6 +31,31 @@ const NativeBadge = () => (
 const CustomBadge = () => (
     <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-900/40 text-purple-400 border border-purple-500/30">custom</span>
 );
+
+const getReadinessBadge = (readinessStatus?: ToolReadinessStatus) => {
+    if (!readinessStatus) {
+        return null;
+    }
+
+    if (readinessStatus.requirement === 'platform_provision') {
+        return readinessStatus.state === 'ready'
+            ? { label: 'native prete', className: 'bg-emerald-950/30 text-emerald-300 border-emerald-500/30' }
+            : { label: 'provisionnement requis', className: 'bg-cyan-950/30 text-cyan-300 border-cyan-500/30' };
+    }
+
+    if (readinessStatus.requirement === 'author_build') {
+        return readinessStatus.state === 'ready'
+            ? { label: 'build confirme', className: 'bg-emerald-950/30 text-emerald-300 border-emerald-500/30' }
+            : { label: 'build requis', className: 'bg-amber-950/30 text-amber-300 border-amber-500/30' };
+    }
+
+    return {
+        label: readinessStatus.runnable ? 'execution immediate' : 'runtime requis',
+        className: readinessStatus.runnable
+            ? 'bg-emerald-950/30 text-emerald-300 border-emerald-500/30'
+            : 'bg-gray-900/50 text-gray-300 border-gray-600/30'
+    };
+};
 
 const RuntimeCompatibilityBanner: React.FC<{ runtimeCompatibility: RuntimeCompatibilityContext | null }> = ({ runtimeCompatibility }) => {
     if (!runtimeCompatibility) {
@@ -146,6 +171,11 @@ const FunctionCard: React.FC<FunctionCardProps> = ({
                     <span className="font-mono text-sm font-semibold text-gray-100 truncate">
                         {fn.name}
                     </span>
+                    {getReadinessBadge(fn.readinessStatus) && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${getReadinessBadge(fn.readinessStatus)?.className}`}>
+                            {getReadinessBadge(fn.readinessStatus)?.label}
+                        </span>
+                    )}
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                     {fn.origin === 'native' ? <NativeBadge /> : <CustomBadge />}
@@ -336,7 +366,7 @@ const FunctionLibraryTab: React.FC = () => {
             workflowId: currentWorkflowId,
             codeInline: newFnLang === 'python'
                 ? `# Votre fonction ${nameValue}\n\n\ndef run(context, args):\n    \"\"\"\n    ${descValue}\n    \"\"\"\n    # TODO: Implémentez votre logique ici\n    return {"result": "ok"}\n`
-                : `// Votre fonction ${nameValue}\n// Accès aux arguments : args.param_name, args.limit, etc.\nexport function run(\n  context: { userId: string; agentId?: string; workflowId?: string; depth: number },\n  args: { [key: string]: unknown }  // Ex: { user_name: string; limit?: number }\n): unknown {\n  // TODO: Implémentez votre logique ici\n  return { result: "ok" };\n}\n`
+                : `// Votre fonction ${nameValue}\n// Accès aux arguments : args.user_name, args.is_admin, etc.\nexport function run(\n  context: { userId: string; agentId?: string; workflowId?: string; depth: number },\n  args: { user_name?: string; is_admin?: boolean }\n): unknown {\n  const userName = typeof args.user_name === "string" ? args.user_name : "inconnu";\n  return { result: \`Bonjour ${'${'}userName}. Ton nom est maintenant enregistré dans ma mémoire.\` };\n}\n`
         });
         if (created) {
             addNotification({ type: 'success', title: 'Fonction créée', message: `"${created.name}" est prête à éditer.` });
@@ -701,6 +731,22 @@ const FunctionDetailPanel: React.FC<{ onOpenEditor: () => void }> = ({ onOpenEdi
                                     {dep}
                                 </span>
                             ))}
+                        </div>
+                    </div>
+                )}
+                {fn.readinessStatus && (
+                    <div className="col-span-2 bg-gray-800/60 rounded-lg p-2">
+                        <div className="text-gray-500 mb-1">Readiness</div>
+                        <div className="space-y-1 text-gray-300 text-[11px]">
+                            <div className="flex items-center justify-between gap-3">
+                                <span className="text-gray-500">Etat</span>
+                                <span className="uppercase tracking-wide">{fn.readinessStatus.state}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3">
+                                <span className="text-gray-500">Action</span>
+                                <span>{fn.readinessStatus.actionLabel}</span>
+                            </div>
+                            <div className="text-gray-400">{fn.readinessStatus.summary}</div>
                         </div>
                     </div>
                 )}

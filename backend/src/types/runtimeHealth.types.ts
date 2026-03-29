@@ -9,7 +9,30 @@ export type RuntimeHealthComponentKey =
     | 'docker_cli'
     | 'docker_rootless'
     | 'node_runtime_image'
-    | 'python_runtime_image';
+    | 'python_runtime_image'
+    | 'python_native_imports';
+
+export interface RuntimeNativePythonImportCheck {
+    dependency: string;
+    module: string;
+    available: boolean;
+    detail?: string;
+}
+
+export interface RuntimeNativePythonDependencyProbe {
+    toolName: string;
+    status: RuntimeHealthStatus;
+    summary: string;
+    checkedAt: string;
+    imports: RuntimeNativePythonImportCheck[];
+}
+
+export interface RuntimeNativePythonHealth {
+    available: boolean;
+    status: RuntimeHealthStatus;
+    summary: string;
+    probes: RuntimeNativePythonDependencyProbe[];
+}
 
 export interface RuntimeHealthComponent {
     key: RuntimeHealthComponentKey;
@@ -70,6 +93,7 @@ export interface RuntimeHealthReport {
     checkedAt: string;
     summary: string;
     components: RuntimeHealthComponent[];
+    nativePython?: RuntimeNativePythonHealth;
     runtime: {
         node: RuntimeBinaryHealth;
         python: RuntimeBinaryHealth;

@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "jest",
+    "test:j7:editor:semi-e2e": "playwright test tests/fonctionnels/J7.Editor.RealBrowser.semi-e2e.spec.ts",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:settingsmodal:report": "node scripts/run-jest-report.mjs tests/unitaires/SettingsModal.TNR.test.ts --outputDir tests/temp_rapport_tests/unitaires/settingsmodal --reportBase settingsmodal-jest"
@@ -34,6 +35,7 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",

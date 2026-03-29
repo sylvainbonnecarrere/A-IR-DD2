@@ -42,6 +42,8 @@ export interface IUserToolRunResourceUsage {
 
 export interface IUserToolRunError {
     code?: string;
+    subsystem?: 'runner' | 'wrapper' | 'user_code' | 'dependency' | 'sandbox_runtime' | 'unknown' | 'build_preparation' | 'runtime_readiness' | 'validation';
+    failureKind?: string;
     message: string;
     retryable?: boolean;
 }
@@ -108,6 +110,12 @@ const UserToolRunResourceUsageSchema = new Schema<IUserToolRunResourceUsage>({
 
 const UserToolRunErrorSchema = new Schema<IUserToolRunError>({
     code: { type: String, trim: true, default: undefined },
+    subsystem: {
+        type: String,
+        enum: ['runner', 'wrapper', 'user_code', 'dependency', 'sandbox_runtime', 'unknown', 'build_preparation', 'runtime_readiness', 'validation'],
+        default: undefined
+    },
+    failureKind: { type: String, trim: true, default: undefined },
     message: { type: String, required: true },
     retryable: { type: Boolean, default: false }
 }, { _id: false });
