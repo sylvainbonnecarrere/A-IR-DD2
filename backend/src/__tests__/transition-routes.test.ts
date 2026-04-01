@@ -66,7 +66,12 @@ describe('J8 transition routes', () => {
     afterEach(async () => {
         runtimeHealthSpy.mockReset();
         await UserToolRun.deleteMany({});
-        await UserTool.deleteMany({ name: /transition-route-test-/i });
+        await UserTool.deleteMany({
+            $or: [
+                { name: /transition-route-test-/i },
+                { name: 'web_search_py' }
+            ]
+        });
         await Workspace.deleteMany({ logicalRoot: /transition-route-test-/i });
         await User.deleteMany({ email: /transition-route-test-/i });
     });
@@ -374,6 +379,83 @@ describe('J8 transition routes', () => {
                 actionLabel: 'Executable'
             })
         }));
+    });
+
+    it('allows explicit platform provisioning through POST /api/tools/:id/provision', async () => {
+        const user = await User.create({
+            email: `transition-route-test-web-search-provision-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionwebsearchprovision${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_search_py',
+            displayName: 'Web Search',
+            description: 'Recherche web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v-provision',
+                contentHash: 'web-search-provision',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v-provision',
+                contentHash: 'web-search-provision',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['search', 'native'],
+            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+        const provisionSpy = jest.spyOn(
+            require('../services/nativePythonProvisioning.service').NativePythonProvisioningService.prototype,
+            'provisionToolVersion'
+        ).mockResolvedValue({
+            toolId: tool.id,
+            toolName: 'web_search_py',
+            toolVersionTag: 'v-provision',
+            status: 'ready',
+            provisionedAt: '2026-03-31T12:00:00.000Z',
+            dependencies: ['duckduckgo-search==6.1.0'],
+            criticalModules: ['duckduckgo_search'],
+            sitePackagesPath: '/tmp/site-packages',
+            reportPath: '/tmp/provision-report.json'
+        });
+
+        const response = await request(app)
+            .post(`/api/tools/${tool.id}/provision?versionTag=v-provision`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body).toEqual(expect.objectContaining({
+            toolId: tool.id,
+            toolVersionTag: 'v-provision',
+            status: 'ready'
+        }));
+        expect(provisionSpy).toHaveBeenCalledWith(tool.id, user.id, 'v-provision');
+        provisionSpy.mockRestore();
     });
 
     it('exposes web_search_py readiness from GET /api/tools when platform provisioning is complete', async () => {

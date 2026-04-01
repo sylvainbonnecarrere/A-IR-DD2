@@ -203,4 +203,33 @@ describe('lmStudioService local runtime transport', () => {
             }),
         }));
     });
+
+    it('throws a terminal stream error when the backend emits an SSE error payload', async () => {
+        const encoder = new TextEncoder();
+        const ssePayload = 'data: {"error":"LMStudio request timeout exceeded after 600000ms","code":"timeout","details":{"timeoutMs":600000}}\n\n';
+
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            body: new ReadableStream({
+                start(controller) {
+                    controller.enqueue(encoder.encode(ssePayload));
+                    controller.close();
+                },
+            }),
+        } as Response)) as typeof fetch;
+
+        const iterator = generateContentStream(
+            'http://localhost:11434',
+            'llama3.1',
+            'system',
+            [],
+            undefined,
+            undefined,
+            undefined
+        );
+
+        await expect(iterator.next()).rejects.toThrow(
+            'LMStudio stream error [timeout] {"timeoutMs":600000}: LMStudio request timeout exceeded after 600000ms'
+        );
+    });
 });

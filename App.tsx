@@ -19,6 +19,7 @@ import { FullscreenChatModal } from './components/modals/FullscreenChatModal';
 import { AgentConfigurationModal } from './components/modals/AgentConfigurationModal';
 import { useRuntimeStore } from './stores/useRuntimeStore';
 import { useDesignStore } from './stores/useDesignStore';
+import { useFunctionStore } from './stores/useFunctionStore';
 import { useWorkflowStore } from './stores/useWorkflowStore';
 import { NotificationProvider } from './contexts';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -90,6 +91,7 @@ const mapPrototypeToAgent = (prototype: any, fallbackTimestamp: string): Agent =
     : (Array.isArray(prototype.tools)
         ? prototype.tools.map((tool: any) => tool?.toString ? tool.toString() : String(tool))
         : []),
+  toolSelections: Array.isArray(prototype.toolSelections) ? prototype.toolSelections : [],
   outputConfig: prototype.outputConfig || {},
   historyConfig: prototype.historyConfig || {},
   creator_id: prototype.robotId || RobotId.Archi,
@@ -105,6 +107,8 @@ const buildInstanceConfiguration = (instance: any, prototype?: Agent) => (
     systemPrompt: instance.systemPrompt || instance.systemInstruction || prototype?.systemPrompt || '',
     capabilities: Array.isArray(instance.capabilities) ? instance.capabilities : (prototype?.capabilities || []),
     tools: Array.isArray(instance.tools) ? instance.tools : (prototype?.tools || []),
+    toolSelections: Array.isArray(instance.toolSelections) ? instance.toolSelections : (prototype?.toolSelections || []),
+    functionInheritance: instance.functionInheritance || undefined,
     historyConfig: instance.historyConfig || prototype?.historyConfig || {},
     outputConfig: instance.outputConfig || prototype?.outputConfig || {},
     position: instance.position || { x: 0, y: 0 }
@@ -334,6 +338,7 @@ function AppContent() {
       nodes: v2Nodes,
       edges: Array.isArray(workspace.edges) ? workspace.edges : []
     });
+    void useFunctionStore.getState().loadFunctions(snapshotWorkflowId || undefined);
 
     setAgents(hydratedPrototypes);
     setWorkflowNodes(legacyNodes);

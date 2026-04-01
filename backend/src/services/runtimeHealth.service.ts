@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import path from 'path';
 import { stat } from 'fs/promises';
 import config from '../config/environment';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
@@ -53,6 +54,7 @@ interface RuntimeHealthConfig {
     dockerExecutable: string;
     nodeRuntimeImage: string;
     pythonRuntimeImage: string;
+    backendPythonRoot: string;
     probeTimeoutMs: number;
 }
 
@@ -177,6 +179,7 @@ export class RuntimeHealthService {
             dockerExecutable: config.runtime.dockerExecutable,
             nodeRuntimeImage: config.runtime.nodeRuntimeImage,
             pythonRuntimeImage: config.runtime.pythonRuntimeImage,
+            backendPythonRoot: path.resolve(__dirname, '../../python'),
             probeTimeoutMs: config.runtime.probeTimeoutMs,
             ...options.runtimeConfig
         };
@@ -640,14 +643,18 @@ export class RuntimeHealthService {
     }
 
     private async runNativePythonImportProbe(target: NativePythonImportTarget, checkedAt: string): Promise<RuntimeNativePythonDependencyProbe> {
-        const script = buildNativePythonImportProbeScript(target.dependencies.map((dependency) => dependency.module));
+        const script = buildNativePythonImportProbeScript(target.toolName, target.dependencies.map((dependency) => dependency.module));
         const args = [
             'run',
             '--rm',
             '--network',
             'none',
+            '--mount',
+            `type=bind,src=${this.runtimeConfig.backendPythonRoot},dst=/opt/airdd2/backend-python,readonly`,
+            '--env',
+            'AIRDD2_NATIVE_ROOT=/opt/airdd2/backend-python',
             '--entrypoint',
-            'python',
+            'python3',
             this.runtimeConfig.pythonRuntimeImage,
             '-c',
             script
@@ -877,11 +884,22 @@ async function defaultKvmAvailable(): Promise<boolean> {
     }
 }
 
-function buildNativePythonImportProbeScript(modules: string[]): string {
+function buildNativePythonImportProbeScript(toolName: string, modules: string[]): string {
     const encodedModules = JSON.stringify(modules);
+    const encodedToolName = JSON.stringify(toolName);
     return [
+        'import os, pathlib',
         'import importlib, json, sys',
+        `tool_name = ${encodedToolName}`,
         `modules = ${encodedModules}`,
+        'def sanitize_segment(value):',
+        '    return "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in str(value or ""))',
+        'native_root = pathlib.Path(os.environ.get("AIRDD2_NATIVE_ROOT", "/opt/airdd2/backend-python"))',
+        'provisioned_root = native_root / ".provisioned" / "native-tools" / sanitize_segment(tool_name)',
+        'if provisioned_root.exists():',
+        '    for site_packages in sorted(provisioned_root.glob("*/site-packages")):',
+        '        if site_packages.is_dir():',
+        '            sys.path.insert(0, str(site_packages))',
         'missing = []',
         'for module in modules:',
         '    try:',

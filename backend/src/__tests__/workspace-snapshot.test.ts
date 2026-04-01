@@ -64,7 +64,8 @@ async function createSnapshotFixture(): Promise<SnapshotFixture> {
         llmProvider: 'Gemini',
         llmModel: 'gemini-2.0-flash',
         capabilities: ['Chat'],
-        tools: [],
+        tools: [new mongoose.Types.ObjectId()],
+        toolSelections: [{ toolId: 'tool.snapshot', versionRef: { versionTag: 'v1', versionNumber: 1, workspaceId: 'ws-1' } }],
         robotId: 'AR_001'
     });
 
@@ -265,6 +266,12 @@ describe('Workspace snapshot contract', () => {
             fileName: 'proof.png'
         }));
         expect(restoredInstance.configuration_json.position).toMatchObject({ x: 120, y: 180 });
+
+        const restoredPrototype = response.body.agentPrototypes.find((prototype: any) => prototype.id === fixture.prototypeId);
+        expect(restoredPrototype).toEqual(expect.objectContaining({
+            functionIds: ['tool.snapshot'],
+            toolSelections: [expect.objectContaining({ toolId: 'tool.snapshot' })]
+        }));
     });
 
     it('returns the same snapshot contract from POST /api/workflows/:id/select', async () => {

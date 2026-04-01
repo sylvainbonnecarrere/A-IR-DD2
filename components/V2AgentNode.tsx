@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
 import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, AgentInstance, ToolCallRecord } from '../types';
 import { Button } from './UI';
@@ -23,6 +23,8 @@ import { useJournalQueue } from '../hooks/useJournalQueue';
 import { useAuth } from '../hooks/useAuth';
 import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
 import { buildBosHydrationFingerprint, hydrateToolMessagesFromPersistedRuns } from '../services/bosRunProjectionService';
+import { deriveSelectedToolIds } from '../services/toolSelectionResolver';
+import type { UserFunction } from '../types/function.types';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -82,7 +84,69 @@ export interface V2AgentNodeData {
   workflowId?: string; // For journal persistence
 }
 
-export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, selected }) => {
+function resolveAgentSelectedToolIds(agent: Agent, agentInstance: AgentInstance | undefined): string[] {
+  const instanceConfig = agentInstance?.configuration_json;
+  const inheritance = instanceConfig?.functionInheritance;
+
+  const normalizeToolIdList = (rawValues: unknown[] | undefined): string[] => {
+    if (!Array.isArray(rawValues)) {
+      return [];
+    }
+
+    return rawValues
+      .map((value) => {
+        if (typeof value === 'string') {
+          return value;
+        }
+
+        if (value && typeof value === 'object' && 'toolId' in (value as Record<string, unknown>) && typeof (value as Record<string, unknown>).toolId === 'string') {
+          return (value as Record<string, unknown>).toolId as string;
+        }
+
+        if (value && typeof value === 'object' && 'toString' in (value as Record<string, unknown>) && typeof (value as Record<string, unknown>).toString === 'function') {
+          const stringValue = String(value);
+          return stringValue !== '[object Object]' ? stringValue : '';
+        }
+
+        return '';
+      })
+      .filter((value): value is string => value.trim().length > 0);
+  };
+
+  const instanceSelectionIds = inheritance?.inheritFromPrototype === false
+    ? deriveSelectedToolIds(inheritance.overrideToolSelections, inheritance.overrideFunctionIds)
+    : deriveSelectedToolIds(instanceConfig?.toolSelections || agentInstance?.toolSelections, undefined);
+
+  const prototypeSelectionIds = deriveSelectedToolIds(agent.toolSelections, agent.functionIds);
+  const fallbackToolIds = normalizeToolIdList((instanceConfig as any)?.tools)
+    .concat(normalizeToolIdList((agentInstance as any)?.tools))
+    .concat(normalizeToolIdList((agent as any).tools));
+
+  return instanceSelectionIds.length > 0
+    ? instanceSelectionIds
+    : prototypeSelectionIds.length > 0
+      ? prototypeSelectionIds
+      : fallbackToolIds;
+}
+
+function resolveAgentToolScope(agent: Agent, agentInstance: AgentInstance | undefined, allFunctions: UserFunction[]): UserFunction[] {
+  const selectedIds = resolveAgentSelectedToolIds(agent, agentInstance);
+
+  if (selectedIds.length === 0) {
+    return [];
+  }
+
+  const selectedIdSet = new Set(selectedIds);
+  return allFunctions.filter((fn) => {
+    if (!fn.isEnabled) {
+      return false;
+    }
+
+    return selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false);
+  });
+}
+
+export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: NodeProps<V2AgentNodeData>) {
   const { t } = useLocalization();
   const { agent, agentInstance: agentInstanceProp } = data;
   
@@ -119,6 +183,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     model: agentInstance.configuration_json.model,
     systemPrompt: agentInstance.configuration_json.systemPrompt,
     tools: agentInstance.configuration_json.tools,
+    toolSelections: agentInstance.configuration_json.toolSelections || (agentInstance as any).toolSelections || agent.toolSelections,
     capabilities: agentInstance.configuration_json.capabilities,
     outputConfig: agentInstance.configuration_json.outputConfig,
     historyConfig: agentInstance.configuration_json.historyConfig,
@@ -157,6 +222,16 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
   // J8 — Functions available for AgentLoop (emulated FC for local LLMs)
   const allFunctions = useFunctionStore(state => state.functions);
+  const loadFunctions = useFunctionStore(state => state.loadFunctions);
+  const configuredToolIds = useMemo(
+    () => resolveAgentSelectedToolIds(effectiveAgent, agentInstance),
+    [effectiveAgent, agentInstance]
+  );
+
+  const scopedFunctions = useMemo(
+    () => resolveAgentToolScope(effectiveAgent, agentInstance, allFunctions),
+    [effectiveAgent, agentInstance, allFunctions]
+  );
 
   // C1 FIX: Auth token pour les appels sandbox (requireAuth)
   const { accessToken } = useAuth();
@@ -539,7 +614,50 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
       if (adapter) {
         // Local LLM path: use AgentLoop with emulated FC via FunctionCallingPromptBuilder
-        const enabledFunctions = allFunctions.filter(f => f.isEnabled);
+        let enabledFunctions = scopedFunctions;
+
+        if (enabledFunctions.length === 0 && configuredToolIds.length > 0) {
+          const effectiveWorkflowId = data.workflowId || agentInstance?.workflowId;
+          console.warn('[V2AgentNode] Empty local tool scope for a configured agent, attempting catalog reload', {
+            nodeId: id,
+            agentId: effectiveAgent.id,
+            configuredToolIds,
+            workflowId: effectiveWorkflowId,
+            loadedFunctionCount: allFunctions.length,
+          });
+
+          await loadFunctions(effectiveWorkflowId ?? undefined);
+          enabledFunctions = resolveAgentToolScope(
+            effectiveAgent,
+            agentInstance,
+            useFunctionStore.getState().functions
+          );
+        }
+
+        console.info('[V2AgentNode] Local AgentLoop tool scope', {
+          nodeId: id,
+          agentId: effectiveAgent.id,
+          agentName: effectiveAgent.name,
+          configuredToolIds,
+          loadedFunctionCount: allFunctions.length,
+          selectedCount: enabledFunctions.length,
+          selectedTools: enabledFunctions.map(fn => ({ id: fn.toolId ?? fn._id, name: fn.name }))
+        });
+
+        if (enabledFunctions.length === 0 && configuredToolIds.length > 0) {
+          const configurationError = `[Erreur configuration outils] ${configuredToolIds.length} outil(s) sont configures pour cet agent, mais aucun n'a pu etre resolu dans le catalogue charge.`;
+          const errorMessage: ChatMessage = {
+            id: generateMessageId('tool-config-error'),
+            sender: 'agent',
+            text: configurationError,
+            isError: true,
+            timestamp: new Date(),
+          };
+          addNodeMessage(id, errorMessage);
+          setNodeExecuting(id, false);
+          return;
+        }
+
         setLoadingMessage(t('loading'));
 
         const loopResult = await runAgentLoop(
@@ -552,6 +670,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             onEvent: (event) => {
               if (event.type === 'tool_call_start') {
                 setLoadingMessage(`🔧 ${event.toolCall?.name ?? '…'}`);
+              } else if (event.type === 'tool_protocol_violation') {
+                setLoadingMessage(t('tool_protocol_violation'));
               } else if (event.type === 'llm_start') {
                 setLoadingMessage(t('loading'));
               }
@@ -564,7 +684,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
           const toolChatMsg: ChatMessage = {
             id: record.id,
             sender: 'tool',
-            text: `${record.functionName}(${JSON.stringify(record.arguments)})`,
+            text: `${record.functionName}(${JSON.stringify(record.arguments)})${record.executionId ? ` [${record.executionId}]` : ''}`,
             toolName: record.functionName,
             timestamp: record.timestamp,
             isError: record.status === 'error',
@@ -586,23 +706,42 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             } as ToolCallRecord,
           };
           addNodeMessage(id, toolChatMsg);
+
+          const serializedToolResult = typeof record.result === 'string'
+            ? record.result
+            : JSON.stringify(record.result, null, 2);
+          const toolResultMessage: ChatMessage = {
+            id: generateMessageId('tool-result'),
+            sender: 'tool_result',
+            text: record.executionId
+              ? `[executionId=${record.executionId}] ${serializedToolResult}`
+              : serializedToolResult,
+            toolCallId: record.id,
+            toolName: record.functionName,
+            timestamp: record.timestamp,
+            isError: record.status === 'error',
+          };
+          addNodeMessage(id, toolResultMessage);
         }
 
         // Add final agent response
-        if (loopResult.finalResponse.trim()) {
+        if (loopResult.finalResponse.trim() || loopResult.finishReason === 'error') {
           const agentMsg: ChatMessage = {
             id: generateMessageId('agent'),
             sender: 'agent',
             text: loopResult.finalResponse,
+            isError: loopResult.finishReason === 'error',
             timestamp: new Date(),
           };
           addNodeMessage(id, agentMsg);
-          persistJournalEntry('chat', {
-            role: 'agent',
-            content: loopResult.finalResponse,
-            llmProvider: effectiveAgent.llmProvider,
-            modelUsed: effectiveAgent.model,
-          });
+          if (loopResult.finalResponse.trim()) {
+            persistJournalEntry('chat', {
+              role: 'agent',
+              content: loopResult.finalResponse,
+              llmProvider: effectiveAgent.llmProvider,
+              modelUsed: effectiveAgent.model,
+            });
+          }
         }
       } else {
       // ─── Standard streaming path (native providers — zero regression) ────────
@@ -1566,4 +1705,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       )}
     </div>
   );
-};
+});
+
+V2AgentNode.displayName = 'V2AgentNode';

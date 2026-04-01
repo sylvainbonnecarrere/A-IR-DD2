@@ -9,10 +9,11 @@ const mockCreateAdapter = jest.fn();
 const mockAddNodeMessage = jest.fn();
 const mockSetNodeExecuting = jest.fn();
 const mockEnqueueEntry = jest.fn();
+const mockLoadFunctions = jest.fn();
 
 let runtimeStoreState: Record<string, unknown>;
 let designStoreState: Record<string, unknown>;
-let functionStoreState: { functions: UserFunction[] };
+let functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> };
 
 const agentInstance = {
     id: 'instance-1',
@@ -88,9 +89,14 @@ jest.mock('../../stores/useDesignStore', () => ({
 }));
 
 jest.mock('../../stores/useFunctionStore', () => ({
-    useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[] }) => unknown) => (
-        selector ? selector(functionStoreState) : functionStoreState
-    )),
+    useFunctionStore: Object.assign(
+        jest.fn((selector?: (state: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> }) => unknown) => (
+            selector ? selector(functionStoreState) : functionStoreState
+        )),
+        {
+            getState: () => functionStoreState,
+        }
+    ),
 }));
 
 jest.mock('../../contexts/WorkflowCanvasContext', () => ({
@@ -192,6 +198,8 @@ const baseAgent: Agent = {
     model: 'gemini-2.5-flash',
     capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
     tools: [],
+    functionIds: ['legacy-weather'],
+    toolSelections: [{ toolId: 'tool.weather' }],
     creator_id: RobotId.Archi,
     created_at: '2026-03-23T10:00:00.000Z',
     updated_at: '2026-03-23T10:00:00.000Z',
@@ -230,13 +238,22 @@ describe('V2AgentNode AgentLoop integration', () => {
             functions: [
                 createFunction(),
                 createFunction({
+                    _id: 'legacy-extra',
+                    toolId: 'tool.extra',
+                    name: 'Extra Tool',
+                    isEnabled: true,
+                }),
+                createFunction({
                     _id: 'legacy-disabled',
                     toolId: 'tool.disabled',
                     name: 'Disabled Tool',
                     isEnabled: false,
                 }),
             ],
+            loadFunctions: mockLoadFunctions,
         };
+
+        mockLoadFunctions.mockImplementation(async () => undefined);
 
         mockCreateAdapter.mockReturnValue({ provider: LLMProvider.Gemini });
         mockRunAgentLoop.mockResolvedValue({
@@ -265,7 +282,7 @@ describe('V2AgentNode AgentLoop integration', () => {
         jest.restoreAllMocks();
     });
 
-    it('passes enabled functions to AgentLoop and projects tool log plus final response into runtime messages', async () => {
+    it('passes only the agent-selected enabled functions to AgentLoop and projects tool log plus final response into runtime messages', async () => {
         render(
             <V2AgentNode
                 id="node-1"
@@ -317,6 +334,8 @@ describe('V2AgentNode AgentLoop integration', () => {
             })
         );
 
+        expect(mockRunAgentLoop.mock.calls[0][2]).toHaveLength(1);
+
         expect(mockAddNodeMessage).toHaveBeenCalledWith(
             'node-1',
             expect.objectContaining({
@@ -354,6 +373,272 @@ describe('V2AgentNode AgentLoop integration', () => {
             expect.objectContaining({
                 role: 'user',
                 content: 'Check Paris weather',
+            })
+        );
+    });
+
+    it('reloads the function catalog on demand when the initial local tool scope is empty', async () => {
+        functionStoreState.functions = [];
+        mockLoadFunctions.mockImplementation(async () => {
+            functionStoreState.functions = [createFunction()];
+        });
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'archi',
+                    label: 'Archi',
+                    agent: baseAgent,
+                    workflowId: 'wf-1',
+                    agentInstance,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        fireEvent.change(screen.getByPlaceholderText('type_message_placeholder'), {
+            target: { value: 'Trigger lazy load' },
+        });
+        fireEvent.submit(screen.getByPlaceholderText('type_message_placeholder').closest('form')!);
+
+        await waitFor(() => {
+            expect(mockLoadFunctions).toHaveBeenCalledWith('wf-1');
+        });
+
+        await waitFor(() => {
+            expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
+        });
+
+        expect(mockRunAgentLoop.mock.calls[0][2]).toEqual([
+            expect.objectContaining({ toolId: 'tool.weather' })
+        ]);
+    });
+
+    it('fails visibly when configured tools remain unresolved after catalog reload', async () => {
+        functionStoreState.functions = [];
+        mockLoadFunctions.mockImplementation(async () => undefined);
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'archi',
+                    label: 'Archi',
+                    agent: baseAgent,
+                    workflowId: 'wf-1',
+                    agentInstance,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        fireEvent.change(screen.getByPlaceholderText('type_message_placeholder'), {
+            target: { value: 'Still unresolved' },
+        });
+        fireEvent.submit(screen.getByPlaceholderText('type_message_placeholder').closest('form')!);
+
+        await waitFor(() => {
+            expect(mockLoadFunctions).toHaveBeenCalledWith('wf-1');
+        });
+
+        expect(mockRunAgentLoop).not.toHaveBeenCalled();
+        expect(mockAddNodeMessage).toHaveBeenCalledWith(
+            'node-1',
+            expect.objectContaining({
+                sender: 'agent',
+                isError: true,
+                text: expect.stringContaining('[Erreur configuration outils]'),
+            })
+        );
+    });
+
+    it('renders a terminal local llm error message from AgentLoop without leaving the card silent', async () => {
+        mockRunAgentLoop.mockResolvedValueOnce({
+            finalResponse: '[Erreur LLM] LMStudio request timeout exceeded after 600000ms',
+            iterations: 1,
+            toolCallLog: [],
+            finishReason: 'error',
+            terminalError: {
+                code: 'timeout',
+                message: 'LMStudio request timeout exceeded after 600000ms',
+                retryable: false,
+                provider: LLMProvider.LMStudio,
+                model: 'local-model',
+            },
+        });
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'archi',
+                    label: 'Archi',
+                    agent: baseAgent,
+                    workflowId: 'wf-1',
+                    agentInstance,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        fireEvent.change(screen.getByPlaceholderText('type_message_placeholder'), {
+            target: { value: 'Trigger timeout' },
+        });
+        fireEvent.submit(screen.getByPlaceholderText('type_message_placeholder').closest('form')!);
+
+        await waitFor(() => {
+            expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
+        });
+
+        expect(mockAddNodeMessage).toHaveBeenCalledWith(
+            'node-1',
+            expect.objectContaining({
+                sender: 'agent',
+                text: '[Erreur LLM] LMStudio request timeout exceeded after 600000ms',
+                isError: true,
+            })
+        );
+    });
+
+    it('adds both tool and tool_result messages for a traced local tool execution', async () => {
+        mockRunAgentLoop.mockResolvedValueOnce({
+            finalResponse: 'Recherche terminee',
+            iterations: 2,
+            finishReason: 'stop',
+            traceLog: ['llm.parse.tool_call.xml'],
+            toolCallLog: [
+                {
+                    id: 'tool-msg-42',
+                    toolId: 'tool.web',
+                    functionId: 'legacy-web',
+                    functionName: 'web_search_py',
+                    arguments: { query: 'meteo paris demain', language: 'fr' },
+                    result: { items: [{ title: 'Meteo Paris' }] },
+                    status: 'success',
+                    durationMs: 44,
+                    executionId: 'exec-web-42',
+                    runner: 'docker_sandbox',
+                    timestamp: new Date('2026-04-01T10:00:00.000Z'),
+                },
+            ],
+        });
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'archi',
+                    label: 'Archi',
+                    agent: baseAgent,
+                    workflowId: 'wf-1',
+                    agentInstance,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        fireEvent.change(screen.getByPlaceholderText('type_message_placeholder'), {
+            target: { value: 'Cherche la meteo de demain' },
+        });
+        fireEvent.submit(screen.getByPlaceholderText('type_message_placeholder').closest('form')!);
+
+        await waitFor(() => {
+            expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
+        });
+
+        expect(mockAddNodeMessage).toHaveBeenCalledWith(
+            'node-1',
+            expect.objectContaining({
+                sender: 'tool',
+                text: expect.stringContaining('web_search_py'),
+            })
+        );
+
+        expect(mockAddNodeMessage).toHaveBeenCalledWith(
+            'node-1',
+            expect.objectContaining({
+                sender: 'tool_result',
+                text: expect.stringContaining('executionId=exec-web-42'),
+                toolName: 'web_search_py',
+            })
+        );
+    });
+
+    it('renders a visible error when AgentLoop reports an empty local response without tool calls', async () => {
+        mockRunAgentLoop.mockResolvedValueOnce({
+            finalResponse: '[Erreur LLM] Le modele local a retourne une reponse vide sans appel d\'outil.',
+            iterations: 1,
+            toolCallLog: [],
+            finishReason: 'error',
+            terminalError: {
+                code: 'empty_response',
+                message: 'Le modele local a retourne une reponse vide sans appel d\'outil.',
+                retryable: false,
+                provider: LLMProvider.LMStudio,
+                model: 'unknown',
+            },
+        });
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'archi',
+                    label: 'Archi',
+                    agent: baseAgent,
+                    workflowId: 'wf-1',
+                    agentInstance,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        fireEvent.change(screen.getByPlaceholderText('type_message_placeholder'), {
+            target: { value: 'Search the web' },
+        });
+        fireEvent.submit(screen.getByPlaceholderText('type_message_placeholder').closest('form')!);
+
+        await waitFor(() => {
+            expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
+        });
+
+        expect(mockAddNodeMessage).toHaveBeenCalledWith(
+            'node-1',
+            expect.objectContaining({
+                sender: 'agent',
+                text: '[Erreur LLM] Le modele local a retourne une reponse vide sans appel d\'outil.',
+                isError: true,
             })
         );
     });

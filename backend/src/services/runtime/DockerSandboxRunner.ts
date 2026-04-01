@@ -249,6 +249,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         if (request.mode === 'python-native') {
             return JSON.stringify({
                 functionName: request.function.name,
+                toolVersionTag: request.toolVersionTag,
                 args: request.args
             });
         }

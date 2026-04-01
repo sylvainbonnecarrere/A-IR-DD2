@@ -51,6 +51,7 @@ export interface SandboxExecutionRequest {
     executionId: string;
     userId: string;
     function: Pick<IUserFunction, '_id' | 'name' | 'language' | 'origin' | 'codeInline' | 'codePath' | 'workflowId'>;
+    toolVersionTag?: string;
     runtime: UserToolRunRuntime;
     launchContext: UserToolRunLaunchContext;
     args: Record<string, unknown>;

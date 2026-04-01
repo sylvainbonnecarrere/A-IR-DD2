@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
 import { IUser } from '../models/User.model';
 import { BuildPreparationError, BuildService } from '../services/build.service';
+import { NativePythonProvisioningService } from '../services/nativePythonProvisioning.service';
 import { RuntimeCompatibilityService } from '../services/runtimeCompatibility.service';
 import { ToolReadinessService } from '../services/toolReadiness.service';
 import { ToolReadAdapterService } from '../services/toolReadAdapter.service';
@@ -11,6 +12,7 @@ const router = Router();
 const runtimeCompatibilityService = new RuntimeCompatibilityService();
 const toolReadAdapterService = new ToolReadAdapterService();
 const buildService = new BuildService();
+const nativePythonProvisioningService = new NativePythonProvisioningService();
 const toolReadinessService = new ToolReadinessService();
 
 const idParamSchema = z.string().regex(/^[a-f\d]{24}$/i, 'ID doit être un ObjectId MongoDB valide');
@@ -133,6 +135,37 @@ router.post('/:id/build', requireAuth, async (req, res) => {
         }
 
         res.status(500).json({ error: 'Erreur lors de la préparation du build' });
+    }
+});
+
+router.post('/:id/provision', requireAuth, async (req, res) => {
+    try {
+        const idResult = idParamSchema.safeParse(req.params.id);
+        if (!idResult.success) {
+            return res.status(400).json({ error: 'ID de tool invalide' });
+        }
+
+        const queryResult = buildQuerySchema.safeParse(req.query);
+        if (!queryResult.success) {
+            return res.status(400).json({ error: 'Paramètres provisioning invalides', details: queryResult.error.issues });
+        }
+
+        const user = req.user as IUser;
+        const result = await nativePythonProvisioningService.provisionToolVersion(
+            idResult.data,
+            user.id,
+            queryResult.data.versionTag
+        );
+
+        res.json(result);
+    } catch (error) {
+        console.error('[ToolsRoute] POST /:id/provision error:', error);
+
+        if (error instanceof BuildPreparationError) {
+            return res.status(409).json({ error: error.message });
+        }
+
+        res.status(500).json({ error: 'Erreur lors du provisionnement plateforme' });
     }
 });
 

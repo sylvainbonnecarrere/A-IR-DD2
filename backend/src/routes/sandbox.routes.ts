@@ -72,7 +72,27 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
         const user = req.user as IUser;
         const { functionId, toolSelection, testArgs } = req.body;
 
+        console.info('[SandboxRoute] POST /run start', {
+            userId: user.id,
+            functionId,
+            toolId: toolSelection?.toolId ?? null,
+            versionTag: toolSelection?.versionRef?.versionTag ?? null,
+            argKeys: Object.keys(testArgs ?? {}),
+        });
+
         const result = await sandboxService.runFunction(functionId, user.id, testArgs, toolSelection);
+
+        console.info('[SandboxRoute] POST /run done', {
+            userId: user.id,
+            functionId,
+            toolId: toolSelection?.toolId ?? null,
+            executionId: result.executionId ?? null,
+            success: result.success,
+            runner: result.runner ?? null,
+            exitCode: result.exitCode ?? null,
+            failureKind: result.metadata?.failureKind ?? result.errorDetails?.failureKind ?? null,
+        });
+
         res.json(result);
     } catch (error: any) {
         console.error('[SandboxRoute] POST /run error:', error);

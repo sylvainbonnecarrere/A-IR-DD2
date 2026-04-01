@@ -60,14 +60,45 @@ export interface AgentLoopResult {
     toolCallLog: ToolCallRecord[];
     /** Number of LLM turns taken. */
     iterations: number;
+    /** Why the loop stopped. */
+    finishReason?: 'stop' | 'tool_calls' | 'length' | 'error';
+    /** Structured terminal error when the local adapter fails. */
+    terminalError?: {
+        code: string;
+        message: string;
+        retryable: boolean;
+        provider: unknown;
+        model: string;
+    };
+    traceLog?: string[];
+}
+
+function buildEmptyLocalResponseError(adapter: ILLMAdapter): AgentLoopResult {
+    const message = 'Le modele local a retourne une reponse vide sans appel d\'outil.';
+
+    return {
+        finalResponse: `[Erreur LLM] ${message}`,
+        toolCallLog: [],
+        iterations: 1,
+        finishReason: 'error',
+        terminalError: {
+            code: 'empty_response',
+            message,
+            retryable: false,
+            provider: adapter.provider,
+            model: 'unknown',
+        },
+        traceLog: ['llm.empty_response_without_tool_call'],
+    };
 }
 
 export interface AgentLoopEvent {
-    type: 'llm_start' | 'llm_done' | 'tool_call_start' | 'tool_call_done' | 'max_iterations';
+    type: 'llm_start' | 'llm_done' | 'tool_call_start' | 'tool_call_done' | 'tool_protocol_violation' | 'max_iterations';
     iteration: number;
     toolCall?: ParsedToolCall;
     toolResult?: unknown;
     response?: string;
+    traceMessage?: string;
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -171,6 +202,16 @@ function toErrorResultPayload(error: ToolExecutionError | Error): Record<string,
 
 function toToolResultHistoryPayload(record: ToolCallRecord): string {
     return JSON.stringify({
+        post_tool_contract: {
+            required_next_step: 'Return exactly one grounded <final_answer> based on this tool_result.',
+            forbidden_behaviors: [
+                'Do not greet the user again.',
+                'Do not restart the conversation.',
+                'Do not add generic filler, emojis, or speculative advice.',
+                'Do not claim memory updates, persistence, or side effects unless the tool output states them explicitly.',
+            ],
+            preferred_style: 'Short, direct, and strictly grounded in the tool output.',
+        },
         tool_results_context: {
             tool_name: record.functionName,
             tool_id: record.toolId ?? record.functionId,
@@ -351,6 +392,7 @@ export async function runAgentLoop(
 ): Promise<AgentLoopResult> {
     const { authToken, onEvent } = options;
     const toolCallLog: ToolCallRecord[] = [];
+    const traceLog: string[] = [];
     let history: ChatMessage[] = [...messages];
     const runtimeFunctions: ToolRegistryReadModel[] = functions.map((fn) => (
         'description' in fn && 'inputSchema' in fn && 'isEnabled' in fn && !('_id' in fn)
@@ -370,22 +412,48 @@ export async function runAgentLoop(
 
         const response = await adapter.complete(request);
 
+        if (response.parseTrace) {
+            traceLog.push(`llm.parse.${response.parseTrace.status}.${response.parseTrace.strategy}`);
+        }
+
         onEvent?.({ type: 'llm_done', iteration, response: response.content });
 
         if (response.finishReason === 'error') {
+            if (response.parseTrace?.status === 'invalid_tool_call') {
+                onEvent?.({
+                    type: 'tool_protocol_violation',
+                    iteration,
+                    traceMessage: response.parseTrace.message,
+                });
+            }
+
             return {
-                finalResponse: `[Erreur LLM] ${response.rawContent ?? 'Unknown error'}`,
+                finalResponse: `[Erreur LLM] ${response.terminalError?.message ?? response.rawContent ?? 'Unknown error'}`,
                 toolCallLog,
                 iterations: iteration,
+                finishReason: 'error',
+                terminalError: response.terminalError,
+                traceLog,
             };
         }
 
         // No tool calls → final response
         if (!response.toolCalls || response.toolCalls.length === 0) {
+            if (!response.content.trim()) {
+                return {
+                    ...buildEmptyLocalResponseError(adapter),
+                    toolCallLog,
+                    iterations: iteration,
+                    traceLog: [...traceLog, 'llm.empty_response_without_tool_call'],
+                };
+            }
+
             return {
                 finalResponse: response.content,
                 toolCallLog,
                 iterations: iteration,
+                finishReason: response.finishReason,
+                traceLog,
             };
         }
 
@@ -521,6 +589,8 @@ export async function runAgentLoop(
                 finalResponse: stopMessage,
                 toolCallLog,
                 iterations: iteration,
+                finishReason: 'error',
+                traceLog,
             };
         }
     }
@@ -530,5 +600,7 @@ export async function runAgentLoop(
         finalResponse: `[Limite atteinte] Le nombre maximum d'itérations (${MAX_ITERATIONS}) a été atteint.`,
         toolCallLog,
         iterations: MAX_ITERATIONS,
+        finishReason: 'length',
+        traceLog,
     };
 }
