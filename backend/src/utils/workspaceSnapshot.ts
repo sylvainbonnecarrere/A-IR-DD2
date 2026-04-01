@@ -190,9 +190,15 @@ function transformWorkflowEdgeForFrontend(edge: any) {
 }
 
 function transformAgentPrototypeForFrontend(proto: any) {
-    const toolIds = Array.isArray(proto.tools)
+    const legacyToolIds = Array.isArray(proto.tools)
         ? proto.tools.map((toolId: any) => toolId?.toString?.() || String(toolId))
         : [];
+    const selectedToolIds = Array.isArray(proto.toolSelections)
+        ? proto.toolSelections
+            .map((selection: any) => selection?.toolId)
+            .filter((toolId: unknown): toolId is string => typeof toolId === 'string' && toolId.trim().length > 0)
+        : [];
+    const functionIds = selectedToolIds.length > 0 ? selectedToolIds : legacyToolIds;
 
     return {
         id: proto._id?.toString() || proto.id,
@@ -203,8 +209,11 @@ function transformAgentPrototypeForFrontend(proto: any) {
         role: proto.role,
         systemPrompt: proto.systemPrompt,
         capabilities: Array.isArray(proto.capabilities) ? proto.capabilities : [],
-        tools: toolIds,
-        functionIds: toolIds,
+        tools: legacyToolIds,
+        functionIds,
+        toolSelections: Array.isArray(proto.toolSelections)
+            ? proto.toolSelections
+            : functionIds.map((toolId: string) => ({ toolId })),
         historyConfig: proto.historyConfig,
         outputConfig: proto.outputConfig,
         robotId: proto.robotId,

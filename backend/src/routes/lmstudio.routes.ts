@@ -4,7 +4,7 @@ import {
     checkLMStudioHealth,
     fetchLMStudioModels,
     detectAvailableEndpoint,
-    streamChatCompletion,
+    openChatCompletionStream,
     fetchChatCompletion
 } from '../services/lmstudioProxy.service';
 import type { ChatCompletionRequest } from '../types/lmstudio.types';
@@ -18,6 +18,24 @@ import { logLMStudioRequest, errorHandler } from '../middleware/logger';
 import { optionalAuth } from '../middleware/auth.middleware';
 
 const router = Router();
+
+function toLMStudioErrorResponse(error: unknown) {
+    const source = error as {
+        statusCode?: number;
+        code?: string;
+        message?: string;
+        details?: Record<string, unknown>;
+    };
+
+    return {
+        statusCode: source.statusCode ?? 500,
+        body: {
+            error: source.message ?? 'Chat completion failed',
+            code: source.code ?? 'lmstudio_proxy_error',
+            details: source.details ?? null
+        }
+    };
+}
 
 // Appliquer les middlewares globaux à toutes les routes LMStudio
 router.use(lmstudioRateLimiter); // Rate limiting global
@@ -196,25 +214,37 @@ router.post(
 
             // Mode streaming (SSE)
             if (requestBody.stream) {
-                // Configuration SSE headers
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
-                res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
-                res.flushHeaders?.();
-                res.write(': connected\n\n');
-
                 try {
+                    const session = await openChatCompletionStream(endpoint, requestBody);
+
+                    // Configuration SSE headers seulement une fois le handshake upstream valide
+                    res.setHeader('Content-Type', 'text/event-stream');
+                    res.setHeader('Cache-Control', 'no-cache');
+                    res.setHeader('Connection', 'keep-alive');
+                    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+                    res.flushHeaders?.();
+                    res.write(': connected\n\n');
+
+                    if (session.firstChunk) {
+                        res.write(session.firstChunk);
+                    }
+
                     // Stream depuis LMStudio vers frontend
-                    for await (const chunk of streamChatCompletion(endpoint, requestBody)) {
+                    for await (const chunk of session.stream()) {
                         res.write(chunk);
                     }
 
                     res.end();
                 } catch (streamError) {
                     console.error('[LMStudio Proxy] Streaming error:', streamError);
-                    res.write(`data: {"error": "${streamError instanceof Error ? streamError.message : 'Streaming failed'}"}\n\n`);
-                    res.end();
+                    const errorResponse = toLMStudioErrorResponse(streamError);
+
+                    if (!res.headersSent) {
+                        res.status(errorResponse.statusCode).json(errorResponse.body);
+                    } else {
+                        res.write(`data: ${JSON.stringify(errorResponse.body)}\n\n`);
+                        res.end();
+                    }
                 }
             }
             // Mode synchrone (non-streaming)
@@ -228,10 +258,8 @@ router.post(
             if (error instanceof Error) {
                 console.error('[LMStudio Proxy] Error stack:', error.stack);
             }
-            res.status(500).json({
-                error: error instanceof Error ? error.message : 'Chat completion failed',
-                details: error instanceof Error ? error.stack : String(error)
-            });
+            const errorResponse = toLMStudioErrorResponse(error);
+            res.status(errorResponse.statusCode).json(errorResponse.body);
         }
     }
 );

@@ -39,10 +39,20 @@ class FakeCommandRunner implements CommandRunner {
     }
 }
 
-function buildNativeImportProbeScript(modules: string[]): string {
+function buildNativeImportProbeScript(toolName: string, modules: string[]): string {
     return [
+        'import os, pathlib',
         'import importlib, json, sys',
+        `tool_name = ${JSON.stringify(toolName)}`,
         `modules = ${JSON.stringify(modules)}`,
+        'def sanitize_segment(value):',
+        '    return "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in str(value or ""))',
+        'native_root = pathlib.Path(os.environ.get("AIRDD2_NATIVE_ROOT", "/opt/airdd2/backend-python"))',
+        'provisioned_root = native_root / ".provisioned" / "native-tools" / sanitize_segment(tool_name)',
+        'if provisioned_root.exists():',
+        '    for site_packages in sorted(provisioned_root.glob("*/site-packages")):',
+        '        if site_packages.is_dir():',
+        '            sys.path.insert(0, str(site_packages))',
         'missing = []',
         'for module in modules:',
         '    try:',
@@ -54,28 +64,32 @@ function buildNativeImportProbeScript(modules: string[]): string {
     ].join('\n');
 }
 
-function buildNativeImportProbeCommand(modules: string[]): string {
+function buildNativeImportProbeCommand(toolName: string, modules: string[]): string {
     return [
         'docker',
         'run',
         '--rm',
         '--network',
         'none',
+        '--mount',
+        'type=bind,src=C:/backend/python,dst=/opt/airdd2/backend-python,readonly',
+        '--env',
+        'AIRDD2_NATIVE_ROOT=/opt/airdd2/backend-python',
         '--entrypoint',
-        'python',
+        'python3',
         'airdd2-runtime-python:3.12-slim',
         '-c',
-        buildNativeImportProbeScript(modules)
+        buildNativeImportProbeScript(toolName, modules)
     ].join(' ');
 }
 
 function nativeImportProbeResponses(overrides?: Record<string, CommandResponse>): Record<string, CommandResponse> {
     return {
-        [buildNativeImportProbeCommand(['requests', 'bs4', 'lxml'])]: {
+        [buildNativeImportProbeCommand('web_fetch_py', ['requests', 'bs4', 'lxml'])]: {
             exitCode: 0,
             stdout: '{"missing": []}\n'
         },
-        [buildNativeImportProbeCommand(['duckduckgo_search'])]: {
+        [buildNativeImportProbeCommand('web_search_py', ['duckduckgo_search'])]: {
             exitCode: 0,
             stdout: '{"missing": []}\n'
         },
@@ -101,7 +115,8 @@ describe('RuntimeHealthService', () => {
             runtimeConfig: {
                 nodeExecutable: 'node',
                 pythonExecutables: ['python3', 'python'],
-                dockerExecutable: 'docker'
+                dockerExecutable: 'docker',
+                backendPythonRoot: 'C:/backend/python'
             },
             kvmAvailable: async () => false
         });
@@ -144,7 +159,8 @@ describe('RuntimeHealthService', () => {
             runtimeConfig: {
                 nodeExecutable: 'node',
                 pythonExecutables: ['python3', 'python'],
-                dockerExecutable: 'docker'
+                dockerExecutable: 'docker',
+                backendPythonRoot: 'C:/backend/python'
             },
             kvmAvailable: async () => false
         });
@@ -177,7 +193,8 @@ describe('RuntimeHealthService', () => {
             runtimeConfig: {
                 nodeExecutable: 'node',
                 pythonExecutables: ['python3', 'python'],
-                dockerExecutable: 'docker'
+                dockerExecutable: 'docker',
+                backendPythonRoot: 'C:/backend/python'
             },
             kvmAvailable: async () => false
         });
@@ -206,7 +223,8 @@ describe('RuntimeHealthService', () => {
             runtimeConfig: {
                 nodeExecutable: 'node',
                 pythonExecutables: ['python3', 'python'],
-                dockerExecutable: 'docker'
+                dockerExecutable: 'docker',
+                backendPythonRoot: 'C:/backend/python'
             },
             kvmAvailable: async () => false
         });
@@ -234,7 +252,8 @@ describe('RuntimeHealthService', () => {
             runtimeConfig: {
                 nodeExecutable: 'node',
                 pythonExecutables: ['python3', 'python'],
-                dockerExecutable: 'docker'
+                dockerExecutable: 'docker',
+                backendPythonRoot: 'C:/backend/python'
             },
             kvmAvailable: async () => false
         });
@@ -269,7 +288,8 @@ describe('RuntimeHealthService', () => {
             runtimeConfig: {
                 nodeExecutable: 'node',
                 pythonExecutables: ['python3', 'python'],
-                dockerExecutable: 'docker'
+                dockerExecutable: 'docker',
+                backendPythonRoot: 'C:/backend/python'
             },
             kvmAvailable: async () => true
         });
@@ -295,7 +315,7 @@ describe('RuntimeHealthService', () => {
             'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
             'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
             ...nativeImportProbeResponses({
-                [buildNativeImportProbeCommand(['duckduckgo_search'])]: {
+                [buildNativeImportProbeCommand('web_search_py', ['duckduckgo_search'])]: {
                     exitCode: 2,
                     stdout: '{"missing":[{"module":"duckduckgo_search","error":"ModuleNotFoundError: No module named \'duckduckgo_search\'"}]}\n',
                     stderr: 'ModuleNotFoundError: No module named \'duckduckgo_search\''
@@ -308,7 +328,8 @@ describe('RuntimeHealthService', () => {
             runtimeConfig: {
                 nodeExecutable: 'node',
                 pythonExecutables: ['python3', 'python'],
-                dockerExecutable: 'docker'
+                dockerExecutable: 'docker',
+                backendPythonRoot: 'C:/backend/python'
             },
             kvmAvailable: async () => false
         });

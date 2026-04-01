@@ -8,6 +8,7 @@ import ReactFlow, {
   addEdge,
   Connection,
   Node,
+  NodeTypes,
   useReactFlow,
   ReactFlowProvider,
 } from 'reactflow';
@@ -58,9 +59,9 @@ interface WorkflowCanvasProps {
 
 // nodeTypes défini GLOBALEMENT pour éviter les re-créations (React Flow best practice)
 // Ne JAMAIS définir ceci dans le composant ou utiliser useMemo
-const NODE_TYPES = {
+const NODE_TYPES: NodeTypes = Object.freeze({
   customAgent: V2AgentNode,
-};
+});
 
 // Composant interne avec accès à useReactFlow
 const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCanvasProps) {

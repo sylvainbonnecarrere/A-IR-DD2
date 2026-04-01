@@ -19,11 +19,14 @@
 
 import mongoose from 'mongoose';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
+import { NativePythonProvisioningService } from './nativePythonProvisioning.service';
 import {
   getRepairOnlyProtectedFields,
   getUserToolStartupSyncPhase,
   syncUserToolsFromLegacyFunctionsOnStartup
 } from './userToolStartupSync.service';
+
+const nativePythonProvisioningService = new NativePythonProvisioningService();
 
 /**
  * Define MongoDB collection schemas with validation rules
@@ -552,6 +555,7 @@ export async function initializeDatabase(): Promise<void> {
     // ─── Toujours seeder les fonctions natives (idempotent) ───────────────
     await seedNativeFunctions(db);
     await syncUserToolsFromLegacyFunctions(db);
+    await provisionNativePythonToolsOnStartup();
 
     console.info('🎯 Database initialization complete!');
   } catch (error) {
@@ -811,6 +815,22 @@ async function syncUserToolsFromLegacyFunctions(db: any): Promise<void> {
     }
   } catch (err) {
     console.warn('⚠️  syncUserToolsFromLegacyFunctions warning:', err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function provisionNativePythonToolsOnStartup(): Promise<void> {
+  try {
+    const summary = await nativePythonProvisioningService.provisionPendingNativeToolsOnStartup();
+
+    if (summary.attempted === 0) {
+      return;
+    }
+
+    console.info(
+      `🐍 native python provisioning startup: attempted=${summary.attempted} succeeded=${summary.succeeded} failed=${summary.failed} skipped=${summary.skipped}`
+    );
+  } catch (err) {
+    console.warn('⚠️  native python provisioning startup warning:', err instanceof Error ? err.message : String(err));
   }
 }
 

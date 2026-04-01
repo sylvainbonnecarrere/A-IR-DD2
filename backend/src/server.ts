@@ -9,6 +9,7 @@ import mongoSanitize from 'express-mongo-sanitize';
 import passport from './middleware/auth.middleware';
 import { connectDatabase } from './config/database';
 import config, { validateConfig } from './config/environment';
+import { LMSTUDIO_CONFIG } from './config/lmstudio.config';
 import lmstudioRoutes from './routes/lmstudio.routes';
 import localLLMRoutes from './routes/local-llm.routes';
 import authRoutes from './routes/auth.routes';
@@ -189,6 +190,12 @@ app.post('/api/execute-python-tool', async (req, res) => {
 
 // Créer le serveur HTTP
 const httpServer = createServer(app);
+const lmStudioRequestTimeoutMs = LMSTUDIO_CONFIG.STREAM_FIRST_BYTE_TIMEOUT_MS + 10_000;
+
+// Align HTTP server timeouts with local LLM long-running streaming paths.
+httpServer.headersTimeout = Math.max(httpServer.headersTimeout, lmStudioRequestTimeoutMs + 1_000);
+httpServer.requestTimeout = Math.max(httpServer.requestTimeout, lmStudioRequestTimeoutMs);
+httpServer.keepAliveTimeout = Math.max(httpServer.keepAliveTimeout, 65_000);
 
 let wsManager: WebSocketManager | null = null;
 

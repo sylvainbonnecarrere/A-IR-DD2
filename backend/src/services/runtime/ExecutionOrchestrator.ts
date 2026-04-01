@@ -62,10 +62,21 @@ export class ExecutionOrchestrator {
             throw new RuntimeNotReadyError(readiness.reason ?? runtimeReport.summary);
         }
 
+        console.info('[ExecutionOrchestrator] queue execution', {
+            executionId,
+            userId: request.userId,
+            functionName: request.fn.name,
+            toolId: executionMetadata.toolId,
+            runtime: executionMetadata.runtime,
+            launchContext: request.launchContext,
+            runner: selectedRunnerId,
+        });
+
         const executionRequest = await this.buildExecutionRequest({
             ...request,
             executionId,
             executionMetadataRuntime: executionMetadata.runtime,
+            executionMetadataToolVersionTag: executionMetadata.toolVersionTag,
             executionMetadataPolicy: executionMetadata.policySnapshot,
             launchContext: request.launchContext
         });
@@ -124,6 +135,15 @@ export class ExecutionOrchestrator {
                     });
                 }
 
+                console.info('[ExecutionOrchestrator] finished execution', {
+                    executionId,
+                    success: executionResult.success,
+                    timedOut: executionResult.timedOut ?? false,
+                    runner: selectedRunnerId,
+                    exitCode: executionResult.exitCode ?? null,
+                    failureKind: executionResult.metadata?.failureKind ?? null,
+                });
+
                 return {
                     ...executionResult,
                     executionId,
@@ -136,6 +156,11 @@ export class ExecutionOrchestrator {
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
+                console.error('[ExecutionOrchestrator] failed execution', {
+                    executionId,
+                    runner: selectedRunnerId,
+                    message,
+                });
                 await this.userToolRunService.failRun(executionId, {
                     error: buildSandboxErrorDetails({
                         code: 'ORCHESTRATOR_ERROR',
@@ -159,6 +184,7 @@ export class ExecutionOrchestrator {
     private async buildExecutionRequest(input: ExecutionOrchestratorRequest & {
         executionId: string;
         executionMetadataRuntime: SandboxExecutionRequest['runtime'];
+        executionMetadataToolVersionTag: string;
         executionMetadataPolicy: SandboxExecutionRequest['policySnapshot'];
     }): Promise<SandboxExecutionRequest> {
         const workspace = await this.resolveWorkspace(input.fn, input.userId);
@@ -177,6 +203,7 @@ export class ExecutionOrchestrator {
                 codePath: input.fn.codePath,
                 workflowId: input.fn.workflowId
             },
+            toolVersionTag: input.executionMetadataToolVersionTag,
             runtime: input.executionMetadataRuntime,
             launchContext: input.launchContext,
             args: input.args,

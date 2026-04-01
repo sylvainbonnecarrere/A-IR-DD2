@@ -102,6 +102,99 @@ describe('AgentLoop canonical tool registry convergence', () => {
         }));
     });
 
+    it('acceptance: executes hello_test once and returns the follow-up answer', async () => {
+        const adapterResponses: LLMResponse[] = [
+            {
+                content: '',
+                finishReason: 'tool_calls',
+                toolCalls: [
+                    {
+                        name: 'hello_test',
+                        arguments: { name: 'Sylvain' },
+                        raw: '<tool_call />',
+                        confidence: 0.95,
+                    }
+                ]
+            },
+            {
+                content: 'Ton nom est maintenant enregistré dans ma mémoire.',
+                finishReason: 'stop'
+            }
+        ];
+
+        const requestLog: Array<{ messages: any[] }> = [];
+
+        const adapter: ILLMAdapter = {
+            provider: LLMProvider.LMStudio,
+            supportsNativeToolCalling: false,
+            complete: jest.fn(async (request) => {
+                requestLog.push({ messages: request.messages });
+                return adapterResponses.shift() as LLMResponse;
+            })
+        };
+
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            json: async () => ({
+                success: true,
+                output: { result: 'Ton nom est maintenant enregistré dans ma mémoire.' },
+                durationMs: 15,
+                executionId: 'exec-hello-1',
+                runner: 'docker_sandbox',
+                metadata: {}
+            })
+        } as any)) as typeof fetch;
+
+        const tools: ToolRegistryReadModel[] = [
+            {
+                id: 'tool-hello',
+                legacyFunctionId: 'fn-hello',
+                name: 'hello_test',
+                description: 'Greets the named user',
+                inputSchema: { type: 'object' },
+                isEnabled: true,
+                versionTag: 'v1',
+                versionNumber: 1,
+                workspaceId: 'ws-hello'
+            }
+        ];
+
+        const result = await runAgentLoop(
+            adapter,
+            [
+                {
+                    id: 'msg-hello',
+                    sender: 'user',
+                    text: 'Bonjour, je m\'appelle Sylvain',
+                    timestamp: new Date('2026-04-01T09:00:00.000Z')
+                }
+            ],
+            tools,
+            'system'
+        );
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(result.finalResponse).toBe('Ton nom est maintenant enregistré dans ma mémoire.');
+        expect(result.toolCallLog[0]).toEqual(expect.objectContaining({
+            functionName: 'hello_test',
+            executionId: 'exec-hello-1',
+            status: 'success',
+        }));
+        expect(requestLog).toHaveLength(2);
+        expect(requestLog[1].messages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                sender: 'tool_result',
+                text: expect.stringContaining('post_tool_contract'),
+            })
+        ]));
+        expect(requestLog[1].messages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                sender: 'tool_result',
+                text: expect.stringContaining('Do not greet the user again.'),
+            })
+        ]));
+    });
+
     it('blocks repeated deterministic tool failures for the same tool signature', async () => {
         const adapterResponses: LLMResponse[] = [
             {
@@ -369,6 +462,83 @@ describe('AgentLoop canonical tool registry convergence', () => {
         expect(result.toolCallLog[1]).toEqual(expect.objectContaining({
             status: 'success',
             duplicateSuppressed: true,
+        }));
+    });
+
+    it('returns a structured terminal loop result when the local adapter fails', async () => {
+        const adapter: ILLMAdapter = {
+            provider: LLMProvider.LMStudio,
+            supportsNativeToolCalling: false,
+            complete: jest.fn(async () => ({
+                content: '',
+                finishReason: 'error',
+                rawContent: 'LMStudio request timeout exceeded after 600000ms',
+                terminalError: {
+                    code: 'timeout',
+                    message: 'LMStudio request timeout exceeded after 600000ms',
+                    retryable: false,
+                    provider: LLMProvider.LMStudio,
+                    model: 'local-model',
+                }
+            }))
+        };
+
+        const result = await runAgentLoop(
+            adapter,
+            [
+                {
+                    id: 'msg-1',
+                    sender: 'user',
+                    text: 'Run something',
+                    timestamp: new Date('2026-03-31T12:00:00.000Z')
+                }
+            ],
+            [],
+            'system'
+        );
+
+        expect(result).toEqual(expect.objectContaining({
+            finalResponse: '[Erreur LLM] LMStudio request timeout exceeded after 600000ms',
+            finishReason: 'error',
+            terminalError: expect.objectContaining({
+                code: 'timeout',
+                model: 'local-model',
+            }),
+        }));
+    });
+
+    it('returns a visible terminal error when the local adapter emits an empty response without tool calls', async () => {
+        const adapter: ILLMAdapter = {
+            provider: LLMProvider.LMStudio,
+            supportsNativeToolCalling: false,
+            complete: jest.fn(async () => ({
+                content: '   ',
+                finishReason: 'stop',
+                rawContent: '',
+            }))
+        };
+
+        const result = await runAgentLoop(
+            adapter,
+            [
+                {
+                    id: 'msg-1',
+                    sender: 'user',
+                    text: 'Search the web',
+                    timestamp: new Date('2026-03-31T12:00:00.000Z')
+                }
+            ],
+            [],
+            'system'
+        );
+
+        expect(result).toEqual(expect.objectContaining({
+            finalResponse: '[Erreur LLM] Le modele local a retourne une reponse vide sans appel d\'outil.',
+            finishReason: 'error',
+            terminalError: expect.objectContaining({
+                code: 'empty_response',
+                provider: LLMProvider.LMStudio,
+            }),
         }));
     });
 });
