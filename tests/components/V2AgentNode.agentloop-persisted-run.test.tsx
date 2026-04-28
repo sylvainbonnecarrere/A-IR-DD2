@@ -192,6 +192,8 @@ const baseAgent: Agent = {
     model: 'gemini-2.5-flash',
     capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
     tools: [],
+    functionIds: ['legacy-weather'],
+    toolSelections: [{ toolId: 'tool.weather' }],
     creator_id: RobotId.Archi,
     created_at: '2026-03-23T10:00:00.000Z',
     updated_at: '2026-03-23T10:00:00.000Z',

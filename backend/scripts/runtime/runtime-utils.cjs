@@ -478,6 +478,7 @@ module.exports = {
     printOutput,
     summarizeStatus,
     buildTextReport,
+    runCommand,
     inspectDockerState,
     imageExists,
     buildRuntimeImage,

@@ -83,7 +83,7 @@ describe('NativePythonProvisioningService', () => {
             inputSchema: { type: 'object' },
             outputSchema: { type: 'object' },
             tags: ['search'],
-            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            dependencies: { npm: [], python: ['ddgs==9.6.1', 'duckduckgo-search==6.1.0'] },
             policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
             isReadonly: true,
             isEnabled: true
@@ -112,6 +112,7 @@ describe('NativePythonProvisioningService', () => {
         expect(result.toolName).toBe('web_search_py');
         expect(result.sitePackagesPath).toContain(path.join('web_search_py', 'v-ready', 'site-packages'));
         await expect(fs.readFile(result.reportPath, 'utf-8')).resolves.toContain('"status": "ready"');
+        expect(result.criticalModules).toEqual(['duckduckgo_search']);
 
         expect(runner.calls).toHaveLength(1);
         expect(runner.calls[0]?.command).toBe('docker');
@@ -171,7 +172,7 @@ describe('NativePythonProvisioningService', () => {
             inputSchema: { type: 'object' },
             outputSchema: { type: 'object' },
             tags: ['search'],
-            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            dependencies: { npm: [], python: ['ddgs==9.6.1', 'duckduckgo-search==6.1.0'] },
             policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
             isReadonly: true,
             isEnabled: true
@@ -205,5 +206,83 @@ describe('NativePythonProvisioningService', () => {
 
         const reportPath = path.join(backendPythonRoot, '.provisioned', 'native-tools', 'web_search_py', 'v-fail', 'provision-report.json');
         await expect(fs.readFile(reportPath, 'utf-8')).resolves.toContain('duckduckgo_search');
+    });
+
+    it('accepts provisioning for web_search_py when duckduckgo_search is available even if ddgs is absent', async () => {
+        const user = await User.create({
+            email: `native-provision-fallback-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `nativeprovisionfallback${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_search_py',
+            description: 'Recherche web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v-fallback-ok',
+                contentHash: 'hash-fallback-ok',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                entrypoint: 'backend/python/native/web_search_py.py',
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            },
+            versions: [{
+                versionTag: 'v-fallback-ok',
+                contentHash: 'hash-fallback-ok',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_search_py.py',
+                sourceInline: null,
+                entrypoint: 'backend/python/native/web_search_py.py',
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['search'],
+            dependencies: { npm: [], python: ['duckduckgo-search==8.1.1'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const runner = new FakeProvisioningRunner({
+            exitCode: 0,
+            stdout: JSON.stringify({
+                success: true,
+                stdout: 'pip ok',
+                stderr: '',
+                target: '/opt/airdd2/backend-python/.provisioned/native-tools/web_search_py/v-fallback-ok/site-packages',
+                modules: ['duckduckgo_search']
+            })
+        });
+        const service = new NativePythonProvisioningService({
+            runner,
+            backendPythonRoot,
+            dockerExecutable: 'docker',
+            provisioningImage: 'airdd2-python-provisioning:3.12-slim',
+            provisionTimeoutMs: 5000
+        });
+
+        const result = await service.provisionToolVersion(tool.id, user.id, 'v-fallback-ok');
+
+        expect(result.status).toBe('ready');
+        expect(result.criticalModules).toEqual(['duckduckgo_search']);
+
+        const refreshed = await UserTool.findById(tool._id).lean();
+        expect(refreshed?.currentVersion.buildStatus).toBe('built');
+        expect(refreshed?.currentVersion.validationStatus).toBe('valid');
     });
 });

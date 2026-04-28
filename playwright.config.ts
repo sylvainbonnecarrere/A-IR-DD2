@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
     testDir: './tests/fonctionnels',
+    testMatch: '**/*.semi-e2e.spec.ts',
     timeout: 60_000,
     expect: {
         timeout: 10_000,

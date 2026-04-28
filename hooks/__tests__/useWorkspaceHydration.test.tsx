@@ -30,7 +30,8 @@ describe('useWorkspaceHydration', () => {
             isAuthenticated: true,
             accessToken: 'test-token',
             isLoading: false,
-            user: null,
+            sessionStatus: 'ready',
+            user: { id: 'user-1', email: 'user@example.com' },
             login: jest.fn(),
             register: jest.fn(),
             logout: jest.fn(),
@@ -177,6 +178,25 @@ describe('useWorkspaceHydration', () => {
         expect(workflowState.getCurrentWorkflowId()).toBe('workflow-1');
     });
 
+    it('waits for a stable authenticated session before calling the workspace API', async () => {
+        mockedUseAuth.mockReturnValue({
+            isAuthenticated: true,
+            accessToken: 'refreshing-token',
+            isLoading: false,
+            sessionStatus: 'restoring-session',
+            user: { id: 'user-1', email: 'user@example.com' },
+            login: jest.fn(),
+            register: jest.fn(),
+            logout: jest.fn(),
+            updateUser: jest.fn()
+        } as any);
+
+        render(<HookProbe />);
+
+        await waitFor(() => expect(latestResult?.isLoading).toBe(true));
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+
     it('remains compatible with API payloads that omit additive fields', async () => {
         (global.fetch as jest.Mock).mockResolvedValue({
             ok: true,
@@ -280,6 +300,7 @@ describe('useWorkspaceHydration', () => {
             isAuthenticated: false,
             accessToken: null,
             isLoading: false,
+            sessionStatus: 'ready',
             user: null,
             login: jest.fn(),
             register: jest.fn(),
@@ -322,7 +343,8 @@ describe('useWorkspaceHydration', () => {
             isAuthenticated: true,
             accessToken: 'auth-token',
             isLoading: false,
-            user: null,
+            sessionStatus: 'ready',
+            user: { id: 'user-auth', email: 'auth@example.com' },
             login: jest.fn(),
             register: jest.fn(),
             logout: jest.fn(),

@@ -460,12 +460,13 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
                     }
                 },
                 query: { type: 'string' },
+                normalized_query: { type: 'string' },
                 total_results: { type: 'number' }
             }
         },
         codePath: 'backend/python/native/web_search_py.py',
         codeInline: null,
-        dependencies: ['duckduckgo-search'],
+        dependencies: ['ddgs', 'duckduckgo-search'],
         healthCheck: {
             criticalPythonImports: ['duckduckgo_search']
         },

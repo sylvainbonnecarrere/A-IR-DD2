@@ -68,7 +68,8 @@ class LegacyAuthorityStartupSyncPolicy implements StartupSyncPolicy {
         let updated = 0;
 
         for (const legacyFn of legacyFunctions) {
-            const mapped = mapLegacyFunctionToUserToolFields(legacyFn);
+            const existingMirror = await userToolsCol.findOne({ _id: legacyFn._id });
+            const mapped = mapLegacyFunctionToUserToolFields(legacyFn, existingMirror);
             const createdAt = normalizeDate(legacyFn.createdAt);
             const updatedAt = normalizeDate(legacyFn.updatedAt);
 

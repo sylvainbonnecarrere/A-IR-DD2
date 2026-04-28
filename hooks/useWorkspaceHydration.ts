@@ -22,7 +22,7 @@
  * - Logout: Reset to guest mode (localStorage)
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './useAuth';
 import { GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
 import { useDesignStore } from '../stores/useDesignStore';
@@ -30,6 +30,7 @@ import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import type { AgentInstance, V2WorkflowNode, V2WorkflowEdge } from '../types';
 import { API_BASE_URL } from '../config/api.config';
+import { getWorkspaceSessionGateState } from '../utils/workspaceSessionGate';
 
 /**
  * Canvas state for visual reconstruction (ÉTAPE 1.6)
@@ -334,7 +335,7 @@ const loadWorkspaceFromLocalStorage = (): WorkspaceData => {
  * @returns Workspace data, loading state, error, and refetch function
  */
 export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
-    const { isAuthenticated, accessToken, isLoading: authLoading } = useAuth();
+    const { isAuthenticated, accessToken, isLoading: authLoading, sessionStatus, user } = useAuth();
     
     // ⭐ ÉTAPE 2.2: Access stores for reset & hydration
     const designStoreReset = useDesignStore((state) => state.resetAll);
@@ -349,7 +350,18 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [source, setSource] = useState<'api' | 'localStorage' | 'none'>('none');
-    const [previousAuthState, setPreviousAuthState] = useState<boolean | null>(null);
+    const previousStableWorkspaceIdentityRef = useRef<string | null>(null);
+    const {
+        sessionReadyForWorkspaceHydration,
+        awaitingStableAuthenticatedSession,
+        stableWorkspaceIdentity
+    } = getWorkspaceSessionGateState({
+        isAuthenticated,
+        accessToken,
+        sessionStatus,
+        userId: user?.id ?? null,
+        authLoading
+    });
 
     /**
      * Hydrate workspace based on auth state
@@ -361,21 +373,29 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
             return;
         }
 
+        if (awaitingStableAuthenticatedSession) {
+            setIsLoading(true);
+            setError(null);
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
 
-        // ⭐ ÉTAPE 2.2: Wipe stores if auth state changed (login or logout)
-        const authStateChanged = previousAuthState !== null && previousAuthState !== isAuthenticated;
-        if (authStateChanged) {
+        // ⭐ ÉTAPE 2.2: Wipe stores only when the stable workspace owner changes
+        const identityChanged = previousStableWorkspaceIdentityRef.current !== null
+            && previousStableWorkspaceIdentityRef.current !== stableWorkspaceIdentity;
+        if (identityChanged) {
             console.log('[useWorkspaceHydration] ⭐ Auth state changed - Wiping stores to prevent data leak');
             designStoreReset();
             runtimeStoreReset();
             workflowStoreReset();
         }
-        setPreviousAuthState(isAuthenticated);
+
+        previousStableWorkspaceIdentityRef.current = stableWorkspaceIdentity;
 
         try {
-            if (isAuthenticated && accessToken) {
+            if (sessionReadyForWorkspaceHydration && accessToken) {
                 // Authenticated mode: fetch from API
                 console.log('[useWorkspaceHydration] Hydrating from API...');
                 const data = await fetchWorkspaceFromAPI(accessToken);
@@ -543,7 +563,7 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
         } finally {
             setIsLoading(false);
         }
-    }, [isAuthenticated, accessToken, authLoading, previousAuthState, designStoreReset, runtimeStoreReset, workflowStoreReset, designStoreHydrate, workflowStoreHydrate, setNodeMessages]);
+    }, [accessToken, authLoading, awaitingStableAuthenticatedSession, designStoreHydrate, designStoreReset, runtimeStoreReset, sessionReadyForWorkspaceHydration, setNodeMessages, stableWorkspaceIdentity, workflowStoreHydrate, workflowStoreReset]);
 
     /**
      * Auto-hydrate on mount and auth changes

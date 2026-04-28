@@ -14,6 +14,9 @@ module.exports = {
         '^@/(.*)$': '<rootDir>/$1',
         '^(\\.{1,2}/)+config/api\\.config$': '<rootDir>/tests/mocks/api.config.ts',
     },
+    testPathIgnorePatterns: [
+        '<rootDir>/tests/fonctionnels/.*\\.spec\\.ts$',
+    ],
     collectCoverageFrom: [
         'services/**/*.ts',
         'stores/**/*.ts',

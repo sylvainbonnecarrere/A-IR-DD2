@@ -12,6 +12,7 @@ const {
     verifyRuntimeImage,
     scanRuntimeImage
 } = require('./runtime-utils.cjs');
+const { syncRuntimeBaseDigests } = require('./sync-runtime-base-digests.cjs');
 
 function parseSeverity(flags) {
     for (const flag of flags) {
@@ -34,6 +35,7 @@ async function main() {
     const dryRun = flags.has('--dry-run');
     const noCache = flags.has('--no-cache');
     const allowMissingScanner = flags.has('--allow-missing-scanner');
+    const skipDigestRefresh = flags.has('--skip-digest-refresh');
     const severities = parseSeverity(flags);
 
     const dockerState = await inspectDockerState();
@@ -58,6 +60,32 @@ async function main() {
     if (!dockerState.available) {
         const status = summarizeStatus(components);
         printOutput(useJson ? { status, docker: dockerState, scanner, images: [] } : buildTextReport('Runtime maintenance', status, components), useJson);
+        process.exit(1);
+    }
+
+    const digestSync = skipDigestRefresh
+        ? {
+            status: 'degraded',
+            summary: 'Synchronisation des digests ignorée (--skip-digest-refresh).',
+            components: [
+                {
+                    label: 'Digests Docker de base',
+                    status: 'degraded',
+                    summary: 'Synchronisation ignorée sur demande.'
+                }
+            ]
+        }
+        : await syncRuntimeBaseDigests({ dryRun, checkOnly: false });
+
+    components.push({
+        label: 'Digests Docker de base',
+        status: digestSync.status,
+        summary: digestSync.summary
+    });
+
+    if (digestSync.status === 'unhealthy') {
+        const status = summarizeStatus(components);
+        printOutput(useJson ? { status, docker: dockerState, scanner, digestSync, images: [] } : buildTextReport('Runtime maintenance', status, components), useJson);
         process.exit(1);
     }
 

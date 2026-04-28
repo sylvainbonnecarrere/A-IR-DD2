@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "jest",
+    "test:web-search-py": "cd backend && npx jest src/__tests__/user-tool-legacy-mapper.test.ts src/__tests__/user-tool-startup-sync.service.test.ts src/__tests__/native-python-provisioning.service.test.ts src/__tests__/build.service.test.ts src/__tests__/web-search-py-native.test.ts --runInBand && cd .. && npx jest tests/services/AgentLoop.test.ts tests/components/V2AgentNode.agentloop.test.tsx --runInBand",
     "test:j7:editor:semi-e2e": "playwright test tests/fonctionnels/J7.Editor.RealBrowser.semi-e2e.spec.ts",
+    "test:smoke:live": "playwright test -c playwright.live.config.ts",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:settingsmodal:report": "node scripts/run-jest-report.mjs tests/unitaires/SettingsModal.TNR.test.ts --outputDir tests/temp_rapport_tests/unitaires/settingsmodal --reportBase settingsmodal-jest"
@@ -41,6 +43,8 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.14.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.21",
     "axios-mock-adapter": "^2.1.0",

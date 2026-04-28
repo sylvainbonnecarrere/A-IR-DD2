@@ -177,6 +177,7 @@ class PythonBuildStrategy implements BuildStrategy {
 export class BuildService {
     private readonly workspaceManager = createWorkspaceManager();
     private readonly preparationPolicy = new ToolPreparationPolicyService();
+    private readonly backendPythonRoot = path.resolve(__dirname, '../../python');
 
     async prepareToolVersion(toolId: string, userId: string, versionTag?: string): Promise<BuildPreparationResult> {
         const { tool, version } = await this.loadBuildableTool(toolId, userId, versionTag);
@@ -250,7 +251,9 @@ export class BuildService {
         }
 
         if (policy.requirement === 'platform_provision') {
-            if (version.buildStatus !== 'built') {
+            await this.reconcileNativeProvisionedToolVersion(tool, version.versionTag);
+            const reconciledVersion = this.resolveToolVersion(tool, version.versionTag);
+            if (reconciledVersion.buildStatus !== 'built') {
                 throw new BuildPreparationError(policy.missingPreparationMessage ?? 'Platform provisioning is required before sandbox execution.', policy.errorCode);
             }
             return;
@@ -522,6 +525,59 @@ export class BuildService {
 
     private resolveBuildReportPath(workspace: WorkspaceProvisioningResult, toolKey: string): string {
         return path.join(workspace.runtimeRoots.buildRoot, 'tools', toolKey, 'build-report.json');
+    }
+
+    private resolveNativeProvisionReportPath(toolName: string, versionTag: string): string {
+        return path.join(
+            this.backendPythonRoot,
+            '.provisioned',
+            'native-tools',
+            sanitizeSegment(toolName),
+            sanitizeSegment(versionTag || 'current'),
+            'provision-report.json'
+        );
+    }
+
+    private async reconcileNativeProvisionedToolVersion(tool: IUserTool, versionTag: string): Promise<void> {
+        const resolvedVersion = this.resolveToolVersion(tool, versionTag);
+        if (resolvedVersion.buildStatus === 'built') {
+            return;
+        }
+
+        const reportPath = this.resolveNativeProvisionReportPath(tool.name, versionTag);
+        if (!(await pathExists(reportPath))) {
+            return;
+        }
+
+        try {
+            const rawReport = await fs.readFile(reportPath, 'utf-8');
+            const report = JSON.parse(rawReport) as {
+                status?: string;
+                toolVersionTag?: string;
+            };
+
+            if (report.status !== 'ready') {
+                return;
+            }
+
+            tool.versions = tool.versions.map((candidate) => (
+                candidate.versionTag === versionTag
+                    ? { ...candidate, buildStatus: 'built', validationStatus: 'valid' }
+                    : candidate
+            ));
+
+            if (tool.currentVersion.versionTag === versionTag) {
+                tool.currentVersion = {
+                    ...tool.currentVersion,
+                    buildStatus: 'built',
+                    validationStatus: 'valid'
+                };
+            }
+
+            await tool.save();
+        } catch {
+            return;
+        }
     }
 
     private async markToolVersionBuilt(tool: IUserTool, versionTag: string): Promise<void> {

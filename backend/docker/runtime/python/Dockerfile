@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm@sha256:31c0807da611e2e377a2e9b566ad4eb038ac5a5838cbbbe6f2262259b5dc77a0 AS python_runtime_builder
+FROM python:3.12-slim-bookworm@sha256:58525e1a8dada8e72d6f8a11a0ddff8d981fd888549108db52455d577f927f77 AS python_runtime_builder
 
 # Run-only image: keep Python runtime, remove package installation tooling.
 # Python dependencies must be prepared via the dedicated provisioning path.
@@ -19,7 +19,7 @@ RUN set -eux; \
         | awk 'sub(":$", "", $1) { print $1 }' \
         | sort -u > /tmp/python-runtime-packages.txt
 
-FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a
+FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
 
 ENV PATH=/usr/local/bin:$PATH \
     LANG=C.UTF-8

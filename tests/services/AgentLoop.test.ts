@@ -541,4 +541,86 @@ describe('AgentLoop canonical tool registry convergence', () => {
             }),
         }));
     });
+
+    it('falls back to web_search_py when the local model returns empty for an explicit web request', async () => {
+        const adapterResponses: LLMResponse[] = [
+            {
+                content: '   ',
+                finishReason: 'stop',
+                rawContent: '',
+            },
+            {
+                content: 'Voici la synthese finale.',
+                finishReason: 'stop',
+            }
+        ];
+
+        const adapter: ILLMAdapter = {
+            provider: LLMProvider.LMStudio,
+            supportsNativeToolCalling: false,
+            complete: jest.fn(async () => adapterResponses.shift() as LLMResponse)
+        };
+
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            json: async () => ({
+                success: true,
+                output: { results: [{ title: 'Meteo Paris', url: 'https://meteo.example/paris' }] },
+                durationMs: 18,
+                executionId: 'exec-web-fallback',
+                runner: 'docker_sandbox',
+                metadata: {}
+            })
+        } as any)) as typeof fetch;
+
+        const result = await runAgentLoop(
+            adapter,
+            [
+                {
+                    id: 'msg-1',
+                    sender: 'user',
+                    text: 'En consultant internet, donne moi la meteo sur Paris pour demain',
+                    timestamp: new Date('2026-04-28T12:00:00.000Z')
+                }
+            ],
+            [
+                {
+                    id: 'tool-web',
+                    legacyFunctionId: 'fn-web',
+                    name: 'web_search_py',
+                    description: 'Native web search',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            query: { type: 'string' },
+                            language: { type: 'string' }
+                        },
+                        required: ['query']
+                    },
+                    isEnabled: true,
+                    versionTag: 'v1',
+                    versionNumber: 1,
+                    workspaceId: null
+                }
+            ],
+            'system'
+        );
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        const [, requestInit] = (global.fetch as jest.Mock).mock.calls[0];
+        expect(JSON.parse(String(requestInit?.body))).toEqual(expect.objectContaining({
+            functionId: 'fn-web',
+            testArgs: {
+                query: 'En consultant internet, donne moi la meteo sur Paris pour demain',
+                language: 'fr'
+            }
+        }));
+        expect(result.finalResponse).toBe('Voici la synthese finale.');
+        expect(result.traceLog).toContain('llm.empty_response_fallback.web_search_py');
+        expect(result.toolCallLog[0]).toEqual(expect.objectContaining({
+            functionName: 'web_search_py',
+            status: 'success',
+            executionId: 'exec-web-fallback'
+        }));
+    });
 });

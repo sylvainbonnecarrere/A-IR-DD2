@@ -274,6 +274,83 @@ function buildDuplicateSuppressedRecord(input: {
     };
 }
 
+function getLatestUserMessage(messages: ChatMessage[]): ChatMessage | null {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message.sender === 'user' && typeof message.text === 'string' && message.text.trim()) {
+            return message;
+        }
+    }
+
+    return null;
+}
+
+function toolAcceptsStringArgument(fn: ToolRegistryReadModel, argumentName: string): boolean {
+    const schema = fn.inputSchema as {
+        properties?: Record<string, { type?: string | string[] }>;
+    } | null;
+    const property = schema?.properties?.[argumentName];
+
+    if (!property?.type) {
+        return true;
+    }
+
+    return Array.isArray(property.type)
+        ? property.type.includes('string')
+        : property.type === 'string';
+}
+
+function inferPromptLanguage(text: string): 'fr' | 'en' {
+    return /\b(le|la|les|des|une|demain|aujourd'hui|meteo|météo|temperature|température|cherche|consulte|internet|temps)\b/i.test(text)
+        ? 'fr'
+        : 'en';
+}
+
+function buildEmptyResponseFallbackToolCall(
+    history: ChatMessage[],
+    functions: ToolRegistryReadModel[]
+): ParsedToolCall | null {
+    if (history.some((message) => message.sender === 'tool_result')) {
+        return null;
+    }
+
+    const latestUserMessage = getLatestUserMessage(history);
+    if (!latestUserMessage) {
+        return null;
+    }
+
+    const query = latestUserMessage.text.trim();
+    const explicitWebIntent = /(internet|web|en ligne|online|search|recherche|consulte|actualité|actualite|news|météo|meteo|weather|température|temperature|forecast|prévision|prevision)/i.test(query);
+    if (!explicitWebIntent) {
+        return null;
+    }
+
+    const webSearchTool = functions.find((fn) => (
+        fn.isEnabled
+        && fn.name === 'web_search_py'
+        && toolAcceptsStringArgument(fn, 'query')
+    ));
+
+    if (!webSearchTool) {
+        return null;
+    }
+
+    const argumentsPayload: Record<string, unknown> = {
+        query,
+    };
+
+    if (toolAcceptsStringArgument(webSearchTool, 'language')) {
+        argumentsPayload.language = inferPromptLanguage(query);
+    }
+
+    return {
+        name: webSearchTool.name,
+        arguments: argumentsPayload,
+        raw: '<tool_call source="agentloop_empty_response_fallback" />',
+        confidence: 0.2,
+    };
+}
+
 /**
  * Look up a UserFunction by name from the provided list.
  * Returns null if not found or disabled — guards against prompt-injected names.
@@ -440,13 +517,22 @@ export async function runAgentLoop(
         // No tool calls → final response
         if (!response.toolCalls || response.toolCalls.length === 0) {
             if (!response.content.trim()) {
+                const fallbackToolCall = buildEmptyResponseFallbackToolCall(history, runtimeFunctions);
+                if (fallbackToolCall) {
+                    traceLog.push(`llm.empty_response_fallback.${fallbackToolCall.name}`);
+                    response.toolCalls = [fallbackToolCall];
+                    response.finishReason = 'tool_calls';
+                } else {
                 return {
                     ...buildEmptyLocalResponseError(adapter),
                     toolCallLog,
                     iterations: iteration,
                     traceLog: [...traceLog, 'llm.empty_response_without_tool_call'],
                 };
+                }
             }
+
+            if (!response.toolCalls || response.toolCalls.length === 0) {
 
             return {
                 finalResponse: response.content,
@@ -455,6 +541,7 @@ export async function runAgentLoop(
                 finishReason: response.finishReason,
                 traceLog,
             };
+            }
         }
 
         // Append assistant turn to history

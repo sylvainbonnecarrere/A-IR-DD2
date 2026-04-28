@@ -16,7 +16,8 @@ function getLegacyFunctionId(legacy: LegacyFunctionLike): mongoose.Types.ObjectI
 
 export async function syncUserToolMirrorFromLegacyFunction(legacy: LegacyFunctionLike): Promise<void> {
     const legacyId = getLegacyFunctionId(legacy);
-    const fields = mapLegacyFunctionToUserToolFields(legacy);
+    const existingTool = await UserTool.findById(legacyId).lean();
+    const fields = mapLegacyFunctionToUserToolFields(legacy, existingTool);
     const createdAt = legacy.createdAt instanceof Date ? legacy.createdAt : new Date(legacy.createdAt ?? Date.now());
     const updatedAt = legacy.updatedAt instanceof Date ? legacy.updatedAt : new Date(legacy.updatedAt ?? Date.now());
 
