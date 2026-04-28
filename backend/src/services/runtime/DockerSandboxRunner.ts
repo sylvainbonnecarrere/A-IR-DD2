@@ -187,11 +187,12 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
     }
 
     private buildDockerArgs(request: SandboxExecutionRequest, maxMemoryMb: number, containerWorkspaceDir: string): string[] {
+        const networkMode = this.resolveDockerNetworkMode(request.policySnapshot.networkMode);
         const baseArgs = [
             'run',
             '--rm',
             '--interactive',
-            '--network=none',
+            `--network=${networkMode}`,
             '--cpus=0.50',
             '--pids-limit=128',
             `--memory=${maxMemoryMb}m`,
@@ -243,6 +244,10 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
             '--eval',
             buildTypescriptWrapper()
         ];
+    }
+
+    private resolveDockerNetworkMode(networkMode: SandboxExecutionRequest['policySnapshot']['networkMode'] | undefined): 'none' | 'bridge' {
+        return networkMode === 'restricted' ? 'bridge' : 'none';
     }
 
     private buildStdinPayload(request: SandboxExecutionRequest): string {

@@ -8,6 +8,7 @@ import { UserTool } from '../models/UserTool.model';
 import sandboxRoutes from '../routes/sandbox.routes';
 import { generateAccessToken } from '../utils/jwt';
 import { BuildPreparationError, BuildService } from '../services/build.service';
+import { NativePythonProvisioningService } from '../services/nativePythonProvisioning.service';
 import { ExecutionOrchestrator } from '../services/runtime/ExecutionOrchestrator';
 
 type FixtureRuntime = 'typescript' | 'python';
@@ -325,6 +326,13 @@ describe('Sandbox routes', () => {
             role: user.role
         });
 
+        jest.spyOn(NativePythonProvisioningService.prototype, 'provisionToolVersion').mockRejectedValue(
+            new BuildPreparationError(
+                'This native tool version declares dependencies and requires platform provisioning before sandbox execution.',
+                'PLATFORM_PROVISION_REQUIRED'
+            )
+        );
+
         const response = await request(app)
             .post('/api/sandbox/run')
             .set('Authorization', `Bearer ${accessToken}`)
@@ -343,6 +351,157 @@ describe('Sandbox routes', () => {
             subsystem: 'build_preparation',
             retryable: false
         }));
+    });
+
+    it('auto-provisions a native readonly tool on demand before executing it through toolSelection', async () => {
+        const timestamp = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const user = await User.create({
+            email: `sandbox-route-${timestamp}@test.com`,
+            password: 'test-only-password-123',
+            username: `sandboxroute${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: `sandbox-route-native-autoprovision-${timestamp}`,
+            description: 'Native tool requiring on-demand provisioning',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v1',
+                contentHash: 'sandbox-native-autoprovision-hash',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            },
+            versions: [{
+                versionTag: 'v1',
+                contentHash: 'sandbox-native-autoprovision-hash',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            }],
+            inputSchema: {},
+            outputSchema: {},
+            tags: [],
+            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({
+            sub: user.id,
+            email: user.email,
+            role: user.role
+        });
+
+        const ensureBuildReadySpy = jest.spyOn(BuildService.prototype, 'ensureBuildReadyForTool')
+            .mockRejectedValueOnce(new BuildPreparationError(
+                'This native tool version declares dependencies and requires platform provisioning before sandbox execution.',
+                'PLATFORM_PROVISION_REQUIRED'
+            ))
+            .mockResolvedValueOnce();
+
+        const provisionSpy = jest.spyOn(NativePythonProvisioningService.prototype, 'provisionToolVersion').mockResolvedValue({
+            toolId: tool.id,
+            toolName: tool.name,
+            toolVersionTag: 'v1',
+            status: 'ready',
+            provisionedAt: new Date().toISOString(),
+            dependencies: ['duckduckgo-search==6.1.0'],
+            criticalModules: ['duckduckgo_search'],
+            sitePackagesPath: '/tmp/site-packages',
+            reportPath: '/tmp/provision-report.json'
+        });
+
+        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
+            report: {
+                status: 'healthy',
+                summary: 'Docker sandbox ready',
+                python: { available: true, executable: 'python', version: 'Python 3.12.0' },
+                runtime: {
+                    mode: 'docker_desktop',
+                    securityLevel: 'dev-only',
+                    executionReady: true,
+                    warning: 'Docker Desktop dev-only',
+                    docker: {
+                        available: true,
+                        rootless: false,
+                        context: 'desktop-linux',
+                        socketPath: '//./pipe/dockerDesktopLinuxEngine',
+                        warning: 'Docker Desktop dev-only',
+                        executionReady: true,
+                        images: { node: true, python: true }
+                    },
+                    firecracker: {
+                        available: false,
+                        enabled: false,
+                        kvmAvailable: false,
+                        warning: 'Firecracker unavailable'
+                    },
+                    runners: {
+                        preferred: 'docker_sandbox',
+                        available: ['docker_sandbox']
+                    }
+                },
+                capabilities: {
+                    syntaxCheck: { python: true, typescript: true },
+                    run: { python: true, typescript: true }
+                }
+            } as any,
+            runner: {
+                getRunnerId: () => 'docker_sandbox',
+                getLabel: () => 'Docker sandbox',
+                supportsRuntime: () => true,
+                getReadiness: () => ({ ready: true })
+            },
+            readiness: { ready: true }
+        });
+
+        jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
+            success: true,
+            output: { results: [{ title: 'Meteo Paris', url: 'https://meteofrance.com/previsions-meteo-france/paris/75000' }] },
+            stdout: 'route test',
+            stderr: '',
+            durationMs: 12,
+            executionId: 'exec-sandbox-autoprovision',
+            runner: 'docker_sandbox',
+            exitCode: 0,
+            metadata: { containerWorkspaceDir: '/tmp/workspace' },
+            resourceUsage: { peakMemoryMb: 24 }
+        } as any);
+
+        const response = await request(app)
+            .post('/api/sandbox/run')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                functionId: tool.id,
+                toolSelection: {
+                    toolId: tool.id,
+                    versionRef: { versionTag: 'v1' }
+                },
+                testArgs: { query: 'meteo paris demain', language: 'fr' }
+            })
+            .expect(200);
+
+        expect(response.body.success).toBe(true);
+        expect(ensureBuildReadySpy).toHaveBeenCalledTimes(2);
+        expect(provisionSpy).toHaveBeenCalledWith(tool.id, user.id, 'v1');
     });
 
     it('returns 503 when the preferred runner is not ready', async () => {

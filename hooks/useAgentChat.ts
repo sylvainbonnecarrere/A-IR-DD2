@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall } from '../types';
+import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, ToolCallRecord } from '../types';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import * as llmService from '../services/llmService';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
@@ -82,7 +82,11 @@ export const useAgentChat = ({
                         messageId: message.id,
                         hasImage: !!message.image,
                         hasFile: !!message.filename,
-                        toolCalls: message.toolCalls
+                        toolCalls: message.toolCalls,
+                        toolCallId: message.toolCallId,
+                        toolName: message.toolName,
+                        toolCallRecord: message.toolCallRecord,
+                        isError: message.isError ?? false,
                     }
                 },
                 { isAuthenticated, accessToken }
@@ -100,6 +104,45 @@ export const useAgentChat = ({
     const addAndPersistMessage = async (nodeId: string, message: ChatMessage) => {
         addNodeMessage(nodeId, message);
         await persistChatMessage(message);
+    };
+
+    const parseToolArguments = (rawArguments: string): Record<string, unknown> => {
+        try {
+            const parsed = JSON.parse(rawArguments);
+            return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+        } catch {
+            return {};
+        }
+    };
+
+    const extractToolExecutionMetadata = (toolResult: unknown): Pick<ToolCallRecord, 'executionId' | 'runner' | 'exitCode' | 'failureKind' | 'artifacts'> => {
+        if (!toolResult || typeof toolResult !== 'object') {
+            return {};
+        }
+
+        const payload = toolResult as Record<string, unknown>;
+        const executionId = typeof payload.executionId === 'string' ? payload.executionId : undefined;
+        const runner = typeof payload.runner === 'string' ? payload.runner : undefined;
+        const exitCode = typeof payload.exitCode === 'number' ? payload.exitCode : undefined;
+        const failureKind = typeof payload.failureKind === 'string' ? payload.failureKind : undefined;
+        const artifacts = Array.isArray(payload.artifacts)
+            ? payload.artifacts.filter((artifact): artifact is { path: string; kind: 'file' | 'json' | 'log' } => {
+                return !!artifact
+                    && typeof artifact === 'object'
+                    && typeof (artifact as Record<string, unknown>).path === 'string'
+                    && ((artifact as Record<string, unknown>).kind === 'file'
+                        || (artifact as Record<string, unknown>).kind === 'json'
+                        || (artifact as Record<string, unknown>).kind === 'log');
+            })
+            : undefined;
+
+        return { executionId, runner, exitCode, failureKind, artifacts };
+    };
+
+    const isToolErrorResult = (toolResult: unknown): boolean => {
+        return !!toolResult
+            && typeof toolResult === 'object'
+            && 'error' in (toolResult as Record<string, unknown>);
     };
 
     const handleSendMessage = async (userInput: string, attachedFile: File | null) => {
@@ -302,28 +345,75 @@ export const useAgentChat = ({
             // Execute tools if any
             if (toolCalls.length > 0) {
                 for (const toolCall of toolCalls) {
+                    const toolTimestamp = new Date();
+                    const parsedArguments = parseToolArguments(toolCall.arguments);
+
                     try {
                         const toolResult = await executeTool(toolCall);
+                        const toolExecutionError = isToolErrorResult(toolResult);
+                        const executionMetadata = extractToolExecutionMetadata(toolResult);
+                        const toolMessage: ChatMessage = {
+                            id: generateMessageId('tool-call'),
+                            sender: 'tool',
+                            text: `${toolCall.name}(${toolCall.arguments})${executionMetadata.executionId ? ` [${executionMetadata.executionId}]` : ''}`,
+                            toolName: toolCall.name,
+                            timestamp: toolTimestamp,
+                            isError: toolExecutionError,
+                            toolCallRecord: {
+                                id: toolCall.id,
+                                functionName: toolCall.name,
+                                arguments: parsedArguments,
+                                result: toolResult,
+                                status: toolExecutionError ? 'error' : 'success',
+                                timestamp: toolTimestamp,
+                                ...executionMetadata,
+                            },
+                        };
+                        await addAndPersistMessage(nodeId, toolMessage);
+
+                        const serializedToolResult = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
                         const toolResultMessage: ChatMessage = {
                             id: generateMessageId('tool-result'),
                             sender: 'tool_result',
-                            text: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
+                            text: executionMetadata.executionId
+                                ? `[executionId=${executionMetadata.executionId}] ${serializedToolResult}`
+                                : serializedToolResult,
                             toolCallId: toolCall.id,
                             toolName: toolCall.name,
-                            timestamp: new Date()
+                            timestamp: toolTimestamp,
+                            isError: toolExecutionError,
                         };
-                        addNodeMessage(nodeId, toolResultMessage);
+                        await addAndPersistMessage(nodeId, toolResultMessage);
                     } catch (error) {
+                        const toolErrorText = `Erreur: ${error instanceof Error ? error.message : String(error)}`;
+                        const toolMessage: ChatMessage = {
+                            id: generateMessageId('tool-call'),
+                            sender: 'tool',
+                            text: `${toolCall.name}(${toolCall.arguments})`,
+                            toolName: toolCall.name,
+                            timestamp: toolTimestamp,
+                            isError: true,
+                            toolCallRecord: {
+                                id: toolCall.id,
+                                functionName: toolCall.name,
+                                arguments: parsedArguments,
+                                result: { error: toolErrorText },
+                                status: 'error',
+                                timestamp: toolTimestamp,
+                            },
+                        };
+                        await addAndPersistMessage(nodeId, toolMessage);
+
                         const errorMessage: ChatMessage = {
                             id: generateMessageId('tool-error'),
                             sender: 'tool_result',
-                            text: `Erreur: ${error instanceof Error ? error.message : String(error)}`,
+                            text: toolErrorText,
                             toolCallId: toolCall.id,
                             toolName: toolCall.name,
                             isError: true,
-                            timestamp: new Date()
+                            timestamp: toolTimestamp,
                         };
-                        addNodeMessage(nodeId, errorMessage);
+                        await addAndPersistMessage(nodeId, errorMessage);
                     }
                 }
 

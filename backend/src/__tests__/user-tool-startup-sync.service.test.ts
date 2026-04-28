@@ -3,6 +3,7 @@ import {
     syncUserToolsFromLegacyFunctionsOnStartup,
     getRepairOnlyProtectedFields
 } from '../services/userToolStartupSync.service';
+import { mapLegacyFunctionToUserToolFields } from '../utils/userToolLegacyMapper';
 
 type LegacyFunctionDoc = {
     _id: mongoose.Types.ObjectId;
@@ -324,5 +325,73 @@ describe('userToolStartupSync service', () => {
             versionTag: '5',
             sourceMode: 'inline'
         }));
+    });
+
+    it('preserves version readiness state in legacy-authority mode when the mirrored source is unchanged', async () => {
+        process.env.USER_TOOLS_STARTUP_SYNC_PHASE = 'legacy-authority';
+
+        const legacyFunction = buildLegacyFunction({
+            _id: new mongoose.Types.ObjectId(),
+            name: 'web_search_py',
+            origin: 'native',
+            userId: null as any,
+            workflowId: null as any,
+            language: 'python',
+            codePath: 'backend/python/native/web_search_py.py',
+            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            isReadonly: true,
+            version: 'v-ready',
+            updatedAt: new Date('2026-03-31T12:00:00.000Z')
+        });
+        const baselineCurrentVersion = mapLegacyFunctionToUserToolFields(legacyFunction as any) as any;
+
+        const preexistingMirror = {
+            _id: legacyFunction._id,
+            ownerUserId: null,
+            scopeType: 'native',
+            name: 'web_search_py',
+            runtime: 'python',
+            currentVersion: {
+                versionTag: 'v-ready',
+                contentHash: baselineCurrentVersion.currentVersion.contentHash,
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v-ready',
+                contentHash: baselineCurrentVersion.currentVersion.contentHash,
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }]
+        };
+
+        const db = new FakeDb({
+            user_functions: new FakeCollection([legacyFunction]),
+            user_tools: new FakeCollection([preexistingMirror])
+        });
+
+        const summary = await syncUserToolsFromLegacyFunctionsOnStartup(db as any);
+
+        expect(summary).toEqual({
+            phase: 'legacy-authority',
+            scanned: 1,
+            created: 0,
+            updated: 1,
+            skippedExisting: 0
+        });
+
+        const preservedMirror = db.collection('user_tools').getById(legacyFunction._id);
+        expect(preservedMirror.currentVersion).toEqual(expect.objectContaining({
+            versionTag: 'v-ready',
+            buildStatus: 'built',
+            validationStatus: 'valid'
+        }));
+        expect(preservedMirror.versions).toEqual([
+            expect.objectContaining({
+                versionTag: 'v-ready',
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            })
+        ]);
     });
 });

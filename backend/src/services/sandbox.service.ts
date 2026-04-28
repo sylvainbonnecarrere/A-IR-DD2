@@ -4,6 +4,7 @@ import { UserFunction, IUserFunction } from '../models/UserFunction.model';
 import { UserTool } from '../models/UserTool.model';
 import { syncUserToolMirrorFromLegacyFunction } from './userToolMirror.service';
 import { BuildPreparationError, BuildService } from './build.service';
+import { NativePythonProvisioningService } from './nativePythonProvisioning.service';
 import { RuntimeHealthService } from './runtimeHealth.service';
 import { ExecutionOrchestrator } from './runtime/ExecutionOrchestrator';
 import type { SandboxExecutionMetadata, SandboxExecutionResourceUsage } from './runtime/execution.types';
@@ -51,6 +52,7 @@ export class SandboxService {
     private pythonExecutable: string = 'python3';
     private pythonDetected: boolean = false;
     private readonly buildService = new BuildService();
+    private readonly nativePythonProvisioningService = new NativePythonProvisioningService();
     private readonly runtimeHealthService = new RuntimeHealthService();
     private readonly executionOrchestrator = new ExecutionOrchestrator();
 
@@ -142,10 +144,28 @@ export class SandboxService {
                 await this.buildService.ensureBuildReadyForRun(functionId, userId);
             }
         } catch (error) {
-            if (error instanceof BuildPreparationError) {
+            if (
+                error instanceof BuildPreparationError
+                && error.code === 'PLATFORM_PROVISION_REQUIRED'
+                && toolSelection
+            ) {
+                await this.nativePythonProvisioningService.provisionToolVersion(
+                    toolSelection.toolId,
+                    userId,
+                    toolSelection.versionRef?.versionTag
+                );
+
+                await this.buildService.ensureBuildReadyForTool(
+                    toolSelection.toolId,
+                    userId,
+                    toolSelection.versionRef?.versionTag
+                );
+            } else if (error instanceof BuildPreparationError) {
                 throw error;
             }
-            throw error;
+            else {
+                throw error;
+            }
         }
 
         await this.ensureRuntimeReadyForRun(fn.language);

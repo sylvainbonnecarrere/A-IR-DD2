@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '../UI';
-import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon } from '../Icons';
+import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon, ErrorIcon } from '../Icons';
+import { ToolCallBlock } from '../workflow/ToolCallBlock';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useDesignStore } from '../../stores/useDesignStore';
 import { useAgentChat } from '../../hooks/useAgentChat';
@@ -161,8 +162,9 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
         if (instance.content && Array.isArray(instance.content)) {
           const backendMessages = instance.content.map((item: any, idx: number) => {
             // Transform role to sender
-            let sender: 'user' | 'agent' | 'tool' = 'agent';
+            let sender: 'user' | 'agent' | 'tool' | 'tool_result' = 'agent';
             if (item.role === 'user') sender = 'user';
+            else if (item.role === 'tool_result') sender = 'tool_result';
             else if (item.role === 'tool' || item.type === 'error') sender = 'tool';
             else sender = 'agent';
 
@@ -174,6 +176,9 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
               filename: item.metadata?.filename || undefined,
               isError: item.type === 'error',
               toolCalls: item.metadata?.toolCalls || undefined,
+              toolCallId: item.metadata?.toolCallId || undefined,
+              toolName: item.metadata?.toolName || undefined,
+              toolCallRecord: item.metadata?.toolCallRecord || undefined,
               timestamp: item.timestamp ? new Date(item.timestamp) : new Date()
             };
           });
@@ -293,9 +298,34 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const renderMessage = (message: ChatMessage) => {
     const isUser = message.sender === 'user';
     const isError = message.isError;
+    const isToolResult = message.sender === 'tool_result';
+    const isToolCall = message.sender === 'tool';
 
     return (
       <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+        {isToolCall && message.toolCallRecord && (
+          <div className="w-full mr-12">
+            <ToolCallBlock toolCall={message.toolCallRecord} defaultExpanded={false} />
+          </div>
+        )}
+
+        {isToolResult && (
+          <div className="max-w-3xl mr-12 w-full">
+            <div className="mb-2 p-2 bg-gray-800 rounded-lg border border-gray-600">
+              <div className="flex items-center mb-1">
+                <ErrorIcon className={`w-4 h-4 mr-2 ${isError ? 'text-red-400' : 'text-green-400'}`} />
+                <span className="text-xs font-semibold text-gray-300">
+                  {isError ? t('tool_error') : t('tool_result')}: {message.toolName}
+                </span>
+              </div>
+              <div className="text-xs text-gray-400 font-mono bg-gray-900 p-2 rounded break-words overflow-wrap-anywhere whitespace-pre-wrap">
+                {message.text}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isToolResult && !isToolCall && (
         <div className={`max-w-3xl px-4 py-2 rounded-lg ${isUser
           ? 'bg-indigo-600 text-white ml-12'
           : isError
@@ -366,6 +396,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
             </div>
           )}
         </div>
+        )}
       </div>
     );
   };

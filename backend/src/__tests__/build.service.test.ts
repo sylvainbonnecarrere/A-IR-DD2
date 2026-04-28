@@ -45,6 +45,16 @@ describe('BuildService', () => {
             process.env.WORKSPACE_STORAGE_PATH = originalWorkspaceStoragePath;
         }
 
+        await fs.rm(
+            path.join(
+                path.resolve(__dirname, '../../python'),
+                '.provisioned',
+                'native-tools',
+                'native_versioned_tool_report_recovery'
+            ),
+            { recursive: true, force: true }
+        );
+
         await Workspace.deleteMany({});
         await UserTool.deleteMany({});
         await UserFunction.deleteMany({});
@@ -340,6 +350,84 @@ describe('BuildService', () => {
         await expect(buildService.ensureBuildReadyForTool(tool._id.toString(), user.id, 'v3'))
             .resolves
             .toBeUndefined();
+    });
+
+    it('reconciles a native tool version from a ready provisioning report before blocking sandbox execution', async () => {
+        const { user, workflow } = await createOwnedWorkflowFixture();
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: workflow._id,
+            name: 'native_versioned_tool_report_recovery',
+            description: 'Native versioned tool recovered from provision report',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v3',
+                contentHash: 'native-v3-report',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            },
+            versions: [{
+                versionTag: 'v3',
+                contentHash: 'native-v3-report',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'not_built',
+                validationStatus: 'unknown'
+            }],
+            inputSchema: {},
+            outputSchema: {},
+            tags: [],
+            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const reportPath = path.join(
+            path.resolve(__dirname, '../../python'),
+            '.provisioned',
+            'native-tools',
+            'native_versioned_tool_report_recovery',
+            'v3',
+            'provision-report.json'
+        );
+
+        await fs.mkdir(path.dirname(reportPath), { recursive: true });
+        await fs.writeFile(reportPath, JSON.stringify({
+            toolId: tool._id.toString(),
+            toolName: tool.name,
+            toolVersionTag: 'v3',
+            status: 'ready',
+            provisionedAt: new Date().toISOString(),
+            dependencies: ['duckduckgo-search==6.1.0'],
+            criticalModules: ['duckduckgo_search'],
+            sitePackagesPath: '/opt/airdd2/backend-python/.provisioned/native-tools/native_versioned_tool_report_recovery/v3/site-packages',
+            reportPath
+        }, null, 2), 'utf-8');
+
+        await expect(buildService.ensureBuildReadyForTool(tool._id.toString(), user.id, 'v3'))
+            .resolves
+            .toBeUndefined();
+
+        const refreshed = await UserTool.findById(tool._id).lean();
+        expect(refreshed?.currentVersion.buildStatus).toBe('built');
+        expect(refreshed?.currentVersion.validationStatus).toBe('valid');
+        expect(refreshed?.versions[0]?.buildStatus).toBe('built');
     });
 
     it('requires platform provisioning for dependency-bearing native legacy functions until the mirrored tool is marked built', async () => {

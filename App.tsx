@@ -38,6 +38,9 @@ import { PersistenceService } from './services/persistenceService';
 import apiClient from './utils/apiClient';
 // ⭐ FIX QA: Import useJournalQueue for image persistence
 import { useJournalQueue } from './hooks/useJournalQueue';
+import { getWorkspaceSessionGateState } from './utils/workspaceSessionGate';
+
+const RESUME_WORKSPACE_REFRESH_THROTTLE_MS = 5000;
 
 interface EditingImageInfo {
   nodeId: string;
@@ -194,11 +197,47 @@ const mapChatMessages = (messages: any[] = []): ChatMessage[] => messages.map((m
   toolCalls: message.toolCalls
 }));
 
+const buildMessageIdentity = (message: ChatMessage) => [
+  message.id || '',
+  message.sender,
+  message.text,
+  message.timestamp instanceof Date ? message.timestamp.toISOString() : new Date(message.timestamp || Date.now()).toISOString(),
+  message.toolCallId || '',
+  message.toolName || ''
+].join('::');
+
+const mergeRuntimeMessages = (persistedMessages: ChatMessage[], currentMessages: ChatMessage[]): ChatMessage[] => {
+  if (persistedMessages.length === 0) {
+    return currentMessages;
+  }
+
+  if (currentMessages.length === 0) {
+    return persistedMessages;
+  }
+
+  const merged = [...persistedMessages];
+  const seen = new Set(persistedMessages.map(buildMessageIdentity));
+
+  for (const message of currentMessages) {
+    const identity = buildMessageIdentity(message);
+    if (!seen.has(identity)) {
+      seen.add(identity);
+      merged.push(message);
+    }
+  }
+
+  return merged.sort((left, right) => {
+    const leftTime = left.timestamp instanceof Date ? left.timestamp.getTime() : new Date(left.timestamp).getTime();
+    const rightTime = right.timestamp instanceof Date ? right.timestamp.getTime() : new Date(right.timestamp).getTime();
+    return leftTime - rightTime;
+  });
+};
+
 /**
  * Inner App component that uses Auth context
  * Must be wrapped by AuthProvider to access useAuth()
  */
-function AppContent() {
+export function AppContent() {
   const { isAuthenticated, accessToken, runtimeLLMConfigs, localLLMProfiles, user, logout, refreshRuntimeConfigState, sessionStatus, error: authError } = useAuth();
   const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
   const [isAgentModalOpen, setAgentModalOpen] = useState(false);
@@ -232,6 +271,12 @@ function AppContent() {
   const { t } = useLocalization();
 
   const llmConfigs = runtimeLLMConfigs;
+  const { sessionReadyForWorkspaceHydration } = getWorkspaceSessionGateState({
+    isAuthenticated,
+    accessToken,
+    sessionStatus,
+    userId: user?.id ?? null
+  });
 
   // ⭐ ÉTAPE 5: Hydration state for authenticated users
   const [isHydrating, setIsHydrating] = useState(false);
@@ -246,6 +291,10 @@ function AppContent() {
   const [switchWorkflowName, setSwitchWorkflowName] = useState('');
   const [switchProgress, setSwitchProgress] = useState(0);
   const isSwitchingRef = useRef(false);  // Guard anti-re-entrance (pas de useState pour éviter re-render)
+  const isHydratingRef = useRef(false);
+  const workspaceReloadPromiseRef = useRef<Promise<void> | null>(null);
+  const hydratedWorkspaceIdentityRef = useRef<string | null>(null);
+  const lastResumeWorkspaceRefreshAtRef = useRef(0);
 
   // ⭐ UX Polish: Hyperspace animation state for guests
   // Shows when: first load as guest OR after logout
@@ -296,7 +345,29 @@ function AppContent() {
   // ⭐ FIX QA: Journal queue for persisting generated images
   const { enqueueEntry: enqueueJournalEntry } = useJournalQueue();
 
-  const applyWorkspaceSnapshot = useCallback((workspace: WorkspaceSnapshot) => {
+  useEffect(() => {
+    isHydratingRef.current = isHydrating;
+  }, [isHydrating]);
+
+  const clearTransientUiState = useCallback(() => {
+    setWorkflowNodes([]);
+    setAgents([]);
+    setImagePanelOpen(false);
+    setCurrentImageNodeId(null);
+    setCurrentImageAgent(null);
+    setCurrentImageAgentInstance(null);
+    setImageModificationPanelOpen(false);
+    setEditingImageInfo(null);
+    setVideoPanelOpen(false);
+    setCurrentVideoNodeId(null);
+    setCurrentVideoAgent(null);
+    setCurrentVideoAgentInstance(null);
+    setMapsPanelOpen(false);
+    setCurrentMapsNodeId(null);
+    setMapsPreloadedResults(null);
+  }, []);
+
+  const applyWorkspaceSnapshot = useCallback((workspace: WorkspaceSnapshot, options?: { preserveRuntimeMessages?: boolean }) => {
     const snapshotWorkflowId = workspace.workflow?.id;
     const fallbackTimestamp = new Date().toISOString();
     const rawPrototypes = Array.isArray(workspace.agentPrototypes) ? workspace.agentPrototypes : [];
@@ -343,13 +414,18 @@ function AppContent() {
     setAgents(hydratedPrototypes);
     setWorkflowNodes(legacyNodes);
 
-    const { setNodeMessages } = useRuntimeStore.getState();
+    const { setNodeMessages, getNodeMessages } = useRuntimeStore.getState();
     for (const instance of rawInstances) {
       const instanceId = instance.id || instance._id;
       if (!instanceId) {
         continue;
       }
-      setNodeMessages(`node-${instanceId}`, mapChatMessages(instance.chatMessages));
+      const nodeId = `node-${instanceId}`;
+      const persistedMessages = mapChatMessages(instance.chatMessages);
+      const nextMessages = options?.preserveRuntimeMessages
+        ? mergeRuntimeMessages(persistedMessages, getNodeMessages(nodeId))
+        : persistedMessages;
+      setNodeMessages(nodeId, nextMessages);
     }
 
     console.log('[App] Workspace snapshot applied:', {
@@ -360,65 +436,156 @@ function AppContent() {
     });
   }, [hydrateFromServer, hydrateWorkflowFromServer]);
 
+  const reloadWorkspaceSnapshot = useCallback(async ({
+    reason,
+    mode,
+  }: {
+    reason: string;
+    mode: 'initial-auth' | 'resume';
+  }) => {
+    if (!isAuthenticated || !sessionReadyForWorkspaceHydration || !user?.id) {
+      return;
+    }
+
+    if (workspaceReloadPromiseRef.current) {
+      return workspaceReloadPromiseRef.current;
+    }
+
+    const reloadPromise = (async () => {
+      const showOverlay = mode === 'initial-auth';
+
+      if (showOverlay) {
+        setHydrationMessage('Chargement de votre workspace...');
+        setIsHydrating(true);
+        setHydrationProgress(10);
+      }
+
+      try {
+        if (mode === 'initial-auth') {
+          useDesignStore.getState().resetAll();
+          useRuntimeStore.getState().resetForWorkflowSwitch();
+
+          const allGuestKeys = getAllGuestKeys();
+          allGuestKeys.forEach(key => localStorage.removeItem(key));
+
+          sessionStorage.clear();
+          sessionStorage.setItem('_arc_hydrating', 'true');
+          setHydrationProgress(30);
+        }
+
+        if (showOverlay) {
+          setHydrationProgress(60);
+        }
+
+        const { data: workspace } = await apiClient.get('/api/user/workspace');
+
+        if (showOverlay) {
+          setHydrationProgress(80);
+        }
+
+        applyWorkspaceSnapshot(workspace, {
+          preserveRuntimeMessages: mode === 'resume'
+        });
+        hydratedWorkspaceIdentityRef.current = `auth:${user.id}`;
+
+        console.log('[App] Workspace reload complete:', {
+          reason,
+          mode,
+          userId: user.id,
+        });
+      } catch (err) {
+        console.error('[App] Workspace hydration error:', err);
+        if (showOverlay) {
+          setHydrationMessage(authError || 'Restauration de session impossible. Reconnexion requise.');
+        }
+      } finally {
+        if (showOverlay) {
+          setTimeout(() => {
+            setIsHydrating(false);
+            setHydrationProgress(0);
+            sessionStorage.removeItem('_arc_hydrating');
+          }, 500);
+        }
+      }
+    })().finally(() => {
+      workspaceReloadPromiseRef.current = null;
+    });
+
+    workspaceReloadPromiseRef.current = reloadPromise;
+    return reloadPromise;
+  }, [applyWorkspaceSnapshot, authError, isAuthenticated, sessionReadyForWorkspaceHydration, user?.id]);
+
   /**
    * ⭐ ÉTAPE 5: Hydration for authenticated users
    * Fetches workspace data from GET /api/user/workspace and populates stores
    */
   useEffect(() => {
-    const hydrateWorkspace = async () => {
-      if (!isAuthenticated || !accessToken || sessionStatus === 'loading' || sessionStatus === 'degraded') {
-        setIsHydrating(false);
-        sessionStorage.removeItem('_arc_hydrating');
+    if (!isAuthenticated) {
+      hydratedWorkspaceIdentityRef.current = null;
+      setIsHydrating(false);
+      sessionStorage.removeItem('_arc_hydrating');
+      return;
+    }
+
+    if (!sessionReadyForWorkspaceHydration || !user?.id) {
+      return;
+    }
+
+    const currentIdentity = `auth:${user.id}`;
+    if (hydratedWorkspaceIdentityRef.current === currentIdentity) {
+      return;
+    }
+
+    void reloadWorkspaceSnapshot({
+      reason: 'initial-auth-hydration',
+      mode: 'initial-auth',
+    });
+  }, [isAuthenticated, reloadWorkspaceSnapshot, sessionReadyForWorkspaceHydration, user?.id]);
+
+  useEffect(() => {
+    if (!sessionReadyForWorkspaceHydration || !user?.id) {
+      return;
+    }
+
+    const requestResumeWorkspaceRefresh = (reason: string) => {
+      const now = Date.now();
+
+      if (isHydratingRef.current || isSwitchingRef.current) {
         return;
       }
 
-      setHydrationMessage(
-        sessionStatus === 'restoring-session'
-          ? 'Restauration de votre session et du workspace...'
-          : 'Chargement de votre workspace...'
-      );
-      setIsHydrating(true);
-      setHydrationProgress(10);
+      if (now - lastResumeWorkspaceRefreshAtRef.current < RESUME_WORKSPACE_REFRESH_THROTTLE_MS) {
+        return;
+      }
 
-      try {
-        // CRITICAL: Hard reset on authenticated user login to prevent stale data
-        useDesignStore.getState().resetAll();
-        useRuntimeStore.getState().resetForWorkflowSwitch();
-        
-        // ⭐ SECURITY FIX: Wipe sélectif — préserver auth_data_v1 (JWT token)
-        // localStorage.clear() détruisait le token JWT juste après le login,
-        // causant des 401 sur toutes les requêtes suivantes via apiClient.
-        const allGuestKeys = getAllGuestKeys();
-        allGuestKeys.forEach(key => localStorage.removeItem(key));
-        
-        sessionStorage.clear();
-        sessionStorage.setItem('_arc_hydrating', 'true');
-        
-        setHydrationProgress(30);
+      lastResumeWorkspaceRefreshAtRef.current = now;
+      void reloadWorkspaceSnapshot({
+        reason,
+        mode: 'resume',
+      });
+    };
 
-        // Single authoritative snapshot from API
-        setHydrationProgress(60);
-
-        const { data: workspace } = await apiClient.get('/api/user/workspace');
-        setHydrationProgress(80);
-        applyWorkspaceSnapshot(workspace);
-
-      } catch (err) {
-        console.error('[App] Workspace hydration error:', err);
-        setHydrationMessage(authError || 'Restauration de session impossible. Reconnexion requise.');
-      } finally {
-        // Small delay to show 100% before hiding
-        setTimeout(() => {
-          setIsHydrating(false);
-          setHydrationProgress(0);
-          // ⭐ J4: Signal fin d'hydratation — débloque BosWorkflowManagementPage
-          sessionStorage.removeItem('_arc_hydrating');
-        }, 500);
+    const handleFocus = () => requestResumeWorkspaceRefresh('window-focus');
+    const handleOnline = () => requestResumeWorkspaceRefresh('network-online');
+    const handlePageShow = () => requestResumeWorkspaceRefresh('page-show');
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestResumeWorkspaceRefresh('visibility-visible');
       }
     };
 
-    hydrateWorkspace();
-  }, [isAuthenticated, accessToken, applyWorkspaceSnapshot, authError, sessionStatus]);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('pageshow', handlePageShow);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('pageshow', handlePageShow);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [reloadWorkspaceSnapshot, sessionReadyForWorkspaceHydration, user?.id]);
 
   /**
    * ⭐ V2 SWITCH WORKFLOW: Fonction unifiée de réhydratation complète
@@ -477,7 +644,9 @@ function AppContent() {
       }
       // ═══ ÉTAPE 3 : APPLIQUER LE SNAPSHOT (progress 70%) ═══
       setSwitchProgress(70);
-      applyWorkspaceSnapshot(data.reloadedData);
+      applyWorkspaceSnapshot(data.reloadedData, {
+        preserveRuntimeMessages: false
+      });
 
       // ═══ ÉTAPE 4 : REFRESH LISTE WORKFLOWS (progress 95%) ═══
       setSwitchProgress(95);
@@ -539,27 +708,19 @@ function AppContent() {
    * ONLY handles non-llmConfigs cleanup
    * llmConfigs hydration is now handled by the unified effect below
    */
+  const previousStableUserIdRef = useRef<string | null | undefined>(undefined);
+
   useEffect(() => {
-    // ⭐ CRITICAL J4.4: Clear React state on auth change to prevent data leaks
-    setWorkflowNodes([]);
-    setAgents([]);
-    
-    // ⭐ FIX J4.5: Close all open panels on auth change to prevent stale nodeId references
-    setImagePanelOpen(false);
-    setCurrentImageNodeId(null);
-    setCurrentImageAgent(null);
-    setCurrentImageAgentInstance(null);
-    setImageModificationPanelOpen(false);
-    setEditingImageInfo(null);
-    setVideoPanelOpen(false);
-    setCurrentVideoNodeId(null);
-    setCurrentVideoAgent(null);
-    setCurrentVideoAgentInstance(null);
-    setMapsPanelOpen(false);
-    setCurrentMapsNodeId(null);
-    setMapsPreloadedResults(null);
-    
-  }, [isAuthenticated, accessToken]);
+    const stableUserId = isAuthenticated ? (user?.id ?? null) : null;
+    const previousStableUserId = previousStableUserIdRef.current;
+    previousStableUserIdRef.current = stableUserId;
+
+    if (previousStableUserId === undefined || previousStableUserId === stableUserId) {
+      return;
+    }
+
+    clearTransientUiState();
+  }, [clearTransientUiState, isAuthenticated, user?.id]);
 
   useEffect(() => {
     updateLLMConfigs(llmConfigs);
@@ -574,7 +735,7 @@ function AppContent() {
   // ⭐ V4 FIX: Wait for hydration to complete before loading workflows
   // The hydration useEffect sets _arc_hydrating flag; we wait until it's cleared.
   useEffect(() => {
-    if (!isAuthenticated || !accessToken) return;
+    if (!sessionReadyForWorkspaceHydration) return;
 
     const loadWorkflows = async (retryCount = 0) => {
       try {
@@ -601,7 +762,7 @@ function AppContent() {
     }, 200);
 
     return () => clearTimeout(timer);
-  }, [isAuthenticated, accessToken]);
+  }, [sessionReadyForWorkspaceHydration, user?.id]);
 
   // ⭐ V2: L'ancien watcher PHASE 2 (resetAll sur currentWorkflowId change) est supprimé.
   // switchToWorkflow() orchestre désormais le reset + rechargement complet.

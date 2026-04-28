@@ -91,7 +91,7 @@ describe('DockerSandboxRunner', () => {
             'run',
             '--rm',
             '--interactive',
-            '--network=none',
+            '--network=bridge',
             '--cap-drop=ALL',
             '--security-opt',
             'no-new-privileges',
@@ -114,6 +114,23 @@ describe('DockerSandboxRunner', () => {
             args: { value: 'hello' },
             code: 'function run(args) { return { echoed: args.value }; }'
         });
+    });
+
+    it('keeps network disabled for tools whose policy forbids outbound access', async () => {
+        const processRunner = new FakeDockerProcessRunner();
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+
+        await runner.execute(createRequest({
+            policySnapshot: {
+                networkMode: 'none',
+                timeoutSeconds: 12,
+                maxMemoryMb: 192,
+                secretAliases: []
+            }
+        }));
+
+        const call = processRunner.calls[0];
+        expect(call.args).toEqual(expect.arrayContaining(['--network=none']));
     });
 
     it('classifies invalid non-JSON sandbox output as a runner contract error', async () => {

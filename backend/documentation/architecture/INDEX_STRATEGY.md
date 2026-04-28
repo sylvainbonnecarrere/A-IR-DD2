@@ -287,7 +287,7 @@ db.agent_prototypes.createIndex({
 ### Vérifier Index Existants
 
 ```bash
-docker exec -it a-ir-dd2-mongodb mongosh -u admin -p SecurePassword123! --authenticationDatabase admin
+docker exec -it a-ir-dd2-mongodb mongosh -u "$MONGO_USER" -p "$MONGO_PASSWORD" --authenticationDatabase admin
 
 use a-ir-dd2-dev
 

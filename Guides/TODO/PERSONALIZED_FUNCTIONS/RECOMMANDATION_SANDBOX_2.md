@@ -731,7 +731,7 @@ Collections recommandées :
 - branches
 - permissions
 
-### `tools`
+### `user_tools`
 - metadata
 - runtime
 - versions
@@ -739,7 +739,7 @@ Collections recommandées :
 - policy
 - hash
 
-### `tool_runs`
+### `user_tool_runs`
 - tool version
 - user
 - inputs
@@ -754,7 +754,7 @@ Collections recommandées :
 ### `nodes`
 - config node
 
-### `agents`
+### `agent_instances_`
 - config agent
 - tools autorisés
 - mémoire / policy
@@ -844,7 +844,7 @@ C’est pratique au début, mais c’est moins fiable, moins sûr et moins scala
 ## Solution optimale locale, gratuite, compatible avec votre stack en 2026
 
 ### Architecture recommandée
-- **1 workspace persistant par utilisateur ou projet**
+- **1 ou plusieurs workflows persistants par utilisateur**
 - **0 conteneur permanent si inactif**
 - **1 sandbox éphémère par exécution**
 - **1 sandbox de build distincte si nécessaire**
@@ -854,10 +854,9 @@ C’est pratique au début, mais c’est moins fiable, moins sûr et moins scala
 ### Technologie recommandée
 #### Par ordre de pragmatisme
 1. **Docker rootless durci**
-2. **gVisor** pour tools non fiables
-3. **Firecracker microVM** pour la cible sécurité optimale
+2.  **Firecracker microVM** pour la cible sécurité optimale
 
-### Mon choix si je devais architecturer aujourd’hui
+### Mon choix final
 - **MVP** : Docker rootless durci
 - **Cible sérieuse 2026** : Firecracker pour exécutions user-generated
 
@@ -923,7 +922,8 @@ Les tools IA ne sont pas juste du code arbitraire ; ils deviennent des capacité
 - schémas d’entrée/sortie
 - idempotence si possible
 - permissions déclaratives
-- observation complète
+- observation complète, gestion des erreurs et stacktraces
+- implémentation de hooks preToolUse et PostToolUse pour monitoring et gestion des erreurs
 - garde-fous humains sur actions critiques
 - limitation des effets de bord
 
