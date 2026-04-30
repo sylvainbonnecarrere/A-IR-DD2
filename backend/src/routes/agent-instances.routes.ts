@@ -11,6 +11,7 @@ import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 import { transformAgentInstanceForFrontend } from '../utils/transforms';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
+import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
 
 // Type pour les paramètres de route hérités (via mergeParams)
 interface WorkflowParams {
@@ -45,6 +46,7 @@ const createAgentInstanceSchema = z.object({
     historyConfig: z.object({}).passthrough().optional(),
     tools: z.array(z.object({}).passthrough()).optional(),
     toolSelections: z.array(toolSelectionSchema).optional(),
+    webSearchParams: WebSearchParamsSchema.optional(),
     outputConfig: z.object({}).passthrough().optional(),
     robotId: CanonicalRobotIdEnum,
     
@@ -161,11 +163,15 @@ router.post('/',
                 }
             }
 
+            const normalizedInstanceData = instanceData.webSearchParams !== undefined
+                ? { ...instanceData, webSearchParams: parseWebSearchParams(instanceData.webSearchParams) }
+                : instanceData;
+
             const instance = new AgentInstance({
                 workflowId,
                 userId: user.id,
                 prototypeId: prototypeId || undefined,
-                ...instanceData
+                ...normalizedInstanceData
             });
 
             await instance.save();
@@ -265,6 +271,9 @@ router.post('/from-prototype', requireAuth,
         // 4. PHASE 2 - HistoryConfig: Use frontend config if provided
         const finalHistoryConfig = configuration_json?.historyConfig || prototype.historyConfig || {};
         const finalOutputConfig = configuration_json?.outputConfig || prototype.outputConfig || {};
+            const finalWebSearchParams = configuration_json?.webSearchParams !== undefined
+                ? parseWebSearchParams(configuration_json.webSearchParams)
+                : (prototype as any).webSearchParams || undefined;
         // ⭐ LOCAL LLM: Resolve localLLMProfileId (frontend takes precedence over prototype)
         const finalLocalLLMProfileId = configuration_json?.localLLMProfileId ?? (prototype as any).localLLMProfileId ?? null;
         
@@ -313,6 +322,7 @@ router.post('/from-prototype', requireAuth,
             capabilities: finalCapabilities,  // ⭐ PHASE 2: From frontend configuration_json
             historyConfig: finalHistoryConfig,  // ⭐ PHASE 2: From frontend configuration_json
             outputConfig: finalOutputConfig,  // ⭐ PHASE 2: From frontend configuration_json
+            webSearchParams: finalWebSearchParams,
             tools: finalTools,
             toolSelections: finalToolSelections,
             robotId: finalRobotId,
@@ -396,6 +406,17 @@ router.post('/from-prototype', requireAuth,
             }));
         }
         
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({
+                error: 'Validation échouée',
+                details: error.errors.map((e) => ({
+                    field: e.path.join('.'),
+                    message: e.message,
+                    code: e.code,
+                })),
+            });
+        }
+
         res.status(500).json(errorResponse);
     }
 });
@@ -497,6 +518,9 @@ router.put('/:id',
                 if (configuration_json.outputConfig !== undefined) {
                     instance.outputConfig = configuration_json.outputConfig;
                 }
+                if (configuration_json.webSearchParams !== undefined) {
+                    instance.webSearchParams = parseWebSearchParams(configuration_json.webSearchParams);
+                }
                 // J6: Function Inheritance
                 if (configuration_json.functionInheritance !== undefined) {
                     instance.functionInheritance = configuration_json.functionInheritance;
@@ -537,7 +561,11 @@ router.put('/:id',
             }
             
             // Apply other updates (name, position, etc.) using Object.assign
-            Object.assign(instance, otherUpdates);
+            const normalizedOtherUpdates = otherUpdates.webSearchParams !== undefined
+                ? { ...otherUpdates, webSearchParams: parseWebSearchParams(otherUpdates.webSearchParams) }
+                : otherUpdates;
+
+            Object.assign(instance, normalizedOtherUpdates);
             await instance.save();
 
             // ⭐ CRITICAL: Log saved state for debugging (BREAK #2 fix)
@@ -570,6 +598,16 @@ router.put('/:id',
             res.json(instance);
         } catch (error) {
             console.error('[AgentInstances] PUT error:', error);
+            if (error instanceof z.ZodError) {
+                return res.status(400).json({
+                    error: 'Validation échouée',
+                    details: error.errors.map((e) => ({
+                        field: e.path.join('.'),
+                        message: e.message,
+                        code: e.code,
+                    })),
+                });
+            }
             res.status(500).json({ error: 'Erreur mise à jour instance' });
         }
     }

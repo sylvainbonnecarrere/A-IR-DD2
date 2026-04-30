@@ -77,7 +77,7 @@ function buildNativeImportProbeCommand(toolName: string, modules: string[]): str
         'AIRDD2_NATIVE_ROOT=/opt/airdd2/backend-python',
         '--entrypoint',
         'python3',
-        'airdd2-runtime-python:3.12-slim',
+        'airdd2-runtime-python:3.12-ubuntu-noble',
         '-c',
         buildNativeImportProbeScript(toolName, modules)
     ].join(' ');
@@ -104,8 +104,8 @@ describe('RuntimeHealthService', () => {
             'python3 --version': { exitCode: 0, stderr: 'Python 3.12.6\n' },
             'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"27.5.1"\n' },
             'docker info --format {{json .Rootless}}': { exitCode: 0, stdout: 'true\n' },
-            'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            'docker image inspect airdd2-runtime-node:22.22.2-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
+            'docker image inspect airdd2-runtime-python:3.12-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
             ...nativeImportProbeResponses()
         });
 
@@ -150,8 +150,8 @@ describe('RuntimeHealthService', () => {
             'python --version': { exitCode: 0, stdout: 'Python 3.11.9\n' },
             'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"27.5.1"\n' },
             'docker info --format {{json .Rootless}}': { exitCode: 0, stdout: 'false\n' },
-            'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 1, stderr: 'No such image' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 1, stderr: 'No such image' }
+            'docker image inspect airdd2-runtime-node:22.22.2-ubuntu-noble --format {{json .Id}}': { exitCode: 1, stderr: 'No such image' },
+            'docker image inspect airdd2-runtime-python:3.12-ubuntu-noble --format {{json .Id}}': { exitCode: 1, stderr: 'No such image' }
         });
 
         const service = new RuntimeHealthService({
@@ -183,8 +183,8 @@ describe('RuntimeHealthService', () => {
             'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"29.1.3"\n' },
             'docker info --format {{json .Rootless}}': { exitCode: 1, stderr: 'template failure' },
             'docker info --format {{json .SecurityOptions}}': { exitCode: 0, stdout: '["name=seccomp","name=rootless"]\n' },
-            'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            'docker image inspect airdd2-runtime-node:22.22.2-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
+            'docker image inspect airdd2-runtime-python:3.12-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
             ...nativeImportProbeResponses()
         });
 
@@ -212,8 +212,8 @@ describe('RuntimeHealthService', () => {
             'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"29.1.3"\n' },
             'docker info --format {{json .SecurityOptions}}': { exitCode: 0, stdout: '["name=seccomp","name=cgroupns"]\n' },
             'docker info --format {{json .Rootless}}': { exitCode: 1, stderr: 'template failure' },
-            'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            'docker image inspect airdd2-runtime-node:22.22.2-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
+            'docker image inspect airdd2-runtime-python:3.12-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
             ...nativeImportProbeResponses()
         });
 
@@ -242,8 +242,8 @@ describe('RuntimeHealthService', () => {
             'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"29.1.3"\n' },
             'docker context show': { exitCode: 0, stdout: 'desktop-linux\n' },
             'docker context inspect desktop-linux --format {{.Endpoints.docker.Host}}': { exitCode: 0, stdout: 'npipe:////./pipe/dockerDesktopLinuxEngine\n' },
-            'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            'docker image inspect airdd2-runtime-node:22.22.2-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
+            'docker image inspect airdd2-runtime-python:3.12-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
             ...nativeImportProbeResponses()
         });
 
@@ -278,8 +278,8 @@ describe('RuntimeHealthService', () => {
             'python3 --version': { exitCode: 0, stdout: 'Python 3.12.6\n' },
             'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"29.1.3"\n' },
             'docker info --format {{json .Rootless}}': { exitCode: 0, stdout: 'true\n' },
-            'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            'docker image inspect airdd2-runtime-node:22.22.2-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
+            'docker image inspect airdd2-runtime-python:3.12-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
             ...nativeImportProbeResponses()
         });
 
@@ -312,8 +312,8 @@ describe('RuntimeHealthService', () => {
             'python3 --version': { exitCode: 0, stdout: 'Python 3.12.6\n' },
             'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"29.1.3"\n' },
             'docker info --format {{json .Rootless}}': { exitCode: 0, stdout: 'true\n' },
-            'docker image inspect airdd2-runtime-node:bookworm-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-slim --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+            'docker image inspect airdd2-runtime-node:22.22.2-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
+            'docker image inspect airdd2-runtime-python:3.12-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
             ...nativeImportProbeResponses({
                 [buildNativeImportProbeCommand('web_search_py', ['duckduckgo_search'])]: {
                     exitCode: 2,
@@ -346,7 +346,7 @@ describe('RuntimeHealthService', () => {
             toolName: 'web_search_py',
             status: 'degraded',
             imports: [expect.objectContaining({
-                dependency: 'duckduckgo-search',
+                dependency: 'ddgs',
                 module: 'duckduckgo_search',
                 available: false
             })]

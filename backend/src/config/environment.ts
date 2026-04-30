@@ -57,9 +57,9 @@ export const config = {
             .map(value => value.trim())
             .filter(Boolean),
         dockerExecutable: process.env.RUNTIME_DOCKER_EXECUTABLE || 'docker',
-        nodeRuntimeImage: process.env.RUNTIME_NODE_IMAGE || 'airdd2-runtime-node:bookworm-slim',
-        pythonRuntimeImage: process.env.RUNTIME_PYTHON_IMAGE || 'airdd2-runtime-python:3.12-slim',
-        pythonProvisioningImage: process.env.RUNTIME_PYTHON_PROVISIONING_IMAGE || 'airdd2-python-provisioning:3.12-slim',
+        nodeRuntimeImage: process.env.RUNTIME_NODE_IMAGE || 'airdd2-runtime-node:22.22.2-ubuntu-noble',
+        pythonRuntimeImage: process.env.RUNTIME_PYTHON_IMAGE || 'airdd2-runtime-python:3.12-ubuntu-noble',
+        pythonProvisioningImage: process.env.RUNTIME_PYTHON_PROVISIONING_IMAGE || 'airdd2-python-provisioning:3.12-ubuntu-noble',
         probeTimeoutMs: parseInt(process.env.RUNTIME_PROBE_TIMEOUT_MS || '8000', 10),
         provisionTimeoutMs: parseInt(process.env.RUNTIME_PROVISION_TIMEOUT_MS || '120000', 10),
         nativePythonProvisionOnStartup: (process.env.RUNTIME_NATIVE_PYTHON_PROVISION_ON_STARTUP || 'true').toLowerCase() !== 'false'

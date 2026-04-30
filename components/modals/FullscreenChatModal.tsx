@@ -4,14 +4,18 @@ import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon, Error
 import { ToolCallBlock } from '../workflow/ToolCallBlock';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useDesignStore } from '../../stores/useDesignStore';
+import { useFunctionStore } from '../../stores/useFunctionStore';
 import { useAgentChat } from '../../hooks/useAgentChat';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../contexts/AuthContext';
 import { ChatMessage, Agent, LLMCapability, WorkflowNode, AgentInstance } from '../../types';
 import { ConfirmationModal } from './ConfirmationModal';
+import { WebSearchParamsModal } from './WebSearchParamsModal';
 import { ImageGenerationPanel } from '../panels/ImageGenerationPanel';
 import { VideoGenerationConfigPanel } from '../panels/VideoGenerationConfigPanel';
 import { MapsGroundingConfigPanel } from '../panels/MapsGroundingConfigPanel';
+import { deriveSelectedToolIds } from '../../services/toolSelectionResolver';
+import { persistInstanceWebSearchParams } from '../../services/webSearchParamsConfigService';
 
 // Minimize icon
 const MinimizeIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -80,7 +84,8 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     isNodeExecuting
   } = useRuntimeStore();
 
-  const { agents, agentInstances } = useDesignStore();
+  const { agents, agentInstances, updateInstanceConfig } = useDesignStore();
+  const functions = useFunctionStore((state) => state.functions);
   const { t } = useLocalization();
   const { isAuthenticated, accessToken } = useAuth();
 
@@ -91,12 +96,33 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const [webFetchEnabled, setWebFetchEnabled] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [activeSidePanel, setActiveSidePanel] = useState<'none' | 'image' | 'video' | 'maps'>('none');
+  const [isWebSearchParamsModalOpen, setIsWebSearchParamsModalOpen] = useState(false);
+  const [isSavingWebSearchParams, setIsSavingWebSearchParams] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const inferredInstanceId = React.useMemo(() => {
+    if (fullscreenChatAgentInstance?.id) {
+      return fullscreenChatAgentInstance.id;
+    }
+
+    if (!fullscreenChatNodeId) {
+      return null;
+    }
+
+    const exactMatch = agentInstances.find(inst => inst.id === fullscreenChatNodeId);
+    if (exactMatch) {
+      return exactMatch.id;
+    }
+
+    const normalizedNodeId = fullscreenChatNodeId.replace(/^node-/, '');
+    const prefixedMatch = agentInstances.find(inst => inst.id === normalizedNodeId);
+    return prefixedMatch?.id ?? null;
+  }, [fullscreenChatAgentInstance, fullscreenChatNodeId, agentInstances]);
+
   // Read agentInstance from store (triggers re-render when config is updated)
-  const agentInstance = fullscreenChatAgentInstance?.id
-    ? agentInstances.find(inst => inst.id === fullscreenChatAgentInstance.id)
+  const agentInstance = inferredInstanceId
+    ? agentInstances.find(inst => inst.id === inferredInstanceId) || fullscreenChatAgentInstance
     : fullscreenChatAgentInstance;
   
   const messages = fullscreenChatNodeId ? getNodeMessages(fullscreenChatNodeId) : [];
@@ -115,10 +141,58 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     ? {
         ...agentPrototype,
         ...(agentInstance.configuration_json as any),
+        webSearchParams: agentInstance.configuration_json?.webSearchParams || agentPrototype.webSearchParams,
         historyConfig: agentInstance.configuration_json?.historyConfig 
           || agentPrototype.historyConfig
       }
     : agentPrototype || null;
+
+  const selectedToolIds = React.useMemo(() => {
+    if (!agent) {
+      return [] as string[];
+    }
+
+    const inheritance = agentInstance?.configuration_json?.functionInheritance;
+    if (inheritance?.inheritFromPrototype === false) {
+      return deriveSelectedToolIds(inheritance.overrideToolSelections, inheritance.overrideFunctionIds);
+    }
+
+    return deriveSelectedToolIds(
+      agentInstance?.configuration_json?.toolSelections || (agentInstance as any)?.toolSelections || agent.toolSelections,
+      agent.functionIds
+    );
+  }, [agent, agentInstance]);
+
+  const hasWebSearchPyTool = React.useMemo(() => {
+    const selectedIdSet = new Set(selectedToolIds);
+    return functions.some((fn) => fn.isEnabled && fn.name === 'web_search_py' && (selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false)));
+  }, [functions, selectedToolIds]);
+
+  const handleSaveWebSearchParams = async (webSearchParams: NonNullable<Agent['webSearchParams']>) => {
+    if (!agentInstance?.id || !agentInstance.configuration_json) {
+      return;
+    }
+
+    setIsSavingWebSearchParams(true);
+
+    try {
+      const updatedConfig = {
+        ...agentInstance.configuration_json,
+        webSearchParams,
+      };
+
+      await persistInstanceWebSearchParams(
+        { ...agentInstance, configuration_json: updatedConfig },
+        webSearchParams,
+        accessToken
+      );
+
+      updateInstanceConfig(agentInstance.id, updatedConfig);
+      setIsWebSearchParamsModalOpen(false);
+    } finally {
+      setIsSavingWebSearchParams(false);
+    }
+  };
   
   const instanceId = agentInstance?.id;
 
@@ -568,6 +642,20 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   </Button>
                 )}
 
+                {hasWebSearchPyTool && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-9 rounded-lg border border-sky-300/35 bg-[linear-gradient(135deg,rgba(10,37,64,0.96),rgba(17,94,145,0.88)_52%,rgba(148,210,255,0.2))] px-3 text-sky-50 hover:border-sky-200/60 hover:bg-[linear-gradient(135deg,rgba(12,48,79,0.98),rgba(14,116,144,0.92)_56%,rgba(186,230,253,0.28))] hover:text-white hover:shadow-[0_0_18px_rgba(125,211,252,0.35)] transition-all duration-200 text-sm font-medium"
+                    onClick={() => setIsWebSearchParamsModalOpen(true)}
+                    disabled={isLoading}
+                    title="Paramètres Web Search de l'agent"
+                  >
+                    <WebSearchIcon width={16} height={16} className="mr-1" />
+                    Web Search
+                  </Button>
+                )}
+
                 {/* Image generation/modification button */}
                 {(agent?.capabilities?.includes(LLMCapability.ImageGeneration) || agent?.capabilities?.includes(LLMCapability.ImageModification)) && (
                   <Button
@@ -725,6 +813,15 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
           )}
         </div>
       </div>
+
+      <WebSearchParamsModal
+        isOpen={isWebSearchParamsModalOpen}
+        agentName={agentName}
+        initialParams={agentInstance?.configuration_json?.webSearchParams || agent?.webSearchParams}
+        isSaving={isSavingWebSearchParams}
+        onClose={() => setIsWebSearchParamsModalOpen(false)}
+        onSave={handleSaveWebSearchParams}
+      />
 
       {/* Modal de confirmation de suppression */}
       <ConfirmationModal

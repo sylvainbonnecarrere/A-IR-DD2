@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252 AS node_runtime_builder
+FROM ubuntu:noble-20260410@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b AS node_runtime_builder
 
 # Run-only image: keep Node runtime, remove package installation tooling.
 # Dependency installation belongs to a separate preparation workflow.
@@ -41,7 +41,7 @@ RUN set -eux; \
         | sort -u > /tmp/node-runtime-packages.txt; \
     /opt/node-runtime/bin/node --version
 
-FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
+FROM ubuntu:noble-20260410@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b
 
 ENV NODE_ENV=production \
     HOME=/home/sandbox

@@ -16,6 +16,9 @@ import {
     validateAgentInstanceContent,
     createChatContent,
     createErrorContent,
+    WebSearchParamsSchema,
+    parseWebSearchParams,
+    DEFAULT_WEB_SEARCH_MAX_CONTEXT_TOKENS,
     // Workflow schemas
     WorkflowCreateSchema,
     WorkflowSaveSchema,
@@ -113,6 +116,153 @@ describe('Agent Schemas (ÉTAPE 1.6)', () => {
             const result = validateAgentCreate(agentWithoutPosition);
             expect(result.position).toEqual({ x: 0, y: 0 });
         });
+
+        it('should normalize optional webSearchParams when provided', () => {
+            const validAgent = {
+                name: 'Test Agent',
+                role: 'Assistant',
+                systemPrompt: 'You are a helpful assistant.',
+                llmProvider: 'Mistral',
+                llmModel: 'mistral-large',
+                robotId: 'AR_001',
+                webSearchParams: {
+                    nb_request_transformation: 1,
+                    request_list: true,
+                    max_uses: 5,
+                    cross_lingual_search: false,
+                    web_engine_search: true,
+                    web_engine: 'duckduckgo.com',
+                    web_engine_nb_result_select: 3,
+                    dig_snippet: false,
+                    allowed_domains: [' example.com ', 'example.com'],
+                    query_transformation: 'prompt',
+                    reranking_prompt: 'rerank',
+                    relevance_threshold: 7,
+                    rerank_strategy: 'Fast'
+                }
+            };
+
+            const result = AgentCreateSchema.safeParse(validAgent);
+            expect(result.success).toBe(true);
+            if (result.success) {
+                expect(result.data.webSearchParams).toEqual(expect.objectContaining({
+                    request_list: false,
+                    allowed_domains: ['example.com']
+                }));
+            }
+        });
+    });
+});
+
+describe('WebSearchParams Schema', () => {
+    it('should normalize valid params with defaults and domain cleanup', () => {
+        const result = parseWebSearchParams({
+            nb_request_transformation: 1,
+            request_list: true,
+            max_uses: 5,
+            cross_lingual_search: false,
+            web_engine_search: true,
+            web_engine: 'duckduckgo.com',
+            web_engine_nb_result_select: 3,
+            dig_snippet: false,
+            allowed_domains: [' example.com ', 'example.com', 'docs.openai.com '],
+            query_transformation: 'prompt transformation',
+            reranking_prompt: 'prompt reranking',
+            relevance_threshold: 7,
+            rerank_strategy: 'Fast',
+        });
+
+        expect(result.request_list).toBe(false);
+        expect(result.allowed_domains).toEqual(['example.com', 'docs.openai.com']);
+        expect(result.max_context_tokens).toBeUndefined();
+    });
+
+    it('should accept optional max_context_tokens when above lower bound', () => {
+        const result = WebSearchParamsSchema.safeParse({
+            nb_request_transformation: 2,
+            request_list: true,
+            max_uses: 5,
+            cross_lingual_search: true,
+            web_engine_search: true,
+            web_engine: 'google.com',
+            web_engine_nb_result_select: 4,
+            dig_snippet: true,
+            allowed_domains: [],
+            query_transformation: 'prompt transformation',
+            reranking_prompt: 'prompt reranking',
+            relevance_threshold: 8,
+            rerank_strategy: 'Deep',
+            max_context_tokens: DEFAULT_WEB_SEARCH_MAX_CONTEXT_TOKENS,
+        });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect(result.data.nb_request_transformation).toBe(1);
+            expect(result.data.request_list).toBe(false);
+            expect(result.data.max_context_tokens).toBe(DEFAULT_WEB_SEARCH_MAX_CONTEXT_TOKENS);
+        }
+    });
+
+    it('should reject dig_snippet when web engine search is disabled', () => {
+        const result = WebSearchParamsSchema.safeParse({
+            nb_request_transformation: 1,
+            request_list: false,
+            max_uses: 5,
+            cross_lingual_search: false,
+            web_engine_search: false,
+            web_engine: 'duckduckgo.com',
+            web_engine_nb_result_select: 3,
+            dig_snippet: true,
+            allowed_domains: [],
+            query_transformation: 'prompt transformation',
+            reranking_prompt: 'prompt reranking',
+            relevance_threshold: 7,
+            rerank_strategy: 'Fast',
+        });
+
+        expect(result.success).toBe(false);
+    });
+
+    it('should ignore legacy multi-query values and force single-query mode', () => {
+        const result = parseWebSearchParams({
+            nb_request_transformation: 99,
+            request_list: true,
+            max_uses: 5,
+            cross_lingual_search: true,
+            web_engine_search: true,
+            web_engine: 'qwant.com',
+            web_engine_nb_result_select: 3,
+            dig_snippet: false,
+            allowed_domains: [],
+            query_transformation: 'prompt transformation',
+            reranking_prompt: 'prompt reranking',
+            relevance_threshold: 7,
+            rerank_strategy: 'Fast',
+        });
+
+        expect(result.nb_request_transformation).toBe(1);
+        expect(result.request_list).toBe(false);
+    });
+
+    it('should reject too small max_context_tokens', () => {
+        const result = WebSearchParamsSchema.safeParse({
+            nb_request_transformation: 1,
+            request_list: false,
+            max_uses: 5,
+            cross_lingual_search: false,
+            web_engine_search: true,
+            web_engine: 'duckduckgo.com',
+            web_engine_nb_result_select: 3,
+            dig_snippet: false,
+            allowed_domains: [],
+            query_transformation: 'prompt transformation',
+            reranking_prompt: 'prompt reranking',
+            relevance_threshold: 7,
+            rerank_strategy: 'Fast',
+            max_context_tokens: 128,
+        });
+
+        expect(result.success).toBe(false);
     });
 });
 

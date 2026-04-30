@@ -79,6 +79,20 @@ export {
 } from './agent-instance.schema';
 
 // ============================================
+// WEB SEARCH PARAMS SCHEMA
+// ============================================
+export {
+    WebSearchParamsSchema,
+    WEB_SEARCH_ENGINE_VALUES,
+    WEB_SEARCH_RERANK_STRATEGY_VALUES,
+    DEFAULT_WEB_SEARCH_MAX_CONTEXT_TOKENS,
+    defaultWebSearchQueryTransformationPrompt,
+    defaultWebSearchRerankingPrompt,
+    parseWebSearchParams,
+    type WebSearchParams,
+} from './web-search-params.schema';
+
+// ============================================
 // WORKFLOW SCHEMAS
 // ============================================
 export {

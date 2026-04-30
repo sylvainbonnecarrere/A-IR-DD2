@@ -55,6 +55,7 @@ export interface SandboxExecutionRequest {
     runtime: UserToolRunRuntime;
     launchContext: UserToolRunLaunchContext;
     args: Record<string, unknown>;
+    privateContext?: Record<string, unknown>;
     policySnapshot: IUserToolRunPolicySnapshot;
     workspace: WorkspaceProvisioningResult | null;
     sourceCode?: string;

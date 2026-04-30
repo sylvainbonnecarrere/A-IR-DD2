@@ -127,14 +127,14 @@ describe('userToolLegacyMapper', () => {
             networkMode: 'restricted',
             writablePaths: [],
             secretAliases: [],
-            timeoutSeconds: 60,
+            timeoutSeconds: 180,
             maxMemoryMb: 256
         });
         expect(executionMetadata.policySnapshot).toEqual({
             networkMode: 'restricted',
             writablePaths: [],
             secretAliases: [],
-            timeoutSeconds: 60,
+            timeoutSeconds: 180,
             maxMemoryMb: 256
         });
     });

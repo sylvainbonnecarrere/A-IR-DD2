@@ -81,6 +81,7 @@ export function transformAgentInstanceForFrontend(instance: any) {
             toolSelections: Array.isArray(toolSelections) ? toolSelections : [],
             historyConfig: historyConfig || {},
             outputConfig: outputConfig || {},
+            ...(remaining.webSearchParams !== undefined && { webSearchParams: remaining.webSearchParams }),
             position: position || { x: 0, y: 0 },
             functionInheritance: functionInheritance || { inheritFromPrototype: true, overrideFunctionIds: [], overrideToolSelections: [] },
             // ⭐ LOCAL LLM: Include localLLMProfileId for correct endpoint resolution after reload

@@ -301,9 +301,177 @@ function toolAcceptsStringArgument(fn: ToolRegistryReadModel, argumentName: stri
 }
 
 function inferPromptLanguage(text: string): 'fr' | 'en' {
-    return /\b(le|la|les|des|une|demain|aujourd'hui|meteo|météo|temperature|température|cherche|consulte|internet|temps)\b/i.test(text)
+    return /\b(le|la|les|des|une|un|du|de|demain|aujourd'hui|aujourd’hui|meteo|météo|temperature|température|cherche|consulte|internet|temps|quel|quelle|quels|quelles|films?|fran[cç]ais|voir|aller|moment|salle|affiche|actuellement)\b/i.test(text)
         ? 'fr'
         : 'en';
+}
+
+function toPlainObject(value: unknown): Record<string, unknown> | null {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : null;
+}
+
+function toObjectArray(value: unknown): Record<string, unknown>[] {
+    return Array.isArray(value)
+        ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
+        : [];
+}
+
+function classifyWebSearchLogicalFailure(result: unknown): ToolExecutionError | null {
+    const payload = toPlainObject(result);
+    const errorPayload = toPlainObject(payload?.error);
+    const message = typeof errorPayload?.message === 'string'
+        ? errorPayload.message
+        : typeof payload?.error === 'string'
+            ? payload.error
+            : null;
+
+    if (!message) {
+        return null;
+    }
+
+    const step = typeof errorPayload?.step === 'string' ? errorPayload.step : undefined;
+    const isQueryTransformationFailure = message.includes('QUERY_TRANSFORMATION_FAILED');
+    const isDeterministicTemplateFailure = /lmstudio api error:\s*400|error rendering prompt with jinja template|no user query found in messages/i.test(message);
+    const retryable = /timeout hidden llm|endpoint hidden llm injoignable|503|tempor/i.test(message) && !isDeterministicTemplateFailure;
+
+    return new ToolExecutionError(message, {
+        code: isQueryTransformationFailure ? 'QUERY_TRANSFORMATION_FAILED' : 'WEB_SEARCH_TOOL_ERROR',
+        subsystem: 'tool_logic',
+        retryable,
+        deterministic: isDeterministicTemplateFailure,
+        failureKind: step,
+        rawError: result,
+    });
+}
+
+function buildBlockingWebSearchFailureResponse(record: ToolCallRecord): AgentLoopResult {
+    const payload = toPlainObject(record.result);
+    const errorMessage = typeof payload?.error === 'string'
+        ? payload.error
+        : typeof toPlainObject(payload?.error)?.message === 'string'
+            ? String(toPlainObject(payload?.error)?.message)
+            : 'web_search_py a échoué avant l’exécution de la recherche.';
+
+    return {
+        finalResponse: `[Erreur outil] ${errorMessage}`,
+        toolCallLog: [record],
+        iterations: 1,
+        finishReason: 'error',
+        traceLog: ['tool.web_search_py.blocking_failure'],
+    };
+}
+
+function toSingleLine(value: string, maxLength = 220): string {
+    const collapsed = value.replace(/\s+/g, ' ').trim();
+    if (collapsed.length <= maxLength) {
+        return collapsed;
+    }
+
+    return `${collapsed.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+}
+
+function buildWebSearchEmptyResponseFallback(
+    record: ToolCallRecord,
+    history: ChatMessage[]
+): string | null {
+    const result = toPlainObject(record.result);
+    if (!result) {
+        return null;
+    }
+
+    const latestUserMessage = getLatestUserMessage(history);
+    const query = asNonEmptyString(result.query) ?? latestUserMessage?.text.trim() ?? 'votre demande';
+    const normalizedQuery = asNonEmptyString(result.normalized_query);
+    const totalResults = typeof result.total_results === 'number'
+        ? result.total_results
+        : toObjectArray(result.results).length;
+    const trace = toPlainObject(result.trace);
+    const plannedQueries = toObjectArray(trace?.queries);
+    const completedQueries = plannedQueries.filter((item) => item.status === 'completed').length;
+    const results = toObjectArray(result.results);
+    const primaryResult = results[0] ?? toObjectArray(trace?.selected_sources)[0] ?? null;
+    const primaryTitle = asNonEmptyString(primaryResult?.title);
+    const primaryUrl = asNonEmptyString(primaryResult?.url);
+    const primarySnippet = asNonEmptyString(primaryResult?.snippet);
+    const language = inferPromptLanguage(latestUserMessage?.text ?? query);
+
+    if (language === 'fr') {
+        const lines = [
+            `J'ai bien exécuté la recherche web pour "${query}".`,
+            normalizedQuery && normalizedQuery !== query ? `Requête normalisée: ${normalizedQuery}.` : null,
+            plannedQueries.length > 0
+                ? `${plannedQueries.length} requête(s) candidate(s) préparée(s)${completedQueries > 0 ? `, ${completedQueries} terminée(s)` : ''}.`
+                : null,
+            `${totalResults} résultat(s) retenu(s).`,
+            primaryTitle || primaryUrl
+                ? `Source principale: ${primaryTitle ?? 'source web'}${primaryUrl ? ` (${primaryUrl})` : ''}.`
+                : null,
+            primarySnippet ? `Extrait: ${toSingleLine(primarySnippet)}.` : null,
+            `Le modèle local n'a pas produit de synthèse après l'outil, j'affiche donc le résultat vérifiable directement.`,
+        ].filter((line): line is string => Boolean(line));
+
+        return lines.join('\n');
+    }
+
+    const lines = [
+        `I executed the web search for "${query}" successfully.`,
+        normalizedQuery && normalizedQuery !== query ? `Normalized query: ${normalizedQuery}.` : null,
+        plannedQueries.length > 0
+            ? `${plannedQueries.length} candidate query(ies) prepared${completedQueries > 0 ? `, ${completedQueries} completed` : ''}.`
+            : null,
+        `${totalResults} result(s) selected.`,
+        primaryTitle || primaryUrl
+            ? `Primary source: ${primaryTitle ?? 'web source'}${primaryUrl ? ` (${primaryUrl})` : ''}.`
+            : null,
+        primarySnippet ? `Snippet: ${toSingleLine(primarySnippet)}.` : null,
+        `The local model did not produce a post-tool summary, so I am showing the verified result directly.`,
+    ].filter((line): line is string => Boolean(line));
+
+    return lines.join('\n');
+}
+
+function buildPostToolEmptyResponseFallback(
+    history: ChatMessage[],
+    toolCallLog: ToolCallRecord[]
+): { response: string; traceKey: string } | null {
+    const latestSuccessfulRecord = [...toolCallLog].reverse().find((record) => record.status === 'success');
+    if (!latestSuccessfulRecord) {
+        return null;
+    }
+
+    if (latestSuccessfulRecord.functionName === 'web_search_py') {
+        const response = buildWebSearchEmptyResponseFallback(latestSuccessfulRecord, history);
+        if (response) {
+            return {
+                response,
+                traceKey: `llm.empty_response_after_tool_result_fallback.${latestSuccessfulRecord.functionName}`,
+            };
+        }
+    }
+
+    const latestUserMessage = getLatestUserMessage(history);
+    const language = inferPromptLanguage(latestUserMessage?.text ?? latestSuccessfulRecord.functionName);
+    const fallbackText = typeof latestSuccessfulRecord.result === 'string'
+        ? toSingleLine(latestSuccessfulRecord.result, 280)
+        : toSingleLine(JSON.stringify(latestSuccessfulRecord.result), 280);
+
+    return {
+        response: language === 'fr'
+            ? `L'outil ${latestSuccessfulRecord.functionName} s'est exécuté correctement, mais le modèle local n'a pas produit de synthèse. Résultat direct: ${fallbackText}`
+            : `The ${latestSuccessfulRecord.functionName} tool completed successfully, but the local model did not produce a summary. Direct result: ${fallbackText}`,
+        traceKey: `llm.empty_response_after_tool_result_fallback.${latestSuccessfulRecord.functionName}`,
+    };
 }
 
 function buildEmptyResponseFallbackToolCall(
@@ -321,7 +489,9 @@ function buildEmptyResponseFallbackToolCall(
 
     const query = latestUserMessage.text.trim();
     const explicitWebIntent = /(internet|web|en ligne|online|search|recherche|consulte|actualité|actualite|news|météo|meteo|weather|température|temperature|forecast|prévision|prevision)/i.test(query);
-    if (!explicitWebIntent) {
+    const implicitWeatherIntent = /(quel\s+temps|temps\s+fera|fera(?:[-'\s])?t(?:[-'\s])?il|fera(?:[-'\s])?t(?:[-'\s])?elle|pleuvra|pluie|averses?|orage|orages|neigera|neige|ensoleill[eé]|temp[eé]ratures?\s+max|temp[eé]ratures?\s+min)/i.test(query);
+    const implicitCurrentInfoIntent = /(en\s+ce\s+moment|actuellement|en\s+salle|a(?:\s+l['’])?affiche|sort(?:ent|ie|ies)|quels?\s+films?|films?\s+fran[cç]ais|cin[eé]ma|cin[eé]mas|aller\s+voir|s[eé]ances?|programme)/i.test(query);
+    if (!explicitWebIntent && !implicitWeatherIntent && !implicitCurrentInfoIntent) {
         return null;
     }
 
@@ -367,7 +537,8 @@ function findFunction(name: string, functions: ToolRegistryReadModel[]): ToolReg
 async function executeFunction(
     fn: ToolRegistryReadModel,
     args: Record<string, unknown>,
-    authToken?: string
+    authToken?: string,
+    privateContext?: Record<string, unknown>
 ): Promise<{
     result: unknown;
     durationMs: number;
@@ -393,7 +564,8 @@ async function executeFunction(
                     workspaceId: fn.workspaceId ?? null,
                 },
             } satisfies ToolSelection,
-            testArgs: args
+            testArgs: args,
+            ...(privateContext ? { privateContext } : {})
         }),
     });
 
@@ -449,6 +621,15 @@ export interface AgentLoopOptions {
     language?: 'fr' | 'en';
     /** Progress callback for UI updates. */
     onEvent?: (event: AgentLoopEvent) => void;
+    /** Hidden execution context injected for a specific tool call. */
+    prepareToolExecution?: (input: {
+        fn: ToolRegistryReadModel;
+        toolCall: ParsedToolCall;
+        iteration: number;
+    }) => {
+        args?: Record<string, unknown>;
+        privateContext?: Record<string, unknown>;
+    };
 }
 
 /**
@@ -467,7 +648,7 @@ export async function runAgentLoop(
     systemPrompt: string,
     options: AgentLoopOptions = {}
 ): Promise<AgentLoopResult> {
-    const { authToken, onEvent } = options;
+    const { authToken, onEvent, prepareToolExecution } = options;
     const toolCallLog: ToolCallRecord[] = [];
     const traceLog: string[] = [];
     let history: ChatMessage[] = [...messages];
@@ -517,6 +698,17 @@ export async function runAgentLoop(
         // No tool calls → final response
         if (!response.toolCalls || response.toolCalls.length === 0) {
             if (!response.content.trim()) {
+                const postToolFallback = buildPostToolEmptyResponseFallback(history, toolCallLog);
+                if (postToolFallback) {
+                    return {
+                        finalResponse: postToolFallback.response,
+                        toolCallLog,
+                        iterations: iteration,
+                        finishReason: 'stop',
+                        traceLog: [...traceLog, postToolFallback.traceKey],
+                    };
+                }
+
                 const fallbackToolCall = buildEmptyResponseFallbackToolCall(history, runtimeFunctions);
                 if (fallbackToolCall) {
                     traceLog.push(`llm.empty_response_fallback.${fallbackToolCall.name}`);
@@ -557,6 +749,7 @@ export async function runAgentLoop(
 
         // Execute tool calls
         const executedThisIteration = new Map<string, ToolCallRecord>();
+        const iterationRecords: ToolCallRecord[] = [];
         let duplicateDeterministicSuppressions = 0;
         let executedSandboxCalls = 0;
 
@@ -602,8 +795,28 @@ export async function runAgentLoop(
                     });
                     duplicateDeterministicSuppressions += 1;
                 } else {
+                const preparedExecution = prepareToolExecution?.({
+                    fn,
+                    toolCall: tc,
+                    iteration,
+                });
+                const executionArgs = preparedExecution?.args ?? tc.arguments;
+
                 try {
-                    const { result, durationMs, executionId, runner, exitCode, failureKind, artifacts } = await executeFunction(fn, tc.arguments, authToken);
+                    const { result, durationMs, executionId, runner, exitCode, failureKind, artifacts } = await executeFunction(
+                        fn,
+                        executionArgs,
+                        authToken,
+                        preparedExecution?.privateContext
+                    );
+
+                    const logicalToolError = fn.name === 'web_search_py'
+                        ? classifyWebSearchLogicalFailure(result)
+                        : null;
+                    if (logicalToolError) {
+                        throw logicalToolError;
+                    }
+
                     record = {
                         id: generateId(),
                         toolId: fn.id,
@@ -650,6 +863,7 @@ export async function runAgentLoop(
             }
 
             toolCallLog.push(record);
+            iterationRecords.push(record);
             onEvent?.({ type: 'tool_call_done', iteration, toolCall: tc, toolResult: record.result });
 
             // Append tool_result message to history so the LLM can see the output
@@ -665,6 +879,21 @@ export async function runAgentLoop(
                     timestamp: record.timestamp,
                 } as ChatMessage,
             ];
+        }
+
+        const blockingWebSearchFailure = iterationRecords.find((record) => (
+            record.functionName === 'web_search_py'
+            && record.status === 'error'
+            && record.errorCode === 'QUERY_TRANSFORMATION_FAILED'
+        ));
+
+        if (blockingWebSearchFailure) {
+            return {
+                ...buildBlockingWebSearchFailureResponse(blockingWebSearchFailure),
+                toolCallLog,
+                iterations: iteration,
+                traceLog: [...traceLog, 'tool.web_search_py.blocking_failure'],
+            };
         }
 
         if (executedSandboxCalls === 0 && duplicateDeterministicSuppressions > 0) {

@@ -26,6 +26,7 @@ export interface ExecutionOrchestratorRequest {
     fn: IUserFunction;
     userId: string;
     args: Record<string, unknown>;
+    privateContext?: Record<string, unknown>;
     launchContext: UserToolRunLaunchContext;
     agentInstanceId?: string;
 }
@@ -207,6 +208,7 @@ export class ExecutionOrchestrator {
             runtime: input.executionMetadataRuntime,
             launchContext: input.launchContext,
             args: input.args,
+            privateContext: input.privateContext,
             policySnapshot: input.executionMetadataPolicy,
             workspace,
             sourceCode,

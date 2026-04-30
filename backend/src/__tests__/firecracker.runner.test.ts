@@ -21,8 +21,8 @@ function createReport(firecrackerAvailable: boolean): RuntimeHealthReport {
                 executionReady: true,
             },
             images: {
-                node: { available: true, status: 'healthy', image: 'airdd2-runtime-node:bookworm-slim' },
-                python: { available: true, status: 'healthy', image: 'airdd2-runtime-python:3.12-slim' },
+                node: { available: true, status: 'healthy', image: 'airdd2-runtime-node:22.22.2-ubuntu-noble' },
+                python: { available: true, status: 'healthy', image: 'airdd2-runtime-python:3.12-ubuntu-noble' },
             },
             runners: {
                 preferred: firecrackerAvailable ? 'firecracker' : 'docker_sandbox',

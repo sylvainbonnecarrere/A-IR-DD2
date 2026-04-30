@@ -219,7 +219,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
             baseArgs.push('--mount', `type=bind,src=${this.backendPythonRoot},dst=${CONTAINER_NATIVE_ROOT},readonly`);
             return [
                 ...baseArgs,
-                'airdd2-runtime-python:3.12-slim',
+                'airdd2-runtime-python:3.12-ubuntu-noble',
                 'python3',
                 '-c',
                 buildPythonNativeWrapper(CONTAINER_NATIVE_ROOT)
@@ -229,7 +229,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         if (request.mode === 'python-custom') {
             return [
                 ...baseArgs,
-                'airdd2-runtime-python:3.12-slim',
+                'airdd2-runtime-python:3.12-ubuntu-noble',
                 'python3',
                 '-c',
                 buildPythonCustomWrapper()
@@ -238,7 +238,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
 
         return [
             ...baseArgs,
-            'airdd2-runtime-node:bookworm-slim',
+            'airdd2-runtime-node:22.22.2-ubuntu-noble',
             'node',
             '--input-type=commonjs',
             '--eval',
@@ -255,7 +255,8 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
             return JSON.stringify({
                 functionName: request.function.name,
                 toolVersionTag: request.toolVersionTag,
-                args: request.args
+                args: request.args,
+                privateContext: request.privateContext ?? {}
             });
         }
 

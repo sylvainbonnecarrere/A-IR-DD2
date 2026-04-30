@@ -140,6 +140,9 @@ print(json.dumps({"result": result, "seenQueries": seen_queries}, ensure_ascii=F
             'build_search_plan',
             'execute_search',
             'project_results',
+            'fetch_pages',
+            'rerank_sources',
+            'build_context_block',
         ]);
         expect(payload.result.trace.errors).toEqual([]);
         expect(payload.result.trace.consulted_sources[0]?.url).toContain('meteofrance.com');
@@ -390,6 +393,96 @@ print(json.dumps(result, ensure_ascii=False))
         expect(result.trace.selected_sources[0]?.url).toBe('https://platform.openai.com/docs/api-reference/responses');
     });
 
+    it('improves generic current-facts query shaping and avoids off-target foreign sources when a France source exists', async () => {
+        const workspaceRoot = resolveWorkspaceRoot();
+        const pythonExecutable = resolvePythonExecutable(workspaceRoot);
+        const pythonRoot = path.join(workspaceRoot, 'backend', 'python');
+
+        const pythonSnippet = `
+import json
+import sys
+
+sys.path.insert(0, ${JSON.stringify(pythonRoot)})
+
+import native.web_search_py as web_search_py
+from core.function_context import FunctionContext
+
+seen_queries = []
+
+class FakeDDGS:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def text(self, query=None, keywords=None, region=None, safesearch=None, max_results=None, **kwargs):
+        seen_queries.append(query or keywords)
+        return [
+            {
+                "title": "请问法语疑问形容词quel的具体用法？ - 知乎",
+                "href": "https://www.zhihu.com/question/282245518",
+                "body": "Question générale en chinois sur quel."
+            },
+            {
+                "title": "Les chiffres-clés du sport en France",
+                "href": "https://www.sports.gouv.fr/les-chiffres-cles-du-sport-en-france-2026",
+                "body": "Le football reste le sport le plus pratiqué en France selon les dernières statistiques 2026."
+            }
+        ]
+
+web_search_py.DDGS = FakeDDGS
+web_search_py._DEPS_OK = True
+web_search_py._SEARCH_BACKENDS = ("duckduckgo",)
+
+result = web_search_py.run(
+    FunctionContext(workspace_dir='.', function_name='web_search_py'),
+    {
+        "query": "Quel sport est le plus pratiqué en France en 2026 d'après les derniers articles sur internet ?",
+        "num_results": 5,
+        "language": "fr",
+        "safe_search": True,
+    },
+)
+
+print(json.dumps({"result": result, "seen_queries": seen_queries}, ensure_ascii=False))
+        `;
+
+        const { stdout, stderr } = await execFileAsync(
+            pythonExecutable,
+            ['-c', pythonSnippet],
+            {
+                cwd: workspaceRoot,
+                timeout: 30000,
+                env: {
+                    ...process.env,
+                    PYTHONIOENCODING: 'utf-8'
+                }
+            }
+        );
+
+        expect(stderr).toBe('');
+
+        const payload = JSON.parse(stdout.trim()) as {
+            result: {
+                normalized_query: string;
+                verified_fragments: Array<{ url: string; critical_fragment: string }>;
+                reranked_sources: Array<{ url: string; relevance_score: number }>;
+                llm_context_block: { content: string };
+            };
+            seen_queries: string[];
+        };
+
+        expect(payload.result.normalized_query).toBe('sport plus pratiqué france 2026');
+        expect(payload.seen_queries).toEqual(expect.arrayContaining([
+            'sport plus pratiqué france 2026 statistiques',
+            'site:.fr sport plus pratiqué france 2026',
+        ]));
+        expect(payload.result.reranked_sources[0]?.url).toContain('sports.gouv.fr');
+        expect(payload.result.verified_fragments[0]?.url).toContain('sports.gouv.fr');
+        expect(payload.result.llm_context_block.content).toContain('football reste le sport le plus pratiqué');
+    });
+
     it('returns a structured error with trace when a search step fails', async () => {
         const workspaceRoot = resolveWorkspaceRoot();
         const pythonExecutable = resolvePythonExecutable(workspaceRoot);
@@ -478,6 +571,237 @@ print(json.dumps(result, ensure_ascii=False))
             status: 'failed',
             details: {
                 error: result.trace.errors[0],
+            },
+        });
+    });
+
+    it('skips page fetching when dig_snippet is false and keeps fetch trace explicit', async () => {
+        const workspaceRoot = resolveWorkspaceRoot();
+        const pythonExecutable = resolvePythonExecutable(workspaceRoot);
+        const pythonRoot = path.join(workspaceRoot, 'backend', 'python');
+
+        const pythonSnippet = `
+import json
+import sys
+
+sys.path.insert(0, ${JSON.stringify(pythonRoot)})
+
+import native.web_search_py as web_search_py
+from core.function_context import FunctionContext
+
+fetch_calls = []
+
+class FakeDDGS:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def text(self, query=None, keywords=None, region=None, safesearch=None, max_results=None, **kwargs):
+        return [
+            {
+                "title": "METEO PARIS par Météo-France",
+                "href": "https://meteofrance.com/previsions-meteo-france/paris/75000",
+                "body": "Retrouvez les prévisions météo Paris demain."
+            }
+        ]
+
+def fake_fetch_selected_pages(*args, **kwargs):
+    fetch_calls.append('called')
+    raise AssertionError('fetch_selected_pages should not be called')
+
+web_search_py.DDGS = FakeDDGS
+web_search_py._DEPS_OK = True
+web_search_py._SEARCH_BACKENDS = ("duckduckgo",)
+web_search_py.page_fetch_service.fetch_selected_pages = fake_fetch_selected_pages
+
+result = web_search_py.run(
+    FunctionContext(workspace_dir='.', function_name='web_search_py'),
+    {
+        "query": "Cherche sur le web la météo et les températures minimales et maximales demain à Paris",
+        "num_results": 5,
+        "language": "fr",
+        "safe_search": True,
+        "dig_snippet": False,
+    },
+)
+
+print(json.dumps({"result": result, "fetch_calls": fetch_calls}, ensure_ascii=False))
+        `;
+
+        const { stdout, stderr } = await execFileAsync(
+            pythonExecutable,
+            ['-c', pythonSnippet],
+            {
+                cwd: workspaceRoot,
+                timeout: 30000,
+                env: {
+                    ...process.env,
+                    PYTHONIOENCODING: 'utf-8'
+                }
+            }
+        );
+
+        expect(stderr).toBe('');
+
+        const payload = JSON.parse(stdout.trim()) as {
+            result: {
+                verified_fragments: Array<unknown>;
+                llm_context_block: { sources: Array<unknown> };
+                trace: {
+                    page_fetches: Array<unknown>;
+                    steps: Array<{ name: string; status: string; details?: Record<string, unknown> }>;
+                };
+            };
+            fetch_calls: string[];
+        };
+
+        expect(payload.fetch_calls).toEqual([]);
+        expect(payload.result.verified_fragments).toEqual([
+            expect.objectContaining({
+                source_kind: 'search_snippet',
+                relevance_score: expect.any(Number),
+                critical_fragment: 'Retrouvez les prévisions météo Paris demain.',
+            })
+        ]);
+        expect(payload.result.llm_context_block.sources).toEqual([
+            expect.objectContaining({
+                reference: 'S1',
+            })
+        ]);
+        expect(payload.result.trace.page_fetches).toEqual([]);
+        expect(payload.result.trace.steps.at(-1)).toEqual({
+            name: 'build_context_block',
+            status: 'completed',
+            details: {
+                source_count: 1,
+                estimated_tokens: expect.any(Number),
+                truncated: false,
+            },
+        });
+    });
+
+    it('fetches verified fragments when dig_snippet is true and supports nested web_search_params', async () => {
+        const workspaceRoot = resolveWorkspaceRoot();
+        const pythonExecutable = resolvePythonExecutable(workspaceRoot);
+        const pythonRoot = path.join(workspaceRoot, 'backend', 'python');
+
+        const pythonSnippet = `
+import json
+import sys
+
+sys.path.insert(0, ${JSON.stringify(pythonRoot)})
+
+import native.web_search_py as web_search_py
+from core.function_context import FunctionContext
+
+class FakeDDGS:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def text(self, query=None, keywords=None, region=None, safesearch=None, max_results=None, **kwargs):
+        return [
+            {
+                "title": "METEO MARSEILLE par Météo-France",
+                "href": "https://meteofrance.com/previsions-meteo-france/marseille/13000",
+                "body": "Prévisions météo demain à Marseille."
+            },
+            {
+                "title": "METEO PARIS par Météo-France",
+                "href": "https://meteofrance.com/previsions-meteo-france/paris/75000",
+                "body": "Retrouvez les prévisions météo Paris demain."
+            }
+        ]
+
+def fake_fetch_selected_pages(results, dig_snippet=False, **kwargs):
+    return [
+        {
+            "url": results[0]["url"],
+            "status": "fetched",
+            "fetched": True,
+            "truncated": False,
+            "content": "Contenu vérifié Paris demain 8°C 17°C",
+        }
+    ]
+
+web_search_py.DDGS = FakeDDGS
+web_search_py._DEPS_OK = True
+web_search_py._SEARCH_BACKENDS = ("duckduckgo",)
+web_search_py.page_fetch_service.fetch_selected_pages = fake_fetch_selected_pages
+
+result = web_search_py.run(
+    FunctionContext(workspace_dir='.', function_name='web_search_py'),
+    {
+        "query": "Cherche sur le web la météo et les températures minimales et maximales demain à Paris",
+        "num_results": 5,
+        "language": "fr",
+        "safe_search": True,
+        "web_search_params": {
+            "dig_snippet": True,
+            "web_engine_nb_result_select": 1,
+        },
+    },
+)
+
+print(json.dumps(result, ensure_ascii=False))
+        `;
+
+        const { stdout, stderr } = await execFileAsync(
+            pythonExecutable,
+            ['-c', pythonSnippet],
+            {
+                cwd: workspaceRoot,
+                timeout: 30000,
+                env: {
+                    ...process.env,
+                    PYTHONIOENCODING: 'utf-8'
+                }
+            }
+        );
+
+        expect(stderr).toBe('');
+
+        const result = JSON.parse(stdout.trim()) as {
+            total_results: number;
+            verified_fragments: Array<{ url: string; source_kind: string; relevance_score: number; critical_fragment: string }>;
+            llm_context_block: { sources: Array<{ reference: string; url: string }>; content: string };
+            reranked_sources: Array<{ url: string; relevance_score: number }>;
+            trace: {
+                page_fetches: Array<{ url: string; status: string; fetched: boolean }>;
+                steps: Array<{ name: string; status: string; details?: Record<string, number | boolean | string> }>;
+            };
+        };
+
+        expect(result.total_results).toBe(1);
+        expect(result.verified_fragments).toEqual([
+            expect.objectContaining({
+                source_kind: 'page_content',
+                critical_fragment: 'Contenu vérifié Paris demain 8°C 17°C',
+                relevance_score: expect.any(Number),
+            })
+        ]);
+        expect(result.reranked_sources[0]?.relevance_score).toBeGreaterThanOrEqual(7);
+        expect(result.llm_context_block.sources[0]).toEqual(expect.objectContaining({
+            reference: 'S1',
+        }));
+        expect(result.llm_context_block.content).toContain('Contenu vérifié Paris demain 8°C 17°C');
+        expect(result.trace.page_fetches).toEqual([
+            expect.objectContaining({
+                status: 'fetched',
+                fetched: true,
+            })
+        ]);
+        expect(result.trace.steps.at(-1)).toEqual({
+            name: 'build_context_block',
+            status: 'completed',
+            details: {
+                source_count: 1,
+                estimated_tokens: expect.any(Number),
+                truncated: false,
             },
         });
     });

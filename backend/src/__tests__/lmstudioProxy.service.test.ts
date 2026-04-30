@@ -78,6 +78,28 @@ describe('lmstudioProxy.service local generation timeouts', () => {
         );
     });
 
+    it('allows overriding the non-streaming local completion timeout for hidden web-search calls', async () => {
+        jest.useFakeTimers();
+
+        global.fetch = jest.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+                reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+            });
+        })) as typeof fetch;
+
+        const completionPromise = fetchChatCompletion('http://localhost:11434', {
+            model: 'ministral-3:8b',
+            messages: [{ role: 'user', content: 'hello' }],
+            stream: false,
+        } as any, 120000);
+
+        jest.advanceTimersByTime(120000);
+
+        await expect(completionPromise).rejects.toThrow(
+            'LMStudio request timeout exceeded after 120000ms'
+        );
+    });
+
     it('still keeps short safety timeouts for generic probe helpers', async () => {
         jest.useFakeTimers();
 

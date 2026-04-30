@@ -102,7 +102,7 @@ describe('NativePythonProvisioningService', () => {
             runner,
             backendPythonRoot,
             dockerExecutable: 'docker',
-            provisioningImage: 'airdd2-python-provisioning:3.12-slim',
+            provisioningImage: 'airdd2-python-provisioning:3.12-ubuntu-noble',
             provisionTimeoutMs: 5000
         });
 
@@ -119,7 +119,7 @@ describe('NativePythonProvisioningService', () => {
         expect(runner.calls[0]?.args).toEqual(expect.arrayContaining([
             'run',
             '--rm',
-            'airdd2-python-provisioning:3.12-slim',
+            'airdd2-python-provisioning:3.12-ubuntu-noble',
             'python3'
         ]));
 
@@ -192,7 +192,7 @@ describe('NativePythonProvisioningService', () => {
             runner,
             backendPythonRoot,
             dockerExecutable: 'docker',
-            provisioningImage: 'airdd2-python-provisioning:3.12-slim',
+            provisioningImage: 'airdd2-python-provisioning:3.12-ubuntu-noble',
             provisionTimeoutMs: 5000
         });
 
@@ -272,7 +272,7 @@ describe('NativePythonProvisioningService', () => {
             runner,
             backendPythonRoot,
             dockerExecutable: 'docker',
-            provisioningImage: 'airdd2-python-provisioning:3.12-slim',
+            provisioningImage: 'airdd2-python-provisioning:3.12-ubuntu-noble',
             provisionTimeoutMs: 5000
         });
 
