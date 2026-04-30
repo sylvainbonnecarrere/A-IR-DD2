@@ -114,4 +114,83 @@ describe('agentToolExecution', () => {
     expect(result.executedArguments.num_results).toBe(3);
     expect(result.executionId).toBe('exec-123');
   });
+
+  it('sends a minimal sandbox payload while forwarding engine selection and query transformation in private context', async () => {
+    global.fetch = jest.fn(async (_url, init) => {
+      const payload = JSON.parse(String(init?.body ?? '{}'));
+
+      expect(payload.testArgs).toEqual({
+        query: 'météo Marseille demain',
+        num_results: 3,
+      });
+      expect(JSON.stringify(payload.testArgs)).not.toContain('query_transformation');
+      expect(JSON.stringify(payload.testArgs)).not.toContain('duckduckgo.com');
+
+      expect(payload.privateContext).toEqual(expect.objectContaining({
+        web_search: expect.objectContaining({
+          params: expect.objectContaining({
+            web_engine: 'duckduckgo.com',
+            query_transformation: 'Q={{user_query}}',
+          }),
+          llm: expect.objectContaining({
+            provider: LLMProvider.OpenAI,
+            model: 'gpt-4o-mini',
+            localLLMProfileId: null,
+          }),
+        }),
+      }));
+
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          output: {
+            query: 'météo Marseille demain',
+            trace: {
+              transformed_query_raw: 'Marseille météo demain',
+              queries: [
+                {
+                  engine: 'duckduckgo.com',
+                  engine_query_text: 'Marseille météo demain',
+                },
+              ],
+            },
+          },
+          executionId: 'exec-456',
+          runner: 'docker_sandbox',
+          exitCode: 0,
+          metadata: { artifacts: [] },
+        }),
+      } as Response;
+    }) as typeof fetch;
+
+    const result = await executeAgentToolCall({
+      toolCall: {
+        id: 'tool-2',
+        name: 'web_search_py',
+        arguments: JSON.stringify({
+          query: 'météo Marseille demain',
+          num_results: 2,
+        }),
+      },
+      agent: weatherSearchAgent,
+      availableFunctions: [webSearchFunction],
+      authToken: 'token-123',
+    });
+
+    expect(result.executionId).toBe('exec-456');
+    expect(result.serializedArguments).toBe('{"query":"météo Marseille demain","num_results":3}');
+    expect(result.result).toEqual(expect.objectContaining({
+      trace: expect.objectContaining({
+        transformed_query_raw: 'Marseille météo demain',
+        queries: [
+          expect.objectContaining({
+            engine: 'duckduckgo.com',
+            engine_query_text: 'Marseille météo demain',
+          }),
+        ],
+      }),
+    }));
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
 });

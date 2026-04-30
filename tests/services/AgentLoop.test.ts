@@ -688,6 +688,103 @@ describe('AgentLoop canonical tool registry convergence', () => {
         }));
     });
 
+    it('stops immediately after a sandbox timeout on web_search_py instead of issuing the same search twice', async () => {
+        const adapterResponses: LLMResponse[] = [
+            {
+                content: 'Tentative 1',
+                finishReason: 'tool_calls',
+                toolCalls: [
+                    {
+                        name: 'web_search_py',
+                        arguments: {
+                            query: 'météo demain Marseille',
+                            num_results: 3,
+                            language: 'fr',
+                            safe_search: true,
+                        },
+                        raw: '<tool_call />'
+                    }
+                ]
+            },
+            {
+                content: 'Tentative 2',
+                finishReason: 'tool_calls',
+                toolCalls: [
+                    {
+                        name: 'web_search_py',
+                        arguments: {
+                            query: 'météo demain Marseille',
+                            num_results: 3,
+                            language: 'fr',
+                            safe_search: true,
+                        },
+                        raw: '<tool_call />'
+                    }
+                ]
+            }
+        ];
+
+        const adapter: ILLMAdapter = {
+            provider: LLMProvider.LMStudio,
+            supportsNativeToolCalling: false,
+            complete: jest.fn(async () => adapterResponses.shift() as LLMResponse)
+        };
+
+        global.fetch = jest.fn(async () => ({
+            ok: false,
+            status: 504,
+            json: async () => ({
+                error: 'Timeout: la sandbox éphémère a dépassé la limite autorisée.',
+                errorDetails: {
+                    code: 'TIMEOUT',
+                    subsystem: 'sandbox_runtime',
+                    retryable: false,
+                    failureKind: 'timeout',
+                }
+            })
+        } as any)) as typeof fetch;
+
+        const result = await runAgentLoop(
+            adapter,
+            [
+                {
+                    id: 'msg-timeout-web',
+                    sender: 'user',
+                    text: 'Donne moi la météo de demain à Marseille',
+                    timestamp: new Date('2026-04-30T12:00:00.000Z')
+                }
+            ],
+            [
+                {
+                    id: 'tool-web',
+                    legacyFunctionId: 'fn-web',
+                    name: 'web_search_py',
+                    description: 'Native web search',
+                    inputSchema: { type: 'object' },
+                    isEnabled: true,
+                    versionTag: 'v1',
+                    versionNumber: 1,
+                    workspaceId: null
+                }
+            ],
+            'system'
+        );
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(adapter.complete).toHaveBeenCalledTimes(1);
+        expect(result.finishReason).toBe('error');
+        expect(result.finalResponse).toContain('Timeout: la sandbox éphémère a dépassé la limite autorisée.');
+        expect(result.traceLog).toContain('tool.web_search_py.blocking_failure');
+        expect(result.toolCallLog).toHaveLength(1);
+        expect(result.toolCallLog[0]).toEqual(expect.objectContaining({
+            functionName: 'web_search_py',
+            status: 'error',
+            errorCode: 'TIMEOUT',
+            failureKind: 'timeout',
+            errorSubsystem: 'sandbox_runtime',
+        }));
+    });
+
     it('deduplicates identical tool calls emitted in the same iteration', async () => {
         const adapterResponses: LLMResponse[] = [
             {

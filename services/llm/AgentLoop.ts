@@ -232,6 +232,26 @@ function isDeterministicFailureRecord(record?: ToolCallRecord | null): boolean {
     return Boolean(record?.status === 'error' && record.deterministicFailure);
 }
 
+function isBlockingWebSearchFailureRecord(record?: ToolCallRecord | null): boolean {
+    if (!record || record.functionName !== 'web_search_py' || record.status !== 'error') {
+        return false;
+    }
+
+    if (record.errorCode === 'QUERY_TRANSFORMATION_FAILED') {
+        return true;
+    }
+
+    if (record.errorCode === 'TIMEOUT' || record.failureKind === 'timeout') {
+        return true;
+    }
+
+    const payload = toPlainObject(record.result);
+    const payloadCode = asNonEmptyString(payload?.code);
+    const payloadFailureKind = asNonEmptyString(payload?.failureKind);
+
+    return payloadCode === 'TIMEOUT' || payloadFailureKind === 'timeout';
+}
+
 function isRecordStillFresh(record: ToolCallRecord, now: number): boolean {
     return now - record.timestamp.getTime() <= TOOL_CALL_DEDUP_WINDOW_MS;
 }
@@ -585,6 +605,7 @@ async function executeFunction(
             subsystem: errorDetails?.subsystem,
             retryable: errorDetails?.retryable,
             deterministic: isDeterministicHttpFailure(response.status, errorDetails?.code, errorDetails?.subsystem, errorDetails?.retryable),
+            failureKind: errorDetails?.failureKind,
             httpStatus: response.status,
             rawError: errorPayload,
         });
@@ -881,11 +902,7 @@ export async function runAgentLoop(
             ];
         }
 
-        const blockingWebSearchFailure = iterationRecords.find((record) => (
-            record.functionName === 'web_search_py'
-            && record.status === 'error'
-            && record.errorCode === 'QUERY_TRANSFORMATION_FAILED'
-        ));
+        const blockingWebSearchFailure = iterationRecords.find((record) => isBlockingWebSearchFailureRecord(record));
 
         if (blockingWebSearchFailure) {
             return {

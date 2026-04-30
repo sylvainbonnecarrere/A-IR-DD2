@@ -10,6 +10,7 @@ import { generateAccessToken } from '../utils/jwt';
 import { BuildPreparationError, BuildService } from '../services/build.service';
 import { NativePythonProvisioningService } from '../services/nativePythonProvisioning.service';
 import { ExecutionOrchestrator } from '../services/runtime/ExecutionOrchestrator';
+import * as webSearchPrivateContextService from '../services/webSearchPrivateContext.service';
 
 type FixtureRuntime = 'typescript' | 'python';
 
@@ -244,6 +245,119 @@ describe('Sandbox routes', () => {
                 name: fixture.fn.name,
                 language: 'python'
             })
+        }));
+    });
+
+    it('propagates resolved web search privateContext through /api/sandbox/run and preserves trace.engine_query_plans', async () => {
+        const fixture = await createFixture('python');
+        await UserFunction.findByIdAndUpdate(fixture.fn.id, { name: 'web_search_py' });
+
+        jest.spyOn(BuildService.prototype, 'ensureBuildReadyForRun').mockResolvedValue();
+        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
+            report: {
+                status: 'healthy',
+                summary: 'Docker sandbox ready',
+            } as any,
+            runner: {
+                getRunnerId: () => 'docker_sandbox',
+                getLabel: () => 'Docker sandbox',
+                supportsRuntime: () => true,
+                getReadiness: () => ({ ready: true })
+            },
+            readiness: { ready: true }
+        });
+
+        const resolvedPrivateContext = {
+            web_search: {
+                params: {
+                    web_engine: 'duckduckgo.com',
+                    query_transformation: 'Q={{user_query}}',
+                },
+                llm_runtime: {
+                    provider: 'OpenAI',
+                    model: 'gpt-4o-mini',
+                    api_key: 'sk-test',
+                },
+            },
+        };
+
+        jest.spyOn(webSearchPrivateContextService, 'resolveWebSearchPrivateContext').mockResolvedValue(resolvedPrivateContext);
+
+        const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
+            success: true,
+            output: {
+                trace: {
+                    transformed_query_raw: 'Marseille météo demain',
+                    engine_query_plans: [
+                        {
+                            engine: 'duckduckgo.com',
+                            engine_query_text: 'Marseille météo demain',
+                            engine_query_url: 'https://duckduckgo.com/?q=Marseille+m%C3%A9t%C3%A9o+demain',
+                        },
+                    ],
+                },
+            },
+            stdout: 'route web search test',
+            stderr: '',
+            durationMs: 9,
+            exitCode: 0,
+            runner: 'docker_sandbox',
+            executionId: 'utr-route-web-search-trace',
+            metadata: {
+                artifacts: [{ path: 'output/result.json', kind: 'json' }],
+            }
+        } as any);
+
+        const response = await request(app)
+            .post('/api/sandbox/run')
+            .set('Authorization', `Bearer ${fixture.accessToken}`)
+            .send({
+                functionId: fixture.fn.id,
+                testArgs: {
+                    query: 'météo Marseille demain',
+                    num_results: 3,
+                },
+                privateContext: {
+                    web_search: {
+                        params: {
+                            web_engine: 'duckduckgo.com',
+                            query_transformation: 'Q={{user_query}}',
+                        },
+                        llm: {
+                            provider: 'OpenAI',
+                            model: 'gpt-4o-mini',
+                        },
+                    },
+                }
+            })
+            .expect(200);
+
+        expect(response.body).toEqual(expect.objectContaining({
+            success: true,
+            executionId: 'utr-route-web-search-trace',
+            output: expect.objectContaining({
+                trace: expect.objectContaining({
+                    transformed_query_raw: 'Marseille météo demain',
+                    engine_query_plans: [
+                        expect.objectContaining({
+                            engine: 'duckduckgo.com',
+                            engine_query_text: 'Marseille météo demain',
+                        }),
+                    ],
+                }),
+            }),
+        }));
+
+        expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({
+            args: {
+                query: 'météo Marseille demain',
+                num_results: 3,
+            },
+            privateContext: resolvedPrivateContext,
+            fn: expect.objectContaining({
+                name: 'web_search_py',
+                language: 'python',
+            }),
         }));
     });
 
