@@ -28,6 +28,7 @@ import { deriveSelectedToolIds } from '../services/toolSelectionResolver';
 import { persistInstanceWebSearchParams } from '../services/webSearchParamsConfigService';
 import type { UserFunction } from '../types/function.types';
 import { buildWebSearchExecutionArgs, executeAgentToolCall } from '../services/agentToolExecution';
+import { shouldSuppressVisualToolResult } from '../utils/toolResultVisibility';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -1218,6 +1219,11 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     const isError = message.isError;
     const isToolResult = message.sender === 'tool_result';
     const isToolCall = message.sender === 'tool';
+    const suppressToolResult = shouldSuppressVisualToolResult(message, messages);
+
+    if (suppressToolResult) {
+      return null;
+    }
 
     return (
       <div key={message.id} className={`mb-3 ${isUser ? 'ml-4' : 'mr-4'}`}>

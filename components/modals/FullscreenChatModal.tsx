@@ -16,6 +16,7 @@ import { VideoGenerationConfigPanel } from '../panels/VideoGenerationConfigPanel
 import { MapsGroundingConfigPanel } from '../panels/MapsGroundingConfigPanel';
 import { deriveSelectedToolIds } from '../../services/toolSelectionResolver';
 import { persistInstanceWebSearchParams } from '../../services/webSearchParamsConfigService';
+import { shouldSuppressVisualToolResult } from '../../utils/toolResultVisibility';
 
 // Minimize icon
 const MinimizeIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -374,6 +375,11 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     const isError = message.isError;
     const isToolResult = message.sender === 'tool_result';
     const isToolCall = message.sender === 'tool';
+    const suppressToolResult = shouldSuppressVisualToolResult(message, messages);
+
+    if (suppressToolResult) {
+      return null;
+    }
 
     return (
       <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
