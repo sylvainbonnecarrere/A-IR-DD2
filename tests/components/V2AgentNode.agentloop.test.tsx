@@ -532,7 +532,34 @@ describe('V2AgentNode AgentLoop integration', () => {
                     functionId: 'legacy-web',
                     functionName: 'web_search_py',
                     arguments: { query: 'meteo paris demain', language: 'fr' },
-                    result: { items: [{ title: 'Meteo Paris' }] },
+                    result: {
+                        query: 'meteo paris demain',
+                        normalized_query: 'météo et températures minimales et maximales à Paris le 30/04/2026',
+                        total_results: 1,
+                        reranked_sources: [
+                            {
+                                title: 'Meteo Paris',
+                                url: 'https://meteo.example/paris-demain',
+                                relevance_score: 9,
+                                critical_fragment: 'Paris demain 8°C 17°C'
+                            }
+                        ],
+                        verified_fragments: [
+                            {
+                                url: 'https://meteo.example/paris-demain',
+                                relevance_score: 9,
+                                critical_fragment: 'Paris demain 8°C 17°C'
+                            }
+                        ],
+                        trace: {
+                            queries: [
+                                { query: 'meteo paris demain', status: 'completed' }
+                            ],
+                            selected_sources: [
+                                { title: 'Meteo Paris', url: 'https://meteo.example/paris-demain' }
+                            ]
+                        }
+                    },
                     status: 'success',
                     durationMs: 44,
                     executionId: 'exec-web-42',
@@ -584,6 +611,51 @@ describe('V2AgentNode AgentLoop integration', () => {
             expect.objectContaining({
                 sender: 'tool_result',
                 text: expect.stringContaining('executionId=exec-web-42'),
+                toolName: 'web_search_py',
+            })
+        );
+
+        expect(mockAddNodeMessage).toHaveBeenCalledWith(
+            'node-1',
+            expect.objectContaining({
+                sender: 'tool_result',
+                text: expect.stringContaining('planned_queries=1'),
+                toolName: 'web_search_py',
+            })
+        );
+
+        expect(mockAddNodeMessage).toHaveBeenCalledWith(
+            'node-1',
+            expect.objectContaining({
+                sender: 'tool_result',
+                text: expect.stringContaining('primary_source=https://meteo.example/paris-demain'),
+                toolName: 'web_search_py',
+            })
+        );
+
+        expect(mockAddNodeMessage).toHaveBeenCalledWith(
+            'node-1',
+            expect.objectContaining({
+                sender: 'tool_result',
+                text: expect.stringContaining('reranked_sources=1'),
+                toolName: 'web_search_py',
+            })
+        );
+
+        expect(mockAddNodeMessage).toHaveBeenCalledWith(
+            'node-1',
+            expect.objectContaining({
+                sender: 'tool_result',
+                text: expect.stringContaining('primary_relevance_score=9'),
+                toolName: 'web_search_py',
+            })
+        );
+
+        expect(mockAddNodeMessage).toHaveBeenCalledWith(
+            'node-1',
+            expect.objectContaining({
+                sender: 'tool_result',
+                text: expect.stringContaining('primary_fragment=Paris demain 8°C 17°C'),
                 toolName: 'web_search_py',
             })
         );

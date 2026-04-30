@@ -10,6 +10,7 @@ import { ExecutionOrchestrator } from './runtime/ExecutionOrchestrator';
 import type { SandboxExecutionMetadata, SandboxExecutionResourceUsage } from './runtime/execution.types';
 import { getSandboxErrorDetailsFromExecutionResult, RuntimeNotReadyError, type SandboxErrorDetails } from './runtime/errors';
 import type { IUserToolPolicy } from '../models/UserTool.model';
+import { resolveWebSearchPrivateContext } from './webSearchPrivateContext.service';
 
 export interface SandboxResult {
     success: boolean;
@@ -107,7 +108,9 @@ export class SandboxService {
         functionId: string,
         userId: string,
         testArgs: Record<string, unknown> = {},
-        toolSelection?: SandboxToolSelection
+        toolSelection?: SandboxToolSelection,
+        privateContext?: Record<string, unknown>,
+        authHeader?: string
     ): Promise<SandboxResult> {
         // 1. Charger la fonction depuis la BDD
         // C9.1 FIX: S'assurer que Python est détecté avant execution
@@ -133,12 +136,16 @@ export class SandboxService {
             );
         }
 
+        const resolvedVersionTag = toolSelection
+            ? (fn as VersionedExecutionTarget).toolVersionTag
+            : undefined;
+
         try {
             if (toolSelection) {
                 await this.buildService.ensureBuildReadyForTool(
                     toolSelection.toolId,
                     userId,
-                    toolSelection.versionRef?.versionTag
+                    resolvedVersionTag
                 );
             } else {
                 await this.buildService.ensureBuildReadyForRun(functionId, userId);
@@ -152,13 +159,13 @@ export class SandboxService {
                 await this.nativePythonProvisioningService.provisionToolVersion(
                     toolSelection.toolId,
                     userId,
-                    toolSelection.versionRef?.versionTag
+                    resolvedVersionTag
                 );
 
                 await this.buildService.ensureBuildReadyForTool(
                     toolSelection.toolId,
                     userId,
-                    toolSelection.versionRef?.versionTag
+                    resolvedVersionTag
                 );
             } else if (error instanceof BuildPreparationError) {
                 throw error;
@@ -174,10 +181,13 @@ export class SandboxService {
             console.warn('[SandboxService] user_tools mirror sync warning:', error instanceof Error ? error.message : String(error));
         });
 
+        const resolvedPrivateContext = await resolveWebSearchPrivateContext(fn.name, userId, privateContext, authHeader);
+
         const executionResult = await this.executionOrchestrator.execute({
             fn,
             userId,
             args: testArgs,
+            privateContext: resolvedPrivateContext,
             launchContext: 'editor_test'
         });
 
@@ -212,7 +222,7 @@ export class SandboxService {
 
         const requestedVersionTag = toolSelection.versionRef?.versionTag;
         const resolvedVersion = requestedVersionTag
-            ? tool.versions.find((version) => version.versionTag === requestedVersionTag) || null
+            ? this.findMatchingToolVersion(tool.versions, requestedVersionTag, toolSelection.versionRef?.versionNumber) || null
             : tool.currentVersion;
 
         if (!resolvedVersion) {
@@ -256,6 +266,56 @@ export class SandboxService {
 
         const match = versionTag.match(/(\d+)/);
         return match ? Number.parseInt(match[1], 10) : 1;
+    }
+
+    private normalizeVersionAlias(versionTag?: string): string | null {
+        if (typeof versionTag !== 'string') {
+            return null;
+        }
+
+        const normalized = versionTag.trim().toLowerCase();
+        if (!normalized) {
+            return null;
+        }
+
+        const withoutPrefix = normalized.startsWith('v') ? normalized.slice(1) : normalized;
+        const simpleMajor = withoutPrefix.match(/^(\d+)(?:\.0+)*$/);
+        if (simpleMajor) {
+            return simpleMajor[1];
+        }
+
+        return withoutPrefix;
+    }
+
+    private findMatchingToolVersion(
+        versions: Array<{ versionTag: string }>,
+        requestedVersionTag?: string,
+        requestedVersionNumber?: number
+    ) {
+        if (!requestedVersionTag && !requestedVersionNumber) {
+            return null;
+        }
+
+        const exactMatch = requestedVersionTag
+            ? versions.find((version) => version.versionTag === requestedVersionTag)
+            : undefined;
+        if (exactMatch) {
+            return exactMatch;
+        }
+
+        const normalizedRequestedTag = this.normalizeVersionAlias(requestedVersionTag);
+        if (normalizedRequestedTag) {
+            const aliasMatch = versions.find((version) => this.normalizeVersionAlias(version.versionTag) === normalizedRequestedTag);
+            if (aliasMatch) {
+                return aliasMatch;
+            }
+        }
+
+        if (Number.isFinite(requestedVersionNumber)) {
+            return versions.find((version) => this.parseVersionNumber(version.versionTag) === requestedVersionNumber);
+        }
+
+        return null;
     }
 
     private async ensureRuntimeReadyForRun(language: 'python' | 'typescript'): Promise<void> {

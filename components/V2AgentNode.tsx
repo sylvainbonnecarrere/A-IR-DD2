@@ -4,6 +4,7 @@ import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, Ag
 import { Button } from './UI';
 import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon, MaximizeIcon } from './Icons';
 import { ConfirmationModal } from './modals/ConfirmationModal';
+import { WebSearchParamsModal } from './modals/WebSearchParamsModal';
 
 import { WebSearchGroundingPanel } from './panels/WebSearchGroundingPanel';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
@@ -24,7 +25,9 @@ import { useAuth } from '../hooks/useAuth';
 import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
 import { buildBosHydrationFingerprint, hydrateToolMessagesFromPersistedRuns } from '../services/bosRunProjectionService';
 import { deriveSelectedToolIds } from '../services/toolSelectionResolver';
+import { persistInstanceWebSearchParams } from '../services/webSearchParamsConfigService';
 import type { UserFunction } from '../types/function.types';
+import { buildWebSearchExecutionArgs, executeAgentToolCall } from '../services/agentToolExecution';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -82,6 +85,92 @@ export interface V2AgentNodeData {
   agent: Agent; // The prototype
   agentInstance?: AgentInstance; // The instance data
   workflowId?: string; // For journal persistence
+}
+
+function toPlainObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function toObjectArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
+    : [];
+}
+
+function toNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function formatToolResultMessage(toolName: string, result: unknown, executionId?: string): string {
+  const serializedResult = typeof result === 'string'
+    ? result
+    : JSON.stringify(result, null, 2);
+
+  const resultObject = toPlainObject(result);
+  if (toolName !== 'web_search_py' || !resultObject) {
+    return executionId
+      ? `[executionId=${executionId}] ${serializedResult}`
+      : serializedResult;
+  }
+
+  const query = toNonEmptyString(resultObject.query);
+  const normalizedQuery = toNonEmptyString(resultObject.normalized_query);
+  const trace = toPlainObject(resultObject.trace);
+  const traceQueries = toObjectArray(trace?.queries);
+  const selectedSources = toObjectArray(trace?.selected_sources);
+  const rerankedSources = toObjectArray(resultObject.reranked_sources);
+  const verifiedFragments = toObjectArray(resultObject.verified_fragments);
+  const llmContextBlock = toPlainObject(resultObject.llm_context_block);
+  const contextSources = toObjectArray(llmContextBlock?.sources);
+  const projectedResults = toObjectArray(resultObject.results);
+
+  if (!query && !trace && projectedResults.length === 0 && selectedSources.length === 0 && rerankedSources.length === 0) {
+    return executionId
+      ? `[executionId=${executionId}] ${serializedResult}`
+      : serializedResult;
+  }
+
+  const totalResults = typeof resultObject.total_results === 'number'
+    ? resultObject.total_results
+    : projectedResults.length;
+  const primaryVerified = verifiedFragments[0] ?? rerankedSources[0] ?? null;
+  const primarySource = primaryVerified ?? selectedSources[0] ?? projectedResults[0] ?? null;
+  const primaryTitle = toNonEmptyString(primarySource?.title);
+  const primaryUrl = toNonEmptyString(primarySource?.url);
+  const primaryFragment = toNonEmptyString(primaryVerified?.critical_fragment);
+  const primaryScore = typeof primaryVerified?.relevance_score === 'number' ? primaryVerified.relevance_score : null;
+  const pageFetches = toObjectArray(trace?.page_fetches);
+  const fetchedCount = pageFetches.filter((item) => item.fetched === true).length;
+
+  const lines = [
+    executionId ? `[executionId=${executionId}]` : null,
+    query ? `query=${query}` : null,
+    normalizedQuery && normalizedQuery !== query ? `normalized_query=${normalizedQuery}` : null,
+    `planned_queries=${traceQueries.length}`,
+    ...traceQueries.slice(0, 3).map((traceQuery, index) => {
+      const label = toNonEmptyString(traceQuery.query) ?? JSON.stringify(traceQuery);
+      const status = toNonEmptyString(traceQuery.status) ?? 'unknown';
+      return `query_${index + 1}=[${status}] ${label}`;
+    }),
+    `selected_results=${totalResults}`,
+    rerankedSources.length > 0 ? `reranked_sources=${rerankedSources.length}` : null,
+    verifiedFragments.length > 0 ? `verified_fragments=${verifiedFragments.length}` : null,
+    pageFetches.length > 0 ? `page_fetches=${pageFetches.length} (fetched=${fetchedCount})` : null,
+    contextSources.length > 0 ? `llm_context_sources=${contextSources.length}` : null,
+    primaryTitle ? `primary_title=${primaryTitle}` : null,
+    primaryUrl ? `primary_source=${primaryUrl}` : null,
+    primaryScore !== null ? `primary_relevance_score=${primaryScore}` : null,
+    primaryFragment ? `primary_fragment=${primaryFragment}` : null,
+  ].filter((line): line is string => Boolean(line));
+
+  return lines.join('\n');
 }
 
 function resolveAgentSelectedToolIds(agent: Agent, agentInstance: AgentInstance | undefined): string[] {
@@ -146,6 +235,22 @@ function resolveAgentToolScope(agent: Agent, agentInstance: AgentInstance | unde
   });
 }
 
+function hasLegacyWebSearchTool(agent: Agent, agentInstance: AgentInstance | undefined): boolean {
+  const candidateToolLists = [
+    agentInstance?.configuration_json?.tools,
+    (agentInstance as any)?.tools,
+    agent.tools,
+  ];
+
+  return candidateToolLists.some((toolList) => Array.isArray(toolList) && toolList.some((tool) => {
+    if (!tool || typeof tool !== 'object') {
+      return false;
+    }
+
+    return (tool as Record<string, unknown>).name === 'web_search_py';
+  }));
+}
+
 export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: NodeProps<V2AgentNodeData>) {
   const { t } = useLocalization();
   const { agent, agentInstance: agentInstanceProp } = data;
@@ -186,6 +291,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     toolSelections: agentInstance.configuration_json.toolSelections || (agentInstance as any).toolSelections || agent.toolSelections,
     capabilities: agentInstance.configuration_json.capabilities,
     outputConfig: agentInstance.configuration_json.outputConfig,
+    webSearchParams: agentInstance.configuration_json.webSearchParams || agent.webSearchParams,
     historyConfig: agentInstance.configuration_json.historyConfig,
     localLLMProfileId: (agentInstance.configuration_json as any)?.localLLMProfileId || agent.localLLMProfileId,
   } : agent;
@@ -218,11 +324,12 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   } = useWorkflowCanvasContext();
 
   // Design store for agent data (not node operations)
-  const { selectAgent } = useDesignStore();
+  const { selectAgent, updateInstanceConfig } = useDesignStore();
 
   // J8 — Functions available for AgentLoop (emulated FC for local LLMs)
   const allFunctions = useFunctionStore(state => state.functions);
   const loadFunctions = useFunctionStore(state => state.loadFunctions);
+  const effectiveWorkflowId = data.workflowId || agentInstance?.workflowId;
   const configuredToolIds = useMemo(
     () => resolveAgentSelectedToolIds(effectiveAgent, agentInstance),
     [effectiveAgent, agentInstance]
@@ -232,6 +339,35 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     () => resolveAgentToolScope(effectiveAgent, agentInstance, allFunctions),
     [effectiveAgent, agentInstance, allFunctions]
   );
+
+  const hasLegacyWebSearchPyTool = useMemo(
+    () => hasLegacyWebSearchTool(effectiveAgent, agentInstance),
+    [effectiveAgent, agentInstance]
+  );
+
+  const hasWebSearchPyTool = useMemo(
+    () => {
+      if (hasLegacyWebSearchPyTool) {
+        return true;
+      }
+
+      const selectedIdSet = new Set(configuredToolIds);
+      return allFunctions.some((fn) => fn.isEnabled && fn.name === 'web_search_py' && (selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false)));
+    },
+    [allFunctions, configuredToolIds, hasLegacyWebSearchPyTool]
+  );
+
+  useEffect(() => {
+    if (hasLegacyWebSearchPyTool) {
+      return;
+    }
+
+    if (configuredToolIds.length === 0 || allFunctions.length > 0) {
+      return;
+    }
+
+    void loadFunctions(effectiveWorkflowId ?? undefined);
+  }, [allFunctions.length, configuredToolIds.length, effectiveWorkflowId, hasLegacyWebSearchPyTool, loadFunctions]);
 
   // C1 FIX: Auth token pour les appels sandbox (requireAuth)
   const { accessToken } = useAuth();
@@ -244,6 +380,8 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   const [showThinking, setShowThinking] = useState(true);
   const [webFetchEnabled, setWebFetchEnabled] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [isWebSearchParamsModalOpen, setIsWebSearchParamsModalOpen] = useState(false);
+  const [isSavingWebSearchParams, setIsSavingWebSearchParams] = useState(false);
 
   // Arc-LLM states
   const [showWebSearchResults, setShowWebSearchResults] = useState(false);
@@ -301,6 +439,32 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     // Ouvrir directement la modale de confirmation sans manipulation de focus
     setShowDeleteConfirm(true);
   };
+
+  const handleSaveWebSearchParams = useCallback(async (webSearchParams: NonNullable<Agent['webSearchParams']>) => {
+    if (!agentInstance?.id || !agentInstance.configuration_json) {
+      return;
+    }
+
+    setIsSavingWebSearchParams(true);
+
+    try {
+      const updatedConfig = {
+        ...agentInstance.configuration_json,
+        webSearchParams,
+      };
+
+      await persistInstanceWebSearchParams(
+        { ...agentInstance, configuration_json: updatedConfig },
+        webSearchParams,
+        accessToken
+      );
+
+      updateInstanceConfig(agentInstance.id, updatedConfig);
+      setIsWebSearchParamsModalOpen(false);
+    } finally {
+      setIsSavingWebSearchParams(false);
+    }
+  }, [accessToken, agentInstance, updateInstanceConfig]);
 
   const handleConfirmDelete = () => {
     if (onDeleteNode) {
@@ -667,6 +831,25 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           effectiveAgent.systemPrompt ?? '',
           {
             authToken: accessToken ?? undefined,  // C1 FIX: JWT pour requireAuth sandbox
+              prepareToolExecution: ({ fn, toolCall }) => {
+                if (fn.name !== 'web_search_py' || !effectiveAgent.webSearchParams || !accessToken) {
+                  return { args: toolCall.arguments };
+                }
+
+                return {
+                  args: buildWebSearchExecutionArgs(toolCall.arguments, effectiveAgent),
+                  privateContext: {
+                    web_search: {
+                      params: effectiveAgent.webSearchParams,
+                      llm: {
+                        provider: effectiveAgent.llmProvider,
+                        model: effectiveAgent.model,
+                        localLLMProfileId: effectiveAgent.localLLMProfileId ?? null,
+                      },
+                    },
+                  },
+                };
+              },
             onEvent: (event) => {
               if (event.type === 'tool_call_start') {
                 setLoadingMessage(`🔧 ${event.toolCall?.name ?? '…'}`);
@@ -707,15 +890,10 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           };
           addNodeMessage(id, toolChatMsg);
 
-          const serializedToolResult = typeof record.result === 'string'
-            ? record.result
-            : JSON.stringify(record.result, null, 2);
           const toolResultMessage: ChatMessage = {
             id: generateMessageId('tool-result'),
             sender: 'tool_result',
-            text: record.executionId
-              ? `[executionId=${record.executionId}] ${serializedToolResult}`
-              : serializedToolResult,
+            text: formatToolResultMessage(record.functionName, record.result, record.executionId),
             toolCallId: record.id,
             toolName: record.functionName,
             timestamp: record.timestamp,
@@ -830,7 +1008,13 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
           try {
-            const toolResult = await executeTool(toolCall);
+            const execution = await executeAgentToolCall({
+              toolCall,
+              agent: effectiveAgent,
+              availableFunctions: scopedFunctions,
+              authToken: accessToken ?? undefined,
+            });
+            const toolResult = execution.result;
             const toolResultMessage: ChatMessage = {
               id: generateMessageId('tool-result'),
               sender: 'tool_result',
@@ -1484,7 +1668,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
               {/* Input row */}
               <div className="flex items-end space-x-2">
-                <div className="flex-1">
+                <div className="flex-1 space-y-2">
                   <textarea
                     value={userInput}
                     onChange={(e) => setUserInput(e.target.value)}
@@ -1503,6 +1687,21 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
                       }
                     }}
                   />
+
+                  {hasWebSearchPyTool && (
+                    <div className="flex justify-start">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="p-2 h-8 w-8 text-sky-300 border border-sky-400/30 bg-[linear-gradient(135deg,rgba(8,33,59,0.9),rgba(13,78,118,0.78)_58%,rgba(125,211,252,0.16))] hover:text-sky-100 hover:border-sky-200/55 hover:bg-[linear-gradient(135deg,rgba(10,41,71,0.95),rgba(14,116,144,0.82)_58%,rgba(186,230,253,0.24))] hover:shadow-[0_0_16px_rgba(56,189,248,0.28)] transition-all duration-200 rounded-md hover:scale-110 active:scale-95"
+                        onClick={() => setIsWebSearchParamsModalOpen(true)}
+                        disabled={isLoading}
+                        title="Paramètres Web Search de l'agent"
+                      >
+                        <WebSearchIcon width={14} height={14} />
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Action buttons */}
@@ -1666,6 +1865,15 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
               onChange={handleFileUpload}
               className="hidden"
               accept={effectiveAgent?.capabilities?.includes(LLMCapability.PDFSupport) ? "image/*,application/pdf" : "image/*,text/*,.pdf,.doc,.docx"}
+            />
+
+            <WebSearchParamsModal
+              isOpen={isWebSearchParamsModalOpen}
+              agentName={displayName}
+              initialParams={agentInstance?.configuration_json?.webSearchParams || effectiveAgent?.webSearchParams}
+              isSaving={isSavingWebSearchParams}
+              onClose={() => setIsWebSearchParamsModalOpen(false)}
+              onSave={handleSaveWebSearchParams}
             />
           </div>
         </div>

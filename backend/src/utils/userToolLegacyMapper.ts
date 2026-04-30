@@ -66,7 +66,7 @@ const NATIVE_FUNCTION_POLICY_OVERRIDES: Partial<Record<string, IUserToolPolicy>>
         networkMode: 'restricted',
         writablePaths: [],
         secretAliases: [],
-        timeoutSeconds: 60,
+        timeoutSeconds: 180,
         maxMemoryMb: 256
     }
 };

@@ -45,6 +45,7 @@ export interface IAgentPrototype extends Document {
     llmModel: string;
     capabilities: string[];
     historyConfig?: object;
+    webSearchParams?: object;
     // ⭐ Tools V2: Références vers user_functions (rétrocompat : legacyTools conservé)
     tools?: mongoose.Types.ObjectId[];     // Références vers user_functions._id
     toolSelections?: IToolSelection[];     // Références versionnées vers user_tools
@@ -126,6 +127,7 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
         type: String
     }],
     historyConfig: Schema.Types.Mixed,
+    webSearchParams: Schema.Types.Mixed,
     // ⭐ Tools V2: tableau de références ObjectId vers user_functions
     tools: [{
         type: Schema.Types.ObjectId,

@@ -49,6 +49,7 @@ function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string,
     llmModel: agentData.model || '', // Frontend uses 'model', backend expects 'llmModel'
     capabilities: agentData.capabilities?.map(c => String(c)) || [],
     historyConfig: agentData.historyConfig || undefined,
+    webSearchParams: agentData.webSearchParams || undefined,
     // C3 FIX: Envoyer functionIds (V2) au lieu de tools (legacy)
     // tools legacy omis intentionnellement — le backend les stocke en legacyTools
     functionIds,
@@ -99,6 +100,7 @@ export function mapAPIResponseToAgent(apiData: any): Agent {
     functionIds,
     toolSelections,
     outputConfig: apiData.outputConfig,
+    webSearchParams: apiData.webSearchParams,
     creator_id: apiData.robotId, // Backend uses 'robotId', frontend expects 'creator_id'
     created_at: apiData.createdAt || new Date().toISOString(),
     updated_at: apiData.updatedAt || new Date().toISOString(),
@@ -174,6 +176,7 @@ export async function updateAgentPrototype(
     if (agentData.model !== undefined) payload.llmModel = agentData.model;
     if (agentData.capabilities !== undefined) payload.capabilities = agentData.capabilities.map(c => String(c));
     if (agentData.historyConfig !== undefined) payload.historyConfig = agentData.historyConfig;
+    if (agentData.webSearchParams !== undefined) payload.webSearchParams = agentData.webSearchParams;
     if (agentData.tools !== undefined) payload.tools = agentData.tools;
     if (agentData.functionIds !== undefined) payload.functionIds = agentData.functionIds; // C3 FIX
     if (agentData.toolSelections !== undefined) payload.toolSelections = agentData.toolSelections;

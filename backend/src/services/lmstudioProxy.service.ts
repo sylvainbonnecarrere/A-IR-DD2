@@ -110,17 +110,35 @@ export async function fetchWithTimeout(
     timeout: number = LMSTUDIO_CONFIG.TIMEOUT_MS
 ): Promise<Response> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const hasTimeout = Number.isFinite(timeout) && timeout > 0;
+    const timeoutId = hasTimeout ? setTimeout(() => controller.abort(), timeout) : undefined;
+    const startedAt = Date.now();
 
     try {
+        console.info('[LMStudio Proxy] fetchWithTimeout start', {
+            url,
+            timeoutMs: hasTimeout ? timeout : 0,
+            timeoutDisabled: !hasTimeout,
+        });
         const response = await fetch(url, {
             ...options,
             signal: controller.signal
         });
-        clearTimeout(timeoutId);
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
+        console.info('[LMStudio Proxy] fetchWithTimeout success', {
+            url,
+            durationMs: Date.now() - startedAt,
+            timeoutMs: hasTimeout ? timeout : 0,
+            timeoutDisabled: !hasTimeout,
+            status: response.status,
+        });
         return response;
     } catch (error) {
-        clearTimeout(timeoutId);
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
         if (isAbortTimeoutError(error)) {
             throw new LMStudioProxyError('timeout', `LMStudio request timeout exceeded after ${timeout}ms`, {
                 statusCode: 504,
@@ -385,7 +403,8 @@ export async function openChatCompletionStream(
  */
 export async function fetchChatCompletion(
     endpoint: string,
-    requestBody: ChatCompletionRequest
+    requestBody: ChatCompletionRequest,
+    timeoutMs: number = LMSTUDIO_CONFIG.CHAT_COMPLETION_TIMEOUT_MS
 ): Promise<any> {
     // Validation whitelist
     if (!isEndpointAllowed(endpoint)) {
@@ -399,6 +418,13 @@ export async function fetchChatCompletion(
     };
 
     try {
+        console.info('[LMStudio Proxy] fetchChatCompletion start', {
+            endpoint,
+            model: requestBody.model,
+            messagesCount: Array.isArray(requestBody.messages) ? requestBody.messages.length : 0,
+            timeoutMs,
+            timeoutDisabled: !Number.isFinite(timeoutMs) || timeoutMs <= 0,
+        });
         const response = await fetchWithTimeout(
             `${endpoint}/v1/chat/completions`,
             {
@@ -406,7 +432,7 @@ export async function fetchChatCompletion(
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ...processedBody, stream: false })
             },
-            LMSTUDIO_CONFIG.CHAT_COMPLETION_TIMEOUT_MS
+            timeoutMs
         );
 
         if (!response.ok) {
@@ -414,7 +440,14 @@ export async function fetchChatCompletion(
             throw new Error(`LMStudio API error: ${response.status} - ${errorText}`);
         }
 
-        return await response.json();
+        const payload = await response.json();
+        console.info('[LMStudio Proxy] fetchChatCompletion success', {
+            endpoint,
+            model: requestBody.model,
+            timeoutMs,
+            choicesCount: Array.isArray(payload?.choices) ? payload.choices.length : 0,
+        });
+        return payload;
     } catch (error) {
         if (error instanceof Error) {
             throw error;

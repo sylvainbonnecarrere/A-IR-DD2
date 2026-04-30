@@ -7,6 +7,12 @@ import { executeTool } from '../utils/toolExecutor';
 import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
 import { isLLMConfigured } from '../utils/llmProviderUtils';
 import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
+import { createAdapter } from '../services/adapters/AdapterFactory';
+import { runAgentLoop } from '../services/llm/AgentLoop';
+import { useFunctionStore } from '../stores/useFunctionStore';
+import { useDesignStore } from '../stores/useDesignStore';
+import { deriveSelectedToolIds } from '../services/toolSelectionResolver';
+import { executeAgentToolCall, buildWebSearchExecutionArgs } from '../services/agentToolExecution';
 // ⭐ AUTO-SAVE: Import persistence service for chat content
 import { PersistenceService } from '../services/persistenceService';
 
@@ -58,6 +64,9 @@ export const useAgentChat = ({
         setNodeExecuting,
         localLLMProfiles,
     } = useRuntimeStore();
+    const allFunctions = useFunctionStore((state) => state.functions);
+    const loadFunctions = useFunctionStore((state) => state.loadFunctions);
+    const agentInstances = useDesignStore((state) => state.agentInstances);
 
     const [loadingMessage, setLoadingMessage] = useState('');
 
@@ -114,6 +123,15 @@ export const useAgentChat = ({
             return {};
         }
     };
+
+    const selectedToolIds = agent
+        ? deriveSelectedToolIds(agent.toolSelections, agent.functionIds)
+        : [];
+    const selectedIdSet = new Set(selectedToolIds);
+    const scopedFunctions = allFunctions.filter((fn) => fn.isEnabled && (selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false)));
+    const workflowId = instanceId
+        ? agentInstances.find((inst) => inst.id === instanceId)?.workflowId
+        : undefined;
 
     const extractToolExecutionMetadata = (toolResult: unknown): Pick<ToolCallRecord, 'executionId' | 'runner' | 'exitCode' | 'failureKind' | 'artifacts'> => {
         if (!toolResult || typeof toolResult !== 'object') {
@@ -270,8 +288,110 @@ export const useAgentChat = ({
                 conversationHistoryForAPI = historyConfig?.enabled ? currentFullHistory : [userMessage];
             }
 
-            // Stream LLM response
             const credential = agentRuntime.credential;
+            const adapter = createAdapter(
+                agent.llmProvider as LLMProvider,
+                agentConfig,
+                agent.model,
+                accessToken ?? undefined,
+            );
+
+            if (adapter) {
+                let enabledFunctions = scopedFunctions;
+
+                if (enabledFunctions.length === 0 && selectedToolIds.length > 0 && workflowId) {
+                    await loadFunctions(workflowId);
+                    const reloadedFunctions = useFunctionStore.getState().functions;
+                    enabledFunctions = reloadedFunctions.filter((fn) => fn.isEnabled && (selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false)));
+                }
+
+                const loopResult = await runAgentLoop(
+                    adapter,
+                    conversationHistoryForAPI,
+                    enabledFunctions,
+                    agent.systemPrompt ?? '',
+                    {
+                        authToken: accessToken ?? undefined,
+                        prepareToolExecution: ({ fn, toolCall }) => {
+                            if (fn.name !== 'web_search_py' || !agent.webSearchParams || !accessToken) {
+                                return { args: toolCall.arguments };
+                            }
+
+                            return {
+                                args: buildWebSearchExecutionArgs(toolCall.arguments, agent),
+                                privateContext: {
+                                    web_search: {
+                                        params: agent.webSearchParams,
+                                        llm: {
+                                            provider: agent.llmProvider,
+                                            model: agent.model,
+                                            localLLMProfileId: agent.localLLMProfileId ?? null,
+                                        },
+                                    },
+                                },
+                            };
+                        },
+                        onEvent: (event) => {
+                            if (event.type === 'tool_call_start') {
+                                setLoadingMessage(`🔧 ${event.toolCall?.name ?? '…'}`);
+                            } else if (event.type === 'llm_start') {
+                                setLoadingMessage(t('loading'));
+                            }
+                        },
+                    }
+                );
+
+                for (const record of loopResult.toolCallLog) {
+                    const toolMessage: ChatMessage = {
+                        id: record.id,
+                        sender: 'tool',
+                        text: `${record.functionName}(${JSON.stringify(record.arguments)})${record.executionId ? ` [${record.executionId}]` : ''}`,
+                        toolName: record.functionName,
+                        timestamp: record.timestamp,
+                        isError: record.status === 'error',
+                        toolCallRecord: {
+                            id: record.id,
+                            functionName: record.functionName,
+                            arguments: record.arguments,
+                            result: record.result,
+                            status: record.status,
+                            durationMs: record.durationMs,
+                            executionId: record.executionId,
+                            runner: record.runner,
+                            exitCode: record.exitCode,
+                            failureKind: record.failureKind,
+                            artifacts: record.artifacts,
+                            timestamp: record.timestamp,
+                        },
+                    };
+                    await addAndPersistMessage(nodeId, toolMessage);
+
+                    const toolResultMessage: ChatMessage = {
+                        id: generateMessageId('tool-result'),
+                        sender: 'tool_result',
+                        text: typeof record.result === 'string' ? record.result : JSON.stringify(record.result, null, 2),
+                        toolCallId: record.id,
+                        toolName: record.functionName,
+                        timestamp: record.timestamp,
+                        isError: record.status === 'error',
+                    };
+                    await addAndPersistMessage(nodeId, toolResultMessage);
+                }
+
+                if (loopResult.finalResponse.trim() || loopResult.finishReason === 'error') {
+                    const agentMsg: ChatMessage = {
+                        id: generateMessageId('agent'),
+                        sender: 'agent',
+                        text: loopResult.finalResponse,
+                        isError: loopResult.finishReason === 'error',
+                        timestamp: new Date(),
+                    };
+                    await addAndPersistMessage(nodeId, agentMsg);
+                }
+
+                return;
+            }
+
             const stream = llmService.generateContentStream(
                 agent.llmProvider,
                 credential,
@@ -346,27 +466,35 @@ export const useAgentChat = ({
             if (toolCalls.length > 0) {
                 for (const toolCall of toolCalls) {
                     const toolTimestamp = new Date();
-                    const parsedArguments = parseToolArguments(toolCall.arguments);
 
                     try {
-                        const toolResult = await executeTool(toolCall);
+                        const execution = await executeAgentToolCall({
+                            toolCall,
+                            agent,
+                            availableFunctions: scopedFunctions,
+                            authToken: accessToken ?? undefined,
+                        });
+                        const toolResult = execution.result;
                         const toolExecutionError = isToolErrorResult(toolResult);
-                        const executionMetadata = extractToolExecutionMetadata(toolResult);
                         const toolMessage: ChatMessage = {
                             id: generateMessageId('tool-call'),
                             sender: 'tool',
-                            text: `${toolCall.name}(${toolCall.arguments})${executionMetadata.executionId ? ` [${executionMetadata.executionId}]` : ''}`,
+                            text: `${toolCall.name}(${execution.serializedArguments})${execution.executionId ? ` [${execution.executionId}]` : ''}`,
                             toolName: toolCall.name,
                             timestamp: toolTimestamp,
                             isError: toolExecutionError,
                             toolCallRecord: {
                                 id: toolCall.id,
                                 functionName: toolCall.name,
-                                arguments: parsedArguments,
+                                arguments: execution.executedArguments,
                                 result: toolResult,
                                 status: toolExecutionError ? 'error' : 'success',
                                 timestamp: toolTimestamp,
-                                ...executionMetadata,
+                                executionId: execution.executionId,
+                                runner: execution.runner,
+                                exitCode: execution.exitCode,
+                                failureKind: execution.failureKind,
+                                artifacts: execution.artifacts,
                             },
                         };
                         await addAndPersistMessage(nodeId, toolMessage);
@@ -375,8 +503,8 @@ export const useAgentChat = ({
                         const toolResultMessage: ChatMessage = {
                             id: generateMessageId('tool-result'),
                             sender: 'tool_result',
-                            text: executionMetadata.executionId
-                                ? `[executionId=${executionMetadata.executionId}] ${serializedToolResult}`
+                            text: execution.executionId
+                                ? `[executionId=${execution.executionId}] ${serializedToolResult}`
                                 : serializedToolResult,
                             toolCallId: toolCall.id,
                             toolName: toolCall.name,
@@ -396,7 +524,7 @@ export const useAgentChat = ({
                             toolCallRecord: {
                                 id: toolCall.id,
                                 functionName: toolCall.name,
-                                arguments: parsedArguments,
+                                arguments: parseToolArguments(toolCall.arguments),
                                 result: { error: toolErrorText },
                                 status: 'error',
                                 timestamp: toolTimestamp,

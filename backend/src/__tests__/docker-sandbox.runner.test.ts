@@ -99,7 +99,7 @@ describe('DockerSandboxRunner', () => {
             '/sandbox/tmp:size=64m,noexec,nosuid,nodev',
             '--workdir',
             '/persistent-workspace/source',
-            'airdd2-runtime-node:bookworm-slim'
+            'airdd2-runtime-node:22.22.2-ubuntu-noble'
         ]));
         expect(call.args.join(' ')).toContain('type=bind,src=C:/sandbox/workspace-root,dst=/persistent-workspace');
         expect(call.timeoutMs).toBe(12000);
@@ -283,7 +283,7 @@ describe('DockerSandboxRunner', () => {
 
         const call = processRunner.calls[0];
         expect(call.args).toEqual(expect.arrayContaining([
-            'airdd2-runtime-python:3.12-slim',
+            'airdd2-runtime-python:3.12-ubuntu-noble',
             'python3',
             '-c'
         ]));

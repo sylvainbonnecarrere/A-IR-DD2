@@ -88,6 +88,82 @@ export interface OutputConfig {
   schema?: object;
 }
 
+export type WebSearchEngine = 'duckduckgo.com' | 'bing.com' | 'google.com' | 'baidu.com' | 'qwant.com';
+
+export type WebSearchRerankStrategy = 'Fast' | 'Deep';
+
+export const DEFAULT_WEB_SEARCH_MAX_CONTEXT_TOKENS = 4000;
+
+export interface WebSearchParams {
+  nb_request_transformation: number;
+  request_list: boolean;
+  max_uses: number;
+  cross_lingual_search: boolean;
+  web_engine_search: boolean;
+  web_engine: WebSearchEngine;
+  web_engine_nb_result_select: number;
+  dig_snippet: boolean;
+  allowed_domains: string[];
+  query_transformation: string;
+  reranking_prompt: string;
+  relevance_threshold: number;
+  rerank_strategy: WebSearchRerankStrategy;
+  max_context_tokens?: number;
+}
+
+export const defaultWebSearchQueryTransformationPrompt = `# ROLE
+Tu es le processeur d'abstraction sémantique. Ta mission est de transformer le flux de pensée naturel du prompt utilisateur en un vecteur de recherche optimal pour une recherche web, dépouillé de toute syntaxe conversationnelle.
+
+# PRINCIPES D'ABSTRACTION
+1. DÉTERMINATION DU NOYAU : Extraire le sujet pivot de la demande (l'entité ou le concept central).
+2. EXPANSION DES DIMENSIONS : Identifier les variables critiques nécessaires à la résolution de l'intention (qu'elles soient temporelles, spatiales, techniques ou normatives).
+3. RÉSOLUTION DES RÉFÉRENTIELS : Convertir tout terme relatif ou contextuel en une valeur absolue et explicite selon les métadonnées fournies.
+4. SYNTHÈSE D'INDEXATION : Produire une chaîne de termes à haute densité informationnelle, hiérarchisée par pertinence pour un index de recherche.
+
+# CONTRAINTES DE FLUX
+- SORTIE : Chaîne de mots-clés brute uniquement.
+- ÉLAGAGE : Suppression totale des structures grammaticales, des déterminants et des modalisateurs.
+- NEUTRALITÉ : Ne pas interpréter, ne pas conseiller. Uniquement transformer.
+
+# ENTRÉES SYSTÈME
+- RÉFÉRENTIELS : {{system_context}} (Exemples : Dates, Localisation, Spécialisation, Secteurs etc...)
+- INPUT : {{user_query}}`;
+
+export const defaultWebSearchRerankingPrompt = `# ROLE
+Tu es le "Information Juror", un expert en analyse de pertinence et en vérification de faits. Ta mission est de classer des sources web en fonction de leur utilité réelle pour répondre à une intention spécifique.
+
+# PARAMÈTRES D'ENTRÉE
+- INTENTION_INITIALE : {{user_query}}
+- SOURCE_WEB : {{source_content}} (URL + Snippet ou Full Text)
+
+# CRITÈRES D'ÉVALUATION (Score sur 10)
+1. ADÉQUATION : La source contient-elle une réponse directe ou des données pivots pour l'intention ?
+2. FRAÎCHEUR : La date de la source est-elle cohérente avec la temporalité de la demande ?
+3. DENSITÉ : Ratio informations utiles / bruit publicitaire ou remplissage.
+
+# FORMAT DE SORTIE (STRICT JSON)
+{
+  "relevance_score": [0-10],
+  "reasoning": "Explication en 10 mots max",
+  "critical_fragment": "Le passage exact contenant l'info clé"
+}`;
+
+export const defaultWebSearchParams: WebSearchParams = {
+  nb_request_transformation: 1,
+  request_list: false,
+  max_uses: 5,
+  cross_lingual_search: false,
+  web_engine_search: true,
+  web_engine: 'duckduckgo.com',
+  web_engine_nb_result_select: 3,
+  dig_snippet: false,
+  allowed_domains: [],
+  query_transformation: defaultWebSearchQueryTransformationPrompt,
+  reranking_prompt: defaultWebSearchRerankingPrompt,
+  relevance_threshold: 7,
+  rerank_strategy: 'Fast',
+};
+
 /**
  * Configuration granulaire de persistance par agent
  * Définit ce qui est sauvegardé pour chaque agent individuellement
@@ -181,6 +257,7 @@ export interface Agent {
   functionIds?: string[];               // Alias legacy transitoire avant convergence complète sur toolSelections
   toolSelections?: ToolSelection[];     // Références canoniques versionnées vers user_tools
   outputConfig?: OutputConfig;
+  webSearchParams?: WebSearchParams;
   persistenceConfig?: PersistenceConfig;
   localLLMProfileId?: string;            // Only set when llmProvider === LLMProvider.LMStudio
   // V2 Governance: Robot creator validation
@@ -272,6 +349,7 @@ export interface AgentInstance {
     systemPrompt: string;
     tools: Tool[];
     outputConfig?: OutputConfig;
+    webSearchParams?: WebSearchParams;
     capabilities?: LLMCapability[];
     historyConfig?: HistoryConfig;
     localLLMProfileId?: string;  // Which local LLM profile is used for this instance

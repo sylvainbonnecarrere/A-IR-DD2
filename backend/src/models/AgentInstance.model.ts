@@ -144,6 +144,7 @@ export interface IAgentInstance extends Document {
         overrideFunctionIds?: string[]; // Si inheritFromPrototype = false
         overrideToolSelections?: IToolSelection[];
     };
+    webSearchParams?: object;
     outputConfig?: object;
     localLLMProfileId?: string;   // Which LocalLLMProfile is used for this instance
     robotId: string;
@@ -266,6 +267,7 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         }],
         _id: false
     },
+    webSearchParams: Schema.Types.Mixed,
     outputConfig: Schema.Types.Mixed,
     // ⭐ LOCAL LLM: Profil LLM local sélectionné pour cette instance
     localLLMProfileId: {

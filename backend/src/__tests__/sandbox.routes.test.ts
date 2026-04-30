@@ -504,6 +504,113 @@ describe('Sandbox routes', () => {
         expect(provisionSpy).toHaveBeenCalledWith(tool.id, user.id, 'v1');
     });
 
+    it('accepts a legacy semver versionTag for a native tool selection and resolves it to the canonical tag', async () => {
+        const timestamp = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const user = await User.create({
+            email: `sandbox-route-${timestamp}@test.com`,
+            password: 'test-only-password-123',
+            username: `sandboxroute${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: `sandbox-route-native-semver-${timestamp}`,
+            description: 'Native tool version compatibility test',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v1',
+                contentHash: 'sandbox-native-semver-hash',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v1',
+                contentHash: 'sandbox-native-semver-hash',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: null,
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: {},
+            outputSchema: {},
+            tags: [],
+            dependencies: { python: [], npm: [] },
+            policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({
+            sub: user.id,
+            email: user.email,
+            role: user.role
+        });
+
+        const ensureBuildReadySpy = jest.spyOn(BuildService.prototype, 'ensureBuildReadyForTool').mockResolvedValue();
+        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
+            report: {
+                status: 'healthy',
+                summary: 'Docker sandbox ready'
+            } as any,
+            runner: {
+                getRunnerId: () => 'docker_sandbox',
+                getLabel: () => 'Docker sandbox',
+                supportsRuntime: () => true,
+                getReadiness: () => ({ ready: true })
+            },
+            readiness: { ready: true }
+        });
+        const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
+            success: true,
+            output: { ok: true },
+            stdout: 'route test',
+            stderr: '',
+            durationMs: 12,
+            executionId: 'exec-sandbox-semver',
+            runner: 'docker_sandbox',
+            exitCode: 0,
+            metadata: { containerWorkspaceDir: '/tmp/workspace' },
+            resourceUsage: { peakMemoryMb: 24 }
+        } as any);
+
+        const response = await request(app)
+            .post('/api/sandbox/run')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                functionId: tool.id,
+                toolSelection: {
+                    toolId: tool.id,
+                    versionRef: { versionTag: '1.0.0', versionNumber: 1 }
+                },
+                testArgs: { query: 'films programmation informatique cinémas Paris semaine 2025', language: 'fr' }
+            })
+            .expect(200);
+
+        expect(response.body.success).toBe(true);
+        expect(ensureBuildReadySpy).toHaveBeenCalledWith(tool.id, user.id, 'v1');
+        expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({
+            fn: expect.objectContaining({
+                name: tool.name,
+                toolVersionTag: 'v1'
+            })
+        }));
+    });
+
     it('returns 503 when the preferred runner is not ready', async () => {
         const fixture = await createFixture();
         jest.spyOn(BuildService.prototype, 'ensureBuildReadyForRun').mockResolvedValue();

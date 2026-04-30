@@ -6,7 +6,7 @@ import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../contexts/NotificationContext';
-import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, PersistenceConfig, defaultPersistenceConfig, LocalLLMProfile, ToolSelection } from '../../types';
+import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, PersistenceConfig, defaultPersistenceConfig, LocalLLMProfile, ToolSelection, defaultWebSearchParams } from '../../types';
 import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels, getCapabilitiesForLLM } from '../../llmModels';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
 import { initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
@@ -118,6 +118,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             outputConfig: instanceConfig?.outputConfig
                 ? JSON.parse(JSON.stringify(instanceConfig.outputConfig))
                 : (prototypeConfig.outputConfig ? JSON.parse(JSON.stringify(prototypeConfig.outputConfig)) : undefined),
+            webSearchParams: JSON.parse(JSON.stringify(instanceConfig?.webSearchParams || prototypeConfig.webSearchParams || defaultWebSearchParams)),
             capabilities: instanceConfig?.capabilities
                 ? [...instanceConfig.capabilities]
                 : (prototypeConfig.capabilities ? [...prototypeConfig.capabilities] : []),

@@ -14,6 +14,8 @@
     "runtime:check": "node scripts/runtime/check-runtime.cjs",
     "runtime:update-digests": "node scripts/runtime/sync-runtime-base-digests.cjs",
     "runtime:rebuild": "node scripts/runtime/rebuild-runtime.cjs",
+    "runtime:verify:provisioning": "node scripts/runtime/verify-provisioning-runtime.cjs",
+    "runtime:ci": "npm run runtime:rebuild && npm run runtime:verify:provisioning",
     "runtime:scan": "node scripts/runtime/scan-runtime.cjs --fail-on-severity=high",
     "runtime:maintain": "node scripts/runtime/maintain-runtime.cjs --fail-on-severity=high",
     "migrate:up": "ts-node -r dotenv/config src/migrations/004_tools_v2_function_registry.ts up",

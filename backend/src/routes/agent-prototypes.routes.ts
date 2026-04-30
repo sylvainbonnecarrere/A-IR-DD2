@@ -7,6 +7,7 @@ import { requireRobotGovernance } from '../middleware/robot-governance.middlewar
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
+import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
 
 const router = Router();
 
@@ -30,6 +31,7 @@ const createAgentPrototypeSchema = z.object({
     llmModel: z.string(),
     capabilities: z.array(z.string()).default([]),
     historyConfig: z.object({}).passthrough().optional(),
+    webSearchParams: WebSearchParamsSchema.optional(),
     tools: z.array(z.object({}).passthrough()).optional(),       // legacy (rétrocompat)
     functionIds: z.array(z.string()).optional(),                 // V2 — ids stables de tools, alias frontend vers user_tools
     toolSelections: z.array(toolSelectionSchema).optional(),     // V2 cible — refs versionnées
@@ -114,8 +116,11 @@ router.post('/',
             const user = req.user as IUser;
 
             // C3 FIX: Extraire functionIds et mapper vers tools (ObjectId[])
-            const { functionIds, toolSelections, tools, ...rest } = req.body;
+            const { functionIds, toolSelections, tools, webSearchParams, ...rest } = req.body;
             const prototypeData: Record<string, any> = { userId: user.id, ...rest };
+            if (webSearchParams !== undefined) {
+                prototypeData.webSearchParams = parseWebSearchParams(webSearchParams);
+            }
             const canonicalFunctionIds = Array.isArray(functionIds) && functionIds.length > 0
                 ? functionIds
                 : Array.isArray(toolSelections)
@@ -145,6 +150,16 @@ router.post('/',
             res.status(201).json(responseObj);
         } catch (error) {
             console.error('[AgentPrototypes] POST error:', error);
+            if (error instanceof z.ZodError) {
+                return res.status(400).json({
+                    error: 'Validation échouée',
+                    details: error.errors.map((e) => ({
+                        field: e.path.join('.'),
+                        message: e.message,
+                        code: e.code,
+                    })),
+                });
+            }
             res.status(500).json({ error: 'Erreur création prototype' });
         }
     }
@@ -180,7 +195,7 @@ router.put('/:id',
             }
 
             // ⭐ SECURITY FIX: Whitelist allowed fields to prevent mass assignment
-            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, tools, functionIds, toolSelections, outputConfig, robotId, workflowId, localLLMProfileId } = req.body;
+            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, webSearchParams, tools, functionIds, toolSelections, outputConfig, robotId, workflowId, localLLMProfileId } = req.body;
 
             // Update only whitelisted fields (userId never modifiable)
             if (name !== undefined) prototype.name = name;
@@ -190,6 +205,7 @@ router.put('/:id',
             if (llmModel !== undefined) prototype.llmModel = llmModel;
             if (capabilities !== undefined) prototype.capabilities = capabilities;
             if (historyConfig !== undefined) prototype.historyConfig = historyConfig;
+            if (webSearchParams !== undefined) prototype.webSearchParams = parseWebSearchParams(webSearchParams);
             // C3 FIX: functionIds (V2) prend la priorité sur tools (legacy) et reste l'alias frontend canonique
             if (functionIds !== undefined || toolSelections !== undefined) {
                 const canonicalFunctionIds = Array.isArray(functionIds)
@@ -221,6 +237,16 @@ router.put('/:id',
             res.json(responseObj);
         } catch (error) {
             console.error('[AgentPrototypes] PUT error:', error);
+            if (error instanceof z.ZodError) {
+                return res.status(400).json({
+                    error: 'Validation échouée',
+                    details: error.errors.map((e) => ({
+                        field: e.path.join('.'),
+                        message: e.message,
+                        code: e.code,
+                    })),
+                });
+            }
             res.status(500).json({ error: 'Erreur mise à jour prototype' });
         }
     }

@@ -43,7 +43,8 @@ const runFunctionSchema = z.object({
     testArgs: z
         .record(z.unknown())
         .optional()
-        .default({})
+        .default({}),
+    privateContext: z.record(z.unknown()).optional()
 });
 
 const checkSyntaxSchema = z.object({
@@ -70,7 +71,7 @@ router.get('/health', requireAuth, async (_req, res) => {
 router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req, res) => {
     try {
         const user = req.user as IUser;
-        const { functionId, toolSelection, testArgs } = req.body;
+        const { functionId, toolSelection, testArgs, privateContext } = req.body;
 
         console.info('[SandboxRoute] POST /run start', {
             userId: user.id,
@@ -80,7 +81,14 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
             argKeys: Object.keys(testArgs ?? {}),
         });
 
-        const result = await sandboxService.runFunction(functionId, user.id, testArgs, toolSelection);
+        const result = await sandboxService.runFunction(
+            functionId,
+            user.id,
+            testArgs,
+            toolSelection,
+            privateContext,
+            req.headers.authorization,
+        );
 
         console.info('[SandboxRoute] POST /run done', {
             userId: user.id,

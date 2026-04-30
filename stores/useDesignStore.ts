@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Agent, V2WorkflowNode, V2WorkflowEdge, RobotId, AgentInstance, ResolvedAgentInstance } from '../types';
+import { Agent, V2WorkflowNode, V2WorkflowEdge, RobotId, AgentInstance, ResolvedAgentInstance, defaultWebSearchParams } from '../types';
 import { GovernanceService } from '../services/governanceService';
 import apiClient from '../utils/apiClient';
 
@@ -342,6 +342,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       systemPrompt: prototype.systemPrompt,
       tools: JSON.parse(JSON.stringify(prototype.tools || [])), // Deep clone
       outputConfig: prototype.outputConfig ? JSON.parse(JSON.stringify(prototype.outputConfig)) : undefined,
+      webSearchParams: JSON.parse(JSON.stringify(prototype.webSearchParams || defaultWebSearchParams)),
       capabilities: prototype.capabilities ? [...prototype.capabilities] : undefined,
       historyConfig: prototype.historyConfig ? JSON.parse(JSON.stringify(prototype.historyConfig)) : undefined,
       position,
@@ -441,10 +442,10 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   getResolvedInstance: (instanceId) => {
     const state = get();
     const instance = state.agentInstances.find(i => i.id === instanceId);
-    if (!instance) return null;
+    if (!instance) return undefined;
 
     const prototype = state.agents.find(a => a.id === instance.prototypeId);
-    if (!prototype) return null;
+    if (!prototype) return undefined;
 
     return { instance, prototype };
   },
