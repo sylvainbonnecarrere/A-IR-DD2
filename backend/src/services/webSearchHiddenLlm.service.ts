@@ -16,6 +16,7 @@ export interface WebSearchHiddenLlmRequest {
     userPrompt: string;
     timeoutSeconds?: number;
     maxTokens?: number;
+    allowReasoningRetry?: boolean;
 }
 
 const OPENAI_COMPATIBLE_ENDPOINTS: Record<string, string> = {
@@ -272,7 +273,7 @@ async function completeWithLocalRuntime(input: WebSearchHiddenLlmRequest): Promi
                 remainingTimeoutMs: getEffectiveTimeoutMs(timeout.deadlineMs),
                 error: error instanceof Error ? error.message : String(error),
             });
-            if (shouldRetryReasoningLengthExhaustion(error) && attempt === 0 && requestedMaxTokens < 1000) {
+            if (input.allowReasoningRetry !== false && shouldRetryReasoningLengthExhaustion(error) && attempt === 0 && requestedMaxTokens < 1000) {
                 requestedMaxTokens = computeExpandedMaxTokens(requestedMaxTokens);
                 console.info('[WebSearchHiddenLLM] local runtime retrying after reasoning-length exhaustion', {
                     model: input.runtime.model,

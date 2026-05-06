@@ -235,4 +235,40 @@ describe('web-search hidden llm routes', () => {
             max_tokens: 660,
         }));
     });
+
+    it('does not retry reasoning-length exhaustion when allowReasoningRetry=false', async () => {
+        const { accessToken } = await createFixture();
+
+        const fetchChatCompletionSpy = jest.spyOn(lmstudioProxyService, 'fetchChatCompletion');
+        fetchChatCompletionSpy.mockResolvedValueOnce({
+            choices: [{
+                finish_reason: 'length',
+                message: {
+                    role: 'assistant',
+                    content: '',
+                    reasoning_content: 'Thinking Process: analyse en cours'
+                }
+            }],
+        } as any);
+
+        const response = await request(app)
+            .post('/api/web-search/hidden-llm/complete')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                runtime: {
+                    provider: 'LLM local (on premise)',
+                    model: 'qwen/qwen3.5-9b',
+                    endpoint: 'http://192.168.56.1:1234',
+                },
+                systemPrompt: 'Q=météo Paris demain',
+                userPrompt: 'météo Paris demain',
+                timeoutSeconds: 15,
+                maxTokens: 220,
+                allowReasoningRetry: false,
+            });
+
+        expect(response.status).toBe(500);
+        expect(response.body.error).toContain('contenu final vide après reasoning');
+        expect(fetchChatCompletionSpy).toHaveBeenCalledTimes(1);
+    });
 });

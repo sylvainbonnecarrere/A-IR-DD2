@@ -98,6 +98,49 @@ describe('Workflow CRUD Flow - Cycle de vie complet', () => {
             instance1Id = response.body.id;
         });
 
+        it('Étape 3b: Persister un message chat de rôle tool_result sur une instance', async () => {
+            const activeInstanceId = instance1Id || (
+                await request(app)
+                    .post(`/api/workflows/${workflowId}/instances/from-prototype`)
+                    .set('Authorization', `Bearer ${accessToken}`)
+                    .send({
+                        prototypeId,
+                        position: { x: 120, y: 120 }
+                    })
+                    .expect(201)
+            ).body.id;
+
+            const response = await request(app)
+                .post(`/api/agent-instances/${activeInstanceId}/content`)
+                .set('Authorization', `Bearer ${accessToken}`)
+                .send({
+                    content: {
+                        type: 'chat',
+                        role: 'tool_result',
+                        message: 'QUERY_TRANSFORMATION_FAILED: Timeout hidden LLM après 45s.',
+                        metadata: {
+                            source: 'tool_executor',
+                            retryable: true,
+                        },
+                    },
+                })
+                .expect(201);
+
+            expect(response.body).toEqual(expect.objectContaining({
+                success: true,
+                contentCount: 1,
+            }));
+
+            const persistedInstance = await AgentInstance.findById(activeInstanceId).lean();
+            expect(persistedInstance?.content).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    type: 'chat',
+                    role: 'tool_result',
+                    message: 'QUERY_TRANSFORMATION_FAILED: Timeout hidden LLM après 45s.',
+                }),
+            ]));
+        });
+
         // TODO: Étape 4 - Blocage: deuxième POST /from-prototype retourne 404 au lieu de 201
         // Première instance crée (201), deuxième appel même endpoint → 404
         // it('Étape 4: Ajouter deuxième instance au workflow', async () => { ... });

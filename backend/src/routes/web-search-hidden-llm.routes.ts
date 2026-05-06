@@ -20,6 +20,7 @@ const completeSchema = z.object({
     userPrompt: z.string(),
     timeoutSeconds: z.number().int().min(0).optional(),
     maxTokens: z.number().int().positive().max(1000).optional(),
+    allowReasoningRetry: z.boolean().optional(),
 });
 
 router.post('/complete', requireAuth, validateRequest(completeSchema), async (req: Request, res: Response) => {

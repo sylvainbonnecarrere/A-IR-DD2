@@ -160,6 +160,10 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         const maxMemoryMb = Math.max(request.policySnapshot.maxMemoryMb ?? 256, 64);
         const containerWorkspaceDir = request.workspace ? CONTAINER_SOURCE_ROOT : CONTAINER_FALLBACK_WORKSPACE;
         const stdinPayload = this.buildStdinPayload(request);
+        // Debug: log the stdin payload that will be sent to the sandbox (helps verify transformed query propagation)
+        try {
+            console.debug('[DockerSandboxRunner] stdinPayload:', stdinPayload);
+        } catch {}
         const args = this.buildDockerArgs(request, maxMemoryMb, containerWorkspaceDir);
 
         const result = await this.processRunner.run('docker', args, {
@@ -252,12 +256,15 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
 
     private buildStdinPayload(request: SandboxExecutionRequest): string {
         if (request.mode === 'python-native') {
-            return JSON.stringify({
+            const payload: any = {
                 functionName: request.function.name,
                 toolVersionTag: request.toolVersionTag,
                 args: request.args,
-                privateContext: request.privateContext ?? {}
-            });
+            };
+            if (request.privateContext !== undefined) {
+                payload.privateContext = request.privateContext;
+            }
+            return JSON.stringify(payload);
         }
 
         return JSON.stringify({

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 import warnings
 from typing import Any, Dict, List, Tuple
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
@@ -76,6 +77,13 @@ def _normalize_whitespace(value: str) -> str:
     return " ".join(value.split())
 
 
+def _emit_debug_event(event: str, **payload: Any) -> None:
+    try:
+        print(json.dumps({"WEB_SEARCH_DEBUG": event, **payload}, ensure_ascii=False))
+    except Exception:
+        pass
+
+
 def _create_execution_trace(raw_query: str, language: str, num_results: int, safe_search: bool, web_engine: str) -> Dict[str, Any]:
     return {
         "input": {
@@ -92,11 +100,134 @@ def _create_execution_trace(raw_query: str, language: str, num_results: int, saf
         "transformation": {},
         "queries": [],
         "consulted_sources": [],
+        "engine_top_results": [],
         "selected_sources": [],
+        "rerank_diagnostics": {},
         "page_fetches": [],
         "steps": [],
         "errors": [],
     }
+
+
+def _summarize_engine_results(raw_results: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    summarized: List[Dict[str, Any]] = []
+    bounded_limit = max(0, int(limit))
+    for index, result in enumerate(raw_results[:bounded_limit], start=1):
+        url = str(result.get("href", "") or result.get("url", "")).strip()
+        if not url:
+            continue
+        summarized.append({
+            "rank": index,
+            "title": str(result.get("title", "") or ""),
+            "url": url,
+            "snippet": str(result.get("body", "") or result.get("snippet", "") or ""),
+        })
+    return summarized
+
+
+def _summarize_rerank_candidates(reranked_sources: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    summarized: List[Dict[str, Any]] = []
+    bounded_limit = max(0, int(limit))
+    for index, item in enumerate(reranked_sources[:bounded_limit], start=1):
+        summarized.append({
+            "rank": index,
+            "title": str(item.get("title", "") or ""),
+            "url": str(item.get("url", "") or ""),
+            "source_kind": str(item.get("source_kind", "") or ""),
+            "relevance_score": int(item.get("relevance_score", 0) or 0),
+            "mode": str(item.get("mode", "") or ""),
+            "reasoning": _normalize_whitespace(str(item.get("reasoning", "") or "")),
+            "critical_fragment": _normalize_whitespace(str(item.get("critical_fragment", "") or "")),
+            "fallback_reason": str(item.get("fallback_reason", "") or ""),
+            "llm_error": _normalize_whitespace(str(item.get("llm_error", "") or "")),
+        })
+    return summarized
+
+
+def _build_rerank_diagnostics(reranked_sources: List[Dict[str, Any]], threshold: int, selected_count: int) -> Dict[str, Any]:
+    top_candidates = _summarize_rerank_candidates(reranked_sources, 3)
+    return {
+        "threshold": threshold,
+        "evaluation_count": len(reranked_sources),
+        "selected_count": selected_count,
+        "best_score": int(reranked_sources[0].get("relevance_score", 0) or 0) if reranked_sources else 0,
+        "fallback_count": sum(1 for item in reranked_sources if str(item.get("mode", "")).strip().lower() == "fallback"),
+        "top_candidates": top_candidates,
+    }
+
+
+def _build_no_relevant_result_message(rerank_diagnostics: Dict[str, Any]) -> str:
+    threshold = int(rerank_diagnostics.get("threshold", 0) or 0)
+    evaluation_count = int(rerank_diagnostics.get("evaluation_count", 0) or 0)
+    best_score = int(rerank_diagnostics.get("best_score", 0) or 0)
+    top_candidates = list(rerank_diagnostics.get("top_candidates", []))
+
+    if not top_candidates:
+        return (
+            "Aucune source suffisamment pertinente n'a été validée par le moteur d'abstraction. "
+            f"Seuil={threshold}, évaluées={evaluation_count}, meilleur_score={best_score}."
+        )
+
+    serialized_candidates: List[str] = []
+    for candidate in top_candidates:
+        parts = [
+            f"[{candidate.get('rank', '?')}] {str(candidate.get('title', '') or candidate.get('url', '') or 'source inconnue')}",
+            f"score={int(candidate.get('relevance_score', 0) or 0)}",
+        ]
+        mode = str(candidate.get("mode", "") or "").strip()
+        if mode:
+            parts.append(f"mode={mode}")
+        reasoning = _normalize_whitespace(str(candidate.get("reasoning", "") or ""))
+        if reasoning:
+            parts.append(f"raison={reasoning}")
+        fallback_reason = str(candidate.get("fallback_reason", "") or "").strip()
+        if fallback_reason:
+            parts.append(f"fallback={fallback_reason}")
+        llm_error = _normalize_whitespace(str(candidate.get("llm_error", "") or ""))
+        if llm_error:
+            parts.append(f"llm_error={llm_error}")
+        serialized_candidates.append(" | ".join(parts))
+
+    details = " ; ".join(serialized_candidates)
+    normalized_details = _normalize_whitespace(details)
+    if len(normalized_details) > 900:
+        normalized_details = f"{normalized_details[:897].rstrip()}..."
+
+    return (
+        "Aucune source suffisamment pertinente n'a été validée par le moteur d'abstraction. "
+        f"Seuil={threshold}, évaluées={evaluation_count}, meilleur_score={best_score}. "
+        f"Top candidats: {normalized_details}"
+    )
+
+
+def _summarize_engine_query_plans(engine_query_plans: List[Dict[str, Any]], limit: int = 5) -> List[Dict[str, Any]]:
+    summarized: List[Dict[str, Any]] = []
+    for index, plan in enumerate(engine_query_plans[: max(0, int(limit))], start=1):
+        summarized.append({
+            "rank": index,
+            "engine": str(plan.get("engine", "") or ""),
+            "domain": str(plan.get("domain", "") or ""),
+            "engine_query_text": str(plan.get("engine_query_text", "") or ""),
+            "engine_query_url": str(plan.get("engine_query_url", "") or ""),
+        })
+    return summarized
+
+
+def _summarize_trace_queries(trace_queries: List[Dict[str, Any]], limit: int = 5) -> List[Dict[str, Any]]:
+    summarized: List[Dict[str, Any]] = []
+    for index, item in enumerate(trace_queries[: max(0, int(limit))], start=1):
+        attempts = item.get("attempts", []) if isinstance(item.get("attempts"), list) else []
+        summarized.append({
+            "rank": index,
+            "query": str(item.get("query", "") or ""),
+            "engine": str(item.get("engine", "") or ""),
+            "backend": str(item.get("backend", "") or ""),
+            "engine_query_url": str(item.get("engine_query_url", "") or ""),
+            "status": str(item.get("status", "") or ""),
+            "result_count": int(item.get("result_count", 0) or 0),
+            "attempts": attempts,
+        })
+    return summarized
 
 
 def _record_step(trace: Dict[str, Any], name: str, status: str, details: Dict[str, Any] | None = None) -> None:
@@ -120,6 +251,15 @@ def _record_error(trace: Dict[str, Any], step: str, exc: Exception) -> Dict[str,
 
 def _build_failure_response(original_query: str, normalized_query: str, trace: Dict[str, Any], step: str, exc: Exception) -> Dict[str, Any]:
     error = _record_error(trace, step, exc)
+    _emit_debug_event(
+        "failure",
+        step=step,
+        message=error.get("message", ""),
+        transformed_query_raw=trace.get("transformed_query_raw", ""),
+        web_engine=trace.get("input", {}).get("web_engine", ""),
+        engine_query_plans=_summarize_engine_query_plans(list(trace.get("engine_query_plans", []))),
+        top_results=trace.get("engine_top_results", []),
+    )
     return {
         "results": [],
         "query": original_query,
@@ -351,6 +491,14 @@ def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
         _record_step(trace, "build_search_plan", "completed", {
             "engine_plan_count": len(engine_query_plans),
         })
+        _emit_debug_event(
+            "query_transformation",
+            mode=str(transformed_query.get("mode", "unknown") or "unknown"),
+            transformed_query_raw=normalized_query,
+            web_engine=str(runtime_params.get("web_engine", "") or ""),
+            allowed_domains=list(runtime_params.get("allowed_domains", [])),
+            engine_query_plans=_summarize_engine_query_plans(engine_query_plans),
+        )
     except Exception as exc:
         return _build_failure_response(raw_query, "", trace, "build_search_plan", exc)
 
@@ -367,6 +515,7 @@ def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
                     region=region,
                     safesearch=safesearch,
                     num_results=num_results,
+                    runtime_params=runtime_params,
                 )
         raw_results = list(execution_payload.get("results_raw", []))
         engine_execution_trace = list(execution_payload.get("engine_execution_trace", []))
@@ -379,6 +528,7 @@ def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
                 "engine": item.get("engine", ""),
                 "engine_query_url": item.get("engine_query_url", ""),
                 "backend": item.get("backend", ""),
+                "attempts": item.get("attempts", []),
             }
             for item in engine_execution_trace
         ]
@@ -390,10 +540,21 @@ def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
             for result in raw_results
             if str(result.get("href", "")).strip()
         ]
+        trace["engine_top_results"] = _summarize_engine_results(
+            raw_results,
+            min(int(runtime_params.get("selected_result_limit", 3)), 3),
+        )
         _record_step(trace, "execute_search", "completed", {
             "raw_result_count": len(raw_results),
             "engine_execution_count": len(engine_execution_trace),
         })
+        _emit_debug_event(
+            "engine_execution",
+            web_engine=str(runtime_params.get("web_engine", "") or ""),
+            transformed_query_raw=normalized_query,
+            engine_queries=_summarize_trace_queries(trace["queries"]),
+            top_results=trace.get("engine_top_results", []),
+        )
     except Exception as exc:
         return _build_failure_response(raw_query, normalized_query, trace, "execute_search", exc)
 
@@ -453,14 +614,23 @@ def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
         )
         reranked_sources = list(rerank_payload.get("evaluations", []))
         verified_fragments = list(rerank_payload.get("selected", []))[: int(runtime_params.get("max_uses", 5))]
+        rerank_threshold = int(runtime_params.get("relevance_threshold", 7))
+        trace["rerank_diagnostics"] = _build_rerank_diagnostics(
+            reranked_sources,
+            rerank_threshold,
+            len(verified_fragments),
+        )
         _record_step(trace, "rerank_sources", "completed", {
             "evaluation_count": len(reranked_sources),
             "selected_count": len(verified_fragments),
+            "threshold": rerank_threshold,
+            "best_score": trace["rerank_diagnostics"].get("best_score", 0),
         })
     except Exception as exc:
         return _build_failure_response(raw_query, normalized_query, trace, "rerank_sources", exc)
 
     if not verified_fragments:
+        rerank_diagnostics = trace.get("rerank_diagnostics", {})
         return {
             "results": projected_results,
             "query": raw_query,
@@ -470,13 +640,16 @@ def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
             "engine_query_plans": trace.get("engine_query_plans", []),
             "engine_execution_trace": trace.get("engine_execution_trace", []),
             "results_raw": raw_results,
+            "engine_top_results": trace.get("engine_top_results", []),
             "total_results": len(projected_results),
             "error": {
                 "step": "rerank_sources",
                 "type": "NO_RELEVANT_RESULT",
-                "message": "Aucune source suffisamment pertinente n'a été validée par le moteur d'abstraction.",
+                "message": _build_no_relevant_result_message(rerank_diagnostics),
+                "diagnostics": rerank_diagnostics,
             },
             "reranked_sources": reranked_sources,
+            "rerank_diagnostics": rerank_diagnostics,
             "verified_fragments": [],
             "llm_context_block": llm_context_block,
             "trace": trace,
@@ -504,8 +677,10 @@ def run(context: FunctionContext, args: Dict[str, Any]) -> Dict[str, Any]:
         "engine_query_plans": trace.get("engine_query_plans", []),
         "engine_execution_trace": trace.get("engine_execution_trace", []),
         "results_raw": raw_results,
+        "engine_top_results": trace.get("engine_top_results", []),
         "total_results": len(projected_results),
         "reranked_sources": reranked_sources,
+        "rerank_diagnostics": trace.get("rerank_diagnostics", {}),
         "verified_fragments": verified_fragments,
         "llm_context_block": llm_context_block,
         "trace": trace,

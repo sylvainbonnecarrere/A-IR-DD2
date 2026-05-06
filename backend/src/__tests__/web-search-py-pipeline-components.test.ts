@@ -89,11 +89,12 @@ import native.web_search_query_transformation as query_transformation
 
 captured = {}
 
-def fake_complete_text(context, *, system_prompt, user_prompt, timeout, max_tokens):
+def fake_complete_text(context, *, system_prompt, user_prompt, timeout, max_tokens, allow_reasoning_retry=True):
     captured['system_prompt'] = system_prompt
     captured['user_prompt'] = user_prompt
     captured['timeout'] = timeout
     captured['max_tokens'] = max_tokens
+    captured['allow_reasoning_retry'] = allow_reasoning_retry
     return '   météo Paris demain site officiel   '
 
 query_transformation.complete_text = fake_complete_text
@@ -103,11 +104,17 @@ result = query_transformation.transform_query(
     user_query='Cherche sur le web la météo demain à Paris',
     system_context=['language:fr', 'target_date:29/04/2026'],
     runtime_params={
+            'llm_runtime': {
+                'provider': 'OpenAI',
+                'model': 'gpt-test',
+                'api_key': 'sk-test',
+            },
         'query_transformation': 'Q={{user_query}}',
         'allowed_domains': ['meteofrance.com'],
         'request_list': False,
         'nb_request_transformation': 1,
         'cross_lingual_search': True,
+        'fetch_timeout_seconds': 15,
     },
 )
 
@@ -123,7 +130,7 @@ print(json.dumps({'captured': captured, 'result': result}, ensure_ascii=False))
         expect(stderr).toBe('');
 
         const payload = parseLastJsonLine<{
-            captured: { system_prompt: string; user_prompt: string; timeout: number; max_tokens: number };
+            captured: { system_prompt: string; user_prompt: string; timeout: number; max_tokens: number; allow_reasoning_retry: boolean };
             result: {
                 normalized_query: string;
                 transformed_query_raw: string;
@@ -142,8 +149,9 @@ print(json.dumps({'captured': captured, 'result': result}, ensure_ascii=False))
         expect(payload.captured.user_prompt).not.toContain('{{system_context}}');
         expect(payload.captured.user_prompt).not.toContain('ALLOWED_DOMAINS');
         expect(payload.captured.user_prompt).not.toContain('NB_REQUEST_TRANSFORMATION');
-        expect(payload.captured.timeout).toBe(0);
+        expect(payload.captured.timeout).toBe(45);
         expect(payload.captured.max_tokens).toBe(220);
+        expect(payload.captured.allow_reasoning_retry).toBe(false);
         expect(payload.result).toEqual({
             normalized_query: 'météo Paris demain site officiel',
             transformed_query_raw: 'météo Paris demain site officiel',
@@ -154,6 +162,203 @@ print(json.dumps({'captured': captured, 'result': result}, ensure_ascii=False))
             raw_output: 'météo Paris demain site officiel',
             mode: 'llm',
         });
+    });
+
+    it('compacts the legacy default transformation prompt for local runtimes before calling the hidden LLM', async () => {
+        const workspaceRoot = resolveWorkspaceRoot();
+        const pythonExecutable = resolvePythonExecutable(workspaceRoot);
+        const pythonRoot = path.join(workspaceRoot, 'backend', 'python');
+
+        const pythonSnippet = `
+import json
+import sys
+
+sys.path.insert(0, ${JSON.stringify(pythonRoot)})
+
+import native.web_search_query_transformation as query_transformation
+
+captured = {}
+
+def fake_complete_text(context, *, system_prompt, user_prompt, timeout, max_tokens, allow_reasoning_retry=True):
+    captured['system_prompt'] = system_prompt
+    captured['user_prompt'] = user_prompt
+    captured['timeout'] = timeout
+    captured['allow_reasoning_retry'] = allow_reasoning_retry
+    return 'météo paris demain prévisions'
+
+query_transformation.complete_text = fake_complete_text
+
+result = query_transformation.transform_query(
+    context=None,
+    user_query=${JSON.stringify("En allant sur internet, donne moi le temps qu'il fera demain à Paris")},
+    system_context=['language:fr', 'target_date:06/05/2026'],
+    runtime_params={
+        'llm_runtime': {
+            'provider': 'LLM local (on premise)',
+            'model': 'qwen/qwen3.5-9b',
+            'endpoint': 'http://host.docker.internal:1234',
+        },
+        'hidden_llm_timeout_seconds': 120,
+        'query_transformation': query_transformation.DEFAULT_QUERY_TRANSFORMATION_TEMPLATE,
+    },
+)
+
+print(json.dumps({'captured': captured, 'result': result}, ensure_ascii=False))
+        `;
+
+        const { stdout, stderr } = await execFileAsync(pythonExecutable, ['-c', pythonSnippet], {
+            cwd: workspaceRoot,
+            timeout: 30000,
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        });
+
+        expect(stderr).toBe('');
+
+        const payload = JSON.parse(stdout.trim()) as {
+            captured: { system_prompt: string; user_prompt: string; timeout: number; allow_reasoning_retry?: boolean };
+            result: { transformed_query_raw: string; mode: string };
+        };
+
+        expect(payload.captured.system_prompt).toBe('');
+        expect(payload.captured.user_prompt).toContain('Transforme la demande utilisateur en requête web concise.');
+        expect(payload.captured.user_prompt).toContain('CONTEXTE=["language:fr", "target_date:06/05/2026"]');
+        expect(payload.captured.user_prompt).not.toContain('PRINCIPES D\'ABSTRACTION');
+        expect(payload.captured.user_prompt.length).toBeLessThan(400);
+        expect(payload.captured.timeout).toBe(120);
+        expect(payload.captured.allow_reasoning_retry).toBe(true);
+        expect(payload.result.transformed_query_raw).toBe('météo paris demain prévisions');
+        expect(payload.result.mode).toBe('llm');
+    });
+
+    it('uses a higher default hidden LLM timeout for local on-prem runtimes', async () => {
+        const workspaceRoot = resolveWorkspaceRoot();
+        const pythonExecutable = resolvePythonExecutable(workspaceRoot);
+        const pythonRoot = path.join(workspaceRoot, 'backend', 'python');
+
+        const pythonSnippet = `
+import json
+import sys
+
+sys.path.insert(0, ${JSON.stringify(pythonRoot)})
+
+from core.function_context import FunctionContext
+from native.web_search_runtime_params import resolve_runtime_params
+
+result = resolve_runtime_params(
+    FunctionContext(
+        workspace_dir='.',
+        function_name='web_search_py',
+        private_context={
+            'web_search': {
+                'params': {
+                    'web_engine': 'duckduckgo.com',
+                },
+                'llm_runtime': {
+                    'provider': 'LLM local (on premise)',
+                    'model': 'qwen/qwen3.5-9b',
+                    'endpoint': 'http://host.docker.internal:1234',
+                    'completion_api_url': 'http://host.docker.internal:3001/api/web-search/hidden-llm/complete',
+                },
+            }
+        },
+    ),
+    {
+        'query': 'météo demain Paris',
+        'num_results': 5,
+        'language': 'fr',
+        'safe_search': True,
+    },
+)
+
+print(json.dumps(result, ensure_ascii=False))
+        `;
+
+        const { stdout, stderr } = await execFileAsync(pythonExecutable, ['-c', pythonSnippet], {
+            cwd: workspaceRoot,
+            timeout: 30000,
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        });
+
+        expect(stderr).toBe('');
+
+        const payload = JSON.parse(stdout.trim()) as {
+            hidden_llm_timeout_seconds: number;
+            llm_runtime: { provider: string; endpoint: string };
+        };
+
+        expect(payload.hidden_llm_timeout_seconds).toBe(120);
+        expect(payload.llm_runtime.provider).toBe('LLM local (on premise)');
+        expect(payload.llm_runtime.endpoint).toBe('http://host.docker.internal:1234');
+    });
+
+    it('removes source_content from the reranking prompt sent to the hidden LLM', async () => {
+        const workspaceRoot = resolveWorkspaceRoot();
+        const pythonExecutable = resolvePythonExecutable(workspaceRoot);
+        const pythonRoot = path.join(workspaceRoot, 'backend', 'python');
+
+        const pythonSnippet = `
+import json
+import sys
+
+sys.path.insert(0, ${JSON.stringify(pythonRoot)})
+
+import native.web_search_reranking as reranking
+
+captured = {}
+
+def fake_complete_text(context, *, system_prompt, user_prompt, timeout, max_tokens, allow_reasoning_retry=True):
+    captured['system_prompt'] = system_prompt
+    captured['user_prompt'] = user_prompt
+    return json.dumps({
+        'relevance_score': 9,
+        'reasoning': 'source pertinente',
+        'critical_fragment': 'Prévisions météo Paris demain 8°C 17°C.'
+    }, ensure_ascii=False)
+
+reranking.complete_text = fake_complete_text
+
+result = reranking.rerank_sources(
+    None,
+    'Donne moi la météo pour demain à Paris',
+    {
+        'normalized_query': 'météo paris demain prévisions',
+        'must_include_terms': [],
+    },
+    [{
+        'title': 'Météo Paris demain',
+        'url': 'https://meteofrance.com/previsions-meteo-france/paris/75000',
+        'snippet': 'Prévisions météo Paris demain 8°C 17°C.',
+    }],
+    [],
+    runtime_params={
+        'allowed_domains': [],
+        'reranking_prompt': ${JSON.stringify("# PARAMÈTRES D'ENTRÉE\n- INTENTION_INITIALE : {{user_query}}\n- SOURCE_WEB : {{source_content}}")},
+        'relevance_threshold': 7,
+        'rerank_strategy': 'Fast',
+    },
+)
+
+print(json.dumps({'captured': captured, 'result': result}, ensure_ascii=False))
+        `;
+
+        const { stdout, stderr } = await execFileAsync(pythonExecutable, ['-c', pythonSnippet], {
+            cwd: workspaceRoot,
+            timeout: 30000,
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        });
+
+        expect(stderr).toBe('');
+
+        const payload = JSON.parse(stdout.trim()) as {
+            captured: { system_prompt: string; user_prompt: string };
+            result: { selected: Array<{ url: string; relevance_score: number }> };
+        };
+
+        expect(payload.captured.system_prompt).toContain('INTENTION_INITIALE : Donne moi la météo pour demain à Paris');
+        expect(payload.captured.system_prompt).not.toContain('{{source_content}}');
+        expect(payload.captured.system_prompt).not.toContain('SOURCE_WEB :');
+        expect(payload.captured.user_prompt).toContain('SOURCE_WEB: {"title": "Météo Paris demain"');
+        expect(payload.result.selected[0]?.url).toBe('https://meteofrance.com/previsions-meteo-france/paris/75000');
     });
 
     it('targets the backend hidden llm completion endpoint for hidden transformation', async () => {
@@ -236,7 +441,8 @@ print(json.dumps({'captured': captured, 'result': result}, ensure_ascii=False))
             env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
         });
 
-        expect(stderr).toBe('');
+        expect(stderr).toContain('web_search_hidden_llm_request_start');
+        expect(stderr).toContain('web_search_hidden_llm_request_success');
 
         const payload = parseLastJsonLine<{
             captured: {
@@ -271,6 +477,7 @@ print(json.dumps({'captured': captured, 'result': result}, ensure_ascii=False))
             userPrompt: 'Quelle est la météo pour demain à Paris ?',
             timeoutSeconds: 5,
             maxTokens: 128,
+            allowReasoningRetry: true,
         });
         expect(payload.result).toBe('Paris météo demain 30/04/2026 prévisions températures précipitations vent');
     });
@@ -929,7 +1136,7 @@ print(json.dumps(payload, ensure_ascii=False))
                 engine: 'google.com',
                 adapter_name: 'GoogleSearchAdapter',
                 execution_kind: 'http_search_page',
-                supported_runtime: false,
+                supported_runtime: true,
                 query_url: 'https://www.google.com/search?q=test+search',
                 request: {
                     q: 'test search',
@@ -942,7 +1149,7 @@ print(json.dumps(payload, ensure_ascii=False))
                 engine: 'bing.com',
                 adapter_name: 'BingSearchAdapter',
                 execution_kind: 'http_search_page',
-                supported_runtime: false,
+                supported_runtime: true,
                 query_url: 'https://www.bing.com/search?q=test+search',
                 request: {
                     q: 'test search',
@@ -955,7 +1162,7 @@ print(json.dumps(payload, ensure_ascii=False))
                 engine: 'baidu.com',
                 adapter_name: 'BaiduSearchAdapter',
                 execution_kind: 'http_search_page',
-                supported_runtime: false,
+                supported_runtime: true,
                 query_url: 'https://www.baidu.com/s?wd=test+search',
                 request: {
                     wd: 'test search',
@@ -968,7 +1175,7 @@ print(json.dumps(payload, ensure_ascii=False))
                 engine: 'qwant.com',
                 adapter_name: 'QwantSearchAdapter',
                 execution_kind: 'http_search_page',
-                supported_runtime: false,
+                supported_runtime: true,
                 query_url: 'https://www.qwant.com/?q=test+search',
                 request: {
                     t: 'web',

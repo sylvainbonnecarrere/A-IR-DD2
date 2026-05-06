@@ -4,6 +4,11 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
+function parseLastJsonLine<T>(stdout: string): T {
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+    return JSON.parse(lines[lines.length - 1]) as T;
+}
+
 function resolveWorkspaceRoot(): string {
     return path.resolve(__dirname, '../../../');
 }
@@ -27,6 +32,7 @@ import sys
 sys.path.insert(0, ${JSON.stringify(pythonRoot)})
 
 import native.web_search_py as web_search_py
+import native.web_search_presearch as presearch
 import native.web_search_query_transformation as query_transformation
 import native.web_search_reranking as reranking
 from core.function_context import FunctionContext
@@ -91,6 +97,7 @@ def fake_rerank(context, user_query, transformed_query, results, fetched_fragmen
 
 web_search_py.DDGS = FakeDDGS
 web_search_py._DEPS_OK = True
+presearch.transform_query = fake_transform
 query_transformation.transform_query = fake_transform
 web_search_py.transform_query = fake_transform
 reranking.rerank_sources = fake_rerank
@@ -147,7 +154,7 @@ print(json.dumps(result, ensure_ascii=False))
 
         expect(stderr).toBe('');
 
-        const result = JSON.parse(stdout.trim()) as {
+        const result = parseLastJsonLine<{
             normalized_query: string;
             results: Array<{ url: string; title: string }>;
             verified_fragments: Array<{ url: string; relevance_score: number }>;
@@ -157,7 +164,7 @@ print(json.dumps(result, ensure_ascii=False))
                     normalized_query: string;
                 };
             };
-        };
+        }>(stdout);
 
         expect(result.normalized_query).toBe('adoption vélo urbain france 2024');
         expect(result.trace.transformation.mode).toBe('llm');
@@ -178,6 +185,7 @@ import sys
 sys.path.insert(0, ${JSON.stringify(pythonRoot)})
 
 import native.web_search_py as web_search_py
+import native.web_search_presearch as presearch
 import native.web_search_query_transformation as query_transformation
 import native.web_search_reranking as reranking
 from core.function_context import FunctionContext
@@ -249,6 +257,7 @@ def fake_rerank(context, user_query, transformed_query, results, fetched_fragmen
 
 web_search_py.DDGS = FakeDDGS
 web_search_py._DEPS_OK = True
+presearch.transform_query = fake_transform
 query_transformation.transform_query = fake_transform
 web_search_py.transform_query = fake_transform
 reranking.rerank_sources = fake_rerank
@@ -304,7 +313,7 @@ print(json.dumps({"result": result, "calls": calls}, ensure_ascii=False))
 
         expect(stderr).toBe('');
 
-        const payload = JSON.parse(stdout.trim()) as {
+        const payload = parseLastJsonLine<{
             calls: Array<{ backend: string; region: string; query?: string }>;
             result: {
                 results: Array<{ url: string }>;
@@ -313,7 +322,7 @@ print(json.dumps({"result": result, "calls": calls}, ensure_ascii=False))
                     queries: Array<{ attempts?: Array<{ backend: string; status: string }> }>;
                 };
             };
-        };
+        }>(stdout);
 
         expect(payload.calls.map((call) => call.backend)).toEqual(['html']);
         expect(payload.result.results[0]?.url).toBe('https://meteofrance.com/previsions-meteo-france/paris/75000');

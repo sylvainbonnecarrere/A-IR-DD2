@@ -115,7 +115,15 @@ describe('agentToolExecution', () => {
     expect(result.executionId).toBe('exec-123');
   });
 
-  it('sends a minimal sandbox payload while forwarding engine selection and query transformation in private context', async () => {
+  it('sends a minimal sandbox payload while forwarding the selected web engine from agent settings into private context', async () => {
+    const googleSearchAgent: Agent = {
+      ...weatherSearchAgent,
+      webSearchParams: {
+        ...weatherSearchAgent.webSearchParams,
+        web_engine: 'google.com',
+      },
+    };
+
     global.fetch = jest.fn(async (_url, init) => {
       const payload = JSON.parse(String(init?.body ?? '{}'));
 
@@ -129,7 +137,7 @@ describe('agentToolExecution', () => {
       expect(payload.privateContext).toEqual(expect.objectContaining({
         web_search: expect.objectContaining({
           params: expect.objectContaining({
-            web_engine: 'duckduckgo.com',
+            web_engine: 'google.com',
             query_transformation: 'Q={{user_query}}',
           }),
           llm: expect.objectContaining({
@@ -150,7 +158,7 @@ describe('agentToolExecution', () => {
               transformed_query_raw: 'Marseille météo demain',
               queries: [
                 {
-                  engine: 'duckduckgo.com',
+                  engine: 'google.com',
                   engine_query_text: 'Marseille météo demain',
                 },
               ],
@@ -173,7 +181,7 @@ describe('agentToolExecution', () => {
           num_results: 2,
         }),
       },
-      agent: weatherSearchAgent,
+      agent: googleSearchAgent,
       availableFunctions: [webSearchFunction],
       authToken: 'token-123',
     });
@@ -185,7 +193,7 @@ describe('agentToolExecution', () => {
         transformed_query_raw: 'Marseille météo demain',
         queries: [
           expect.objectContaining({
-            engine: 'duckduckgo.com',
+            engine: 'google.com',
             engine_query_text: 'Marseille météo demain',
           }),
         ],

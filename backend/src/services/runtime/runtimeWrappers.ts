@@ -77,6 +77,8 @@ export function buildPythonCustomWrapper(): string {
 
 export function buildPythonNativeWrapper(nativeRoot: string): string {
     return [
+        'import contextlib',
+        'import io',
         'import json',
         'import os',
         'import pathlib',
@@ -105,10 +107,20 @@ export function buildPythonNativeWrapper(nativeRoot: string): string {
         '    if function_name not in FUNCTION_REGISTRY:',
         '        raise ValueError(f"Fonction \'{function_name}\' non trouvée dans le registre")',
         '    context = FunctionContext(workspace_dir=workspace_dir, function_name=function_name, private_context=private_context)',
-        '    output = FUNCTION_REGISTRY[function_name](context, args)',
-        '    print(json.dumps({"success": True, "output": output, "stdout": ""}, ensure_ascii=False))',
+        '    stdout_buffer = io.StringIO()',
+        '    with contextlib.redirect_stdout(stdout_buffer):',
+        "        # Emit sandbox debug info for web_search_py so host logs contain the transformed query/args",
+        "        try:",
+        "            if function_name == 'web_search_py':",
+        "                # print a compact JSON line that will be captured in stdout_buffer",
+        "                print(json.dumps({'SANDBOX_DEBUG': 'incoming_args', 'args': args}, ensure_ascii=False))",
+        "        except Exception:",
+        "            pass",
+        '        output = FUNCTION_REGISTRY[function_name](context, args)',
+        '    print(json.dumps({"success": True, "output": output, "stdout": stdout_buffer.getvalue().strip()}, ensure_ascii=False))',
         'except Exception as exc:',
-        '    print(json.dumps({"success": False, "output": None, "stderr": str(exc), "stdout": "", "traceback": traceback.format_exc(), "failureKind": classify_failure(exc), "errorType": exc.__class__.__name__}, ensure_ascii=False))',
+        '    captured_stdout = stdout_buffer.getvalue().strip() if "stdout_buffer" in locals() else ""',
+        '    print(json.dumps({"success": False, "output": None, "stderr": str(exc), "stdout": captured_stdout, "traceback": traceback.format_exc(), "failureKind": classify_failure(exc), "errorType": exc.__class__.__name__}, ensure_ascii=False))',
         '    sys.exit(1)'
     ].join('\n');
 }

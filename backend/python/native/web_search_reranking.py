@@ -26,6 +26,14 @@ def _clip_text(value: str, max_length: int = 320) -> str:
     return f"{normalized[: max(0, max_length - 1)].rstrip()}…"
 
 
+def _sanitize_reranking_prompt(prompt: str) -> str:
+    sanitized = str(prompt or "")
+    sanitized = re.sub(r"^.*\{\{source_content\}\}.*(?:\r?\n|$)", "", sanitized, flags=re.MULTILINE)
+    sanitized = sanitized.replace("{{source_content}}", "")
+    sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
+    return sanitized.strip()
+
+
 def _extract_query_terms(query: str) -> List[str]:
     return [
         token for token in re.split(r"[^a-zà-ÿ0-9]+", query.lower())
@@ -129,16 +137,8 @@ def _evaluate_candidate_with_llm(
     reranking_prompt: str,
     must_include_terms: List[str],
 ) -> Dict[str, Any]:
-    rendered_prompt = (reranking_prompt or "")
+    rendered_prompt = _sanitize_reranking_prompt(reranking_prompt)
     rendered_prompt = rendered_prompt.replace("{{user_query}}", user_query)
-    rendered_prompt = rendered_prompt.replace(
-        "{{source_content}}",
-        json.dumps({
-            "url": candidate.get("url", ""),
-            "title": candidate.get("title", ""),
-            "content": candidate.get("source_content", ""),
-        }, ensure_ascii=False),
-    )
     contract = "Retourne strictement un JSON avec relevance_score, reasoning et critical_fragment."
     payload = complete_text(
         context,
@@ -193,6 +193,7 @@ def rerank_sources(
             fallback = _fallback_score_candidate(candidate, normalized_query, allowed_domains, must_include_terms, rerank_strategy)
             fallback["relevance_score"] = 0
             fallback["reasoning"] = "domaine non autorisé"
+            fallback["fallback_reason"] = "domain_not_allowed"
             return {
                 "title": str(candidate.get("title", "")),
                 "url": str(candidate.get("url", "")),
@@ -209,8 +210,10 @@ def rerank_sources(
                 reranking_prompt,
                 must_include_terms,
             )
-        except Exception:
+        except Exception as exc:
             evaluation = _fallback_score_candidate(candidate, normalized_query, allowed_domains, must_include_terms, rerank_strategy)
+            evaluation["fallback_reason"] = "llm_error"
+            evaluation["llm_error"] = _clip_text(str(exc), 180)
 
         return {
             "title": str(candidate.get("title", "")),

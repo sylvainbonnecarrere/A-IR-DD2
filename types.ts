@@ -111,30 +111,17 @@ export interface WebSearchParams {
   max_context_tokens?: number;
 }
 
-export const defaultWebSearchQueryTransformationPrompt = `# ROLE
-Tu es le processeur d'abstraction sémantique. Ta mission est de transformer le flux de pensée naturel du prompt utilisateur en un vecteur de recherche optimal pour une recherche web, dépouillé de toute syntaxe conversationnelle.
-
-# PRINCIPES D'ABSTRACTION
-1. DÉTERMINATION DU NOYAU : Extraire le sujet pivot de la demande (l'entité ou le concept central).
-2. EXPANSION DES DIMENSIONS : Identifier les variables critiques nécessaires à la résolution de l'intention (qu'elles soient temporelles, spatiales, techniques ou normatives).
-3. RÉSOLUTION DES RÉFÉRENTIELS : Convertir tout terme relatif ou contextuel en une valeur absolue et explicite selon les métadonnées fournies.
-4. SYNTHÈSE D'INDEXATION : Produire une chaîne de termes à haute densité informationnelle, hiérarchisée par pertinence pour un index de recherche.
-
-# CONTRAINTES DE FLUX
-- SORTIE : Chaîne de mots-clés brute uniquement.
-- ÉLAGAGE : Suppression totale des structures grammaticales, des déterminants et des modalisateurs.
-- NEUTRALITÉ : Ne pas interpréter, ne pas conseiller. Uniquement transformer.
-
-# ENTRÉES SYSTÈME
-- RÉFÉRENTIELS : {{system_context}} (Exemples : Dates, Localisation, Spécialisation, Secteurs etc...)
-- INPUT : {{user_query}}`;
+export const defaultWebSearchQueryTransformationPrompt = `Transforme la demande utilisateur en requête web concise.
+Retourne uniquement une ligne de mots-clés utiles, sans phrase ni commentaire.
+Résous date, lieu et spécialisation à partir du contexte si disponible.
+CONTEXTE={{system_context}}
+INPUT={{user_query}}`;
 
 export const defaultWebSearchRerankingPrompt = `# ROLE
 Tu es le "Information Juror", un expert en analyse de pertinence et en vérification de faits. Ta mission est de classer des sources web en fonction de leur utilité réelle pour répondre à une intention spécifique.
 
 # PARAMÈTRES D'ENTRÉE
 - INTENTION_INITIALE : {{user_query}}
-- SOURCE_WEB : {{source_content}} (URL + Snippet ou Full Text)
 
 # CRITÈRES D'ÉVALUATION (Score sur 10)
 1. ADÉQUATION : La source contient-elle une réponse directe ou des données pivots pour l'intention ?
