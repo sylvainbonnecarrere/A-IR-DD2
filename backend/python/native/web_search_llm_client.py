@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 from typing import Any, Dict
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -56,6 +57,10 @@ def _post_json(url: str, headers: Dict[str, str], body: Dict[str, Any], timeout:
     return _read_json_response(request, timeout)
 
 
+def _emit_event(payload: Dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+
+
 def complete_text(
     context: Any,
     *,
@@ -63,6 +68,7 @@ def complete_text(
     user_prompt: str,
     timeout: int = 30,
     max_tokens: int = 800,
+    allow_reasoning_retry: bool = True,
 ) -> str:
     timeout_value = int(timeout)
     private_root = _to_mapping(getattr(context, "private_context", {}))
@@ -84,16 +90,17 @@ def complete_text(
     if auth_header:
         headers["Authorization"] = auth_header
 
-    print(json.dumps({
+    _emit_event({
         "event": "web_search_hidden_llm_request_start",
         "provider": request_runtime.get("provider"),
         "model": request_runtime.get("model"),
         "timeout_seconds": timeout_value,
         "timeout_disabled": timeout_value <= 0,
         "max_tokens": max(1, int(max_tokens)),
+        "allow_reasoning_retry": bool(allow_reasoning_retry),
         "system_prompt_length": len(system_prompt or ""),
         "user_prompt_length": len(user_prompt or ""),
-    }, ensure_ascii=False))
+    })
 
     response = _post_json(
         completion_api_url,
@@ -104,6 +111,7 @@ def complete_text(
             "userPrompt": user_prompt,
             "timeoutSeconds": max(0, timeout_value),
             "maxTokens": max(1, int(max_tokens)),
+            "allowReasoningRetry": bool(allow_reasoning_retry),
         },
         max(0, timeout_value),
     )
@@ -112,11 +120,11 @@ def complete_text(
     if not isinstance(text, str) or not text.strip():
         raise ValueError(f"Réponse backend hidden LLM invalide: {response}")
 
-    print(json.dumps({
+    _emit_event({
         "event": "web_search_hidden_llm_request_success",
         "provider": request_runtime.get("provider"),
         "model": request_runtime.get("model"),
         "text_length": len(text.strip()),
-    }, ensure_ascii=False))
+    })
 
     return text.strip()

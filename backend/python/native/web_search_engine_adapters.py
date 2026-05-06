@@ -75,7 +75,7 @@ _ADAPTERS: Dict[str, SearchEngineAdapter] = {
         query_param_name="q",
         base_search_url="https://www.google.com/search",
         execution_kind="http_search_page",
-        supported_runtime=False,
+        supported_runtime=True,
         default_params={},
     ),
     "bing.com": SearchEngineAdapter(
@@ -84,7 +84,7 @@ _ADAPTERS: Dict[str, SearchEngineAdapter] = {
         query_param_name="q",
         base_search_url="https://www.bing.com/search",
         execution_kind="http_search_page",
-        supported_runtime=False,
+        supported_runtime=True,
         default_params={},
     ),
     "baidu.com": SearchEngineAdapter(
@@ -93,7 +93,7 @@ _ADAPTERS: Dict[str, SearchEngineAdapter] = {
         query_param_name="wd",
         base_search_url="https://www.baidu.com/s",
         execution_kind="http_search_page",
-        supported_runtime=False,
+        supported_runtime=True,
         default_params={},
     ),
     "qwant.com": SearchEngineAdapter(
@@ -102,7 +102,7 @@ _ADAPTERS: Dict[str, SearchEngineAdapter] = {
         query_param_name="q",
         base_search_url="https://www.qwant.com/",
         execution_kind="http_search_page",
-        supported_runtime=False,
+        supported_runtime=True,
         default_params={"t": "web"},
     ),
 }

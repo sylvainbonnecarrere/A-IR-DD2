@@ -6,6 +6,8 @@ from typing import Any, Dict, List
 
 
 DEFAULT_FETCH_TIMEOUT_SECONDS = 15
+DEFAULT_HIDDEN_LLM_TIMEOUT_SECONDS = 45
+DEFAULT_LOCAL_HIDDEN_LLM_TIMEOUT_SECONDS = 120
 DEFAULT_MAX_CONTENT_BYTES = 250_000
 DEFAULT_MAX_FETCH_WORKERS = 3
 DEFAULT_RELEVANCE_THRESHOLD = 7
@@ -54,17 +56,38 @@ def _to_string_list(value: Any) -> List[str]:
     return normalized
 
 
+def _as_string(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _is_local_hidden_llm_runtime(runtime: Dict[str, Any]) -> bool:
+    provider = str(runtime.get("provider", "") or "").strip().lower()
+    endpoint = str(runtime.get("endpoint", "") or "").strip()
+    api_key = str(runtime.get("api_key", "") or "").strip()
+    return "local" in provider or bool(endpoint and not api_key)
+
+
 def resolve_runtime_params(context: Any, args: Dict[str, Any]) -> Dict[str, Any]:
     private_web_search = _to_mapping(getattr(context, "private_context", {}).get("web_search", {}))
     private_params = _to_mapping(private_web_search.get("params"))
     canonical_params = _to_mapping(args.get("web_search_params"))
     camel_params = _to_mapping(args.get("webSearchParams"))
+    llm_runtime = _to_mapping(private_web_search.get("llm_runtime"))
 
     merged_params: Dict[str, Any] = {
         **camel_params,
         **canonical_params,
         **private_params,
     }
+    default_hidden_llm_timeout_seconds = (
+        DEFAULT_LOCAL_HIDDEN_LLM_TIMEOUT_SECONDS
+        if _is_local_hidden_llm_runtime(llm_runtime)
+        else DEFAULT_HIDDEN_LLM_TIMEOUT_SECONDS
+    )
 
     num_results = _as_int(args.get("num_results"), 5, minimum=1)
     selected_result_limit = _as_int(
@@ -91,6 +114,11 @@ def resolve_runtime_params(context: Any, args: Dict[str, Any]) -> Dict[str, Any]
             DEFAULT_FETCH_TIMEOUT_SECONDS,
             minimum=1,
         ),
+        "hidden_llm_timeout_seconds": _as_int(
+            merged_params.get("hidden_llm_timeout_seconds", args.get("hidden_llm_timeout_seconds", default_hidden_llm_timeout_seconds)),
+            default_hidden_llm_timeout_seconds,
+            minimum=1,
+        ),
         "max_content_bytes": _as_int(
             merged_params.get("max_content_bytes", args.get("max_content_bytes", DEFAULT_MAX_CONTENT_BYTES)),
             DEFAULT_MAX_CONTENT_BYTES,
@@ -111,8 +139,10 @@ def resolve_runtime_params(context: Any, args: Dict[str, Any]) -> Dict[str, Any]
         "cross_lingual_search": _as_bool(merged_params.get("cross_lingual_search", args.get("cross_lingual_search", False))),
         "allowed_domains": _to_string_list(merged_params.get("allowed_domains", args.get("allowed_domains", []))),
         "query_transformation": str(merged_params.get("query_transformation", args.get("query_transformation", "")) or ""),
+        "mock_transformed_query": _as_string(merged_params.get("mock_transformed_query", args.get("mock_transformed_query", "")), "").strip(),
+        "mock_search_response_html": _as_string(merged_params.get("mock_search_response_html", args.get("mock_search_response_html", "")), "").strip(),
         "reranking_prompt": str(merged_params.get("reranking_prompt", args.get("reranking_prompt", "")) or ""),
         "web_engine_search": _as_bool(merged_params.get("web_engine_search", args.get("web_engine_search", True)), default=True),
         "web_engine": str(merged_params.get("web_engine", args.get("web_engine", DEFAULT_WEB_ENGINE)) or DEFAULT_WEB_ENGINE),
-        "llm_runtime": _to_mapping(private_web_search.get("llm_runtime")),
+        "llm_runtime": llm_runtime,
     }

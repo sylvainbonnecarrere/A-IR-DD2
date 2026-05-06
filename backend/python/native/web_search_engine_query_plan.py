@@ -36,7 +36,28 @@ def build_engine_query_plans(
     plans: List[Dict[str, str]] = []
 
     for domain in plan_domains:
-        engine_query_text = normalized_query if not domain else f"site:{domain} {normalized_query}"
+        # Produce a concise engine query for common patterns (eg. weather + date + location)
+        engine_query_text = normalized_query
+        try:
+            import re
+            if re.search(r"\bm[eé]t[eé]o\b", normalized_query, re.IGNORECASE):
+                # attempt to extract location and explicit date
+                loc_m = re.search(r"à\s+([A-Z][\w\-]+)|sur\s+([A-Z][\w\-]+)", normalized_query)
+                date_m = re.search(r"(\d{2}/\d{2}/\d{4})", normalized_query)
+                location = (loc_m.group(1) or loc_m.group(2)) if loc_m else ""
+                date_str = date_m.group(1) if date_m else ""
+                parts = ["météo"]
+                if location:
+                    parts.append(f'"{location}"')
+                if date_str:
+                    parts.append(f"le {date_str}")
+                concise = " ".join(parts)
+                engine_query_text = concise or normalized_query
+        except Exception:
+            engine_query_text = normalized_query
+
+        if domain:
+            engine_query_text = f"site:{domain} {engine_query_text}"
         plans.append({
             "engine": adapter.engine,
             "adapter_name": adapter.adapter_name,

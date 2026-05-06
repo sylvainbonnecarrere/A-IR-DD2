@@ -70,6 +70,14 @@ function repairJSON(raw: string): ParsedToolCall | null {
         raw.replace(/'/g, '"').replace(/,\s*([}\]])/g, '$1'),
     ];
 
+    // Also try to extract a JSON-looking substring like {...} from the raw
+    const braceMatch = raw.match(/\{[\s\S]*\}/);
+    if (braceMatch) {
+        const candidate = braceMatch[0];
+        attempts.unshift(candidate);
+        attempts.unshift(candidate.replace(/'/g, '"'));
+    }
+
     for (const attempt of attempts) {
         try {
             const parsed = JSON.parse(attempt);

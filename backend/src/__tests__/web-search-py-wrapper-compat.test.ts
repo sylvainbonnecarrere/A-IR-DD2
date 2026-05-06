@@ -4,6 +4,11 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
+function parseLastJsonLine<T>(stdout: string): T {
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+    return JSON.parse(lines[lines.length - 1]) as T;
+}
+
 function resolveWorkspaceRoot(): string {
     return path.resolve(__dirname, '../../../');
 }
@@ -96,7 +101,7 @@ print(json.dumps({
 
         expect(stderr).toBe('');
 
-        const payload = JSON.parse(stdout.trim()) as {
+        const payload = parseLastJsonLine<{
             helperAvailable: boolean;
             helperCodePath: string;
             runCodePath: string;
@@ -108,7 +113,7 @@ print(json.dumps({
             normalizedQuery: string;
             selectedUrl: string;
             seenQueries: string[];
-        };
+        }>(stdout);
 
         expect(payload.helperAvailable).toBe(true);
         expect(payload.helperCodePath.replace(/\\/g, '/')).toContain('/web_search_py_old.py');

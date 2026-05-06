@@ -46,7 +46,7 @@ export interface IToolSelection {
 // Type: Chat Message
 export interface IAgentInstanceChatContent {
     type: 'chat';
-    role: 'user' | 'agent' | 'tool';
+    role: 'user' | 'agent' | 'tool' | 'tool_result';
     message: string;
     timestamp: Date;
     metadata?: {
@@ -311,7 +311,7 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         // Chat fields
         role: {
             type: String,
-            enum: ['user', 'agent', 'tool']
+            enum: ['user', 'agent', 'tool', 'tool_result']
         },
         message: String,
         // Image/Video fields
