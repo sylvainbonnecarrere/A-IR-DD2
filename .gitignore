@@ -62,6 +62,7 @@ out/
 .tmp/
 *.tsbuildinfo
 .eslintcache
+.tools/
 
 # ===============================
 # ENVIRONNEMENTS DE DÉVELOPPEMENT
