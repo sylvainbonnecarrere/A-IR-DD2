@@ -7,6 +7,7 @@ import { UserTool, type IUserTool, type IUserToolVersion } from '../models/UserT
 import { ToolPreparationPolicyService, type PreparationPolicyErrorCode } from './toolPreparationPolicy.service';
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
 import type { WorkspaceProvisioningResult } from './workspace/types';
+import { buildGlobalLegacyFunctionClauses, buildGlobalToolClauses, buildOwnedLegacyFunctionClause, buildOwnedToolClause } from '../utils/sharedExampleAccess';
 
 export type BuildPreparationStatus = 'ready' | 'failed';
 
@@ -385,8 +386,8 @@ export class BuildService {
         return UserFunction.findOne({
             _id: functionId,
             $or: [
-                { userId: null },
-                { userId: new mongoose.Types.ObjectId(userId) }
+                ...buildGlobalLegacyFunctionClauses(),
+                buildOwnedLegacyFunctionClause(userId)
             ]
         }).exec();
     }
@@ -399,8 +400,8 @@ export class BuildService {
         return UserTool.findOne({
             _id: toolId,
             $or: [
-                { ownerUserId: null },
-                { ownerUserId: new mongoose.Types.ObjectId(userId) }
+                ...buildGlobalToolClauses(),
+                buildOwnedToolClause(userId)
             ]
         }).exec();
     }

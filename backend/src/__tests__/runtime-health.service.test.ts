@@ -89,10 +89,6 @@ function nativeImportProbeResponses(overrides?: Record<string, CommandResponse>)
             exitCode: 0,
             stdout: '{"missing": []}\n'
         },
-        [buildNativeImportProbeCommand('web_search_py', ['duckduckgo_search'])]: {
-            exitCode: 0,
-            stdout: '{"missing": []}\n'
-        },
         ...overrides
     };
 }
@@ -315,10 +311,10 @@ describe('RuntimeHealthService', () => {
             'docker image inspect airdd2-runtime-node:22.22.2-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
             'docker image inspect airdd2-runtime-python:3.12-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
             ...nativeImportProbeResponses({
-                [buildNativeImportProbeCommand('web_search_py', ['duckduckgo_search'])]: {
+                [buildNativeImportProbeCommand('web_fetch_py', ['requests', 'bs4', 'lxml'])]: {
                     exitCode: 2,
-                    stdout: '{"missing":[{"module":"duckduckgo_search","error":"ModuleNotFoundError: No module named \'duckduckgo_search\'"}]}\n',
-                    stderr: 'ModuleNotFoundError: No module named \'duckduckgo_search\''
+                    stdout: '{"missing":[{"module":"requests","error":"ModuleNotFoundError: No module named \'requests\'"}]}\n',
+                    stderr: 'ModuleNotFoundError: No module named \'requests\''
                 }
             })
         });
@@ -341,15 +337,15 @@ describe('RuntimeHealthService', () => {
             available: false,
             status: 'degraded'
         }));
-        expect(report.nativePython?.summary).toContain('web_search_py');
+        expect(report.nativePython?.summary).toContain('web_fetch_py');
         expect(report.nativePython?.probes).toContainEqual(expect.objectContaining({
-            toolName: 'web_search_py',
+            toolName: 'web_fetch_py',
             status: 'degraded',
-            imports: [expect.objectContaining({
-                dependency: 'ddgs',
-                module: 'duckduckgo_search',
+            imports: expect.arrayContaining([expect.objectContaining({
+                dependency: 'requests',
+                module: 'requests',
                 available: false
-            })]
+            })])
         }));
     });
 });

@@ -14,6 +14,7 @@ import { UserFunction, IUserFunction } from './models/UserFunction.model';
 import { WHITELISTED_PYTHON_TOOLS } from './config';
 import { syncUserToolMirrorFromLegacyFunction } from './services/userToolMirror.service';
 import { ExecutionOrchestrator } from './services/runtime/ExecutionOrchestrator';
+import { buildGlobalLegacyFunctionClauses, buildOwnedLegacyFunctionClause } from './utils/sharedExampleAccess';
 
 // Path to the Tools V2 runner.py (J7.3)
 const PYTHON_RUNNER_PATH = path.join(__dirname, '../python/runner.py');
@@ -107,8 +108,8 @@ export const executeFunctionById = async (
     const fn = await UserFunction.findOne({
         _id: new mongoose.Types.ObjectId(fnId),
         $or: [
-            { userId: null },                                 // native / shared
-            { userId: new mongoose.Types.ObjectId(userId) }  // user-owned
+            ...buildGlobalLegacyFunctionClauses(),
+            buildOwnedLegacyFunctionClause(userId)
         ]
     }).lean<IUserFunction>();
 

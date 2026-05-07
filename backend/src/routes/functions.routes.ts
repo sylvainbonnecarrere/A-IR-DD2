@@ -3,33 +3,27 @@
  *
  * ENDPOINTS :
  *   GET    /api/functions              — Liste (native + custom de l'utilisateur)
- *   POST   /api/functions              — Créer une fonction custom
  *   GET    /api/functions/:id          — Détail d'une fonction
- *   PUT    /api/functions/:id          — Mettre à jour (custom uniquement)
- *   DELETE /api/functions/:id          — Supprimer (custom uniquement)
- *   PATCH  /api/functions/:id/toggle   — Activer/désactiver
  *   GET    /api/functions/agent/:agentId — Fonctions associées à un prototype
+ *
+ * Cette facade legacy est volontairement en lecture seule.
+ * Les commandes passent desormais par /api/tools et /api/runs.
  */
 
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
-import { validateRequest } from '../middleware/validation.middleware';
-import { FunctionService } from '../services/function.service';
-import { BuildPreparationError, BuildService } from '../services/build.service';
+import { BuildService } from '../services/build.service';
 import { RuntimeCompatibilityService } from '../services/runtimeCompatibility.service';
 import { ToolReadAdapterService } from '../services/toolReadAdapter.service';
 import { UserToolRunQueryService } from '../services/userToolRunQuery.service';
-import { UserToolRunRetentionService } from '../services/userToolRunRetention.service';
 import { IUser } from '../models/User.model';
 
 const router = Router();
-const functionService = new FunctionService();
 const buildService = new BuildService();
 const runtimeCompatibilityService = new RuntimeCompatibilityService();
 const toolReadAdapterService = new ToolReadAdapterService();
 const userToolRunQueryService = new UserToolRunQueryService();
-const userToolRunRetentionService = new UserToolRunRetentionService();
 
 async function applyRuntimeCompatibility(res: any) {
     const runtimeCompatibility = await runtimeCompatibilityService.getRuntimeCompatibility();
@@ -37,33 +31,19 @@ async function applyRuntimeCompatibility(res: any) {
     return runtimeCompatibility;
 }
 
+function respondLegacyWriteDisabled(
+    res: any,
+    canonical: { method: string; path: string }
+) {
+    res.status(410).json({
+        error: 'La facade /api/functions est desormais en lecture seule.',
+        code: 'legacy_functions_read_only',
+        canonical,
+        message: `Utilisez ${canonical.method} ${canonical.path}.`
+    });
+}
+
 // ─── Schémas de Validation Zod ─────────────────────────────────────────────
-
-const createFunctionSchema = z.object({
-    name: z
-        .string()
-        .min(2)
-        .max(64)
-        .regex(/^[a-z][a-z0-9_]*$/, 'Le nom doit être en snake_case (lettres minuscules, chiffres, _)'),
-    description: z.string().min(10).max(500),
-    language: z.enum(['python', 'typescript']),
-    workflowId: z
-        .string()
-        .regex(/^[a-f\d]{24}$/i, 'workflowId doit être un ObjectId valide')
-        .optional()
-        .nullable(),
-    inputSchema: z.object({}).passthrough().optional().default({}),
-    outputSchema: z.object({}).passthrough().optional().default({}),
-    codeInline: z.string().max(50_000).optional().nullable(),
-    dependencies: z.array(z.string().max(100)).max(20).optional().default([]),
-    tags: z.array(z.string().max(30)).max(10).optional().default([])
-});
-
-const updateFunctionSchema = createFunctionSchema.partial().omit({ name: true });
-
-const buildFunctionSchema = z.object({
-    force: z.boolean().optional().default(false)
-});
 
 const idParamSchema = z
     .string()
@@ -75,14 +55,6 @@ const listRunsQuerySchema = z.object({
     status: z.enum(['queued', 'running', 'completed', 'failed', 'stopped', 'timed_out']).optional(),
     sortBy: z.enum(['createdAt', 'durationMs', 'status']).optional().default('createdAt'),
     sortOrder: z.enum(['asc', 'desc']).optional().default('desc')
-});
-
-const cleanupRunsSchema = z.object({
-    retentionDays: z.number().int().min(1).max(365).optional(),
-    retainLatest: z.number().int().min(0).max(200).optional(),
-    dryRun: z.boolean().optional().default(false)
-}).refine((value) => value.retentionDays !== undefined || value.retainLatest !== undefined, {
-    message: 'retentionDays ou retainLatest est requis'
 });
 
 const artifactQuerySchema = z.object({
@@ -134,24 +106,8 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // ─── POST /api/functions ─────────────────────────────────────────────────────
-router.post('/', requireAuth, validateRequest(createFunctionSchema), async (req, res) => {
-    try {
-        const user = req.user as IUser;
-        const created = await functionService.createFunction(user.id, req.body);
-        const runtimeCompatibility = await applyRuntimeCompatibility(res);
-        res.status(201).json({
-            ...created,
-            runtimeCompatibility
-        });
-    } catch (error: any) {
-        console.error('[FunctionsRoute] POST / error:', error);
-        if (error.code === 11000) {
-            return res.status(409).json({
-                error: 'Une fonction avec ce nom existe déjà dans votre espace de travail'
-            });
-        }
-        res.status(500).json({ error: 'Erreur lors de la création de la fonction' });
-    }
+router.post('/', requireAuth, async (_req, res) => {
+    respondLegacyWriteDisabled(res, { method: 'POST', path: '/api/tools' });
 });
 
 // ─── GET /api/functions/agent/:agentId ───────────────────────────────────────
@@ -300,25 +256,8 @@ router.get('/:id/runs/:executionId/artifacts/download', requireAuth, async (req,
     }
 });
 
-router.post('/:id/runs/cleanup', requireAuth, validateRequest(cleanupRunsSchema), async (req, res) => {
-    try {
-        const idResult = idParamSchema.safeParse(req.params.id);
-        if (!idResult.success) {
-            return res.status(400).json({ error: 'ID de fonction invalide' });
-        }
-
-        const user = req.user as IUser;
-        const result = await userToolRunRetentionService.cleanupRunsForFunction(idResult.data, user.id, req.body);
-        if (!result) {
-            return res.status(404).json({ error: 'Fonction introuvable' });
-        }
-
-        res.json(result);
-    } catch (error) {
-        const message = error instanceof Error ? error.message : 'Erreur lors du nettoyage des runs';
-        console.error('[FunctionsRoute] POST /:id/runs/cleanup error:', error);
-        res.status(500).json({ error: message });
-    }
+router.post('/:id/runs/cleanup', requireAuth, async (req, res) => {
+    respondLegacyWriteDisabled(res, { method: 'POST', path: `/api/runs/tool/${req.params.id}/cleanup` });
 });
 
 router.get('/:id/build-status', requireAuth, async (req, res) => {
@@ -343,25 +282,8 @@ router.get('/:id/build-status', requireAuth, async (req, res) => {
 });
 
 // ─── POST /api/functions/:id/build ───────────────────────────────────────────
-router.post('/:id/build', requireAuth, validateRequest(buildFunctionSchema), async (req, res) => {
-    try {
-        const idResult = idParamSchema.safeParse(req.params.id);
-        if (!idResult.success) {
-            return res.status(400).json({ error: 'ID de fonction invalide' });
-        }
-
-        const user = req.user as IUser;
-        const result = await buildService.prepareFunction(idResult.data, user.id);
-        res.json(result);
-    } catch (error: unknown) {
-        console.error('[FunctionsRoute] POST /:id/build error:', error);
-
-        if (error instanceof BuildPreparationError) {
-            return res.status(409).json({ error: error.message });
-        }
-
-        res.status(500).json({ error: 'Erreur lors de la préparation du build' });
-    }
+router.post('/:id/build', requireAuth, async (req, res) => {
+    respondLegacyWriteDisabled(res, { method: 'POST', path: `/api/tools/${req.params.id}/build` });
 });
 
 // ─── GET /api/functions/:id ──────────────────────────────────────────────────
@@ -391,89 +313,18 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // ─── PUT /api/functions/:id ──────────────────────────────────────────────────
-router.put('/:id', requireAuth, validateRequest(updateFunctionSchema), async (req, res) => {
-    try {
-        const idResult = idParamSchema.safeParse(req.params.id);
-        if (!idResult.success) {
-            return res.status(400).json({ error: 'ID de fonction invalide' });
-        }
-
-        const user = req.user as IUser;
-        const updated = await functionService.updateFunction(idResult.data, user.id, req.body);
-
-        if (!updated) {
-            return res.status(404).json({
-                error: 'Fonction introuvable ou non modifiable (fonctions natives en lecture seule)'
-            });
-        }
-
-        const runtimeCompatibility = await applyRuntimeCompatibility(res);
-        res.json({
-            ...updated,
-            runtimeCompatibility
-        });
-    } catch (error) {
-        console.error('[FunctionsRoute] PUT /:id error:', error);
-        res.status(500).json({ error: 'Erreur lors de la mise à jour de la fonction' });
-    }
+router.put('/:id', requireAuth, async (req, res) => {
+    respondLegacyWriteDisabled(res, { method: 'PUT', path: `/api/tools/${req.params.id}` });
 });
 
 // ─── DELETE /api/functions/:id ───────────────────────────────────────────────
 router.delete('/:id', requireAuth, async (req, res) => {
-    try {
-        const idResult = idParamSchema.safeParse(req.params.id);
-        if (!idResult.success) {
-            return res.status(400).json({ error: 'ID de fonction invalide' });
-        }
-
-        const user = req.user as IUser;
-        const success = await functionService.deleteFunction(idResult.data, user.id);
-
-        if (!success) {
-            return res.status(404).json({
-                error: 'Fonction introuvable ou non supprimable (fonctions natives en lecture seule)'
-            });
-        }
-
-        res.status(204).send();
-    } catch (error) {
-        console.error('[FunctionsRoute] DELETE /:id error:', error);
-        res.status(500).json({ error: 'Erreur lors de la suppression de la fonction' });
-    }
+    respondLegacyWriteDisabled(res, { method: 'DELETE', path: `/api/tools/${req.params.id}` });
 });
 
 // ─── PATCH /api/functions/:id/toggle ─────────────────────────────────────────
 router.patch('/:id/toggle', requireAuth, async (req, res) => {
-    try {
-        const idResult = idParamSchema.safeParse(req.params.id);
-        if (!idResult.success) {
-            return res.status(400).json({ error: 'ID de fonction invalide' });
-        }
-
-        const user = req.user as IUser;
-        // allowBashPy : consentement explicite requis pour activer bash_py
-        const allowBashPy = req.body?.allowBashPy === true;
-
-        const updated = await functionService.toggleFunction(
-            idResult.data,
-            user.id,
-            { allowBashPy }
-        );
-
-        if (!updated) {
-            return res.status(404).json({ error: 'Fonction introuvable' });
-        }
-
-        res.json({ id: updated._id, isEnabled: updated.isEnabled });
-    } catch (error: unknown) {
-        const msg = error instanceof Error ? error.message : 'Erreur lors du toggle';
-        // bash_py consent refusal → 403
-        if (msg.includes('allowBashPy')) {
-            return res.status(403).json({ error: msg });
-        }
-        console.error('[FunctionsRoute] PATCH /:id/toggle error:', error);
-        res.status(500).json({ error: 'Erreur lors du toggle de la fonction' });
-    }
+    respondLegacyWriteDisabled(res, { method: 'PATCH', path: `/api/tools/${req.params.id}/toggle` });
 });
 
 export default router;

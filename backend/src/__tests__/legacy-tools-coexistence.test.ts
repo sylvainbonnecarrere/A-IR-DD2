@@ -66,7 +66,7 @@ describe('Legacy functions and target tools coexistence', () => {
         await User.deleteMany({ email: /coexistence-function-/i });
     });
 
-    it('keeps stable ids between /api/functions and /api/tools without cutover', async () => {
+    it('keeps stable read compatibility between /api/functions and /api/tools for canonically created tools', async () => {
         const user = await User.create({
             email: `coexistence-function-${Date.now()}@test.com`,
             password: 'test-only-password-123',
@@ -75,11 +75,11 @@ describe('Legacy functions and target tools coexistence', () => {
         const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
 
         const createResponse = await request(app)
-            .post('/api/functions')
+            .post('/api/tools')
             .set('Authorization', `Bearer ${accessToken}`)
             .send({
                 name: `coexistence_function_${Date.now()}`,
-                description: 'Function created through legacy facade for coexistence testing.',
+                description: 'Function created through canonical tools facade for coexistence testing.',
                 language: 'typescript',
                 codeInline: 'export function run() { return { ok: true }; }',
                 tags: ['coexistence']
@@ -92,7 +92,7 @@ describe('Legacy functions and target tools coexistence', () => {
             securityLevel: 'dev-only'
         }));
 
-        const functionId = createResponse.body._id;
+        const functionId = createResponse.body.tool.id;
 
         const [functionsResponse, toolsResponse, functionDetailResponse, toolDetailResponse] = await Promise.all([
             request(app)
@@ -131,15 +131,202 @@ describe('Legacy functions and target tools coexistence', () => {
         }));
         expect(functionDetailResponse.body).toEqual(expect.objectContaining({
             _id: functionId,
-            name: createResponse.body.name,
+            name: createResponse.body.tool.name,
             runtimeCompatibility: expect.objectContaining({
                 warning: 'Docker Desktop is dev-only.'
             })
         }));
         expect(toolDetailResponse.body.tool).toEqual(expect.objectContaining({
             id: functionId,
-            name: createResponse.body.name,
+            name: createResponse.body.tool.name,
             legacyFunctionId: functionId
         }));
+    });
+
+    it('supports create update toggle and delete through /api/tools while preserving legacy compatibility', async () => {
+        const user = await User.create({
+            email: `coexistence-function-tools-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `coexistencetools${Date.now()}`
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const createResponse = await request(app)
+            .post('/api/tools')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                name: `coexistence_function_tools_${Date.now()}`,
+                description: 'Function created through target tools facade for coexistence testing.',
+                language: 'typescript',
+                codeInline: 'export function run() { return { ok: true }; }',
+                tags: ['coexistence', 'tools']
+            })
+            .expect(201);
+
+        expect(createResponse.body.tool).toEqual(expect.objectContaining({
+            id: expect.any(String),
+            legacyFunctionId: expect.any(String),
+            name: expect.stringContaining('coexistence_function_tools_'),
+            runtime: 'typescript'
+        }));
+        expect(createResponse.body.runtimeCompatibility).toEqual(expect.objectContaining({
+            preferredRunner: 'docker_sandbox'
+        }));
+
+        const toolId = createResponse.body.tool.id;
+
+        const updateResponse = await request(app)
+            .put(`/api/tools/${toolId}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                description: 'Updated through canonical tools write path.',
+                codeInline: 'export function run() { return { ok: "updated" }; }'
+            })
+            .expect(200);
+
+        expect(updateResponse.body.tool).toEqual(expect.objectContaining({
+            id: toolId,
+            description: 'Updated through canonical tools write path.'
+        }));
+
+        const toggleResponse = await request(app)
+            .patch(`/api/tools/${toolId}/toggle`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({ allowBashPy: false })
+            .expect(200);
+
+        expect(toggleResponse.body).toEqual({ id: toolId, isEnabled: false });
+
+        const [legacyDetailResponse, toolDetailResponse] = await Promise.all([
+            request(app)
+                .get(`/api/functions/${toolId}`)
+                .set('Authorization', `Bearer ${accessToken}`)
+                .expect(200),
+            request(app)
+                .get(`/api/tools/${toolId}`)
+                .set('Authorization', `Bearer ${accessToken}`)
+                .expect(200)
+        ]);
+
+        expect(legacyDetailResponse.body).toEqual(expect.objectContaining({
+            _id: toolId,
+            description: 'Updated through canonical tools write path.',
+            isEnabled: false
+        }));
+        expect(toolDetailResponse.body.tool).toEqual(expect.objectContaining({
+            id: toolId,
+            description: 'Updated through canonical tools write path.',
+            isEnabled: false,
+            legacyFunctionId: toolId
+        }));
+
+        await request(app)
+            .delete(`/api/tools/${toolId}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(204);
+
+        await Promise.all([
+            request(app)
+                .get(`/api/functions/${toolId}`)
+                .set('Authorization', `Bearer ${accessToken}`)
+                .expect(404),
+            request(app)
+                .get(`/api/tools/${toolId}`)
+                .set('Authorization', `Bearer ${accessToken}`)
+                .expect(404)
+        ]);
+    });
+
+    it('rejects legacy write routes and points clients to canonical command surfaces', async () => {
+        const user = await User.create({
+            email: `coexistence-function-canonical-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `coexistencecanonical${Date.now()}`
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const createToolResponse = await request(app)
+            .post('/api/tools')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                name: `coexistence_function_canonical_${Date.now()}`,
+                description: 'Function created through canonical tools facade before legacy write rejection checks.',
+                language: 'typescript',
+                codeInline: 'export function run() { return { ok: true }; }',
+                tags: ['coexistence', 'canonical']
+            })
+            .expect(201);
+
+        const functionId = createToolResponse.body.tool.id;
+
+        const createLegacyResponse = await request(app)
+            .post('/api/functions')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                name: `coexistence_function_legacy_blocked_${Date.now()}`,
+                description: 'Legacy create must be blocked.',
+                language: 'typescript',
+                codeInline: 'export function run() { return { ok: false }; }'
+            })
+            .expect(410);
+
+        const updateLegacyResponse = await request(app)
+            .put(`/api/functions/${functionId}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({ description: 'Updated through frozen legacy facade.' })
+            .expect(410);
+
+        const toggleLegacyResponse = await request(app)
+            .patch(`/api/functions/${functionId}/toggle`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({ allowBashPy: false })
+            .expect(410);
+
+        const deleteLegacyResponse = await request(app)
+            .delete(`/api/functions/${functionId}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(410);
+
+        const buildLegacyResponse = await request(app)
+            .post(`/api/functions/${functionId}/build`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({})
+            .expect(410);
+
+        const cleanupLegacyResponse = await request(app)
+            .post(`/api/functions/${functionId}/runs/cleanup`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({ retentionDays: 14 })
+            .expect(410);
+
+        expect(createLegacyResponse.body).toEqual(expect.objectContaining({
+            code: 'legacy_functions_read_only',
+            canonical: { method: 'POST', path: '/api/tools' }
+        }));
+        expect(updateLegacyResponse.body).toEqual(expect.objectContaining({
+            code: 'legacy_functions_read_only',
+            canonical: { method: 'PUT', path: `/api/tools/${functionId}` }
+        }));
+        expect(toggleLegacyResponse.body).toEqual(expect.objectContaining({
+            code: 'legacy_functions_read_only',
+            canonical: { method: 'PATCH', path: `/api/tools/${functionId}/toggle` }
+        }));
+        expect(deleteLegacyResponse.body).toEqual(expect.objectContaining({
+            code: 'legacy_functions_read_only',
+            canonical: { method: 'DELETE', path: `/api/tools/${functionId}` }
+        }));
+        expect(buildLegacyResponse.body).toEqual(expect.objectContaining({
+            code: 'legacy_functions_read_only',
+            canonical: { method: 'POST', path: `/api/tools/${functionId}/build` }
+        }));
+        expect(cleanupLegacyResponse.body).toEqual(expect.objectContaining({
+            code: 'legacy_functions_read_only',
+            canonical: { method: 'POST', path: `/api/runs/tool/${functionId}/cleanup` }
+        }));
+
+        await request(app)
+            .get(`/api/tools/${functionId}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
     });
 });

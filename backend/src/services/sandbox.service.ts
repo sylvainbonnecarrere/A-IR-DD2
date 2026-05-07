@@ -10,7 +10,7 @@ import { ExecutionOrchestrator } from './runtime/ExecutionOrchestrator';
 import type { SandboxExecutionMetadata, SandboxExecutionResourceUsage } from './runtime/execution.types';
 import { getSandboxErrorDetailsFromExecutionResult, RuntimeNotReadyError, type SandboxErrorDetails } from './runtime/errors';
 import type { IUserToolPolicy } from '../models/UserTool.model';
-import { resolveWebSearchPrivateContext } from './webSearchPrivateContext.service';
+import { buildGlobalLegacyFunctionClauses, buildGlobalToolClauses, buildOwnedLegacyFunctionClause, buildOwnedToolClause } from '../utils/sharedExampleAccess';
 
 export interface SandboxResult {
     success: boolean;
@@ -105,7 +105,7 @@ export class SandboxService {
      * @throws Error si la fonction est introuvable, désactivée, ou si le timeout est dépassé
      */
     async runFunction(
-        functionId: string,
+        functionId: string | undefined,
         userId: string,
         testArgs: Record<string, unknown> = {},
         toolSelection?: SandboxToolSelection,
@@ -118,16 +118,19 @@ export class SandboxService {
 
         const fn = toolSelection
             ? await this.resolveVersionedExecutionTarget(toolSelection, userId)
-            : await UserFunction.findOne({
-                _id: functionId,
-                $or: [
-                    { userId: null },
-                    { userId: new mongoose.Types.ObjectId(userId) }
-                ]
-            }).lean<IUserFunction>();
+            : functionId
+                ? await UserFunction.findOne({
+                    _id: functionId,
+                    $or: [
+                        ...buildGlobalLegacyFunctionClauses(),
+                        buildOwnedLegacyFunctionClause(userId)
+                    ]
+                }).lean<IUserFunction>()
+                : null;
 
         if (!fn) {
-            throw new Error(`Fonction introuvable ou accès non autorisé (id: ${functionId})`);
+            const targetIdentity = toolSelection?.toolId ?? functionId ?? 'unknown';
+            throw new Error(`Fonction introuvable ou accès non autorisé (id: ${targetIdentity})`);
         }
 
         if (!fn.isEnabled) {
@@ -147,7 +150,7 @@ export class SandboxService {
                     userId,
                     resolvedVersionTag
                 );
-            } else {
+            } else if (functionId) {
                 await this.buildService.ensureBuildReadyForRun(functionId, userId);
             }
         } catch (error) {
@@ -181,13 +184,11 @@ export class SandboxService {
             console.warn('[SandboxService] user_tools mirror sync warning:', error instanceof Error ? error.message : String(error));
         });
 
-        const resolvedPrivateContext = await resolveWebSearchPrivateContext(fn.name, userId, privateContext, authHeader);
-
         const executionResult = await this.executionOrchestrator.execute({
             fn,
             userId,
             args: testArgs,
-            privateContext: resolvedPrivateContext,
+            privateContext,
             launchContext: 'editor_test'
         });
 
@@ -211,8 +212,8 @@ export class SandboxService {
         const tool = await UserTool.findOne({
             _id: toolSelection.toolId,
             $or: [
-                { ownerUserId: null },
-                { ownerUserId: new mongoose.Types.ObjectId(userId) }
+                ...buildGlobalToolClauses(),
+                buildOwnedToolClause(userId)
             ]
         }).lean();
 

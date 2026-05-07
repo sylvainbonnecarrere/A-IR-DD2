@@ -2,13 +2,16 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { AgentInstance } from '../models/AgentInstance.model';
-import { AgentPrototype } from '../models/AgentPrototype.model';
-import { Workflow } from '../models/Workflow.model';
 import { AgentJournal } from '../models/AgentJournal.model';
+import { AgentPrototype } from '../models/AgentPrototype.model';
+import { UserToolRun } from '../models/UserToolRun.model';
+import { Workflow } from '../models/Workflow.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { requireRobotGovernance } from '../middleware/robot-governance.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
+import { journalService } from '../services/journal.service';
+import { buildChatMessagesByInstance } from '../utils/chatMessageProjection';
 import { transformAgentInstanceForFrontend } from '../utils/transforms';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
 import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
@@ -115,14 +118,34 @@ router.get('/:id',
     }),
     async (req, res) => {
         try {
+            const user = req.user as IUser;
             const instance = await AgentInstance.findById(req.params.id);
 
             if (!instance) {
                 return res.status(404).json({ error: 'Instance introuvable' });
             }
 
-            // ⭐ FIX: Transform instance for frontend consumption
-            res.json(transformAgentInstanceForFrontend(instance));
+            const [journalEntries, toolRuns] = await Promise.all([
+                AgentJournal.find({
+                    agentInstanceId: instance._id,
+                    type: { $in: ['chat', 'tool_invocation'] }
+                }).sort({ timestamp: 1 }),
+                UserToolRun.find({
+                    ownerUserId: user.id,
+                    agentInstanceId: instance._id
+                }).sort({ createdAt: -1 }).limit(200)
+            ]);
+
+            const transformedInstance = transformAgentInstanceForFrontend(instance);
+            const chatMessagesByInstance = buildChatMessagesByInstance(
+                journalEntries,
+                new Map(toolRuns.map((run: any) => [run.executionId, run]))
+            );
+
+            res.json({
+                ...transformedInstance,
+                chatMessages: chatMessagesByInstance[transformedInstance.id] || []
+            });
         } catch (error) {
             console.error('[AgentInstances] GET/:id error:', error);
             res.status(500).json({ error: 'Erreur récupération instance' });
@@ -711,10 +734,10 @@ router.post(
             const user = req.user as IUser;
 
             // Validation du type d'entrée
-            if (!['chat', 'error', 'media'].includes(type)) {
+            if (!['chat', 'error', 'media', 'tool_invocation'].includes(type)) {
                 return res.status(400).json({ 
                     error: 'Invalid journal entry type',
-                    validTypes: ['chat', 'error', 'media']
+                    validTypes: ['chat', 'error', 'media', 'tool_invocation']
                 });
             }
 
@@ -729,77 +752,26 @@ router.post(
                 return res.status(403).json({ error: 'Unauthorized - user does not own this instance' });
             }
 
-            // ⭐ DÉDUPLICATION BACKEND: Vérifier si ce message existe déjà
-            if (payload?.messageId) {
-                const existingEntry = await AgentJournal.findOne({
-                    agentInstanceId: instance._id,
-                    'payload.messageId': payload.messageId
-                });
-                
-                if (existingEntry) {
-                    console.log(`[Journal] SKIP duplicate: messageId ${payload.messageId} already exists`);
-                    return res.status(200).json({ 
-                        skipped: true, 
-                        reason: 'Duplicate messageId - entry already exists',
-                        existingJournalId: existingEntry._id
-                    });
-                }
+            const result = await journalService.persistJournalEntry({
+                instanceId: agentInstanceId,
+                type,
+                payload
+            });
+
+            if (!result.success) {
+                return res.status(500).json({ error: result.error || 'Failed to create journal entry' });
             }
 
-            const { persistenceConfig } = instance;
-
-            let result;
-
-            // Persister selon le type ET la config
-            switch (type) {
-                case 'chat':
-                    if (!persistenceConfig?.saveChat) {
-                        return res.status(200).json({ 
-                            skipped: true, 
-                            reason: 'saveChat is false in persistenceConfig' 
-                        });
-                    }
-                    result = await AgentJournal.createChatEntry(
-                        instance._id,
-                        instance.workflowId,
-                        payload
-                    );
-                    break;
-
-                case 'error':
-                    if (!persistenceConfig?.saveErrors) {
-                        return res.status(200).json({ 
-                            skipped: true, 
-                            reason: 'saveErrors is false in persistenceConfig' 
-                        });
-                    }
-                    result = await AgentJournal.createErrorEntry(
-                        instance._id,
-                        instance.workflowId,
-                        payload
-                    );
-                    break;
-
-                case 'media':
-                    if (!persistenceConfig?.saveMedia) {
-                        return res.status(200).json({ 
-                            skipped: true, 
-                            reason: 'saveMedia is false in persistenceConfig' 
-                        });
-                    }
-                    result = await AgentJournal.createMediaEntry(
-                        instance._id,
-                        instance.workflowId,
-                        payload
-                    );
-                    break;
-
-                default:
-                    return res.status(400).json({ error: 'Unhandled journal type' });
+            if (!result.saved) {
+                return res.status(200).json({
+                    skipped: true,
+                    reason: result.reason,
+                    ...(result.existingEntryId ? { existingJournalId: result.existingEntryId } : {})
+                });
             }
 
             console.log(`[Journal] Created ${type} entry for instance ${agentInstanceId}`);
-            res.json({ success: true, journalId: result._id });
+            res.json({ success: true, journalId: result.entryId });
         } catch (error) {
             console.error('[Journal] POST error:', error);
             res.status(500).json({ error: 'Failed to create journal entry' });

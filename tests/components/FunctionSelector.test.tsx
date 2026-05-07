@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FunctionSelector } from '../../components/FunctionSelector';
+import type { ToolSelection } from '../../types';
 import type { UserFunction } from '../../types/function.types';
 
 const mockLoadFunctions = jest.fn();
@@ -107,5 +108,33 @@ describe('FunctionSelector', () => {
         fireEvent.click(screen.getByRole('button', { name: /weather tool/i }));
 
         expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('emits canonical ToolSelection objects when used with the new contract', async () => {
+        const onChangeToolSelections = jest.fn();
+        const selectedToolSelections: ToolSelection[] = [];
+
+        render(
+            <FunctionSelector
+                selectedToolSelections={selectedToolSelections}
+                onChangeToolSelections={onChangeToolSelections}
+            />
+        );
+
+        await waitFor(() => {
+            expect(mockLoadFunctions).toHaveBeenCalled();
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /weather tool/i }));
+
+        expect(onChangeToolSelections).toHaveBeenCalledWith([
+            expect.objectContaining({
+                toolId: 'tool.weather',
+                versionRef: expect.objectContaining({
+                    versionTag: 'v3',
+                    versionNumber: 3,
+                }),
+            }),
+        ]);
     });
 });

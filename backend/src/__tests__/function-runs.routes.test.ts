@@ -378,24 +378,25 @@ describe('Function run routes', () => {
         expect(response.text).toBe('sandbox ok');
     });
 
-    it('cleans up old runs and their orphan artifacts', async () => {
+    it('rejects legacy cleanup and points to the canonical runs route', async () => {
         const fixture = await createFixture();
 
         const response = await request(app)
             .post(`/api/functions/${fixture.fn.id}/runs/cleanup`)
             .set('Authorization', `Bearer ${fixture.accessToken}`)
             .send({ retentionDays: 14, retainLatest: 2 })
-            .expect(200);
+            .expect(410);
 
         expect(response.body).toEqual(expect.objectContaining({
-            deletedRuns: 1,
-            retainedRuns: 2,
-            deletedArtifacts: ['output/stale.log'],
-            dryRun: false
+            code: 'legacy_functions_read_only',
+            canonical: {
+                method: 'POST',
+                path: `/api/runs/tool/${fixture.fn.id}/cleanup`
+            }
         }));
 
-        expect(await UserToolRun.countDocuments({ toolId: fixture.fn._id })).toBe(2);
-        await expect(fs.access(path.join(tempRoot, 'output', 'stale.log'))).rejects.toBeTruthy();
+        expect(await UserToolRun.countDocuments({ toolId: fixture.fn._id })).toBe(3);
+        await expect(fs.access(path.join(tempRoot, 'output', 'stale.log'))).resolves.toBeUndefined();
     });
 
     it('returns an artifact preview via the target runs route', async () => {

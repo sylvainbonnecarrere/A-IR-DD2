@@ -98,6 +98,13 @@ jest.mock('../../stores/useFunctionStore', () => ({
   ),
 }));
 
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: jest.fn(() => ({
+    accessToken: 'token-123',
+    isAuthenticated: true,
+  })),
+}));
+
 describe('useAgentChat local AgentLoop path', () => {
   beforeEach(() => {
     jest.clearAllMocks();

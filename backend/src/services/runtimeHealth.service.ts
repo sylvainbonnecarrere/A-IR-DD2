@@ -26,14 +26,38 @@ interface NativePythonImportTarget {
     }>;
 }
 
+function resolveCriticalPythonImportDependency(
+    entry: string | { module: string; dependency?: string },
+    availableDependencies: string[],
+    fallbackDependency?: string
+): { module: string; dependency: string } {
+    const normalizeDependencyKey = (value: string) => value.toLowerCase().replace(/[-_.]+/g, '');
+
+    if (typeof entry === 'string') {
+        const exactDependency = availableDependencies.find((dependency) => dependency === entry);
+        const normalizedDependency = availableDependencies.find(
+            (dependency) => normalizeDependencyKey(dependency) === normalizeDependencyKey(entry)
+        );
+
+        return {
+            module: entry,
+            dependency: exactDependency ?? normalizedDependency ?? fallbackDependency ?? entry
+        };
+    }
+
+    return {
+        module: entry.module,
+        dependency: entry.dependency ?? fallbackDependency ?? entry.module
+    };
+}
+
 const nativePythonImportTargets: NativePythonImportTarget[] = nativeFunctionsSeed
     .filter((fn) => fn.origin === 'native' && fn.language === 'python' && (fn.healthCheck?.criticalPythonImports?.length ?? 0) > 0)
     .map((fn) => ({
         toolName: fn.name,
-        dependencies: (fn.healthCheck?.criticalPythonImports ?? []).map((module, index) => ({
-            module,
-            dependency: fn.dependencies[index] ?? module
-        }))
+        dependencies: (fn.healthCheck?.criticalPythonImports ?? []).map((entry, index) => (
+            resolveCriticalPythonImportDependency(entry, fn.dependencies, fn.dependencies[index])
+        ))
     }));
 
 interface CommandExecutionResult {

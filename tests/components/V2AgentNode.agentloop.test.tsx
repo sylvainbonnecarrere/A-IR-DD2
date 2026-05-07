@@ -661,6 +661,131 @@ describe('V2AgentNode AgentLoop integration', () => {
         );
     });
 
+    it('shows a tool message immediately on local tool_call_start before the final response is added', async () => {
+        const nodeMessages: Record<string, any[]> = { 'node-1': [] };
+
+        runtimeStoreState.getNodeMessages = jest.fn((nodeId: string) => nodeMessages[nodeId] ?? []);
+        runtimeStoreState.addNodeMessage = jest.fn((nodeId: string, message: any) => {
+            nodeMessages[nodeId] = [...(nodeMessages[nodeId] ?? []), message];
+        });
+        runtimeStoreState.setNodeMessages = jest.fn((nodeId: string, nextMessages: any[]) => {
+            nodeMessages[nodeId] = nextMessages;
+        });
+
+        mockRunAgentLoop.mockImplementationOnce(async (_adapter, _history, _functions, _systemPrompt, options) => {
+            const toolCall = {
+                id: 'tool-hello-1',
+                name: 'hello_test',
+                arguments: { user_name: 'Syl' },
+                raw: '<tool_call>{"name":"hello_test","arguments":{"user_name":"Syl"}}</tool_call>',
+                confidence: 0.95,
+            };
+
+            const toolCallRecord = {
+                id: 'tool-hello-1',
+                toolId: 'tool.hello',
+                functionId: 'legacy-hello',
+                functionName: 'hello_test',
+                arguments: { user_name: 'Syl' },
+                result: { result: 'Ton nom, Syl, est maintenant enregistré dans ma mémoire' },
+                status: 'success',
+                durationMs: 12,
+                executionId: 'exec-hello-1',
+                runner: 'docker_sandbox',
+                timestamp: new Date('2026-04-01T10:00:00.000Z'),
+            };
+
+            options.onEvent?.({ type: 'tool_call_start', iteration: 1, toolCall });
+
+            expect(nodeMessages['node-1']).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sender: 'tool',
+                    toolName: 'hello_test',
+                    status: 'executing_tool',
+                    text: expect.stringContaining('user_name'),
+                })
+            ]));
+
+            options.onEvent?.({ type: 'tool_call_done', iteration: 1, toolCall, toolResult: toolCallRecord.result, toolCallRecord });
+
+            return {
+                finalResponse: 'Nom enregistré.',
+                iterations: 2,
+                finishReason: 'stop',
+                toolCallLog: [toolCallRecord],
+            };
+        });
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'archi',
+                    label: 'Archi',
+                    agent: baseAgent,
+                    workflowId: 'wf-1',
+                    agentInstance,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        fireEvent.change(screen.getByPlaceholderText('type_message_placeholder'), {
+            target: { value: 'Bonjour, je suis Syl' },
+        });
+        fireEvent.submit(screen.getByPlaceholderText('type_message_placeholder').closest('form')!);
+
+        await waitFor(() => {
+            expect(nodeMessages['node-1']).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sender: 'tool',
+                    toolCallRecord: expect.objectContaining({
+                        id: 'tool-hello-1',
+                        functionName: 'hello_test',
+                        executionId: 'exec-hello-1',
+                    }),
+                }),
+                expect.objectContaining({
+                    sender: 'agent',
+                    text: 'Nom enregistré.',
+                })
+            ]));
+        });
+
+        expect(mockEnqueueEntry).toHaveBeenCalledWith(
+            'wf-1',
+            'instance-1',
+            'tool_invocation',
+            expect.objectContaining({
+                messageId: 'toolinv:tool-hello-1:started',
+                toolCallId: 'tool-hello-1',
+                toolName: 'hello_test',
+                phase: 'started',
+            })
+        );
+
+        expect(mockEnqueueEntry).toHaveBeenCalledWith(
+            'wf-1',
+            'instance-1',
+            'tool_invocation',
+            expect.objectContaining({
+                messageId: 'toolinv:tool-hello-1:completed',
+                toolCallId: 'tool-hello-1',
+                toolName: 'hello_test',
+                executionId: 'exec-hello-1',
+                phase: 'completed',
+                toolId: 'tool.hello',
+                functionId: 'legacy-hello',
+            })
+        );
+    });
+
     it('renders a visible error when AgentLoop reports an empty local response without tool calls', async () => {
         mockRunAgentLoop.mockResolvedValueOnce({
             finalResponse: '[Erreur LLM] Le modele local a retourne une reponse vide sans appel d\'outil.',

@@ -178,6 +178,92 @@ describe('useWorkspaceHydration', () => {
         expect(workflowState.getCurrentWorkflowId()).toBe('workflow-1');
     });
 
+    it('reuses the shared persisted chat projection for tool blocks during hook hydration', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                workflow: {
+                    id: 'workflow-tools',
+                    name: 'Tool Workflow',
+                    isActive: true,
+                    isDefault: true,
+                    isDirty: false,
+                    canvasState: { zoom: 1, panX: 0, panY: 0 },
+                    createdAt: '2026-03-17T09:00:00.000Z',
+                    updatedAt: '2026-03-17T09:30:00.000Z'
+                },
+                nodes: [],
+                edges: [],
+                agentInstances: [{
+                    id: 'instance-tool-1',
+                    prototypeId: 'prototype-tool-1',
+                    workflowId: 'workflow-tools',
+                    name: 'Hydrated Tool Agent',
+                    position: { x: 120, y: 180 },
+                    llmProvider: 'openai',
+                    llmModel: 'gpt-4o-mini',
+                    configuration_json: {
+                        role: 'assistant',
+                        model: 'gpt-4o-mini',
+                        llmProvider: 'openai',
+                        systemPrompt: 'Be precise',
+                        capabilities: ['chat'],
+                        tools: [],
+                        historyConfig: {},
+                        outputConfig: {},
+                        position: { x: 120, y: 180 }
+                    },
+                    chatMessages: [{
+                        id: 'persisted-tool-msg',
+                        sender: 'tool',
+                        text: 'Weather Tool({"city":"Paris"}) [exec-1]',
+                        timestamp: '2026-03-17T10:05:00.000Z',
+                        toolCallRecord: {
+                            id: 'call-1',
+                            toolId: 'tool.weather',
+                            functionId: 'legacy-weather',
+                            functionName: 'Weather Tool',
+                            arguments: { city: 'Paris' },
+                            result: { temperature: 21 },
+                            status: 'success',
+                            executionId: 'exec-1',
+                            timestamp: '2026-03-17T10:05:00.000Z'
+                        }
+                    }]
+                }],
+                llmConfigs: [],
+                userSettings: {
+                    language: 'fr',
+                    theme: 'dark'
+                },
+                metadata: {
+                    loadedAt: '2026-03-17T10:05:00.000Z',
+                    userId: 'user-1',
+                    hasWorkflow: true
+                }
+            })
+        });
+
+        render(<HookProbe />);
+
+        await waitFor(() => expect(latestResult?.isLoading).toBe(false));
+
+        const runtimeState = useRuntimeStore.getState();
+        expect(runtimeState.nodeMessages['instance-tool-1']).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'persisted-tool-msg',
+                sender: 'tool',
+                toolCallRecord: expect.objectContaining({
+                    id: 'call-1',
+                    toolId: 'tool.weather',
+                    functionId: 'legacy-weather',
+                    executionId: 'exec-1',
+                    timestamp: expect.any(Date)
+                })
+            })
+        ]));
+    });
+
     it('waits for a stable authenticated session before calling the workspace API', async () => {
         mockedUseAuth.mockReturnValue({
             isAuthenticated: true,

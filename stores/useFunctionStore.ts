@@ -12,6 +12,8 @@
 
 import { create } from 'zustand';
 import { toolRepository } from '../services/toolRepository';
+import { matchesFunctionIdentity, resolveFunctionCommandId } from '../utils/functionCommandId';
+import type { ToolSelection } from '../types';
 import type {
     UserFunction,
     CreateFunctionPayload,
@@ -97,7 +99,7 @@ interface FunctionStore {
     getFilteredFunctions: () => UserFunction[];
 
     // Sandbox
-    runInSandbox: (functionId: string, testArgs: Record<string, unknown>) => Promise<SandboxRunResult | null>;
+    runInSandbox: (functionId: string | undefined, testArgs: Record<string, unknown>, toolSelection?: ToolSelection) => Promise<SandboxRunResult | null>;
     checkSyntax: (language: 'python' | 'typescript', code: string) => Promise<SyntaxCheckResult | null>;
     clearSandboxResult: () => void;
     loadFunctionRuns: (
@@ -195,9 +197,10 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     updateFunction: async (id, payload) => {
         set({ isLoading: true, error: null });
         try {
-            const { data } = await toolRepository.updateFunction(id, payload);
+            const commandId = resolveFunctionCommandId(id, get().functions);
+            const { data } = await toolRepository.updateFunction(commandId, payload);
             set(state => ({
-                functions: state.functions.map(f => f._id === id ? data : f),
+                functions: state.functions.map(f => matchesFunctionIdentity(f, id) || matchesFunctionIdentity(f, commandId) ? data : f),
                 runtimeCompatibility: data.runtimeCompatibility ?? state.runtimeCompatibility,
                 isLoading: false
             }));
@@ -214,9 +217,10 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     // ─── Supprimer une fonction ──────────────────────────────────────────────
     deleteFunction: async (id) => {
         try {
-            await toolRepository.deleteFunction(id);
+            const commandId = resolveFunctionCommandId(id, get().functions);
+            await toolRepository.deleteFunction(commandId);
             set(state => ({
-                functions: state.functions.filter(f => f._id !== id),
+                functions: state.functions.filter(f => !matchesFunctionIdentity(f, id) && !matchesFunctionIdentity(f, commandId)),
                 selectedFunctionId: state.selectedFunctionId === id ? null : state.selectedFunctionId
             }));
             return true;
@@ -229,10 +233,13 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     // ─── Toggle isEnabled ────────────────────────────────────────────────────
     toggleFunction: async (id, allowBashPy = false) => {
         try {
-            const { data } = await toolRepository.toggleFunction(id, allowBashPy);
+            const commandId = resolveFunctionCommandId(id, get().functions);
+            const { data } = await toolRepository.toggleFunction(commandId, allowBashPy);
             set(state => ({
                 functions: state.functions.map(f =>
-                    f._id === id ? { ...f, isEnabled: data.isEnabled } : f
+                    matchesFunctionIdentity(f, id) || matchesFunctionIdentity(f, commandId)
+                        ? { ...f, isEnabled: data.isEnabled }
+                        : f
                 )
             }));
         } catch (err: any) {
@@ -267,10 +274,13 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     },
 
     // ─── Sandbox ─────────────────────────────────────────────────────────────
-    runInSandbox: async (functionId, testArgs) => {
+    runInSandbox: async (functionId, testArgs, toolSelection) => {
         set({ isSandboxRunning: true, sandboxError: null, sandboxResult: null });
         try {
-            const { data } = await toolRepository.runInSandbox(functionId, testArgs);
+            const commandId = functionId
+                ? resolveFunctionCommandId(functionId, get().functions)
+                : undefined;
+            const { data } = await toolRepository.runInSandbox(commandId, testArgs, toolSelection);
             set({ sandboxResult: data, isSandboxRunning: false });
             return data;
         } catch (err: any) {
@@ -297,11 +307,12 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     loadFunctionRuns: async (functionId, options = {}) => {
         set({ isFunctionRunsLoading: true, functionRunsError: null });
         try {
+            const commandId = resolveFunctionCommandId(functionId, get().functions);
             const limit = options.limit ?? 20;
             const page = options.page ?? 1;
             const sortBy = options.sortBy ?? get().functionRunsPagination.sortBy;
             const sortOrder = options.sortOrder ?? get().functionRunsPagination.sortOrder;
-            const { data } = await toolRepository.loadFunctionRuns(functionId, {
+            const { data } = await toolRepository.loadFunctionRuns(commandId, {
                 limit,
                 page,
                 status: options.status,
@@ -327,7 +338,8 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     loadArtifactPreview: async (functionId, executionId, artifactPath) => {
         set({ isArtifactPreviewLoading: true, artifactPreviewError: null, artifactPreview: null });
         try {
-            const { data } = await toolRepository.loadArtifactPreview(functionId, executionId, artifactPath);
+            const commandId = resolveFunctionCommandId(functionId, get().functions);
+            const { data } = await toolRepository.loadArtifactPreview(commandId, executionId, artifactPath);
             set({ artifactPreview: data, isArtifactPreviewLoading: false });
         } catch (err: any) {
             set({
@@ -339,7 +351,8 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
 
     cleanupFunctionRuns: async (functionId, options) => {
         try {
-            const { data } = await toolRepository.cleanupFunctionRuns(functionId, options);
+            const commandId = resolveFunctionCommandId(functionId, get().functions);
+            const { data } = await toolRepository.cleanupFunctionRuns(commandId, options);
             return data;
         } catch (err: any) {
             set({
@@ -354,7 +367,8 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
     runBuild: async (functionId) => {
         set({ isBuilding: true, buildError: null });
         try {
-            const { data } = await toolRepository.runBuild(functionId);
+            const commandId = resolveFunctionCommandId(functionId, get().functions);
+            const { data } = await toolRepository.runBuild(commandId);
             set({ buildResult: data, isBuilding: false });
             return data;
         } catch (err: any) {
@@ -368,7 +382,8 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
 
     loadBuildStatus: async (functionId) => {
         try {
-            const { data } = await toolRepository.loadBuildStatus(functionId);
+            const commandId = resolveFunctionCommandId(functionId, get().functions);
+            const { data } = await toolRepository.loadBuildStatus(commandId);
             set({ buildResult: data, buildError: null });
         } catch (err: any) {
             if (err.response?.status === 404) {

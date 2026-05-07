@@ -29,19 +29,19 @@ describe('SandboxHealthLoader', () => {
                 nativePython: {
                     available: false,
                     status: 'degraded',
-                    summary: 'Imports critiques manquants ou cassés pour: web_search_py',
+                    summary: 'Imports critiques manquants ou cassés pour: web_fetch_py',
                     probes: [
                         {
-                            toolName: 'web_search_py',
+                            toolName: 'web_fetch_py',
                             status: 'degraded',
-                            summary: 'Imports critiques indisponibles pour web_search_py: duckduckgo_search',
+                            summary: 'Imports critiques indisponibles pour web_fetch_py: requests',
                             checkedAt: '2026-03-19T12:00:00.000Z',
                             imports: [
                                 {
-                                    dependency: 'duckduckgo-search',
-                                    module: 'duckduckgo_search',
+                                    dependency: 'requests',
+                                    module: 'requests',
                                     available: false,
-                                    detail: 'ModuleNotFoundError: No module named duckduckgo_search'
+                                    detail: 'ModuleNotFoundError: No module named requests'
                                 }
                             ]
                         }
@@ -89,6 +89,6 @@ describe('SandboxHealthLoader', () => {
         render(<SandboxHealthLoader />);
 
         expect(screen.getByText(/Runtime dev\/test \(dev-only\)/)).toBeInTheDocument();
-        expect(screen.getByText(/imports natifs a verifier: web_search_py/)).toBeInTheDocument();
+        expect(screen.getByText(/imports natifs a verifier: web_fetch_py/)).toBeInTheDocument();
     });
 });

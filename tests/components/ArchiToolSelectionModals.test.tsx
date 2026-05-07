@@ -58,11 +58,29 @@ jest.mock('../../stores/useDesignStore', () => ({
 }));
 
 jest.mock('../../components/FunctionSelector', () => ({
-    FunctionSelector: ({ onChange, readOnly, selectedIds }: { onChange: (ids: string[]) => void; readOnly?: boolean; selectedIds: string[] }) => (
+    FunctionSelector: ({
+        onChange,
+        onChangeToolSelections,
+        readOnly,
+        selectedIds = [],
+        selectedToolSelections = [],
+    }: {
+        onChange?: (ids: string[]) => void;
+        onChangeToolSelections?: (toolSelections: Array<{ toolId: string }>) => void;
+        readOnly?: boolean;
+        selectedIds?: string[];
+        selectedToolSelections?: Array<{ toolId: string }>;
+    }) => (
         <div>
-            <div data-testid="function-selector-state">{selectedIds.join(',')}</div>
+            <div data-testid="function-selector-state">{(selectedToolSelections.length > 0 ? selectedToolSelections.map((selection) => selection.toolId) : selectedIds).join(',')}</div>
             {!readOnly && (
-                <button type="button" onClick={() => onChange(['tool.weather'])}>
+                <button
+                    type="button"
+                    onClick={() => {
+                        onChange?.(['tool.weather']);
+                        onChangeToolSelections?.([{ toolId: 'tool.weather' }]);
+                    }}
+                >
                     select-canonical-tool
                 </button>
             )}

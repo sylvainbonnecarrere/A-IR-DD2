@@ -8,7 +8,7 @@ describe('ToolReadinessService', () => {
             scopeType: 'native',
             isReadonly: true,
             workflowId: null,
-            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
             currentVersion: {
                 buildStatus: 'built'
             }

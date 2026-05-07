@@ -25,6 +25,21 @@ jest.mock('../../contexts/NotificationContext', () => ({
     useNotifications: () => ({ addNotification: mockAddNotification })
 }));
 
+jest.mock('../../hooks/useLocalization', () => ({
+    useLocalization: jest.fn(() => ({
+        t: (key: string, fallbackOrParams?: string | Record<string, string | number>, params?: Record<string, string | number>) => {
+            if (typeof fallbackOrParams === 'string') {
+                return Object.entries(params ?? {}).reduce(
+                    (value, [paramKey, paramValue]) => value.replace(`{${paramKey}}`, String(paramValue)),
+                    fallbackOrParams,
+                );
+            }
+
+            return key;
+        },
+    })),
+}));
+
 jest.mock('../../services/toolRepository', () => ({
     toolRepository: {
         downloadArtifact: jest.fn(),
@@ -145,14 +160,14 @@ const createStoreState = (overrides: Record<string, unknown> = {}) => ({
                 summary: 'Imports critiques declares pour les natives Python verifies avec succes dans l\'image runtime.',
                 probes: [
                     {
-                        toolName: 'web_search_py',
+                        toolName: 'web_fetch_py',
                         status: 'healthy',
-                        summary: 'Imports critiques verifies pour web_search_py.',
+                        summary: 'Imports critiques verifies pour web_fetch_py.',
                         checkedAt: '2026-03-19T12:00:00.000Z',
                         imports: [
                             {
-                                dependency: 'duckduckgo-search',
-                                module: 'duckduckgo_search',
+                                dependency: 'requests',
+                                module: 'requests',
                                 available: true
                             }
                         ]
@@ -231,8 +246,18 @@ describe('FunctionEditorTab J9 commands', () => {
         fireEvent.click(screen.getByText('Exécuter'));
 
         await waitFor(() => {
-            expect(state.updateFunction).toHaveBeenCalledWith('fn-1', { codeInline: 'print("changed")' });
-            expect(state.runInSandbox).toHaveBeenCalledWith('fn-1', {});
+            expect(state.updateFunction).toHaveBeenCalledWith('tool-1', { codeInline: 'print("changed")' });
+            expect(state.runInSandbox).toHaveBeenCalledWith(
+                undefined,
+                {},
+                expect.objectContaining({
+                    toolId: 'tool-1',
+                    versionRef: expect.objectContaining({
+                        versionNumber: 2,
+                        workspaceId: null,
+                    }),
+                })
+            );
         });
 
         expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
@@ -293,7 +318,7 @@ describe('FunctionEditorTab J9 commands', () => {
         expect(state.runBuild).not.toHaveBeenCalled();
     });
 
-    it('blocks execution on invalid JSON args and downloads artifacts through the repository', async () => {
+    it('blocks execution on invalid JSON args and routes artifact preview and download through canonical tool ids', async () => {
         const state = createStoreState();
         mockStore.mockImplementation(() => state);
 
@@ -316,6 +341,12 @@ describe('FunctionEditorTab J9 commands', () => {
         expect(screen.getByText(/Expected property name or '}' in JSON/)).toBeInTheDocument();
         expect(state.runInSandbox).not.toHaveBeenCalled();
 
+        fireEvent.click(screen.getByRole('button', { name: 'Prévisualiser output/result.json' }));
+
+        await waitFor(() => {
+            expect(state.loadArtifactPreview).toHaveBeenCalledWith('tool-1', 'run-1', 'output/result.json');
+        });
+
         fireEvent.click(screen.getByRole('button', { name: 'Télécharger output/result.json' }));
 
         await waitFor(() => {
@@ -323,7 +354,7 @@ describe('FunctionEditorTab J9 commands', () => {
         });
     });
 
-    it('exposes platform preparation status for native readonly functions', async () => {
+    it('exposes immediate execution status for dependency-free native readonly functions', async () => {
         const state = createStoreState({
             getSelectedFunction: jest.fn(() => ({
                 _id: 'fn-native',
@@ -340,19 +371,19 @@ describe('FunctionEditorTab J9 commands', () => {
                 resolvedCodePath: 'backend/python/native/web_search_py.py',
                 codePathRoot: 'native_repo',
                 codeInline: null,
-                dependencies: ['duckduckgo-search'],
+                dependencies: [],
                 isEnabled: true,
                 isReadonly: true,
                 version: 1,
                 readinessStatus: {
-                    requirement: 'platform_provision',
-                    state: 'waiting_for_provisioning',
-                    prepared: false,
-                    runnable: false,
-                    dependencyReadiness: 'missing',
+                    requirement: 'none',
+                    state: 'ready',
+                    prepared: true,
+                    runnable: true,
+                    dependencyReadiness: 'not_required',
                     runtimeReady: true,
-                    summary: 'Provisionnement plateforme requis avant execution de cette fonction native.',
-                    actionLabel: 'Provisionnement plateforme requis'
+                    summary: 'Aucune preparation supplementaire requise avant execution.',
+                    actionLabel: 'Executable immediatement'
                 },
                 tags: [],
                 createdAt: '2026-03-19T12:00:00.000Z',
@@ -363,19 +394,19 @@ describe('FunctionEditorTab J9 commands', () => {
 
         render(<FunctionEditorTab />);
 
-        const nativePreparationCard = screen.getByText('Provisionnement plateforme en attente').parentElement;
+        const nativePreparationCard = screen.getByText('Aucune preparation supplementaire requise').parentElement;
         expect(nativePreparationCard).not.toBeNull();
         expect(nativePreparationCard).toHaveTextContent('Categorie Native readonly');
-        expect(screen.getByText(/Provisionnement plateforme requis avant execution de cette fonction native/)).toBeInTheDocument();
+        expect(screen.getByText(/Aucune preparation supplementaire requise avant execution/)).toBeInTheDocument();
         expect(screen.queryByText('Préparer build')).not.toBeInTheDocument();
-        expect(screen.getByText('Exécuter')).toBeDisabled();
+        expect(screen.getByText('Exécuter')).toBeEnabled();
     });
 
     it('renders sandbox output and keeps the sidebar scrollable for lower panels', async () => {
         const state = createStoreState({
             sandboxResult: {
                 success: true,
-                output: { result: 'Bonjour Ada. Ton nom est maintenant enregistré dans ma mémoire.' },
+                output: { result: 'Ton nom, Ada, est maintenant enregistré dans ma mémoire' },
                 durationMs: 14,
                 stdout: 'hello_test executed',
                 stderr: ''
@@ -386,7 +417,7 @@ describe('FunctionEditorTab J9 commands', () => {
         render(<FunctionEditorTab />);
 
         expect(screen.getByText('Résultat')).toBeInTheDocument();
-        expect(screen.getByText(/Bonjour Ada. Ton nom est maintenant enregistré dans ma mémoire./)).toBeInTheDocument();
+        expect(screen.getByText(/Ton nom, Ada, est maintenant enregistré dans ma mémoire/)).toBeInTheDocument();
         expect(screen.getByTestId('function-editor-sidebar').className).toContain('overflow-y-auto');
     });
 
@@ -420,8 +451,8 @@ describe('FunctionEditorTab J9 commands', () => {
 
         render(<FunctionEditorTab />);
 
-        expect(screen.getByText(/Exemple QA TypeScript: la fonction lit des donnees JSON strictes depuis args.user_name et args.is_admin./)).toBeInTheDocument();
-        expect(screen.getByText(/Bonjour Ada. Ton nom est maintenant enregistre dans ma memoire./)).toBeInTheDocument();
+        expect(screen.getByText(/Exemple QA TypeScript: la fonction lit des donnees JSON strictes depuis args.user_name./)).toBeInTheDocument();
+        expect(screen.getByText(/Ton nom, Ada, est maintenant enregistre dans ma memoire./)).toBeInTheDocument();
     });
 
     it('projects native Python health details in the runtime banner for Python tools', async () => {
@@ -433,19 +464,19 @@ describe('FunctionEditorTab J9 commands', () => {
                 nativePython: {
                     available: false,
                     status: 'degraded',
-                    summary: 'Imports critiques manquants ou cassés pour: web_search_py',
+                    summary: 'Imports critiques manquants ou cassés pour: web_fetch_py',
                     probes: [
                         {
-                            toolName: 'web_search_py',
+                            toolName: 'web_fetch_py',
                             status: 'degraded',
-                            summary: 'Imports critiques indisponibles pour web_search_py: duckduckgo_search',
+                            summary: 'Imports critiques indisponibles pour web_fetch_py: requests',
                             checkedAt: '2026-03-19T12:00:00.000Z',
                             imports: [
                                 {
-                                    dependency: 'duckduckgo-search',
-                                    module: 'duckduckgo_search',
+                                    dependency: 'requests',
+                                    module: 'requests',
                                     available: false,
-                                    detail: 'ModuleNotFoundError: No module named duckduckgo_search'
+                                    detail: 'ModuleNotFoundError: No module named requests'
                                 }
                             ]
                         }
@@ -457,7 +488,7 @@ describe('FunctionEditorTab J9 commands', () => {
 
         render(<FunctionEditorTab />);
 
-        expect(screen.getByText(/Imports natifs critiques en echec: web_search_py/)).toBeInTheDocument();
+        expect(screen.getByText(/Imports natifs critiques en echec: web_fetch_py/)).toBeInTheDocument();
     });
 
     it('adds a QA diagnostic action when sandbox execution fails', async () => {
@@ -466,11 +497,11 @@ describe('FunctionEditorTab J9 commands', () => {
                 success: false,
                 output: null,
                 durationMs: 19,
-                stderr: 'ModuleNotFoundError: No module named duckduckgo_search',
+                stderr: 'ModuleNotFoundError: No module named requests',
                 errorDetails: {
                     code: 'DEPENDENCY_MISSING',
                     subsystem: 'dependency',
-                    message: 'Dependance native manquante pour web_search_py',
+                    message: 'Dependance native manquante pour web_fetch_py',
                     retryable: false,
                     failureKind: 'dependency_missing'
                 }

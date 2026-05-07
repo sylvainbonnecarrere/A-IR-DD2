@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, ToggleSwitch } from '../UI';
 import { CloseIcon } from '../Icons';
+import { useLocalization } from '../../hooks/useLocalization';
 import { DEFAULT_WEB_SEARCH_MAX_CONTEXT_TOKENS, defaultWebSearchParams, WebSearchParams, type WebSearchEngine } from '../../types';
 
 const WEB_SEARCH_ENGINES: WebSearchEngine[] = ['duckduckgo.com', 'bing.com', 'google.com', 'baidu.com', 'qwant.com'];
@@ -66,6 +67,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
   onClose,
   onSave,
 }) => {
+  const { t } = useLocalization();
   const [formValues, setFormValues] = useState<WebSearchParams>(normalizeWebSearchParams(initialParams));
   const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
   const [domainInput, setDomainInput] = useState('');
@@ -130,12 +132,12 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
 
   const handleSave = async () => {
     if (resolvedValues.web_engine_search && resolvedValues.web_engine_nb_result_select < 1) {
-      setErrorMessage('Le Top N du moteur doit etre superieur ou egal a 1.');
+      setErrorMessage(t('webSearchParams_error_topN', 'Le Top N du moteur doit etre superieur ou egal a 1.'));
       return;
     }
 
     if (resolvedValues.relevance_threshold < 1 || resolvedValues.relevance_threshold > 10) {
-      setErrorMessage('Le seuil de pertinence doit etre compris entre 1 et 10.');
+      setErrorMessage(t('webSearchParams_error_relevance', 'Le seuil de pertinence doit etre compris entre 1 et 10.'));
       return;
     }
 
@@ -154,9 +156,9 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
             <h2
               className="truncate text-[1.08rem] font-semibold text-sky-50"
               style={{ fontFamily: "'Orbitron', 'Rajdhani', sans-serif" }}
-              title={`Paramètres Web Search de l'agent ${agentName}`}
+              title={t('webSearchParams_title', 'Paramètres Web Search de l\'agent {agentName}', { agentName })}
             >
-              Paramètres Web Search de l&apos;agent {agentName}
+              {t('webSearchParams_title', 'Paramètres Web Search de l\'agent {agentName}', { agentName })}
             </h2>
           </div>
           <Button
@@ -180,12 +182,12 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
 
           <section className="rounded-2xl border border-slate-800/80 bg-slate-950/55 p-5 shadow-[inset_0_1px_0_rgba(125,211,252,0.08)]">
             <div className="mb-4 flex items-center justify-between gap-4">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-200/78">Cadence de recherche</h3>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-200/78">{t('webSearchParams_section_searchCadence', 'Cadence de recherche')}</h3>
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
             <label className="space-y-2">
-              <FieldLabel label="Top N résultats moteur" info="Limite l'analyse aux premiers résultats fournis par le moteur de recherche sélectionné." />
+              <FieldLabel label={t('webSearchParams_field_topN_label', 'Top N résultats moteur')} info={t('webSearchParams_field_topN_info', 'Limite l\'analyse aux premiers résultats fournis par le moteur de recherche sélectionné.')} />
               <input
                 type="number"
                 min={1}
@@ -196,7 +198,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
             </label>
 
             <label className="space-y-2">
-              <FieldLabel label="Nombre max de fragments" info="Nombre maximal de sources ou fragments retenus pour la synthèse finale." />
+              <FieldLabel label={t('webSearchParams_field_maxFragments_label', 'Nombre max de fragments')} info={t('webSearchParams_field_maxFragments_info', 'Nombre maximal de sources ou fragments retenus pour la synthèse finale.')} />
               <input
                 type="number"
                 min={1}
@@ -208,7 +210,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
-                <FieldLabel label="Budget max de contexte" info="Limite de sécurité optionnelle pour éviter de saturer le LLM final avec trop de texte." />
+                <FieldLabel label={t('webSearchParams_field_maxContext_label', 'Budget max de contexte')} info={t('webSearchParams_field_maxContext_info', 'Limite de sécurité optionnelle pour éviter de saturer le LLM final avec trop de texte.')} />
                 <ToggleSwitch
                   checked={isMaxContextTokensEnabled}
                   onChange={(checked) => {
@@ -231,7 +233,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
             </div>
 
             <label className="space-y-2">
-              <FieldLabel label="Seuil de pertinence" info="Tout résultat noté sous ce seuil par le reranker est rejeté." />
+              <FieldLabel label={t('webSearchParams_field_relevance_label', 'Seuil de pertinence')} info={t('webSearchParams_field_relevance_info', 'Tout résultat noté sous ce seuil par le reranker est rejeté.')} />
               <input
                 type="range"
                 min={1}
@@ -244,7 +246,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
             </label>
 
             <label className="space-y-2">
-              <FieldLabel label="Stratégie de reranking" info="Fast analyse uniquement les snippets, Deep s'appuie sur le contenu approfondi." />
+              <FieldLabel label={t('webSearchParams_field_rerankStrategy_label', 'Stratégie de reranking')} info={t('webSearchParams_field_rerankStrategy_info', 'Fast analyse uniquement les snippets, Deep s\'appuie sur le contenu approfondi.')} />
               <select
                 value={formValues.rerank_strategy}
                 onChange={(e) => updateField('rerank_strategy', e.target.value as WebSearchParams['rerank_strategy'])}
@@ -259,9 +261,9 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
 
           <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.02fr_0.98fr]">
             <div className="rounded-2xl border border-slate-800/80 bg-slate-950/55 p-5 space-y-4 shadow-[inset_0_1px_0_rgba(125,211,252,0.08)]">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-200/78">Comportement moteur</h3>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-200/78">{t('webSearchParams_section_engineBehavior', 'Comportement moteur')}</h3>
               <div className="flex items-center justify-between gap-3">
-                <FieldLabel label="Activer le moteur web" info="Active l'usage d'un moteur de recherche pour la normalized query." />
+                <FieldLabel label={t('webSearchParams_field_enableWebEngine_label', 'Activer le moteur web')} info={t('webSearchParams_field_enableWebEngine_info', 'Active l\'usage d\'un moteur de recherche pour la normalized query.')} />
                 <ToggleSwitch
                   checked={formValues.web_engine_search}
                   onChange={(checked) => updateField('web_engine_search', checked)}
@@ -269,7 +271,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
               </div>
               {formValues.web_engine_search && (
                 <div className="flex items-center justify-between gap-3">
-                  <FieldLabel label="Dig snippet" info="Ouvre et analyse chaque URL trouvée pour en extraire un résumé ciblé." />
+                  <FieldLabel label={t('webSearchParams_field_digSnippet_label', 'Dig snippet')} info={t('webSearchParams_field_digSnippet_info', 'Ouvre et analyse chaque URL trouvée pour en extraire un résumé ciblé.')} />
                   <ToggleSwitch
                     checked={formValues.dig_snippet}
                     onChange={(checked) => updateField('dig_snippet', checked)}
@@ -279,9 +281,9 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
             </div>
 
             <div className="rounded-2xl border border-slate-800/80 bg-slate-950/55 p-5 space-y-4 shadow-[inset_0_1px_0_rgba(125,211,252,0.08)]">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-200/78">Portée et langue</h3>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-200/78">{t('webSearchParams_section_scopeLanguage', 'Portée et langue')}</h3>
               <div className="flex items-center justify-between gap-3">
-                <FieldLabel label="Recherche cross-linguale" info="Génère la requête dans la langue native puis en anglais pour enrichir les sources." />
+                <FieldLabel label={t('webSearchParams_field_crossLingual_label', 'Recherche cross-linguale')} info={t('webSearchParams_field_crossLingual_info', 'Génère la requête dans la langue native puis en anglais pour enrichir les sources.')} />
                 <ToggleSwitch
                   checked={formValues.cross_lingual_search}
                   onChange={(checked) => updateField('cross_lingual_search', checked)}
@@ -289,7 +291,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
               </div>
               {formValues.web_engine_search && (
               <label className="space-y-2 block">
-                <FieldLabel label="Moteur" info="Sélectionne le moteur web utilisé pour la recherche de base." />
+                <FieldLabel label={t('webSearchParams_field_engine_label', 'Moteur')} info={t('webSearchParams_field_engine_info', 'Sélectionne le moteur web utilisé pour la recherche de base.')} />
                 <select
                   value={formValues.web_engine}
                   onChange={(e) => updateField('web_engine', e.target.value as WebSearchParams['web_engine'])}
@@ -303,7 +305,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
               )}
 
               <div className="space-y-3 pt-1">
-                <FieldLabel label="Domaines autorisés" info="Ajoute des URL ou domaines pour restreindre les recherches à des sources ciblées." />
+                <FieldLabel label={t('webSearchParams_field_allowedDomains_label', 'Domaines autorisés')} info={t('webSearchParams_field_allowedDomains_info', 'Ajoute des URL ou domaines pour restreindre les recherches à des sources ciblées.')} />
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
@@ -328,7 +330,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
                         type="button"
                         onClick={() => handleRemoveDomain(domain)}
                         className="rounded-full border border-sky-300/25 bg-sky-400/10 px-3 py-1 text-xs text-sky-100 hover:bg-sky-400/18"
-                        title={`Retirer ${domain}`}
+                        title={t('webSearchParams_removeDomain_title', 'Retirer {domain}', { domain })}
                       >
                         {domain}
                       </button>
@@ -341,7 +343,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
 
           <section className="rounded-2xl border border-slate-800/80 bg-slate-950/55 p-5 shadow-[inset_0_1px_0_rgba(125,211,252,0.08)]">
           <label className="space-y-2 block rounded-2xl border border-slate-800/80 bg-slate-950/55 p-5 shadow-[inset_0_1px_0_rgba(125,211,252,0.08)]">
-            <FieldLabel label="Query transformation" info="Prompt système chargé de convertir la demande utilisateur en requête de recherche optimisée." />
+            <FieldLabel label={t('webSearchParams_field_queryTransformation_label', 'Query transformation')} info={t('webSearchParams_field_queryTransformation_info', 'Prompt système chargé de convertir la demande utilisateur en requête de recherche optimisée.')} />
             <textarea
               rows={10}
               value={formValues.query_transformation}
@@ -353,7 +355,7 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
 
           <section className="rounded-2xl border border-slate-800/80 bg-slate-950/55 p-5 shadow-[inset_0_1px_0_rgba(125,211,252,0.08)]">
             <label className="space-y-2 block">
-              <FieldLabel label="Reranking" info="Prompt système du juror chargé d'évaluer la pertinence réelle des sources web candidates." />
+              <FieldLabel label={t('webSearchParams_field_reranking_label', 'Reranking')} info={t('webSearchParams_field_reranking_info', 'Prompt système du juror chargé d\'évaluer la pertinence réelle des sources web candidates.')} />
               <textarea
                 rows={8}
                 value={formValues.reranking_prompt}
@@ -367,10 +369,10 @@ export const WebSearchParamsModal: React.FC<WebSearchParamsModalProps> = ({
 
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-sky-400/15 bg-slate-950/72">
           <Button type="button" variant="ghost" onClick={onClose} disabled={isSaving}>
-            Annuler
+            {t('cancel', 'Annuler')}
           </Button>
           <Button type="button" onClick={handleSave} disabled={isSaving} className="border border-sky-300/35 bg-[linear-gradient(135deg,rgba(10,37,64,0.98),rgba(14,116,144,0.92)_56%,rgba(125,211,252,0.26))] text-white hover:brightness-110">
-            {isSaving ? 'Enregistrement...' : 'Enregistrer'}
+            {isSaving ? t('webSearchParams_saving', 'Enregistrement...') : t('save', 'Enregistrer')}
           </Button>
         </div>
       </div>

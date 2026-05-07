@@ -16,6 +16,8 @@
  */
 
 export interface ParsedToolCall {
+    /** Stable invocation id when known. */
+    id?: string;
     /** The function name extracted from the LLM response. */
     name: string;
     /** Parsed argument map. */

@@ -36,6 +36,17 @@ function buildFunctionIndex(functions: UserFunction[]): Map<string, UserFunction
     return index;
 }
 
+export function buildToolSelectionFromFunction(fn: Pick<UserFunction, '_id' | 'toolId' | 'versionTag' | 'version' | 'workspaceContext'>): ToolSelection {
+    return {
+        toolId: fn.toolId ?? fn._id,
+        versionRef: {
+            versionTag: fn.versionTag,
+            versionNumber: fn.version,
+            workspaceId: fn.workspaceContext?.workspaceId ?? null,
+        },
+    };
+}
+
 export function buildToolSelectionsFromFunctions(
     functionIds: string[],
     availableFunctions: UserFunction[]
@@ -44,18 +55,35 @@ export function buildToolSelectionsFromFunctions(
 
     return functionIds.map((toolId) => {
         const matchingFunction = functionIndex.get(toolId);
-        const resolvedToolId = matchingFunction?.toolId ?? toolId;
-        return {
-            toolId: resolvedToolId,
-            versionRef: matchingFunction
-                ? {
-                    versionTag: matchingFunction.versionTag,
-                    versionNumber: matchingFunction.version,
-                    workspaceId: matchingFunction.workspaceContext?.workspaceId ?? null,
-                }
-                : undefined,
-        };
+        return matchingFunction
+            ? buildToolSelectionFromFunction(matchingFunction)
+            : {
+                toolId,
+            };
     });
+}
+
+export function normalizeToolSelections(
+    toolSelections: ToolSelection[] | undefined | null,
+    legacyFunctionIds: string[] | undefined | null,
+    availableFunctions: UserFunction[]
+): ToolSelection[] {
+    const functionIndex = buildFunctionIndex(availableFunctions);
+
+    if (toolSelections && toolSelections.length > 0) {
+        return toolSelections.map((selection) => {
+            const matchingFunction = functionIndex.get(selection.toolId);
+            const canonicalSelection = matchingFunction ? buildToolSelectionFromFunction(matchingFunction) : undefined;
+
+            return {
+                ...selection,
+                toolId: matchingFunction?.toolId ?? selection.toolId,
+                versionRef: selection.versionRef ?? canonicalSelection?.versionRef,
+            };
+        });
+    }
+
+    return buildToolSelectionsFromFunctions(legacyFunctionIds ?? [], availableFunctions);
 }
 
 export function deriveSelectedToolIds(

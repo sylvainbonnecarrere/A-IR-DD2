@@ -27,7 +27,10 @@ interface NativeFunctionSeed {
     version: number;
     tags: string[];
     healthCheck?: {
-        criticalPythonImports?: string[];
+        criticalPythonImports?: Array<string | {
+            module: string;
+            dependency?: string;
+        }>;
     };
 }
 
@@ -416,7 +419,14 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         codeInline: null,
         dependencies: ['beautifulsoup4', 'requests', 'lxml'],
         healthCheck: {
-            criticalPythonImports: ['requests', 'bs4', 'lxml']
+            criticalPythonImports: [
+                'requests',
+                {
+                    module: 'bs4',
+                    dependency: 'beautifulsoup4'
+                },
+                'lxml'
+            ]
         },
         isEnabled: true,
         isReadonly: true,
@@ -429,7 +439,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
     // ─────────────────────────────────────────────────────────────────
     {
         name: 'web_search_py',
-        description: "Effectue une recherche sur le web et retourne les résultats structurés (titre, URL, extrait). Utilise le moteur de recherche configuré dans les paramètres système.",
+        description: "Fonction web search en cours de réimplémentation. Retourne actuellement un message temporaire de disponibilité pendant le nettoyage du runtime.",
         language: 'python',
         origin: 'native',
         userId: null,
@@ -445,31 +455,12 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
             }
         },
         outputSchema: {
-            type: 'object',
-            properties: {
-                results: {
-                    type: 'array',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            title: { type: 'string' },
-                            url: { type: 'string' },
-                            snippet: { type: 'string' },
-                            position: { type: 'number' }
-                        }
-                    }
-                },
-                query: { type: 'string' },
-                normalized_query: { type: 'string' },
-                total_results: { type: 'number' }
-            }
+            type: 'string',
+            description: "Message temporaire tant que la fonctionnalité n'est pas réimplémentée."
         },
         codePath: 'backend/python/native/web_search_py.py',
         codeInline: null,
-        dependencies: ['ddgs', 'duckduckgo-search'],
-        healthCheck: {
-            criticalPythonImports: ['duckduckgo_search']
-        },
+        dependencies: [],
         isEnabled: true,
         isReadonly: true,
         version: 1,

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
-import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, AgentInstance, ToolCallRecord } from '../types';
+import { Agent, ChatMessage, LLMCapability, LLMProvider, Tool, ToolCall, AgentInstance, ToolCallRecord } from '../types';
 import { Button } from './UI';
 import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon, MaximizeIcon } from './Icons';
 import { ConfirmationModal } from './modals/ConfirmationModal';
@@ -20,15 +20,16 @@ import { executeTool } from '../utils/toolExecutor';
 import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
 import { isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
 import { useLocalization } from '../hooks/useLocalization';
-import { useJournalQueue } from '../hooks/useJournalQueue';
+import { useAgentJournalPersistence } from '../hooks/useAgentJournalPersistence';
 import { useAuth } from '../hooks/useAuth';
 import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
 import { buildBosHydrationFingerprint, hydrateToolMessagesFromPersistedRuns } from '../services/bosRunProjectionService';
 import { deriveSelectedToolIds } from '../services/toolSelectionResolver';
 import { persistInstanceWebSearchParams } from '../services/webSearchParamsConfigService';
 import type { UserFunction } from '../types/function.types';
-import { buildWebSearchExecutionArgs, executeAgentToolCall } from '../services/agentToolExecution';
+import { executeAgentToolCall, parseToolCallArguments } from '../services/agentToolExecution';
 import { shouldSuppressVisualToolResult } from '../utils/toolResultVisibility';
+import { AGENT_NODE_HANDLES } from './workflow/connectionContracts';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -174,6 +175,88 @@ function formatToolResultMessage(toolName: string, result: unknown, executionId?
   return lines.join('\n');
 }
 
+function isToolErrorResult(result: unknown): boolean {
+  const resultObject = toPlainObject(result);
+  if (!resultObject) {
+    return false;
+  }
+
+  return typeof resultObject.error === 'string'
+    || resultObject.success === false;
+}
+
+function buildToolInvocationText(toolName: string, args: Record<string, unknown> | string, executionId?: string): string {
+  const serializedArguments = typeof args === 'string'
+    ? args
+    : JSON.stringify(args);
+
+  return `${toolName}(${serializedArguments})${executionId ? ` [${executionId}]` : ''}`;
+}
+
+function buildToolCallMessage(record: ToolCallRecord): ChatMessage {
+  return {
+    id: record.id,
+    sender: 'tool',
+    text: buildToolInvocationText(record.functionName, record.arguments, record.executionId),
+    toolName: record.functionName,
+    timestamp: record.timestamp,
+    isError: record.status === 'error',
+    toolCallRecord: record,
+  };
+}
+
+function buildPendingToolCallMessage(messageId: string, toolName: string, args: Record<string, unknown> | string, timestamp: Date): ChatMessage {
+  return {
+    id: messageId,
+    sender: 'tool',
+    text: buildToolInvocationText(toolName, args),
+    toolName,
+    timestamp,
+    status: 'executing_tool',
+  };
+}
+
+const cornerHandleClassName = 'w-3 h-3 bg-cyan-400 border-2 border-cyan-300 shadow-lg shadow-cyan-400/50 hover:bg-cyan-300 hover:shadow-cyan-300/70 transition-all duration-200 z-20';
+
+function buildToolResultChatMessage(record: ToolCallRecord): ChatMessage {
+  return {
+    id: generateMessageId('tool-result'),
+    sender: 'tool_result',
+    text: formatToolResultMessage(record.functionName, record.result, record.executionId),
+    toolCallId: record.id,
+    toolName: record.functionName,
+    timestamp: record.timestamp,
+    isError: record.status === 'error',
+  };
+}
+
+function mapUserFunctionToProviderTool(fn: UserFunction): Tool {
+  return {
+    name: fn.name,
+    description: fn.description,
+    parameters: fn.inputSchema ?? { type: 'object' },
+    outputSchema: fn.outputSchema,
+  };
+}
+
+function mergeProviderTools(agentTools: Tool[] | undefined, selectedFunctions: UserFunction[]): Tool[] | undefined {
+  if (selectedFunctions.length === 0) {
+    return agentTools;
+  }
+
+  const mergedTools = new Map<string, Tool>();
+
+  for (const tool of agentTools ?? []) {
+    mergedTools.set(tool.name, tool);
+  }
+
+  for (const fn of selectedFunctions) {
+    mergedTools.set(fn.name, mapUserFunctionToProviderTool(fn));
+  }
+
+  return Array.from(mergedTools.values());
+}
+
 function resolveAgentSelectedToolIds(agent: Agent, agentInstance: AgentInstance | undefined): string[] {
   const instanceConfig = agentInstance?.configuration_json;
   const inheritance = instanceConfig?.functionInheritance;
@@ -304,10 +387,6 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     setNodeMessages,
     isNodeExecuting,
     setNodeExecuting,
-    setImagePanelOpen,
-    setImageModificationPanelOpen,
-    setFullscreenImage,
-    setFullscreenChatNodeId,
     llmConfigs,
     localLLMProfiles
   } = useRuntimeStore();
@@ -358,6 +437,11 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     [allFunctions, configuredToolIds, hasLegacyWebSearchPyTool]
   );
 
+  const providerTools = useMemo(
+    () => mergeProviderTools(effectiveAgent.tools, scopedFunctions),
+    [effectiveAgent.tools, scopedFunctions]
+  );
+
   useEffect(() => {
     if (hasLegacyWebSearchPyTool) {
       return;
@@ -391,6 +475,12 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const bosHydrationFingerprintRef = useRef<string>('');
+  const pendingLocalToolMessageIdsRef = useRef<Record<string, string>>({});
+  const journalWorkflowId = data.workflowId || agentInstance?.workflowId;
+  const { persistJournalEntry, persistToolInvocation, resetToolInvocationDedup } = useAgentJournalPersistence({
+    workflowId: journalWorkflowId,
+    instanceId: agentInstance?.id,
+  });
 
   // Get messages from store
   const messages = getNodeMessages(id);
@@ -440,6 +530,46 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     // Ouvrir directement la modale de confirmation sans manipulation de focus
     setShowDeleteConfirm(true);
   };
+
+  const upsertChatMessage = useCallback((message: ChatMessage) => {
+    const existingMessages = getNodeMessages(id);
+    if (existingMessages.some((candidate) => candidate.id === message.id)) {
+      setNodeMessages(id, existingMessages.map((candidate) => candidate.id === message.id ? message : candidate));
+      return;
+    }
+
+    addNodeMessage(id, message);
+  }, [addNodeMessage, getNodeMessages, id, setNodeMessages]);
+
+  const finalizeToolCallMessage = useCallback((toolMessage: ChatMessage, pendingMessageId?: string) => {
+    const existingMessages = getNodeMessages(id);
+    const finalToolCallId = toolMessage.toolCallRecord?.id;
+
+    if (finalToolCallId && existingMessages.some((candidate) => candidate.sender === 'tool' && candidate.toolCallRecord?.id === finalToolCallId)) {
+      setNodeMessages(id, existingMessages.map((candidate) => (
+        candidate.sender === 'tool' && candidate.toolCallRecord?.id === finalToolCallId
+          ? toolMessage
+          : candidate
+      )));
+      return;
+    }
+
+    if (pendingMessageId && existingMessages.some((candidate) => candidate.id === pendingMessageId)) {
+      setNodeMessages(id, existingMessages.map((candidate) => candidate.id === pendingMessageId ? toolMessage : candidate));
+      return;
+    }
+
+    addNodeMessage(id, toolMessage);
+  }, [addNodeMessage, getNodeMessages, id, setNodeMessages]);
+
+  const ensureToolResultMessage = useCallback((toolResultMessage: ChatMessage) => {
+    const existingMessages = getNodeMessages(id);
+    if (existingMessages.some((candidate) => candidate.sender === 'tool_result' && candidate.toolCallId === toolResultMessage.toolCallId)) {
+      return;
+    }
+
+    addNodeMessage(id, toolResultMessage);
+  }, [addNodeMessage, getNodeMessages, id]);
 
   const handleSaveWebSearchParams = useCallback(async (webSearchParams: NonNullable<Agent['webSearchParams']>) => {
     if (!agentInstance?.id || !agentInstance.configuration_json) {
@@ -591,36 +721,6 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     }
   };
 
-  /**
-   * Persister une entrée journal dans MongoDB agent_journals via queue robuste
-   * Respecte persistenceConfig granulaire
-   * Gère les retries automatiques en cas de déconnexion
-   */
-  const { enqueueEntry } = useJournalQueue();
-
-  const persistJournalEntry = useCallback((entryType: 'chat' | 'error' | 'media', payload: any) => {
-    // Try data.workflowId first, fallback to instance.workflowId
-    const effectiveWorkflowId = data.workflowId || agentInstance?.workflowId;
-    
-    if (!agentInstance?.id || !effectiveWorkflowId) {
-      console.warn('[Journal] Missing context for persistence:', { 
-        agentInstanceId: agentInstance?.id, 
-        workflowId: effectiveWorkflowId,
-        dataWorkflowId: data.workflowId,
-        instanceWorkflowId: agentInstance?.workflowId
-      });
-      return;
-    }
-
-    // Enqueuer sans bloquage (async, non-blocking)
-    enqueueEntry(
-      effectiveWorkflowId,
-      agentInstance.id,
-      entryType,
-      payload
-    );
-  }, [agentInstance?.id, agentInstance?.workflowId, data.workflowId, enqueueEntry]);
-
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedInput = userInput.trim();
@@ -632,6 +732,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
       return;
     }
 
+    resetToolInvocationDedup();
     setNodeExecuting(id, true);
 
     const userMessage: ChatMessage = {
@@ -660,10 +761,12 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     addNodeMessage(id, userMessage);
     setUserInput('');
     setAttachedFile(null);
+    pendingLocalToolMessageIdsRef.current = {};
 
     // Persist user message to journal (non-blocking)
     // ⭐ FIX QA: Include image data for persistence if present
     persistJournalEntry('chat', {
+      messageId: userMessage.id,
       role: 'user',
       content: trimmedInput,
       llmProvider: effectiveAgent.llmProvider,
@@ -832,28 +935,42 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           effectiveAgent.systemPrompt ?? '',
           {
             authToken: accessToken ?? undefined,  // C1 FIX: JWT pour requireAuth sandbox
-              prepareToolExecution: ({ fn, toolCall }) => {
-                if (fn.name !== 'web_search_py' || !effectiveAgent.webSearchParams || !accessToken) {
-                  return { args: toolCall.arguments };
-                }
-
-                return {
-                  args: buildWebSearchExecutionArgs(toolCall.arguments, effectiveAgent),
-                  privateContext: {
-                    web_search: {
-                      params: effectiveAgent.webSearchParams,
-                      llm: {
-                        provider: effectiveAgent.llmProvider,
-                        model: effectiveAgent.model,
-                        localLLMProfileId: effectiveAgent.localLLMProfileId ?? null,
-                      },
-                    },
-                  },
-                };
-              },
             onEvent: (event) => {
-              if (event.type === 'tool_call_start') {
-                setLoadingMessage(`🔧 ${event.toolCall?.name ?? '…'}`);
+              if (event.type === 'tool_call_start' && event.toolCall) {
+                const pendingKey = `${event.iteration}:${event.toolCall.name}:${JSON.stringify(event.toolCall.arguments)}`;
+                const pendingMessageId = pendingLocalToolMessageIdsRef.current[pendingKey] ?? generateMessageId('pending-tool');
+                pendingLocalToolMessageIdsRef.current[pendingKey] = pendingMessageId;
+                const matchedFunction = enabledFunctions.find((fn) => fn.name === event.toolCall.name);
+                if (event.toolCall.id) {
+                  persistToolInvocation({
+                    toolCallId: event.toolCall.id,
+                    toolName: event.toolCall.name,
+                    phase: 'started',
+                    toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                    functionId: matchedFunction?._id,
+                  });
+                }
+                upsertChatMessage(buildPendingToolCallMessage(
+                  pendingMessageId,
+                  event.toolCall.name,
+                  event.toolCall.arguments,
+                  new Date()
+                ));
+                setLoadingMessage(`🔧 ${event.toolCall.name}`);
+              } else if (event.type === 'tool_call_done' && event.toolCall && event.toolCallRecord) {
+                const pendingKey = `${event.iteration}:${event.toolCall.name}:${JSON.stringify(event.toolCall.arguments)}`;
+                const pendingMessageId = pendingLocalToolMessageIdsRef.current[pendingKey];
+                persistToolInvocation({
+                  toolCallId: event.toolCallRecord.id,
+                  toolName: event.toolCallRecord.functionName,
+                  phase: event.toolCallRecord.status === 'error' ? 'failed' : 'completed',
+                  executionId: event.toolCallRecord.executionId,
+                  toolId: event.toolCallRecord.toolId,
+                  functionId: event.toolCallRecord.functionId,
+                });
+                finalizeToolCallMessage(buildToolCallMessage(event.toolCallRecord as ToolCallRecord), pendingMessageId);
+                ensureToolResultMessage(buildToolResultChatMessage(event.toolCallRecord as ToolCallRecord));
+                delete pendingLocalToolMessageIdsRef.current[pendingKey];
               } else if (event.type === 'tool_protocol_violation') {
                 setLoadingMessage(t('tool_protocol_violation'));
               } else if (event.type === 'llm_start') {
@@ -865,43 +982,28 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
         // Add tool call messages for each executed function
         for (const record of loopResult.toolCallLog) {
-          const toolChatMsg: ChatMessage = {
+          const toolRecord: ToolCallRecord = {
             id: record.id,
-            sender: 'tool',
-            text: `${record.functionName}(${JSON.stringify(record.arguments)})${record.executionId ? ` [${record.executionId}]` : ''}`,
-            toolName: record.functionName,
+            toolId: record.toolId,
+            functionId: record.functionId,
+            functionName: record.functionName,
+            arguments: record.arguments,
+            result: record.result,
+            status: record.status,
+            durationMs: record.durationMs,
+            executionId: record.executionId,
+            runner: record.runner,
+            exitCode: record.exitCode,
+            failureKind: record.failureKind,
+            artifacts: record.artifacts,
             timestamp: record.timestamp,
-            isError: record.status === 'error',
-            toolCallRecord: {
-              id: record.id,
-              toolId: record.toolId,
-              functionId: record.functionId,
-              functionName: record.functionName,
-              arguments: record.arguments,
-              result: record.result,
-              status: record.status,
-              durationMs: record.durationMs,
-              executionId: record.executionId,
-              runner: record.runner,
-              exitCode: record.exitCode,
-              failureKind: record.failureKind,
-              artifacts: record.artifacts,
-              timestamp: record.timestamp,
-            } as ToolCallRecord,
           };
-          addNodeMessage(id, toolChatMsg);
 
-          const toolResultMessage: ChatMessage = {
-            id: generateMessageId('tool-result'),
-            sender: 'tool_result',
-            text: formatToolResultMessage(record.functionName, record.result, record.executionId),
-            toolCallId: record.id,
-            toolName: record.functionName,
-            timestamp: record.timestamp,
-            isError: record.status === 'error',
-          };
-          addNodeMessage(id, toolResultMessage);
+          finalizeToolCallMessage(buildToolCallMessage(toolRecord));
+          ensureToolResultMessage(buildToolResultChatMessage(toolRecord));
         }
+
+        pendingLocalToolMessageIdsRef.current = {};
 
         // Add final agent response
         if (loopResult.finalResponse.trim() || loopResult.finishReason === 'error') {
@@ -915,6 +1017,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           addNodeMessage(id, agentMsg);
           if (loopResult.finalResponse.trim()) {
             persistJournalEntry('chat', {
+              messageId: agentMsg.id,
               role: 'agent',
               content: loopResult.finalResponse,
               llmProvider: effectiveAgent.llmProvider,
@@ -930,7 +1033,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
         effectiveAgent.model,
         effectiveAgent.systemPrompt,
         conversationHistoryForAPI, // Use computed history based on config
-        effectiveAgent.tools,
+        providerTools,
         effectiveAgent.outputConfig,
         credential, // For endpoints (will be used for LMStudio, ignored for cloud)
         { webFetch: webFetchEnabled, webSearch: webSearchEnabled }, // Native tools config
@@ -979,25 +1082,29 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
         // Handle tool calls
         if (chunk.response && 'toolCalls' in chunk.response && chunk.response.toolCalls) {
           toolCalls = chunk.response.toolCalls;
-          const toolMessage: ChatMessage = {
-            id: agentMessageId,
-            sender: 'agent',
-            text: currentResponse,
-            toolCalls,
-            status: 'executing_tool',
-            timestamp: new Date()
-          };
-
-          const existingMessages = getNodeMessages(id);
-          setNodeMessages(id, existingMessages.map(m =>
-            m.id === agentMessageId ? toolMessage : m
-          ));
+          for (const toolCall of toolCalls) {
+            const matchedFunction = scopedFunctions.find((fn) => fn.isEnabled && fn.name === toolCall.name);
+            persistToolInvocation({
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              phase: 'started',
+              toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+              functionId: matchedFunction?._id,
+            });
+            upsertChatMessage(buildPendingToolCallMessage(
+              `pending-tool-${toolCall.id}`,
+              toolCall.name,
+              parseToolCallArguments(toolCall.arguments),
+              new Date()
+            ));
+          }
         }
       }
 
       // Persist agent response if successful
       if (currentResponse.trim() && !toolCalls.length) {
         persistJournalEntry('chat', {
+          messageId: agentMessageId,
           role: 'agent',
           content: currentResponse,
           llmProvider: effectiveAgent.llmProvider,
@@ -1008,6 +1115,10 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
       // Execute tools if any
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
+          const matchedFunction = scopedFunctions.find((fn) => fn.isEnabled && fn.name === toolCall.name);
+          const toolTimestamp = new Date();
+          const pendingToolMessageId = `pending-tool-${toolCall.id}`;
+
           try {
             const execution = await executeAgentToolCall({
               toolCall,
@@ -1016,26 +1127,54 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
               authToken: accessToken ?? undefined,
             });
             const toolResult = execution.result;
-            const toolResultMessage: ChatMessage = {
-              id: generateMessageId('tool-result'),
-              sender: 'tool_result',
-              text: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
-              toolCallId: toolCall.id,
-              toolName: toolCall.name,
-              timestamp: new Date()
+            const toolRecord: ToolCallRecord = {
+              id: toolCall.id,
+              toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+              functionId: matchedFunction?._id,
+              functionName: toolCall.name,
+              arguments: execution.executedArguments,
+              result: toolResult,
+              status: isToolErrorResult(toolResult) ? 'error' : 'success',
+              timestamp: toolTimestamp,
+              executionId: execution.executionId,
+              runner: execution.runner,
+              exitCode: execution.exitCode,
+              failureKind: execution.failureKind,
+              artifacts: execution.artifacts,
             };
-            addNodeMessage(id, toolResultMessage);
+
+            persistToolInvocation({
+              toolCallId: toolRecord.id,
+              toolName: toolRecord.functionName,
+              phase: toolRecord.status === 'error' ? 'failed' : 'completed',
+              executionId: toolRecord.executionId,
+              toolId: toolRecord.toolId,
+              functionId: toolRecord.functionId,
+            });
+            finalizeToolCallMessage(buildToolCallMessage(toolRecord), pendingToolMessageId);
+            ensureToolResultMessage(buildToolResultChatMessage(toolRecord));
           } catch (error) {
-            const errorMessage: ChatMessage = {
-              id: generateMessageId('tool-error'),
-              sender: 'tool_result',
-              text: `Erreur: ${error instanceof Error ? error.message : String(error)}`,
-              toolCallId: toolCall.id,
-              toolName: toolCall.name,
-              isError: true,
-              timestamp: new Date()
+            const toolErrorText = `Erreur: ${error instanceof Error ? error.message : String(error)}`;
+            const toolRecord: ToolCallRecord = {
+              id: toolCall.id,
+              toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+              functionId: matchedFunction?._id,
+              functionName: toolCall.name,
+              arguments: parseToolCallArguments(toolCall.arguments),
+              result: { error: toolErrorText },
+              status: 'error',
+              timestamp: toolTimestamp,
             };
-            addNodeMessage(id, errorMessage);
+
+            persistToolInvocation({
+              toolCallId: toolRecord.id,
+              toolName: toolRecord.functionName,
+              phase: 'failed',
+              toolId: toolRecord.toolId,
+              functionId: toolRecord.functionId,
+            });
+            finalizeToolCallMessage(buildToolCallMessage(toolRecord), pendingToolMessageId);
+            ensureToolResultMessage(buildToolResultChatMessage(toolRecord));
           }
         }
 
@@ -1045,6 +1184,15 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           m.status === 'executing_tool' ? { ...m, status: undefined } : m
         ));
 
+        persistJournalEntry('chat', {
+          messageId: agentMessageId,
+          role: 'agent',
+          content: currentResponse,
+          llmProvider: effectiveAgent.llmProvider,
+          modelUsed: effectiveAgent.model,
+          toolCalls,
+        });
+
         // If agent has Chat capability, continue generation with tool results
         if (effectiveAgent?.capabilities?.includes(LLMCapability.Chat)) {
           setLoadingMessage(t('analyzing_results'));
@@ -1052,9 +1200,9 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           // Get updated message history including tool results
           const updatedMessages = getNodeMessages(id);
 
-          // Filter out tool_result messages for the follow-up call and create a synthetic user message
-          // that contains the tool results as context
-          const messagesWithoutToolResults = updatedMessages.filter(m => m.sender !== 'tool_result');
+          // Filter out UI-only tool and tool_result messages for the follow-up call and create a synthetic user message
+          // that contains the tool results as context.
+          const messagesWithoutToolResults = updatedMessages.filter(m => m.sender !== 'tool_result' && m.sender !== 'tool');
 
           // Collect tool results for context
           const toolResults = updatedMessages.filter(m => m.sender === 'tool_result');
@@ -1084,7 +1232,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
             effectiveAgent.model,
             effectiveAgent.systemPrompt,
             messagesWithoutToolResults,
-            effectiveAgent.tools,
+            providerTools,
             effectiveAgent.outputConfig,
             credential // endpoint for LMStudio — same agent-specific credential
           );
@@ -1130,6 +1278,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           // ⭐ Phase 3: Persister la réponse follow-up
           if (followUpResponse.trim()) {
             persistJournalEntry('chat', {
+              messageId: followUpMessageId,
               role: 'agent',
               content: followUpResponse,
               llmProvider: effectiveAgent.llmProvider,
@@ -1152,6 +1301,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
       // Persist error to journal
       persistJournalEntry('error', {
+        messageId: errorMessage.id,
         errorCode: 'AGENT_ERROR',
         message: error instanceof Error ? error.message : String(error),
         source: 'llm_service',
@@ -1177,11 +1327,6 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     } else {
       console.warn(`[V2AgentNode ${id}] Cannot open image panel - missing callback or agent/instance`);
     }
-  };
-
-  const handleImageClick = (imageBase64: string, mimeType: string) => {
-    // Cette fonction est maintenant utilisée pour le bouton fullscreen dans l'overlay
-    // On ne fait rien ici car le fullscreen est géré par App.tsx via setFullscreenImage
   };
 
   const handleOpenFullscreenImage = (imageBase64: string, mimeType: string) => {
@@ -1230,6 +1375,19 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
         {/* J9 — ToolCallBlock for Tools V2 function invocations */}
         {isToolCall && message.toolCallRecord && (
           <ToolCallBlock toolCall={message.toolCallRecord} defaultExpanded={false} />
+        )}
+
+        {isToolCall && !message.toolCallRecord && (
+          <div className="mb-2 rounded bg-gray-800/70 border border-cyan-800/40 px-3 py-2">
+            <div className="flex items-center gap-2 text-sm text-cyan-300">
+              <span className="text-gray-400 shrink-0">🔧</span>
+              <span className="font-mono font-bold truncate">{message.toolName ?? t('executing_tool')}</span>
+              <span className="text-xs text-amber-300 animate-pulse shrink-0">{t('executing_tool')}...</span>
+            </div>
+            <div className="mt-2 text-xs text-gray-400 font-mono bg-gray-900/60 p-2 rounded break-words overflow-wrap-anywhere whitespace-pre-wrap">
+              {message.text}
+            </div>
+          </div>
         )}
 
         {/* Tool result message */}
@@ -1499,7 +1657,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
       bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 
       border border-gray-600 rounded-lg shadow-lg 
       transition-all duration-300 ease-out
-      relative overflow-hidden
+      relative overflow-visible
       ${selected ?
           'border-cyan-400 shadow-cyan-400/40 shadow-2xl' :
           'border-gray-600 hover:border-gray-500'
@@ -1526,16 +1684,16 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
         <div className="absolute inset-[1px] rounded-lg bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-purple-500/20 animate-pulse"></div>
       </div>
 
-      {/* Input Handle with glow effect */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="w-3 h-3 bg-cyan-400 border-2 border-cyan-300 
-                   shadow-lg shadow-cyan-400/50
-                   hover:bg-cyan-300 hover:shadow-cyan-300/70 
-                   transition-all duration-200
-                   relative z-10"
-      />
+      {AGENT_NODE_HANDLES.map((handle) => (
+        <Handle
+          key={handle.id}
+          id={handle.id}
+          type={handle.type}
+          position={handle.position}
+          className={cornerHandleClassName}
+          style={handle.style}
+        />
+      ))}
 
       {/* Header - zone de titre draggable avec classe spéciale */}
       <div className="flex items-center justify-between p-3 border-b border-gray-700/80 
@@ -1702,7 +1860,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
                         className="p-2 h-8 w-8 text-sky-300 border border-sky-400/30 bg-[linear-gradient(135deg,rgba(8,33,59,0.9),rgba(13,78,118,0.78)_58%,rgba(125,211,252,0.16))] hover:text-sky-100 hover:border-sky-200/55 hover:bg-[linear-gradient(135deg,rgba(10,41,71,0.95),rgba(14,116,144,0.82)_58%,rgba(186,230,253,0.24))] hover:shadow-[0_0_16px_rgba(56,189,248,0.28)] transition-all duration-200 rounded-md hover:scale-110 active:scale-95"
                         onClick={() => setIsWebSearchParamsModalOpen(true)}
                         disabled={isLoading}
-                        title="Paramètres Web Search de l'agent"
+                        title={t('agentNode_webSearchParams_buttonTitle', "Paramètres Web Search de l'agent")}
                       >
                         <WebSearchIcon width={14} height={14} />
                       </Button>
@@ -1841,7 +1999,9 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
                         }`}
                       onClick={() => setWebSearchEnabled(!webSearchEnabled)}
                       disabled={isLoading}
-                      title={webSearchEnabled ? 'Web Search activé' : 'Web Search désactivé'}
+                      title={webSearchEnabled
+                        ? t('agentNode_webSearchEnabled', 'Web Search activé')
+                        : t('agentNode_webSearchDisabled', 'Web Search désactivé')}
                     >
                       🔍
                     </Button>
@@ -1884,18 +2044,6 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           </div>
         </div>
       </div>
-
-      {/* Output Handle with laser styling */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="w-3 h-3 bg-cyan-400 border-2 border-cyan-300 
-                   shadow-lg shadow-cyan-400/50
-                   hover:bg-cyan-300 hover:shadow-cyan-300/70 
-                   transition-all duration-200
-                   relative z-10"
-      />
-
       {/* Modal de confirmation de suppression - Sécurité : aucune info de configuration affichée */}
       <ConfirmationModal
         isOpen={showDeleteConfirm}

@@ -17,7 +17,7 @@ describe('userToolLegacyMapper', () => {
             inputSchema: {},
             outputSchema: {},
             codePath: 'backend/python/native/web_search_py.py',
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: [], npm: [] },
             isEnabled: true,
             isReadonly: true,
             version: 'v-ready',
@@ -70,7 +70,7 @@ describe('userToolLegacyMapper', () => {
             inputSchema: {},
             outputSchema: {},
             codePath: 'backend/python/native/web_search_py.py',
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: [], npm: [] },
             isEnabled: true,
             isReadonly: true,
             version: 'v-ready',
@@ -79,7 +79,7 @@ describe('userToolLegacyMapper', () => {
         };
         const changedLegacyFunction = {
             ...baselineLegacyFunction,
-            dependencies: { python: ['duckduckgo-search==7.0.0'], npm: [] }
+            dependencies: { python: ['requests==2.32.3'], npm: [] }
         };
         const baseline = mapLegacyFunctionToUserToolFields(baselineLegacyFunction) as any;
 
@@ -114,7 +114,7 @@ describe('userToolLegacyMapper', () => {
             inputSchema: {},
             outputSchema: {},
             codePath: 'backend/python/native/web_search_py.py',
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: [], npm: [] },
             isEnabled: true,
             isReadonly: true,
             version: 'v-ready'

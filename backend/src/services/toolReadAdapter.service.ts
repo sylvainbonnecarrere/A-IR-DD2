@@ -4,6 +4,7 @@ import { AgentPrototype } from '../models/AgentPrototype.model';
 import { UserFunction, type IUserFunction } from '../models/UserFunction.model';
 import type { FunctionReadModel } from './function.service';
 import { UserToolQueryService, type ToolTransitionReadModel } from './userToolQuery.service';
+import { buildGlobalLegacyFunctionClauses, buildOwnedLegacyFunctionClause, isSharedCustomFunctionName } from '../utils/sharedExampleAccess';
 
 interface LegacyFunctionFilter {
     workflowId?: string;
@@ -85,8 +86,8 @@ export class ToolReadAdapterService {
         const legacyFunctions = await UserFunction.find({
             _id: { $in: tools.map((tool) => new mongoose.Types.ObjectId(tool.id)) },
             $or: [
-                { userId: null },
-                { userId: new mongoose.Types.ObjectId(ownerUserId) }
+                ...buildGlobalLegacyFunctionClauses(),
+                buildOwnedLegacyFunctionClause(ownerUserId)
             ]
         }).lean<IUserFunction[]>();
 
@@ -107,7 +108,7 @@ export class ToolReadAdapterService {
                 description: tool.description,
                 language: tool.runtime,
                 origin: tool.origin,
-                userId: tool.origin === 'native' ? null : ownerUserId,
+                userId: tool.origin === 'native' || (tool.isReadonly && isSharedCustomFunctionName(tool.name)) ? null : ownerUserId,
                 workflowId: tool.workflowId ?? null,
                 inputSchema: tool.inputSchema,
                 outputSchema: tool.outputSchema,

@@ -16,7 +16,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Editor, { OnChange, OnMount } from '@monaco-editor/react';
 import { FunctionRunArtifactsPanel } from './FunctionRunArtifactsPanel';
 import { toolRepository } from '../services/toolRepository';
+import { getFunctionCommandId } from '../utils/functionCommandId';
 import { formatQaDiagnosticMessage, getQaDiagnosticPresentation, getSandboxResultDiagnostic } from '../utils/toolDiagnostics';
+import { buildToolSelectionFromFunction } from '../services/toolSelectionResolver';
+import { useLocalization } from '../hooks/useLocalization';
 
 // C8: Définitions de types FunctionContext injectées dans Monaco TypeScript
 const FUNCTION_CONTEXT_TYPES = `
@@ -36,6 +39,7 @@ import type { BuildPreparationResult, RuntimeHealthReport, SandboxRunResult, Fun
 
 const RUN_RETENTION_DAYS = 14;
 const RUN_RETAIN_LATEST = 20;
+type TranslateFn = (key: string, fallbackOrParams?: string | Record<string, string | number>, params?: Record<string, string | number>) => string;
 
 // ─── SandboxConsole ────────────────────────────────────────────────────────────
 interface SandboxConsoleProps {
@@ -45,6 +49,7 @@ interface SandboxConsoleProps {
 }
 
 const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, error }) => {
+    const { t } = useLocalization();
     const diagnostic = getSandboxResultDiagnostic(result);
     const failureKindLabel = result?.metadata?.failureKind
         ? result.metadata.failureKind.replace(/_/g, ' ')
@@ -59,7 +64,7 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
         return (
             <div className="flex items-center gap-2 text-cyan-400 text-xs p-3">
                 <div className="w-3 h-3 border border-cyan-500/40 border-t-cyan-400 rounded-full animate-spin" />
-                Exécution en cours...
+                {t('functionEditor_console_running', 'Exécution en cours...')}
             </div>
         );
     }
@@ -67,7 +72,7 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
     if (!result && !error) {
         return (
             <div className="text-gray-600 text-xs p-3 italic">
-                Aucune exécution — cliquez sur ▶ Exécuter pour tester
+                {t('functionEditor_console_idle', 'Aucune exécution — cliquez sur ▶ Exécuter pour tester')}
             </div>
         );
     }
@@ -78,12 +83,12 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
             {result && (
                 <div className="flex items-center gap-3 px-3 py-1.5 border-b border-gray-700/40 text-gray-500">
                     <span className={result.success ? 'text-green-400' : 'text-red-400'}>
-                        {result.success ? '✓ Succès' : '✗ Échec'}
+                        {result.success ? t('functionEditor_console_success', '✓ Succès') : t('functionEditor_console_failure', '✗ Échec')}
                     </span>
                     <span>{result.durationMs}ms</span>
                     {result.runner && <span>{result.runner}</span>}
                     {typeof result.exitCode === 'number' && <span>exit {result.exitCode}</span>}
-                    {result.timedOut && <span className="text-yellow-400">⏱ Timeout</span>}
+                    {result.timedOut && <span className="text-yellow-400">{t('functionEditor_console_timeout', '⏱ Timeout')}</span>}
                     {result.executionId && <span className="font-mono text-[11px] truncate">{result.executionId}</span>}
                 </div>
             )}
@@ -101,7 +106,7 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
             {/* Output JSON */}
             {result?.success && result.output !== null && (
                 <div className="px-3 py-2">
-                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Résultat</div>
+                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">{t('functionEditor_console_result', 'Résultat')}</div>
                     <pre className="text-green-300 overflow-x-auto whitespace-pre-wrap break-words">
                         {JSON.stringify(result.output, null, 2)}
                     </pre>
@@ -110,7 +115,7 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
 
             {result?.stdout && (
                 <div className="px-3 py-2">
-                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Stdout</div>
+                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">{t('functionEditor_console_stdout', 'Stdout')}</div>
                     <pre className="text-gray-300 overflow-x-auto whitespace-pre-wrap break-words">
                         {result.stdout}
                     </pre>
@@ -120,7 +125,7 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
             {/* Stderr / Error */}
             {(result?.stderr || error) && (
                 <div className="px-3 py-2">
-                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Erreur</div>
+                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">{t('functionEditor_console_error', 'Erreur')}</div>
                     <pre className="text-red-300 overflow-x-auto whitespace-pre-wrap break-words">
                         {result?.errorDetails?.message || result?.stderr || error}
                     </pre>
@@ -129,18 +134,18 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
 
             {diagnostic && (
                 <div className="px-3 py-2 border-t border-gray-700/30">
-                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Diagnostic QA</div>
+                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">{t('functionEditor_console_qaDiagnostic', 'Diagnostic QA')}</div>
                     <div className="space-y-1 text-[11px] text-gray-300">
                         <div>{diagnostic.label}</div>
-                        <div className="text-gray-500">Sous-systeme: {diagnostic.subsystemLabel}</div>
-                        <div className="text-cyan-200">Action recommandee: {diagnostic.recommendedAction}</div>
+                        <div className="text-gray-500">{t('functionEditor_console_subsystem', 'Sous-systeme: {value}', { value: diagnostic.subsystemLabel })}</div>
+                        <div className="text-cyan-200">{t('functionEditor_console_recommendedAction', 'Action recommandee: {value}', { value: diagnostic.recommendedAction })}</div>
                     </div>
                 </div>
             )}
 
             {result?.errorDetails?.traceback && (
                 <div className="px-3 py-2 border-t border-gray-700/30">
-                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Traceback</div>
+                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">{t('functionEditor_console_traceback', 'Traceback')}</div>
                     <pre className="text-orange-200 overflow-x-auto whitespace-pre-wrap break-words">
                         {result.errorDetails.traceback}
                     </pre>
@@ -149,7 +154,7 @@ const SandboxConsole: React.FC<SandboxConsoleProps> = ({ result, isRunning, erro
 
             {(result?.metadata?.artifacts?.length ?? 0) > 0 && (
                 <div className="px-3 py-2">
-                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">Artifacts</div>
+                    <div className="text-gray-500 mb-1 text-xs uppercase tracking-wider">{t('functionEditor_console_artifacts', 'Artifacts')}</div>
                     <div className="space-y-1">
                         {result?.metadata?.artifacts?.map((artifact) => (
                             <div key={artifact.path} className="flex items-center justify-between gap-2 text-gray-300">
@@ -171,11 +176,13 @@ interface BuildStatusPanelProps {
 }
 
 const BuildStatusPanel: React.FC<BuildStatusPanelProps> = ({ result, isBuilding, error }) => {
+    const { t } = useLocalization();
+
     if (isBuilding) {
         return (
             <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-amber-300 flex items-center gap-2">
                 <div className="w-3 h-3 border border-amber-500/40 border-t-amber-300 rounded-full animate-spin" />
-                Préparation du build en cours...
+                {t('functionEditor_build_preparing', 'Préparation du build en cours...')}
             </div>
         );
     }
@@ -195,10 +202,10 @@ const BuildStatusPanel: React.FC<BuildStatusPanelProps> = ({ result, isBuilding,
     return (
         <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-gray-300 space-y-1">
             <div className="flex items-center justify-between gap-2">
-                <span className="text-green-300">Build prêt</span>
+                <span className="text-green-300">{t('functionEditor_build_ready', 'Build prêt')}</span>
                 <span className="text-gray-500">{new Date(result.builtAt).toLocaleString()}</span>
             </div>
-            <div className="text-gray-500 truncate">Artefacts: {result.artifactPaths.length}</div>
+            <div className="text-gray-500 truncate">{t('functionEditor_build_artifacts', 'Artefacts: {count}', { count: result.artifactPaths.length })}</div>
             {result.warnings.length > 0 && (
                 <div className="text-amber-300 whitespace-pre-wrap">{result.warnings.join('\n')}</div>
             )}
@@ -253,11 +260,13 @@ function summarizeNativePythonHealth(runtimeHealth: RuntimeHealthReport | null):
 }
 
 const RuntimeStatusBanner: React.FC<RuntimeStatusBannerProps> = ({ runtimeHealth, isLoading, error, language }) => {
+    const { t } = useLocalization();
+
     if (isLoading && !runtimeHealth) {
         return (
             <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-gray-400 flex items-center gap-2">
                 <div className="w-3 h-3 border border-gray-500/40 border-t-cyan-400 rounded-full animate-spin" />
-                Vérification du runtime d'exécution...
+                {t('functionEditor_runtime_checking', 'Vérification du runtime d\'exécution...')}
             </div>
         );
     }
@@ -281,17 +290,20 @@ const RuntimeStatusBanner: React.FC<RuntimeStatusBannerProps> = ({ runtimeHealth
         ? summarizeNativePythonHealth(runtimeHealth)
         : null;
     const modeDetail = dockerMode === 'docker-desktop'
-        ? 'Docker Desktop · dev-only (dev/test)'
+        ? t('functionEditor_runtime_mode_dockerDesktop', 'Docker Desktop · dev-only (dev/test)')
         : dockerMode === 'rootless'
-            ? 'Docker rootless'
+            ? t('functionEditor_runtime_mode_rootless', 'Docker rootless')
             : dockerMode === 'rootful-linux'
-                ? 'Docker rootful · dev-only (dev/test)'
-                : 'mode non confirmé';
+                ? t('functionEditor_runtime_mode_rootful', 'Docker rootful · dev-only (dev/test)')
+                : t('functionEditor_runtime_mode_unknown', 'mode non confirmé');
     if (canRun) {
         return (
             <div className={`px-3 py-2 border-b border-gray-700/40 text-xs ${isDevOnly ? 'text-amber-300' : 'text-emerald-300'}`}>
                 <div>
-                    Runtime {language === 'python' ? 'Python' : 'TypeScript'} prêt pour l'exécution via {modeDetail}.
+                    {t('functionEditor_runtime_ready', 'Runtime {language} prêt pour l\'exécution via {mode}.', {
+                        language: language === 'python' ? 'Python' : 'TypeScript',
+                        mode: modeDetail,
+                    })}
                 </div>
                 {runtimeHealth.runtime.docker.warning && (
                     <div className="text-gray-400 mt-1">{runtimeHealth.runtime.docker.warning}</div>
@@ -307,7 +319,7 @@ const RuntimeStatusBanner: React.FC<RuntimeStatusBannerProps> = ({ runtimeHealth
 
     return (
         <div className="px-3 py-2 border-b border-gray-700/40 text-xs text-amber-300">
-            <div>Exécution bloquée : {runtimeHealth.summary}</div>
+            <div>{t('functionEditor_runtime_blocked', 'Exécution bloquée : {summary}', { summary: runtimeHealth.summary })}</div>
             {nativePythonSummary && (
                 <div className={`mt-1 ${nativePythonSummary.toneClass}`} title={nativePythonSummary.detail}>
                     {nativePythonSummary.summary}
@@ -328,37 +340,43 @@ interface TestArgsEditorProps {
 }
 
 const TestArgsEditor: React.FC<TestArgsEditorProps> = ({ value, onChange, isValid, errorMessage, example, helperText }) => (
-    <div>
-        <label className="block text-xs font-medium text-gray-400 mb-1">
-            Arguments de test <span className="text-gray-600">(JSON)</span>
-        </label>
-        <textarea
-            value={value}
-            onChange={e => onChange(e.target.value)}
-            rows={4}
-            spellCheck={false}
-            aria-label="Arguments de test JSON"
-            className={`w-full px-3 py-2 bg-gray-900/80 border rounded-lg text-xs font-mono text-gray-300 
-                focus:outline-none resize-none transition-colors ${
-                isValid ? 'border-gray-600/50 focus:border-cyan-500/40' : 'border-red-500/50'
-            }`}
-            placeholder={example}
-        />
-        <div className="mt-2 rounded-lg border border-gray-700/40 bg-gray-900/60 p-2.5 text-[11px] text-gray-400 space-y-2">
-            <p>{helperText}</p>
-            <div>
-                <div className="uppercase tracking-wider text-gray-500 mb-1">Exemple valide</div>
-                <pre className="whitespace-pre-wrap break-words text-cyan-200">{example}</pre>
-            </div>
-            <p className="text-gray-500">
-                JSON strict uniquement: utilisez des doubles quotes pour les cles et les chaines, jamais des quotes simples ni la syntaxe objet JavaScript.
-            </p>
-        </div>
-        {!isValid && errorMessage && (
-            <p className="text-red-400 text-xs mt-2 whitespace-pre-wrap">{errorMessage}</p>
-        )}
-    </div>
+    <TestArgsEditorContent value={value} onChange={onChange} isValid={isValid} errorMessage={errorMessage} example={example} helperText={helperText} />
 );
+
+const TestArgsEditorContent: React.FC<TestArgsEditorProps> = ({ value, onChange, isValid, errorMessage, example, helperText }) => {
+    const { t } = useLocalization();
+
+    return (
+        <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1">
+                {t('functionEditor_testArgs_label', 'Arguments de test')} <span className="text-gray-600">(JSON)</span>
+            </label>
+            <textarea
+                value={value}
+                onChange={e => onChange(e.target.value)}
+                rows={4}
+                spellCheck={false}
+                aria-label={t('functionEditor_testArgs_aria', 'Arguments de test JSON')}
+                className={`w-full px-3 py-2 bg-gray-900/80 border rounded-lg text-xs font-mono text-gray-300 
+                    focus:outline-none resize-none transition-colors ${
+                    isValid ? 'border-gray-600/50 focus:border-cyan-500/40' : 'border-red-500/50'
+                }`}
+                placeholder={example}
+            />
+            <div className="mt-2 rounded-lg border border-gray-700/40 bg-gray-900/60 p-2.5 text-[11px] text-gray-400 space-y-2">
+                <p>{helperText}</p>
+                <div>
+                    <div className="uppercase tracking-wider text-gray-500 mb-1">{t('functionEditor_testArgs_example', 'Exemple valide')}</div>
+                    <pre className="whitespace-pre-wrap break-words text-cyan-200">{example}</pre>
+                </div>
+                <p className="text-gray-500">{t('functionEditor_testArgs_strictJson', 'JSON strict uniquement: utilisez des doubles quotes pour les cles et les chaines, jamais des quotes simples ni la syntaxe objet JavaScript.')}</p>
+            </div>
+            {!isValid && errorMessage && (
+                <p className="text-red-400 text-xs mt-2 whitespace-pre-wrap">{errorMessage}</p>
+            )}
+        </div>
+    );
+};
 
 interface FunctionPreparationSummary {
     categoryLabel: string;
@@ -368,17 +386,17 @@ interface FunctionPreparationSummary {
     helperText: string;
 }
 
-const mapReadinessToPreparationSummary = (fn: UserFunction, readinessStatus: ToolReadinessStatus): FunctionPreparationSummary => {
-    const categoryLabel = fn.origin === 'native' || fn.isReadonly ? 'Native readonly' : 'Custom editable';
-    const scopeLabel = fn.workflowId ? 'Rattachee a un workflow' : (fn.origin === 'native' ? 'Catalogue plateforme' : 'Hors workflow');
+const mapReadinessToPreparationSummary = (fn: UserFunction, readinessStatus: ToolReadinessStatus, t: TranslateFn): FunctionPreparationSummary => {
+    const categoryLabel = fn.origin === 'native' || fn.isReadonly ? t('functionEditor_preparation_category_native', 'Native readonly') : t('functionEditor_preparation_category_custom', 'Custom editable');
+    const scopeLabel = fn.workflowId ? t('functionEditor_preparation_scope_workflow', 'Rattachee a un workflow') : (fn.origin === 'native' ? t('functionEditor_preparation_scope_platform', 'Catalogue plateforme') : t('functionEditor_preparation_scope_outside', 'Hors workflow'));
 
     if (readinessStatus.requirement === 'platform_provision') {
         return {
             categoryLabel,
             scopeLabel,
             preparationLabel: readinessStatus.state === 'ready'
-                ? 'Provisionnement plateforme confirme'
-                : 'Provisionnement plateforme en attente',
+                ? t('functionEditor_preparation_platform_confirmed', 'Provisionnement plateforme confirme')
+                : t('functionEditor_preparation_platform_pending', 'Provisionnement plateforme en attente'),
             toneClass: readinessStatus.state === 'ready'
                 ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-200'
                 : 'border-cyan-500/30 bg-cyan-950/20 text-cyan-200',
@@ -391,8 +409,8 @@ const mapReadinessToPreparationSummary = (fn: UserFunction, readinessStatus: Too
             categoryLabel,
             scopeLabel,
             preparationLabel: readinessStatus.state === 'ready'
-                ? 'Build auteur confirme'
-                : 'Build auteur requis',
+                ? t('functionEditor_preparation_build_confirmed', 'Build auteur confirme')
+                : t('functionEditor_preparation_build_required', 'Build auteur requis'),
             toneClass: readinessStatus.state === 'ready'
                 ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-200'
                 : 'border-amber-500/30 bg-amber-950/20 text-amber-200',
@@ -403,7 +421,7 @@ const mapReadinessToPreparationSummary = (fn: UserFunction, readinessStatus: Too
     return {
         categoryLabel,
         scopeLabel,
-        preparationLabel: 'Aucune preparation supplementaire requise',
+        preparationLabel: t('functionEditor_preparation_none', 'Aucune preparation supplementaire requise'),
         toneClass: readinessStatus.runnable
             ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-200'
             : 'border-gray-600/30 bg-gray-900/50 text-gray-300',
@@ -416,53 +434,53 @@ const getTestArgsExample = (language: 'python' | 'typescript') => {
         return '{\n  "user_name": "Ada",\n  "score": 42\n}';
     }
 
-    return '{\n  "user_name": "Ada",\n  "is_admin": false\n}';
+    return '{\n  "user_name": "Ada"\n}';
 };
 
-const getTestArgsHelperText = (language: 'python' | 'typescript') => {
+const getTestArgsHelperText = (language: 'python' | 'typescript', t: TranslateFn) => {
     if (language === 'python') {
-        return 'Exemple QA Python: la fonction lit des donnees JSON strictes depuis args, par exemple args["user_name"] et args["score"].';
+        return t('functionEditor_testArgs_helper_python', 'Exemple QA Python: la fonction lit des donnees JSON strictes depuis args, par exemple args["user_name"] et args["score"].');
     }
 
-    return 'Exemple QA TypeScript: la fonction lit des donnees JSON strictes depuis args.user_name et args.is_admin. Avec cet exemple, la reponse attendue est: Bonjour Ada. Ton nom est maintenant enregistre dans ma memoire.';
+    return t('functionEditor_testArgs_helper_typescript', 'Exemple QA TypeScript: la fonction lit des donnees JSON strictes depuis args.user_name. Avec cet exemple, la reponse attendue est: Ton nom, Ada, est maintenant enregistre dans ma memoire.');
 };
 
-const buildJsonValidationMessage = (error: unknown) => {
-    const parseMessage = error instanceof Error ? error.message : 'Format JSON invalide.';
-    return `JSON invalide. ${parseMessage}\nExemple valide:\n{\n  "user_name": "Ada"\n}`;
+const buildJsonValidationMessage = (error: unknown, t: TranslateFn) => {
+    const parseMessage = error instanceof Error ? error.message : t('functionEditor_json_invalid_format', 'Format JSON invalide.');
+    return t('functionEditor_json_invalid_message', 'JSON invalide. {message}\nExemple valide:\n{\n  "user_name": "Ada"\n}', { message: parseMessage });
 };
 
-const getPreparationSummary = (fn: UserFunction): FunctionPreparationSummary => {
+const getPreparationSummary = (fn: UserFunction, t: TranslateFn): FunctionPreparationSummary => {
     if (fn.readinessStatus) {
-        return mapReadinessToPreparationSummary(fn, fn.readinessStatus);
+        return mapReadinessToPreparationSummary(fn, fn.readinessStatus, t);
     }
 
     if (fn.origin === 'native' || fn.isReadonly) {
         return {
-            categoryLabel: 'Native readonly',
-            scopeLabel: fn.workflowId ? 'Exposee dans un workflow' : 'Catalogue plateforme',
-            preparationLabel: 'Preparation plateforme requise',
+            categoryLabel: t('functionEditor_preparation_category_native', 'Native readonly'),
+            scopeLabel: fn.workflowId ? t('functionEditor_preparation_scope_exposed', 'Exposee dans un workflow') : t('functionEditor_preparation_scope_platform', 'Catalogue plateforme'),
+            preparationLabel: t('functionEditor_preparation_platform_required', 'Preparation plateforme requise'),
             toneClass: 'border-cyan-500/30 bg-cyan-950/20 text-cyan-200',
-            helperText: 'Cette fonction ne suit pas le build auteur. Elle doit etre preparee et provisionnee par la plateforme avant execution fiable.'
+            helperText: t('functionEditor_preparation_platform_helper', 'Cette fonction ne suit pas le build auteur. Elle doit etre preparee et provisionnee par la plateforme avant execution fiable.')
         };
     }
 
     if (fn.workflowId) {
         return {
-            categoryLabel: 'Custom editable',
-            scopeLabel: 'Rattachee a un workflow',
-            preparationLabel: 'Build auteur disponible',
+            categoryLabel: t('functionEditor_preparation_category_custom', 'Custom editable'),
+            scopeLabel: t('functionEditor_preparation_scope_workflow', 'Rattachee a un workflow'),
+            preparationLabel: t('functionEditor_preparation_build_available', 'Build auteur disponible'),
             toneClass: 'border-amber-500/30 bg-amber-950/20 text-amber-200',
-            helperText: 'Le code peut etre sauvegarde puis prepare via le build auteur avant validation QA approfondie.'
+            helperText: t('functionEditor_preparation_build_helper', 'Le code peut etre sauvegarde puis prepare via le build auteur avant validation QA approfondie.')
         };
     }
 
     return {
-        categoryLabel: 'Custom editable',
-        scopeLabel: 'Hors workflow',
-        preparationLabel: 'Build auteur indisponible',
+        categoryLabel: t('functionEditor_preparation_category_custom', 'Custom editable'),
+        scopeLabel: t('functionEditor_preparation_scope_outside', 'Hors workflow'),
+        preparationLabel: t('functionEditor_preparation_build_unavailable', 'Build auteur indisponible'),
         toneClass: 'border-gray-600/30 bg-gray-900/50 text-gray-300',
-        helperText: 'Le build auteur est reserve aux fonctions custom rattachees a un workflow. Cette fonction peut etre editee et testee, mais pas preparee via ce bouton.'
+        helperText: t('functionEditor_preparation_build_unavailable_helper', 'Le build auteur est reserve aux fonctions custom rattachees a un workflow. Cette fonction peut etre editee et testee, mais pas preparee via ce bouton.')
     };
 };
 
@@ -471,15 +489,23 @@ interface PreparationStatusCardProps {
 }
 
 const PreparationStatusCard: React.FC<PreparationStatusCardProps> = ({ summary }) => (
-    <div className={`px-3 py-2 border-b border-gray-700/40 text-xs ${summary.toneClass}`}>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="font-semibold">Categorie {summary.categoryLabel}</span>
-            <span>{summary.scopeLabel}</span>
-        </div>
-        <div className="mt-1 font-medium">{summary.preparationLabel}</div>
-        <div className="mt-1 text-[11px] opacity-90">{summary.helperText}</div>
-    </div>
+    <PreparationStatusCardContent summary={summary} />
 );
+
+const PreparationStatusCardContent: React.FC<PreparationStatusCardProps> = ({ summary }) => {
+    const { t } = useLocalization();
+
+    return (
+        <div className={`px-3 py-2 border-b border-gray-700/40 text-xs ${summary.toneClass}`}>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="font-semibold">{t('functionEditor_preparation_categoryLabel', 'Categorie {value}', { value: summary.categoryLabel })}</span>
+                <span>{summary.scopeLabel}</span>
+            </div>
+            <div className="mt-1 font-medium">{summary.preparationLabel}</div>
+            <div className="mt-1 text-[11px] opacity-90">{summary.helperText}</div>
+        </div>
+    );
+};
 
 // ─── FunctionEditorTab ─────────────────────────────────────────────────────────
 export const FunctionEditorTab: React.FC = () => {
@@ -517,10 +543,11 @@ export const FunctionEditorTab: React.FC = () => {
     } = useFunctionStore();
 
     const { addNotification } = useNotifications();
+    const { t } = useLocalization();
     const fn = getSelectedFunction();
-    const resolvedToolId = fn?.toolId ?? fn?._id;
+    const resolvedToolId = fn ? getFunctionCommandId(fn) : null;
     const isWorkflowScopedFunction = Boolean(fn?.workflowId);
-    const preparationSummary = fn ? getPreparationSummary(fn) : null;
+    const preparationSummary = fn ? getPreparationSummary(fn, t) : null;
 
     const [code, setCode] = useState<string>('');
     const [testArgsStr, setTestArgsStr] = useState<string>('{}');
@@ -617,7 +644,11 @@ export const FunctionEditorTab: React.FC = () => {
         const updated = await updateFunction(fn._id, { codeInline: code });
         setIsSaving(false);
         if (updated) {
-            addNotification({ type: 'success', title: 'Sauvegardé', message: `"${fn.name}" sauvegardée.` });
+            addNotification({
+                type: 'success',
+                title: t('functionEditor_notification_saved_title', 'Sauvegardé'),
+                message: t('functionEditor_notification_saved_message', '"{name}" sauvegardée.', { name: fn.name })
+            });
         }
     };
 
@@ -629,19 +660,31 @@ export const FunctionEditorTab: React.FC = () => {
         try {
             inputSchema = JSON.parse(inputSchemaStr);
         } catch {
-            addNotification({ type: 'error', title: 'Input Schema invalide', message: 'JSON malformé dans le schéma d\'entrée.' });
+            addNotification({
+                type: 'error',
+                title: t('functionEditor_notification_inputSchemaInvalid_title', 'Input Schema invalide'),
+                message: t('functionEditor_notification_inputSchemaInvalid_message', 'JSON malformé dans le schéma d\'entrée.')
+            });
             return;
         }
         try {
             outputSchema = JSON.parse(outputSchemaStr);
         } catch {
-            addNotification({ type: 'error', title: 'Output Schema invalide', message: 'JSON malformé dans le schéma de sortie.' });
+            addNotification({
+                type: 'error',
+                title: t('functionEditor_notification_outputSchemaInvalid_title', 'Output Schema invalide'),
+                message: t('functionEditor_notification_outputSchemaInvalid_message', 'JSON malformé dans le schéma de sortie.')
+            });
             return;
         }
         setIsSavingSchemas(true);
         await updateFunction(fn._id, { inputSchema, outputSchema });
         setIsSavingSchemas(false);
-        addNotification({ type: 'success', title: 'Schémas sauvegardés', message: `Schémas de "${fn.name}" mis à jour.` });
+        addNotification({
+            type: 'success',
+            title: t('functionEditor_notification_schemasSaved_title', 'Schémas sauvegardés'),
+            message: t('functionEditor_notification_schemasSaved_message', 'Schémas de "{name}" mis à jour.', { name: fn.name })
+        });
     };
 
     // Exécuter dans le sandbox
@@ -651,7 +694,7 @@ export const FunctionEditorTab: React.FC = () => {
         if (!runtimeHealth?.capabilities.run[fn.language]) {
             addNotification({
                 type: 'error',
-                title: 'Runtime non prêt',
+                title: t('functionEditor_notification_runtimeNotReady_title', 'Runtime non prêt'),
                 message: formatQaDiagnosticMessage({
                     code: 'RUNTIME_NOT_READY',
                     subsystem: 'runtime_readiness',
@@ -668,12 +711,12 @@ export const FunctionEditorTab: React.FC = () => {
             setTestArgsValid(true);
             setTestArgsErrorMessage(null);
         } catch (error) {
-            const message = buildJsonValidationMessage(error);
+            const message = buildJsonValidationMessage(error, t);
             setTestArgsValid(false);
             setTestArgsErrorMessage(message);
             addNotification({
                 type: 'error',
-                title: 'JSON invalide',
+                title: t('functionEditor_notification_jsonInvalid_title', 'JSON invalide'),
                 message: formatQaDiagnosticMessage({
                     code: 'JSON_INVALID',
                     subsystem: 'validation',
@@ -685,16 +728,20 @@ export const FunctionEditorTab: React.FC = () => {
         }
 
         // Sauvegarder d'abord si non readonly
-        if (!fn.isReadonly && code !== fn.codeInline) {
-            await updateFunction(fn._id, { codeInline: code });
+        if (!fn.isReadonly && code !== fn.codeInline && resolvedToolId) {
+            await updateFunction(resolvedToolId, { codeInline: code });
         }
 
-        const result = await runInSandbox(fn._id, testArgs);
+        const result = await runInSandbox(
+            undefined,
+            testArgs,
+            buildToolSelectionFromFunction(fn)
+        );
         if (!result) {
             addNotification({
                 type: 'error',
-                title: 'Exécution échouée',
-                message: formatQaDiagnosticMessage(undefined, 'Le sandbox n\'a retourne aucun resultat. Consultez la console d\'execution.')
+                title: t('functionEditor_notification_runFailed_title', 'Exécution échouée'),
+                message: formatQaDiagnosticMessage(undefined, t('functionEditor_notification_runFailed_message', 'Le sandbox n\'a retourne aucun resultat. Consultez la console d\'execution.'))
             });
             return;
         }
@@ -711,14 +758,14 @@ export const FunctionEditorTab: React.FC = () => {
 
         addNotification({
             type: result.success ? 'success' : 'error',
-            title: result.success ? 'Exécution terminée' : 'Exécution en erreur',
+            title: result.success ? t('functionEditor_notification_runDone_title', 'Exécution terminée') : t('functionEditor_notification_runError_title', 'Exécution en erreur'),
             message: result.success
-                ? `Résultat disponible pour "${fn.name}" dans la console d'exécution.`
+                ? t('functionEditor_notification_runDone_message', 'Résultat disponible pour "{name}" dans la console d\'exécution.', { name: fn.name })
                 : formatQaDiagnosticMessage(result.errorDetails ?? {
                     code: result.metadata?.failureKind,
                     subsystem: result.metadata?.failureSubsystem,
                     failureKind: result.metadata?.failureKind,
-                    message: result.stderr || 'Le sandbox a renvoye une erreur.',
+                    message: result.stderr || t('functionEditor_notification_runError_defaultMessage', 'Le sandbox a renvoye une erreur.'),
                     retryable: false
                 }, resultDiagnostic?.label)
         });
@@ -731,11 +778,11 @@ export const FunctionEditorTab: React.FC = () => {
             clearBuildResult();
             addNotification({
                 type: 'info',
-                title: 'Build indisponible',
+                title: t('functionEditor_notification_buildUnavailable_title', 'Build indisponible'),
                 message: formatQaDiagnosticMessage({
                     code: 'BUILD_PREPARATION_ERROR',
                     subsystem: 'build_preparation',
-                    message: 'Le build est disponible uniquement pour les fonctions custom rattachees a un workflow a ce stade.',
+                    message: t('functionEditor_notification_buildUnavailable_message', 'Le build est disponible uniquement pour les fonctions custom rattachees a un workflow a ce stade.'),
                     retryable: false
                 })
             });
@@ -743,15 +790,15 @@ export const FunctionEditorTab: React.FC = () => {
         }
 
         if (code !== fn.codeInline) {
-            const updated = await updateFunction(fn._id, { codeInline: code });
+            const updated = await updateFunction(resolvedToolId ?? fn._id, { codeInline: code });
             if (!updated) {
                 addNotification({
                     type: 'error',
-                    title: 'Build annulé',
+                    title: t('functionEditor_notification_buildCanceled_title', 'Build annulé'),
                     message: formatQaDiagnosticMessage({
                         code: 'BUILD_PREPARATION_ERROR',
                         subsystem: 'build_preparation',
-                        message: 'La sauvegarde du code a echoue avant la preparation du build.',
+                        message: t('functionEditor_notification_buildCanceled_message', 'La sauvegarde du code a echoue avant la preparation du build.'),
                         retryable: false
                     })
                 });
@@ -761,7 +808,11 @@ export const FunctionEditorTab: React.FC = () => {
 
         const result = await runBuild(resolvedToolId ?? fn._id);
         if (result) {
-            addNotification({ type: 'success', title: 'Build prêt', message: `Artefacts préparés pour "${fn.name}".` });
+            addNotification({
+                type: 'success',
+                title: t('functionEditor_notification_buildReady_title', 'Build prêt'),
+                message: t('functionEditor_notification_buildReady_message', 'Artefacts préparés pour "{name}".', { name: fn.name })
+            });
         }
     };
 
@@ -774,7 +825,7 @@ export const FunctionEditorTab: React.FC = () => {
             setTestArgsErrorMessage(null);
         } catch (error) {
             setTestArgsValid(false);
-            setTestArgsErrorMessage(buildJsonValidationMessage(error));
+            setTestArgsErrorMessage(buildJsonValidationMessage(error, t));
         }
     };
 
@@ -815,11 +866,11 @@ export const FunctionEditorTab: React.FC = () => {
         } catch (error: any) {
             addNotification({
                 type: 'error',
-                title: 'Téléchargement impossible',
+                title: t('functionEditor_notification_downloadFailed_title', 'Téléchargement impossible'),
                 message: formatQaDiagnosticMessage({
                     code: 'SANDBOX_RUNTIME_ERROR',
                     subsystem: 'sandbox_runtime',
-                    message: error.response?.data?.error || `Impossible de telecharger ${artifactPath}.`,
+                    message: error.response?.data?.error || t('functionEditor_notification_downloadFailed_message', 'Impossible de telecharger {artifactPath}.', { artifactPath }),
                     retryable: false
                 })
             });
@@ -886,7 +937,10 @@ export const FunctionEditorTab: React.FC = () => {
             return;
         }
 
-        const confirmed = window.confirm(`Supprimer les runs de plus de ${RUN_RETENTION_DAYS} jours en conservant les ${RUN_RETAIN_LATEST} plus récents ?`);
+        const confirmed = window.confirm(t('functionEditor_cleanup_confirm', 'Supprimer les runs de plus de {days} jours en conservant les {count} plus récents ?', {
+            days: RUN_RETENTION_DAYS,
+            count: RUN_RETAIN_LATEST,
+        }));
         if (!confirmed) {
             return;
         }
@@ -899,11 +953,11 @@ export const FunctionEditorTab: React.FC = () => {
         if (!result) {
             addNotification({
                 type: 'error',
-                title: 'Nettoyage impossible',
+                title: t('functionEditor_notification_cleanupFailed_title', 'Nettoyage impossible'),
                 message: formatQaDiagnosticMessage({
                     code: 'SANDBOX_RUNTIME_ERROR',
                     subsystem: 'sandbox_runtime',
-                    message: 'Le nettoyage des runs a echoue.',
+                    message: t('functionEditor_notification_cleanupFailed_message', 'Le nettoyage des runs a echoue.'),
                     retryable: false
                 })
             });
@@ -912,8 +966,11 @@ export const FunctionEditorTab: React.FC = () => {
 
         addNotification({
             type: 'success',
-            title: 'Nettoyage terminé',
-            message: `${result.deletedRuns} run(s) supprime(s), ${result.deletedArtifacts.length} artefact(s) nettoye(s).\nAction recommandee: verifier qu'il reste au moins un run de reference pour QA.`
+            title: t('functionEditor_notification_cleanupDone_title', 'Nettoyage terminé'),
+            message: t('functionEditor_notification_cleanupDone_message', '{runs} run(s) supprime(s), {artifacts} artefact(s) nettoye(s).\nAction recommandee: verifier qu\'il reste au moins un run de reference pour QA.', {
+                runs: result.deletedRuns,
+                artifacts: result.deletedArtifacts.length,
+            })
         });
 
         void loadFunctionRuns(resolvedToolId, {
@@ -924,7 +981,7 @@ export const FunctionEditorTab: React.FC = () => {
             sortOrder: runSortOrder
         });
         setRunPage(1);
-    }, [resolvedToolId, cleanupFunctionRuns, addNotification, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy, runSortOrder]);
+    }, [resolvedToolId, cleanupFunctionRuns, addNotification, loadFunctionRuns, functionRunsPagination.limit, runStatusFilter, runSortBy, runSortOrder, t]);
 
     // Pas de fonction sélectionnée
     if (!fn) {
@@ -933,7 +990,7 @@ export const FunctionEditorTab: React.FC = () => {
                 <svg className="w-10 h-10 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                 </svg>
-                <p className="text-sm text-center">Sélectionnez une fonction dans la Bibliothèque</p>
+                <p className="text-sm text-center">{t('functionEditor_empty', 'Sélectionnez une fonction dans la Bibliothèque')}</p>
             </div>
         );
     }
@@ -942,13 +999,13 @@ export const FunctionEditorTab: React.FC = () => {
     const readinessBlocked = fn.readinessStatus?.runnable === false;
     const runDisabled = isSandboxRunning || isRuntimeHealthLoading || !runtimeHealth?.capabilities.run[fn.language] || readinessBlocked;
     const runDisabledReason = readinessBlocked
-        ? `${fn.readinessStatus?.summary || 'Cette fonction n\'est pas encore exécutable.'} ${fn.readinessStatus?.actionLabel || ''}`.trim()
+        ? `${fn.readinessStatus?.summary || t('functionEditor_notRunnable', 'Cette fonction n\'est pas encore exécutable.')} ${fn.readinessStatus?.actionLabel || ''}`.trim()
         : runtimeHealthError
             || runtimeHealth?.summary
-            || 'Le runtime d\'exécution n\'est pas encore prêt.';
+            || t('functionEditor_runtime_notReady', 'Le runtime d\'exécution n\'est pas encore prêt.');
     const buildDisabled = isBuilding || !isWorkflowScopedFunction;
     const buildDisabledReason = !isWorkflowScopedFunction
-        ? 'Le build est réservé aux fonctions custom rattachées à un workflow.'
+        ? t('functionEditor_build_disabled', 'Le build est réservé aux fonctions custom rattachées à un workflow.')
         : undefined;
 
     return (
@@ -964,7 +1021,7 @@ export const FunctionEditorTab: React.FC = () => {
                     </span>
                     <span className="font-mono text-sm text-gray-200 truncate">{fn.name}</span>
                     {fn.isReadonly && (
-                        <span className="text-xs text-gray-500 flex-shrink-0">🔒 lecture seule</span>
+                        <span className="text-xs text-gray-500 flex-shrink-0">{t('functionEditor_readonly', '🔒 lecture seule')}</span>
                     )}
                 </div>
 
@@ -974,7 +1031,7 @@ export const FunctionEditorTab: React.FC = () => {
                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                         </svg>
-                        {syntaxErrors.length} erreur{syntaxErrors.length > 1 ? 's' : ''}
+                        {t('functionEditor_syntaxErrors', '{count} erreur(s)', { count: syntaxErrors.length })}
                     </div>
                 )}
 
@@ -994,7 +1051,7 @@ export const FunctionEditorTab: React.FC = () => {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M8 12l4 4m0 0l4-4m-4 4V4" />
                                 </svg>
                             )}
-                            Préparer build
+                            {t('functionEditor_build_button', 'Préparer build')}
                         </button>
                     )}
 
@@ -1011,7 +1068,7 @@ export const FunctionEditorTab: React.FC = () => {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
                                 </svg>
                             )}
-                            Sauvegarder
+                            {t('save', 'Sauvegarder')}
                         </button>
                     )}
 
@@ -1028,7 +1085,7 @@ export const FunctionEditorTab: React.FC = () => {
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l14 9-14 9V3z" />
                             </svg>
                         )}
-                        Exécuter
+                        {t('functionEditor_run_button', 'Exécuter')}
                     </button>
                 </div>
             </div>
@@ -1044,7 +1101,7 @@ export const FunctionEditorTab: React.FC = () => {
                                 {'export function run(context: FunctionContext, args: { [key: string]: unknown }): unknown'}
                             </span>
                             <span className="text-[11px] text-blue-400/60 flex-shrink-0">
-                                — accès via <code className="bg-blue-900/40 px-1 rounded">args.param_name</code>
+                                {t('functionEditor_typescript_hint', '— accès via')} <code className="bg-blue-900/40 px-1 rounded">args.param_name</code>
                             </span>
                         </div>
                     )}
@@ -1101,7 +1158,7 @@ export const FunctionEditorTab: React.FC = () => {
                             isValid={testArgsValid}
                             errorMessage={testArgsErrorMessage}
                             example={getTestArgsExample(fn.language)}
-                            helperText={getTestArgsHelperText(fn.language)}
+                            helperText={getTestArgsHelperText(fn.language, t)}
                         />
                     </div>
 
@@ -1111,7 +1168,7 @@ export const FunctionEditorTab: React.FC = () => {
                             onClick={() => setIsConsolePanelOpen(v => !v)}
                             className="flex items-center justify-between px-3 py-2 border-b border-gray-700/40 text-xs text-gray-400 hover:text-gray-300 hover:bg-gray-800/30 transition-colors"
                         >
-                            <span className="font-medium uppercase tracking-wider">Console</span>
+                            <span className="font-medium uppercase tracking-wider">{t('functionEditor_console_title', 'Console')}</span>
                             <svg
                                 className={`w-3 h-3 transition-transform ${isConsolePanelOpen ? '' : '-rotate-90'}`}
                                 fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
@@ -1160,7 +1217,7 @@ export const FunctionEditorTab: React.FC = () => {
                             onClick={() => setShowSchemas(v => !v)}
                             className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-400 hover:text-gray-300 hover:bg-gray-800/30 transition-colors"
                         >
-                            <span className="font-medium uppercase tracking-wider">Schémas I/O</span>
+                            <span className="font-medium uppercase tracking-wider">{t('functionEditor_schemas_title', 'Schémas I/O')}</span>
                             <svg
                                 className={`w-3 h-3 transition-transform ${showSchemas ? '' : '-rotate-90'}`}
                                 fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
@@ -1173,7 +1230,7 @@ export const FunctionEditorTab: React.FC = () => {
                             <div className="p-3 space-y-3">
                                 {/* Input Schema */}
                                 <div>
-                                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Input Schema</label>
+                                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">{t('functionEditor_inputSchema', 'Input Schema')}</label>
                                     <div className="h-28 border border-gray-700/50 rounded overflow-hidden">
                                         <Editor
                                             height="100%"
@@ -1198,7 +1255,7 @@ export const FunctionEditorTab: React.FC = () => {
 
                                 {/* Output Schema */}
                                 <div>
-                                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Output Schema</label>
+                                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">{t('functionEditor_outputSchema', 'Output Schema')}</label>
                                     <div className="h-28 border border-gray-700/50 rounded overflow-hidden">
                                         <Editor
                                             height="100%"
@@ -1235,7 +1292,7 @@ export const FunctionEditorTab: React.FC = () => {
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
                                             </svg>
                                         )}
-                                        Sauvegarder les schémas
+                                        {t('functionEditor_saveSchemas', 'Sauvegarder les schémas')}
                                     </button>
                                 )}
                             </div>

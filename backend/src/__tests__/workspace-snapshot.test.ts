@@ -172,6 +172,40 @@ async function createSnapshotFixture(): Promise<SnapshotFixture> {
         }
     });
 
+    await AgentJournal.create([
+        {
+            workflowId: workflow.id,
+            agentInstanceId: sourceInstance.id,
+            type: 'tool_invocation',
+            severity: 'info',
+            timestamp: new Date('2026-04-30T09:00:00.000Z'),
+            payload: {
+                messageId: 'toolinv:call-snapshot-1:started',
+                toolCallId: 'call-snapshot-1',
+                toolId: prototype.id,
+                functionId: prototype.id,
+                toolName: 'tool.snapshot',
+                phase: 'started'
+            }
+        },
+        {
+            workflowId: workflow.id,
+            agentInstanceId: sourceInstance.id,
+            type: 'tool_invocation',
+            severity: 'info',
+            timestamp: new Date('2026-04-30T09:00:01.000Z'),
+            payload: {
+                messageId: 'toolinv:call-snapshot-1:completed',
+                toolCallId: 'call-snapshot-1',
+                executionId: toolRunExecutionId,
+                toolId: prototype.id,
+                functionId: prototype.id,
+                toolName: 'tool.snapshot',
+                phase: 'completed'
+            }
+        }
+    ]);
+
     return {
         userId: user.id,
         accessToken: generateAccessToken({
@@ -258,13 +292,30 @@ describe('Workspace snapshot contract', () => {
 
         const restoredInstance = response.body.agentInstances.find((instance: any) => instance.id === fixture.sourceInstanceId);
         expect(restoredInstance).toBeDefined();
-        expect(restoredInstance.chatMessages).toHaveLength(1);
-        expect(restoredInstance.chatMessages[0]).toEqual(expect.objectContaining({
-            text: 'restored message',
-            image: 'ZmFrZS1pbWFnZQ==',
-            mimeType: 'image/png',
-            fileName: 'proof.png'
-        }));
+        expect(restoredInstance.chatMessages).toHaveLength(2);
+        expect(restoredInstance.chatMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                text: 'restored message',
+                image: 'ZmFrZS1pbWFnZQ==',
+                mimeType: 'image/png',
+                fileName: 'proof.png'
+            }),
+            expect.objectContaining({
+                sender: 'tool',
+                toolCallRecord: expect.objectContaining({
+                    id: 'call-snapshot-1',
+                    toolId: fixture.prototypeId,
+                    functionId: fixture.prototypeId,
+                    functionName: 'tool.snapshot',
+                    executionId: fixture.toolRunExecutionId,
+                    durationMs: 42,
+                    persistedRunStatus: 'completed',
+                    artifacts: [],
+                    arguments: expect.objectContaining({ prompt: 'hydrate snapshot' }),
+                    result: expect.objectContaining({ restored: true })
+                })
+            })
+        ]));
         expect(restoredInstance.configuration_json.position).toMatchObject({ x: 120, y: 180 });
 
         const restoredPrototype = response.body.agentPrototypes.find((prototype: any) => prototype.id === fixture.prototypeId);
@@ -297,6 +348,16 @@ describe('Workspace snapshot contract', () => {
         }));
 
         const restoredInstance = response.body.reloadedData.agentInstances.find((instance: any) => instance.id === fixture.sourceInstanceId);
-        expect(restoredInstance.chatMessages[0].text).toBe('restored message');
+        expect(restoredInstance.chatMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({ text: 'restored message' }),
+            expect.objectContaining({
+                sender: 'tool',
+                toolCallRecord: expect.objectContaining({
+                    executionId: fixture.toolRunExecutionId,
+                    functionName: 'tool.snapshot',
+                    persistedRunStatus: 'completed'
+                })
+            })
+        ]));
     });
 });

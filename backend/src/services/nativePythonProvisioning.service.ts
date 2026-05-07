@@ -358,7 +358,7 @@ export class NativePythonProvisioningService {
         const nativeSeed = nativeFunctionsSeed.find((candidate) => candidate.name === tool.name);
         const seededModules = nativeSeed?.healthCheck?.criticalPythonImports ?? [];
         if (seededModules.length > 0) {
-            return seededModules;
+            return seededModules.map((entry) => typeof entry === 'string' ? entry : entry.module);
         }
 
         return (tool.dependencies?.python ?? []).map(normalizePythonModuleName);

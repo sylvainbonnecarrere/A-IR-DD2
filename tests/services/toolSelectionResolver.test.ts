@@ -1,4 +1,78 @@
-import {
+import type { ToolSelection } from '../../types';
+import type { UserFunction } from '../../types/function.types';
+import { buildToolSelectionFromFunction, normalizeToolSelections } from '../../services/toolSelectionResolver';
+
+const createFunction = (overrides: Partial<UserFunction> = {}): UserFunction => ({
+    _id: 'legacy-weather',
+    toolId: 'tool.weather',
+    name: 'Weather Tool',
+    description: 'Returns weather data',
+    language: 'python',
+    origin: 'custom',
+    userId: 'user-1',
+    workflowId: 'wf-1',
+    inputSchema: {},
+    outputSchema: {},
+    codePath: 'tools/weather.py',
+    resolvedCodePath: 'tools/weather.py',
+    codePathRoot: 'workspace_source',
+    codeInline: 'def run(context, args):\n    return {"ok": True}',
+    dependencies: [],
+    isEnabled: true,
+    isReadonly: false,
+    version: 3,
+    versionTag: 'v3',
+    tags: ['weather'],
+    createdAt: '2026-03-23T10:00:00.000Z',
+    updatedAt: '2026-03-23T10:00:00.000Z',
+    ...overrides,
+});
+
+describe('normalizeToolSelections', () => {
+    it('builds a canonical tool selection for Phil sandbox runs from the loaded function read model', () => {
+        expect(buildToolSelectionFromFunction(createFunction())).toEqual({
+            toolId: 'tool.weather',
+            versionRef: {
+                versionTag: 'v3',
+                versionNumber: 3,
+                workspaceId: null,
+            },
+        });
+    });
+
+    it('upgrades legacy function ids into canonical tool selections', () => {
+        const selections = normalizeToolSelections(undefined, ['legacy-weather'], [createFunction()]);
+
+        expect(selections).toEqual([
+            expect.objectContaining({
+                toolId: 'tool.weather',
+                versionRef: expect.objectContaining({
+                    versionTag: 'v3',
+                    versionNumber: 3,
+                    workspaceId: null,
+                }),
+            }),
+        ]);
+    });
+
+    it('preserves existing tool selections while backfilling missing version metadata', () => {
+        const rawSelection: ToolSelection = {
+            toolId: 'legacy-weather',
+        };
+
+        const selections = normalizeToolSelections([rawSelection], [], [createFunction()]);
+
+        expect(selections).toEqual([
+            expect.objectContaining({
+                toolId: 'tool.weather',
+                versionRef: expect.objectContaining({
+                    versionTag: 'v3',
+                    versionNumber: 3,
+                }),
+            }),
+        ]);
+    });
+});import {
     buildSelectableToolCatalog,
     buildToolSelectionsFromFunctions,
     deriveSelectedToolIds,

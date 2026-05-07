@@ -30,6 +30,7 @@ import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import type { AgentInstance, V2WorkflowNode, V2WorkflowEdge } from '../types';
 import { API_BASE_URL } from '../config/api.config';
+import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from '../services/persistedChatMessages';
 import { getWorkspaceSessionGateState } from '../utils/workspaceSessionGate';
 
 /**
@@ -39,14 +40,6 @@ interface CanvasState {
     zoom: number;
     panX: number;
     panY: number;
-}
-
-/**
- * Agent instance content types (ÉTAPE 1.6 - polymorphic)
- */
-interface AgentInstanceContent {
-    type: 'chat' | 'image' | 'video' | 'error';
-    [key: string]: any;
 }
 
 /**
@@ -122,7 +115,6 @@ export interface WorkspaceData {
         // ⭐ NOUVEAU ÉTAPE 1.6
         executionId?: string;
         status?: string;
-        content?: AgentInstanceContent[];
         metrics?: AgentInstanceMetrics;
         // ⭐ FIX QA: Chat messages with images for restoration
         chatMessages?: Array<{
@@ -343,7 +335,8 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
     const workflowStoreReset = useWorkflowStore((state) => state.resetAll);
     const designStoreHydrate = useDesignStore((state) => state.hydrateFromServer);
     const workflowStoreHydrate = useWorkflowStore((state) => state.hydrateWorkflowFromServer);
-    // ⭐ FIX QA: Access setNodeMessages for chat history restoration
+    // ⭐ FIX QA: Access runtime store helpers for shared message hydration
+    const getNodeMessages = useRuntimeStore((state) => state.getNodeMessages);
     const setNodeMessages = useRuntimeStore((state) => state.setNodeMessages);
     
     const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
@@ -442,7 +435,6 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
                     // ⭐ NOUVEAU ÉTAPE 1.6 (champs optionnels pour le runtime)
                     executionId: inst.executionId,
                     status: inst.status,
-                    content: inst.content || [],
                     metrics: inst.metrics
                 })) as AgentInstance[];
                 
@@ -505,19 +497,10 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
                 // Backend now returns chatMessages for each instance
                 for (const inst of data.agentInstances) {
                     if (inst.chatMessages && inst.chatMessages.length > 0) {
-                        const messages = inst.chatMessages.map((msg: any, index: number) => ({
-                            id: `restored-${inst.id}-${index}-${Date.now()}`,
-                            sender: (['user', 'agent', 'tool', 'tool_result'].includes(msg.sender) 
-                                ? msg.sender 
-                                : 'agent') as 'user' | 'agent' | 'tool' | 'tool_result',
-                            text: msg.text || '',
-                            timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
-                            image: msg.image,
-                            mimeType: msg.mimeType,
-                            toolCalls: msg.toolCalls
-                        }));
+                        const persistedMessages = mapPersistedChatMessages(inst.chatMessages);
+                        const messages = mergePersistedAndRuntimeMessages(persistedMessages, getNodeMessages(inst.id));
                         setNodeMessages(inst.id, messages);
-                        console.log(`[useWorkspaceHydration] ✅ Restored ${messages.length} chat messages for instance ${inst.id}`);
+                        console.log(`[useWorkspaceHydration] ✅ Restored ${persistedMessages.length} chat messages for instance ${inst.id}`);
                     }
                 }
                 
@@ -563,7 +546,7 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
         } finally {
             setIsLoading(false);
         }
-    }, [accessToken, authLoading, awaitingStableAuthenticatedSession, designStoreHydrate, designStoreReset, runtimeStoreReset, sessionReadyForWorkspaceHydration, setNodeMessages, stableWorkspaceIdentity, workflowStoreHydrate, workflowStoreReset]);
+    }, [accessToken, authLoading, awaitingStableAuthenticatedSession, designStoreHydrate, designStoreReset, getNodeMessages, runtimeStoreReset, sessionReadyForWorkspaceHydration, setNodeMessages, stableWorkspaceIdentity, workflowStoreHydrate, workflowStoreReset]);
 
     /**
      * Auto-hydrate on mount and auth changes
