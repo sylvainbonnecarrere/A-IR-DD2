@@ -15,7 +15,9 @@ import { ImageGenerationPanel } from '../panels/ImageGenerationPanel';
 import { VideoGenerationConfigPanel } from '../panels/VideoGenerationConfigPanel';
 import { MapsGroundingConfigPanel } from '../panels/MapsGroundingConfigPanel';
 import { deriveSelectedToolIds } from '../../services/toolSelectionResolver';
+import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from '../../services/persistedChatMessages';
 import { persistInstanceWebSearchParams } from '../../services/webSearchParamsConfigService';
+import apiClient from '../../utils/apiClient';
 import { shouldSuppressVisualToolResult } from '../../utils/toolResultVisibility';
 
 // Minimize icon
@@ -212,73 +214,26 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   // This ensures history is available even if runtime store was cleared
   useEffect(() => {
     const loadChatHistoryFromBackend = async () => {
-      if (!fullscreenChatAgentInstance?.id || !isAuthenticated || !accessToken || !fullscreenChatNodeId) {
-        return; // Skip if not authenticated or missing instance
+      if (!instanceId || !isAuthenticated || !fullscreenChatNodeId) {
+        return;
       }
 
       try {
-        // Fetch instance with all its content
-        const response = await fetch(
-          `http://localhost:3001/api/agent-instances/${fullscreenChatAgentInstance.id}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`
-            }
-          }
-        );
+        const response = await apiClient.get<{ chatMessages?: any[] }>(`/api/agent-instances/${instanceId}`);
+        const persistedMessages = mapPersistedChatMessages(response.data?.chatMessages || []);
 
-        if (!response.ok) {
-          return;
-        }
-
-        const instance = await response.json();
-        
-        // Transform backend content array to ChatMessage format
-        if (instance.content && Array.isArray(instance.content)) {
-          const backendMessages = instance.content.map((item: any, idx: number) => {
-            // Transform role to sender
-            let sender: 'user' | 'agent' | 'tool' | 'tool_result' = 'agent';
-            if (item.role === 'user') sender = 'user';
-            else if (item.role === 'tool_result') sender = 'tool_result';
-            else if (item.role === 'tool' || item.type === 'error') sender = 'tool';
-            else sender = 'agent';
-
-            return {
-              id: item.metadata?.messageId || `msg-loaded-${idx}`,
-              sender,
-              text: item.message || '',
-              image: item.metadata?.image || undefined,
-              filename: item.metadata?.filename || undefined,
-              isError: item.type === 'error',
-              toolCalls: item.metadata?.toolCalls || undefined,
-              toolCallId: item.metadata?.toolCallId || undefined,
-              toolName: item.metadata?.toolName || undefined,
-              toolCallRecord: item.metadata?.toolCallRecord || undefined,
-              timestamp: item.timestamp ? new Date(item.timestamp) : new Date()
-            };
-          });
-
-          // Get existing messages from runtime store
+        if (persistedMessages.length > 0) {
           const existingMessages = getNodeMessages(fullscreenChatNodeId) || [];
-          
-          // Merge: keep existing (local) messages, prepend backend messages that aren't duplicates
-          const existingIds = new Set(existingMessages.map(m => m.id));
-          const newBackendMessages = backendMessages.filter(m => !existingIds.has(m.id));
-          
-          const mergedMessages = [...newBackendMessages, ...existingMessages];
-          
-          // Only update if we loaded messages from backend
-          if (newBackendMessages.length > 0) {
-            setNodeMessages(fullscreenChatNodeId, mergedMessages);
-          }
+          const mergedMessages = mergePersistedAndRuntimeMessages(persistedMessages, existingMessages);
+          setNodeMessages(fullscreenChatNodeId, mergedMessages);
         }
-      } catch (err) {
-        // Don't block UI - continue without history if load fails
+      } catch {
+        // Don't block UI - continue without history if load fails.
       }
     };
 
     loadChatHistoryFromBackend();
-  }, [fullscreenChatAgentInstance?.id, fullscreenChatNodeId, isAuthenticated, accessToken, getNodeMessages, setNodeMessages]);
+  }, [instanceId, fullscreenChatNodeId, isAuthenticated, getNodeMessages, setNodeMessages]);
 
   // Auto-scroll vers le bas quand de nouveaux messages arrivent
   useEffect(() => {

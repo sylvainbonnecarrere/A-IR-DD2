@@ -174,7 +174,7 @@ describe('DockerSandboxRunner', () => {
                 success: false,
                 output: null,
                 stdout: '',
-                stderr: 'ModuleNotFoundError: No module named duckduckgo_search',
+                stderr: 'ModuleNotFoundError: No module named requests',
                 failureKind: 'dependency_missing',
                 errorType: 'ModuleNotFoundError',
                 traceback: 'Traceback...'
@@ -186,11 +186,11 @@ describe('DockerSandboxRunner', () => {
         const result = await runner.execute(createRequest({
             function: {
                 _id: '507f1f77bcf86cd799439011' as any,
-                name: 'web_search_py',
+                name: 'web_fetch_py',
                 language: 'python',
                 origin: 'native',
                 codeInline: undefined,
-                codePath: 'backend/python/native/web_search_py.py'
+                codePath: 'backend/python/native/web_fetch_py.py'
             },
             runtime: 'python',
             sourceCode: undefined,

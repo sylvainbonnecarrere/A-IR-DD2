@@ -26,52 +26,36 @@ const router = Router();
 const sandboxService = new SandboxService();
 const runtimeHealthService = new RuntimeHealthService();
 
-type SandboxStdoutEvent = Record<string, unknown>;
-
-function parseSandboxStdoutEvents(stdout?: string): SandboxStdoutEvent[] {
-    if (typeof stdout !== 'string' || !stdout.trim()) {
-        return [];
-    }
-
-    const events: SandboxStdoutEvent[] = [];
-    for (const line of stdout.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed) {
-            continue;
-        }
-
-        try {
-            const parsed = JSON.parse(trimmed);
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                events.push(parsed as SandboxStdoutEvent);
-            }
-        } catch {
-            continue;
-        }
-    }
-
-    return events;
-}
-
 // ─── Schémas de Validation ────────────────────────────────────────────────────
 
-const runFunctionSchema = z.object({
-    functionId: z
-        .string()
-        .regex(/^[a-f\d]{24}$/i, 'functionId doit être un ObjectId MongoDB valide'),
-    toolSelection: z.object({
+const toolSelectionSchema = z.object({
         toolId: z.string().regex(/^[a-f\d]{24}$/i, 'toolId doit être un ObjectId MongoDB valide'),
         versionRef: z.object({
             versionTag: z.string().optional(),
             versionNumber: z.number().optional(),
             workspaceId: z.string().nullable().optional()
         }).optional()
-    }).optional(),
+    });
+
+const runFunctionSchema = z.object({
+    functionId: z
+        .string()
+        .regex(/^[a-f\d]{24}$/i, 'functionId doit être un ObjectId MongoDB valide')
+        .optional(),
+    toolSelection: toolSelectionSchema.optional(),
     testArgs: z
         .record(z.unknown())
         .optional()
         .default({}),
     privateContext: z.record(z.unknown()).optional()
+}).superRefine((value, ctx) => {
+    if (!value.functionId && !value.toolSelection) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'functionId ou toolSelection est requis',
+            path: ['functionId'],
+        });
+    }
 });
 
 const checkSyntaxSchema = z.object({
@@ -102,7 +86,7 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
 
         console.info('[SandboxRoute] POST /run start', {
             userId: user.id,
-            functionId,
+            functionId: functionId ?? null,
             toolId: toolSelection?.toolId ?? null,
             versionTag: toolSelection?.versionRef?.versionTag ?? null,
             argKeys: Object.keys(testArgs ?? {}),
@@ -119,7 +103,7 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
 
         console.info('[SandboxRoute] POST /run done', {
             userId: user.id,
-            functionId,
+            functionId: functionId ?? null,
             toolId: toolSelection?.toolId ?? null,
             executionId: result.executionId ?? null,
             success: result.success,
@@ -127,78 +111,6 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
             exitCode: result.exitCode ?? null,
             failureKind: result.metadata?.failureKind ?? result.errorDetails?.failureKind ?? null,
         });
-
-        const stdoutEvents = parseSandboxStdoutEvents(result.stdout);
-        for (const event of stdoutEvents) {
-            const sandboxDebugEvent = typeof event.SANDBOX_DEBUG === 'string' ? event.SANDBOX_DEBUG : null;
-            const webSearchDebugEvent = typeof event.WEB_SEARCH_DEBUG === 'string' ? event.WEB_SEARCH_DEBUG : null;
-
-            if (!sandboxDebugEvent && !webSearchDebugEvent) {
-                continue;
-            }
-
-            console.info('[SandboxRoute] POST /run sandbox stdout', {
-                executionId: result.executionId ?? null,
-                event: webSearchDebugEvent ?? sandboxDebugEvent,
-                payload: event,
-            });
-        }
-
-        const outputPayload = result.output && typeof result.output === 'object'
-            ? result.output as {
-                error?: { step?: string; message?: string; diagnostics?: unknown };
-                rerank_diagnostics?: unknown;
-                trace?: {
-                    transformed_query_raw?: string;
-                    input?: { web_engine?: string };
-                    engine_query_plans?: unknown[];
-                    engine_execution_trace?: unknown[];
-                    engine_top_results?: unknown[];
-                    rerank_diagnostics?: unknown;
-                };
-            }
-            : undefined;
-
-        const outputTrace = outputPayload?.trace;
-
-        const rerankDiagnostics = outputPayload?.rerank_diagnostics ?? outputTrace?.rerank_diagnostics;
-
-        if (outputPayload?.error?.step === 'rerank_sources') {
-            console.info('[SandboxRoute] POST /run web_search rerank diagnostic', {
-                executionId: result.executionId ?? null,
-                webEngine: outputTrace?.input?.web_engine ?? null,
-                transformedQuery: outputTrace?.transformed_query_raw ?? null,
-                error: outputPayload.error.message ?? null,
-                rerankDiagnostics,
-            });
-        }
-
-        if (outputTrace?.engine_query_plans?.length) {
-            console.info('[SandboxRoute] POST /run web_search plan', {
-                executionId: result.executionId ?? null,
-                webEngine: outputTrace.input?.web_engine ?? null,
-                transformedQuery: outputTrace.transformed_query_raw ?? null,
-                queryPlans: outputTrace.engine_query_plans,
-            });
-        }
-
-        if (outputTrace?.engine_execution_trace?.length) {
-            console.info('[SandboxRoute] POST /run web_search execution trace', {
-                executionId: result.executionId ?? null,
-                webEngine: outputTrace.input?.web_engine ?? null,
-                transformedQuery: outputTrace.transformed_query_raw ?? null,
-                executions: outputTrace.engine_execution_trace,
-            });
-        }
-
-        if (outputTrace?.engine_top_results?.length) {
-            console.info('[SandboxRoute] POST /run web_search debug', {
-                executionId: result.executionId ?? null,
-                webEngine: outputTrace.input?.web_engine ?? null,
-                transformedQuery: outputTrace.transformed_query_raw ?? null,
-                topResults: outputTrace.engine_top_results,
-            });
-        }
 
         res.json(result);
     } catch (error: any) {

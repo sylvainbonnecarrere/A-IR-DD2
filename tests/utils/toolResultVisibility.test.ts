@@ -2,7 +2,7 @@ import type { ChatMessage } from '../../types';
 import { shouldSuppressVisualToolResult } from '../../utils/toolResultVisibility';
 
 describe('toolResultVisibility', () => {
-  it('suppresses redundant visible web_search_py tool_result when a matching tool block exists', () => {
+  it('suppresses redundant visible tool_result when a matching tool block exists', () => {
     const messages = [
       {
         id: 'tool-1',
@@ -22,8 +22,8 @@ describe('toolResultVisibility', () => {
       {
         id: 'tool-result-1',
         sender: 'tool_result',
-        text: 'planned_queries=1',
-        toolName: 'web_search_py',
+        text: '{"stdout":"1"}',
+        toolName: 'python_exec',
         toolCallId: 'call-1',
         timestamp: new Date('2026-04-30T10:00:00.000Z'),
       },
@@ -32,7 +32,7 @@ describe('toolResultVisibility', () => {
     expect(shouldSuppressVisualToolResult(messages[1], messages)).toBe(true);
   });
 
-  it('keeps visible tool_result messages for other tools', () => {
+  it('keeps visible tool_result messages when no matching tool block exists', () => {
     const messages = [
       {
         id: 'tool-1',
@@ -54,7 +54,7 @@ describe('toolResultVisibility', () => {
         sender: 'tool_result',
         text: '{"stdout":"1"}',
         toolName: 'python_exec',
-        toolCallId: 'call-2',
+        toolCallId: 'call-3',
         timestamp: new Date('2026-04-30T10:00:00.000Z'),
       },
     ] as ChatMessage[];

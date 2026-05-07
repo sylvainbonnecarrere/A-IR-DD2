@@ -12,6 +12,21 @@ jest.mock('../../hooks/useAuth', () => ({
     }))
 }));
 
+jest.mock('../../hooks/useLocalization', () => ({
+    useLocalization: jest.fn(() => ({
+        t: (key: string, fallbackOrParams?: string | Record<string, string | number>, params?: Record<string, string | number>) => {
+            if (typeof fallbackOrParams === 'string') {
+                return Object.entries(params ?? {}).reduce(
+                    (value, [paramKey, paramValue]) => value.replace(`{${paramKey}}`, String(paramValue)),
+                    fallbackOrParams,
+                );
+            }
+
+            return key;
+        },
+    })),
+}));
+
 jest.mock('../../contexts/NotificationContext', () => ({
     useNotifications: jest.fn(() => ({
         addNotification: mockAddNotification
@@ -188,19 +203,19 @@ describe('PhilFunctionsPage runtime compatibility banner', () => {
                 resolvedCodePath: 'backend/python/native/web_search_py.py',
                 codePathRoot: 'native_repo',
                 codeInline: null,
-                dependencies: ['duckduckgo-search'],
+                dependencies: [],
                 isEnabled: true,
                 isReadonly: true,
                 version: 1,
                 readinessStatus: {
-                    requirement: 'platform_provision',
-                    state: 'waiting_for_provisioning',
-                    prepared: false,
-                    runnable: false,
-                    dependencyReadiness: 'missing',
+                    requirement: 'none',
+                    state: 'ready',
+                    prepared: true,
+                    runnable: true,
+                    dependencyReadiness: 'not_required',
                     runtimeReady: true,
-                    summary: 'Provisionnement plateforme requis avant execution de cette fonction native.',
-                    actionLabel: 'Provisionnement plateforme requis'
+                    summary: 'Aucune preparation supplementaire requise avant execution.',
+                    actionLabel: 'Executable immediatement'
                 },
                 tags: ['search'],
                 createdAt: '2026-03-19T10:00:00.000Z',
@@ -221,19 +236,19 @@ describe('PhilFunctionsPage runtime compatibility banner', () => {
                 resolvedCodePath: 'backend/python/native/web_search_py.py',
                 codePathRoot: 'native_repo',
                 codeInline: null,
-                dependencies: ['duckduckgo-search'],
+                dependencies: [],
                 isEnabled: true,
                 isReadonly: true,
                 version: 1,
                 readinessStatus: {
-                    requirement: 'platform_provision',
-                    state: 'waiting_for_provisioning',
-                    prepared: false,
-                    runnable: false,
-                    dependencyReadiness: 'missing',
+                    requirement: 'none',
+                    state: 'ready',
+                    prepared: true,
+                    runnable: true,
+                    dependencyReadiness: 'not_required',
                     runtimeReady: true,
-                    summary: 'Provisionnement plateforme requis avant execution de cette fonction native.',
-                    actionLabel: 'Provisionnement plateforme requis'
+                    summary: 'Aucune preparation supplementaire requise avant execution.',
+                    actionLabel: 'Executable immediatement'
                 },
                 tags: ['search'],
                 createdAt: '2026-03-19T10:00:00.000Z',
@@ -243,10 +258,10 @@ describe('PhilFunctionsPage runtime compatibility banner', () => {
 
         render(<PhilFunctionsPage />);
 
-        expect(screen.getByText('provisionnement requis')).toBeInTheDocument();
+        expect(screen.getByText('execution immediate')).toBeInTheDocument();
         expect(screen.getByText('Readiness')).toBeInTheDocument();
-        expect(screen.getByText('Provisionnement plateforme requis')).toBeInTheDocument();
-        expect(screen.getByText('waiting_for_provisioning')).toBeInTheDocument();
+        expect(screen.getByText('Executable immediatement')).toBeInTheDocument();
+        expect(screen.getByText('ready')).toBeInTheDocument();
     });
 
     it('disables custom function creation when no workflow is selected', () => {

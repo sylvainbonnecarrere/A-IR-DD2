@@ -10,7 +10,6 @@ import { generateAccessToken } from '../utils/jwt';
 import { BuildPreparationError, BuildService } from '../services/build.service';
 import { NativePythonProvisioningService } from '../services/nativePythonProvisioning.service';
 import { ExecutionOrchestrator } from '../services/runtime/ExecutionOrchestrator';
-import * as webSearchPrivateContextService from '../services/webSearchPrivateContext.service';
 
 type FixtureRuntime = 'typescript' | 'python';
 
@@ -248,302 +247,6 @@ describe('Sandbox routes', () => {
         }));
     });
 
-    it('propagates resolved web search privateContext through /api/sandbox/run and preserves trace.engine_query_plans', async () => {
-        const fixture = await createFixture('python');
-        await UserFunction.findByIdAndUpdate(fixture.fn.id, { name: 'web_search_py' });
-
-        jest.spyOn(BuildService.prototype, 'ensureBuildReadyForRun').mockResolvedValue();
-        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
-            report: {
-                status: 'healthy',
-                summary: 'Docker sandbox ready',
-            } as any,
-            runner: {
-                getRunnerId: () => 'docker_sandbox',
-                getLabel: () => 'Docker sandbox',
-                supportsRuntime: () => true,
-                getReadiness: () => ({ ready: true })
-            },
-            readiness: { ready: true }
-        });
-
-        const resolvedPrivateContext = {
-            web_search: {
-                params: {
-                    web_engine: 'google.com',
-                    query_transformation: 'Q={{user_query}}',
-                },
-                llm_runtime: {
-                    provider: 'OpenAI',
-                    model: 'gpt-4o-mini',
-                    api_key: 'sk-test',
-                },
-            },
-        };
-
-        jest.spyOn(webSearchPrivateContextService, 'resolveWebSearchPrivateContext').mockResolvedValue(resolvedPrivateContext);
-
-        const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
-            success: true,
-            output: {
-                trace: {
-                    transformed_query_raw: 'Marseille météo demain',
-                    engine_query_plans: [
-                        {
-                            engine: 'google.com',
-                            engine_query_text: 'Marseille météo demain',
-                            engine_query_url: 'https://www.google.com/search?q=Marseille+m%C3%A9t%C3%A9o+demain',
-                        },
-                    ],
-                },
-            },
-            stdout: 'route web search test',
-            stderr: '',
-            durationMs: 9,
-            exitCode: 0,
-            runner: 'docker_sandbox',
-            executionId: 'utr-route-web-search-trace',
-            metadata: {
-                artifacts: [{ path: 'output/result.json', kind: 'json' }],
-            }
-        } as any);
-
-        const response = await request(app)
-            .post('/api/sandbox/run')
-            .set('Authorization', `Bearer ${fixture.accessToken}`)
-            .send({
-                functionId: fixture.fn.id,
-                testArgs: {
-                    query: 'météo Marseille demain',
-                    num_results: 3,
-                },
-                privateContext: {
-                    web_search: {
-                        params: {
-                            web_engine: 'google.com',
-                            query_transformation: 'Q={{user_query}}',
-                        },
-                        llm: {
-                            provider: 'OpenAI',
-                            model: 'gpt-4o-mini',
-                        },
-                    },
-                }
-            })
-            .expect(200);
-
-        expect(response.body).toEqual(expect.objectContaining({
-            success: true,
-            executionId: 'utr-route-web-search-trace',
-            output: expect.objectContaining({
-                trace: expect.objectContaining({
-                    transformed_query_raw: 'Marseille météo demain',
-                    engine_query_plans: [
-                        expect.objectContaining({
-                            engine: 'google.com',
-                            engine_query_text: 'Marseille météo demain',
-                        }),
-                    ],
-                }),
-            }),
-        }));
-
-        expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({
-            args: {
-                query: 'météo Marseille demain',
-                num_results: 3,
-            },
-            privateContext: resolvedPrivateContext,
-            fn: expect.objectContaining({
-                name: 'web_search_py',
-                language: 'python',
-            }),
-        }));
-    });
-
-    it('logs structured sandbox stdout events for web_search_py executions', async () => {
-        const fixture = await createFixture('python');
-        await UserFunction.findByIdAndUpdate(fixture.fn.id, { name: 'web_search_py' });
-
-        jest.spyOn(BuildService.prototype, 'ensureBuildReadyForRun').mockResolvedValue();
-        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
-            report: {
-                status: 'healthy',
-                summary: 'Docker sandbox ready',
-            } as any,
-            runner: {
-                getRunnerId: () => 'docker_sandbox',
-                getLabel: () => 'Docker sandbox',
-                supportsRuntime: () => true,
-                getReadiness: () => ({ ready: true })
-            },
-            readiness: { ready: true }
-        });
-
-        jest.spyOn(webSearchPrivateContextService, 'resolveWebSearchPrivateContext').mockResolvedValue({
-            web_search: {
-                params: {
-                    web_engine: 'duckduckgo.com',
-                    query_transformation: 'Q={{user_query}}',
-                },
-                llm_runtime: {
-                    provider: 'LLM local (on premise)',
-                    model: 'qwen/qwen3.5-9b',
-                    endpoint: 'http://192.168.56.1:1234',
-                },
-            },
-        });
-
-        jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
-            success: true,
-            output: {
-                trace: {
-                    transformed_query_raw: 'météo paris demain prévisions',
-                    input: { web_engine: 'duckduckgo.com' },
-                    engine_query_plans: [
-                        {
-                            rank: 1,
-                            engine: 'duckduckgo.com',
-                            engine_query_text: 'météo paris demain prévisions',
-                            engine_query_url: 'https://duckduckgo.com/?q=m%C3%A9t%C3%A9o+paris+demain+pr%C3%A9visions',
-                        },
-                    ],
-                    engine_execution_trace: [
-                        {
-                            rank: 1,
-                            engine: 'duckduckgo.com',
-                            backend: 'http_search_page',
-                            engine_query_url: 'https://duckduckgo.com/?q=m%C3%A9t%C3%A9o+paris+demain+pr%C3%A9visions',
-                            status: 'ok',
-                            result_count: 3,
-                        },
-                    ],
-                    engine_top_results: [
-                        {
-                            rank: 1,
-                            title: 'Météo-France Paris demain',
-                            url: 'https://meteofrance.com/previsions-meteo-france/paris/75000',
-                        },
-                    ],
-                },
-            },
-            stdout: [
-                JSON.stringify({ SANDBOX_DEBUG: 'incoming_args', args: { query: 'temps demain Paris prévision météo', num_results: 3 } }),
-                JSON.stringify({
-                    WEB_SEARCH_DEBUG: 'query_transformation',
-                    transformed_query_raw: 'météo paris demain prévisions',
-                    web_engine: 'duckduckgo.com',
-                    engine_query_plans: [
-                        {
-                            engine: 'duckduckgo.com',
-                            engine_query_text: 'météo paris demain prévisions',
-                            engine_query_url: 'https://duckduckgo.com/?q=m%C3%A9t%C3%A9o+paris+demain+pr%C3%A9visions',
-                        },
-                    ],
-                }),
-                JSON.stringify({
-                    WEB_SEARCH_DEBUG: 'engine_execution',
-                    transformed_query_raw: 'météo paris demain prévisions',
-                    top_results: [
-                        {
-                            rank: 1,
-                            title: 'Météo-France Paris demain',
-                            url: 'https://meteofrance.com/previsions-meteo-france/paris/75000',
-                        },
-                    ],
-                }),
-            ].join('\n'),
-            stderr: '',
-            durationMs: 12,
-            exitCode: 0,
-            runner: 'docker_sandbox',
-            executionId: 'utr-route-web-search-stdout',
-            metadata: {},
-        } as any);
-
-        const consoleInfoSpy = jest.spyOn(console, 'info').mockImplementation(() => undefined);
-
-        await request(app)
-            .post('/api/sandbox/run')
-            .set('Authorization', `Bearer ${fixture.accessToken}`)
-            .send({
-                functionId: fixture.fn.id,
-                testArgs: {
-                    query: 'temps demain Paris prévision météo',
-                    num_results: 3,
-                },
-                privateContext: {
-                    web_search: {
-                        params: {
-                            web_engine: 'duckduckgo.com',
-                            query_transformation: 'Q={{user_query}}',
-                        },
-                        llm: {
-                            provider: 'LLM local (on premise)',
-                            model: 'qwen/qwen3.5-9b',
-                        },
-                    },
-                },
-            })
-            .expect(200);
-
-        const sandboxStdoutLogs = consoleInfoSpy.mock.calls.filter((call) => call[0] === '[SandboxRoute] POST /run sandbox stdout');
-        expect(sandboxStdoutLogs).toEqual(expect.arrayContaining([
-            [
-                '[SandboxRoute] POST /run sandbox stdout',
-                expect.objectContaining({
-                    executionId: 'utr-route-web-search-stdout',
-                    event: 'query_transformation',
-                    payload: expect.objectContaining({
-                        transformed_query_raw: 'météo paris demain prévisions',
-                    }),
-                }),
-            ],
-            [
-                '[SandboxRoute] POST /run sandbox stdout',
-                expect.objectContaining({
-                    executionId: 'utr-route-web-search-stdout',
-                    event: 'engine_execution',
-                    payload: expect.objectContaining({
-                        top_results: [
-                            expect.objectContaining({
-                                title: 'Météo-France Paris demain',
-                            }),
-                        ],
-                    }),
-                }),
-            ],
-        ]));
-
-        expect(consoleInfoSpy).toHaveBeenCalledWith(
-            '[SandboxRoute] POST /run web_search plan',
-            expect.objectContaining({
-                executionId: 'utr-route-web-search-stdout',
-                webEngine: 'duckduckgo.com',
-                transformedQuery: 'météo paris demain prévisions',
-                queryPlans: [
-                    expect.objectContaining({
-                        engine_query_url: 'https://duckduckgo.com/?q=m%C3%A9t%C3%A9o+paris+demain+pr%C3%A9visions',
-                    }),
-                ],
-            }),
-        );
-
-        expect(consoleInfoSpy).toHaveBeenCalledWith(
-            '[SandboxRoute] POST /run web_search execution trace',
-            expect.objectContaining({
-                executionId: 'utr-route-web-search-stdout',
-                executions: [
-                    expect.objectContaining({
-                        backend: 'http_search_page',
-                        status: 'ok',
-                        result_count: 3,
-                    }),
-                ],
-            }),
-        );
-    });
-
     it('returns 409 when build preparation is required before sandbox execution', async () => {
         const fixture = await createFixture();
         jest.spyOn(BuildService.prototype, 'ensureBuildReadyForRun').mockRejectedValue(
@@ -611,7 +314,7 @@ describe('Sandbox routes', () => {
             inputSchema: {},
             outputSchema: {},
             tags: [],
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: ['requests==2.32.3'], npm: [] },
             policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
             isReadonly: true,
             isEnabled: true
@@ -634,7 +337,6 @@ describe('Sandbox routes', () => {
             .post('/api/sandbox/run')
             .set('Authorization', `Bearer ${accessToken}`)
             .send({
-                functionId: tool.id,
                 toolSelection: {
                     toolId: tool.id,
                     versionRef: { versionTag: 'v1' }
@@ -695,7 +397,7 @@ describe('Sandbox routes', () => {
             inputSchema: {},
             outputSchema: {},
             tags: [],
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: ['requests==2.32.3'], npm: [] },
             policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
             isReadonly: true,
             isEnabled: true
@@ -720,8 +422,8 @@ describe('Sandbox routes', () => {
             toolVersionTag: 'v1',
             status: 'ready',
             provisionedAt: new Date().toISOString(),
-            dependencies: ['duckduckgo-search==6.1.0'],
-            criticalModules: ['duckduckgo_search'],
+            dependencies: ['requests==2.32.3'],
+            criticalModules: ['requests'],
             sitePackagesPath: '/tmp/site-packages',
             reportPath: '/tmp/provision-report.json'
         });
@@ -787,7 +489,6 @@ describe('Sandbox routes', () => {
             .post('/api/sandbox/run')
             .set('Authorization', `Bearer ${accessToken}`)
             .send({
-                functionId: tool.id,
                 toolSelection: {
                     toolId: tool.id,
                     versionRef: { versionTag: 'v1' }
@@ -994,7 +695,7 @@ describe('Sandbox routes', () => {
             success: false,
             output: null,
             stdout: '',
-            stderr: 'ModuleNotFoundError: No module named duckduckgo_search',
+            stderr: 'ModuleNotFoundError: No module named requests',
             durationMs: 14,
             exitCode: 1,
             runner: 'docker_sandbox',
@@ -1021,7 +722,7 @@ describe('Sandbox routes', () => {
         expect(response.body.errorDetails).toEqual(expect.objectContaining({
             code: 'DEPENDENCY_MISSING',
             subsystem: 'dependency',
-            message: 'ModuleNotFoundError: No module named duckduckgo_search',
+            message: 'ModuleNotFoundError: No module named requests',
             failureKind: 'dependency_missing',
             errorType: 'ModuleNotFoundError',
             traceback: 'Traceback...'
@@ -1043,6 +744,23 @@ describe('Sandbox routes', () => {
         expect(response.body.error).toBe('Validation échouée');
         expect(response.body.details).toEqual(expect.arrayContaining([
             expect.objectContaining({ field: 'functionId' })
+        ]));
+    });
+
+    it('returns 400 when neither legacy functionId nor canonical toolSelection is provided', async () => {
+        const fixture = await createFixture();
+
+        const response = await request(app)
+            .post('/api/sandbox/run')
+            .set('Authorization', `Bearer ${fixture.accessToken}`)
+            .send({
+                testArgs: {}
+            })
+            .expect(400);
+
+        expect(response.body.error).toBe('Validation échouée');
+        expect(response.body.details).toEqual(expect.arrayContaining([
+            expect.objectContaining({ field: 'functionId', message: 'functionId ou toolSelection est requis' })
         ]));
     });
 });

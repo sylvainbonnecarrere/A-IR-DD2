@@ -17,6 +17,7 @@ import { deleteUserToolMirror, syncUserToolMirrorFromLegacyFunction } from './us
 import { AgentPrototype } from '../models/AgentPrototype.model';
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
 import type { WorkspaceProvisioningResult } from './workspace/types';
+import { buildGlobalLegacyFunctionClauses, buildOwnedLegacyFunctionClause } from '../utils/sharedExampleAccess';
 
 interface ListFunctionsFilter {
     workflowId?: string;
@@ -63,10 +64,11 @@ export class FunctionService {
      * Filtre optionnel : workflowId, origin, language, isEnabled
      */
     async listFunctions(userId: string, filters: ListFunctionsFilter = {}): Promise<FunctionReadModel[]> {
+        const userObjectId = new mongoose.Types.ObjectId(userId);
         const query: Record<string, unknown> = {
             $or: [
-                { userId: null },                                            // natives
-                { userId: new mongoose.Types.ObjectId(userId) }              // custom user
+                ...buildGlobalLegacyFunctionClauses(),
+                buildOwnedLegacyFunctionClause(userObjectId)
             ]
         };
 
@@ -83,15 +85,15 @@ export class FunctionService {
         }
 
         if (filters.workflowId) {
-            // Fonctions natives (workflowId: null) + fonctions du workflow spécifique
+            const workflowObjectId = new mongoose.Types.ObjectId(filters.workflowId);
             query.$or = [
-                { userId: null },
+                ...buildGlobalLegacyFunctionClauses(),
                 {
-                    userId: new mongoose.Types.ObjectId(userId),
-                    workflowId: new mongoose.Types.ObjectId(filters.workflowId)
+                    ...buildOwnedLegacyFunctionClause(userObjectId),
+                    workflowId: workflowObjectId
                 },
                 {
-                    userId: new mongoose.Types.ObjectId(userId),
+                    ...buildOwnedLegacyFunctionClause(userObjectId),
                     workflowId: null
                 }
             ];
@@ -156,11 +158,13 @@ export class FunctionService {
     async getFunctionById(functionId: string, userId: string): Promise<FunctionReadModel | null> {
         if (!mongoose.Types.ObjectId.isValid(functionId)) return null;
 
+        const userObjectId = new mongoose.Types.ObjectId(userId);
+
         const fn = await UserFunction.findOne({
             _id: functionId,
             $or: [
-                { userId: null },
-                { userId: new mongoose.Types.ObjectId(userId) }
+                ...buildGlobalLegacyFunctionClauses(),
+                buildOwnedLegacyFunctionClause(userObjectId)
             ]
         }).lean<IUserFunction>();
 
@@ -280,12 +284,14 @@ export class FunctionService {
     ): Promise<FunctionReadModel | null> {
         if (!mongoose.Types.ObjectId.isValid(functionId)) return null;
 
+        const userObjectId = new mongoose.Types.ObjectId(userId);
+
         // Chercher la fonction (native ou custom)
         const fn = await UserFunction.findOne({
             _id: functionId,
             $or: [
-                { userId: null },
-                { userId: new mongoose.Types.ObjectId(userId) }
+                ...buildGlobalLegacyFunctionClauses(),
+                buildOwnedLegacyFunctionClause(userObjectId)
             ]
         });
 

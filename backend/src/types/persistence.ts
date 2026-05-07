@@ -105,18 +105,24 @@ export interface MediaPayload {
 /**
  * Types d'événements enregistrés dans les journaux
  */
-export type JournalEntryType = 'chat' | 'error' | 'media' | 'task' | 'system';
+export type JournalEntryType = 'chat' | 'error' | 'media' | 'task' | 'system' | 'tool_invocation';
 
 /**
  * Niveaux de sévérité pour filtrage
  */
 export type JournalSeverity = 'info' | 'warn' | 'error';
 
+export interface JournalCorrelationIds {
+    messageId?: string;
+    toolCallId?: string;
+    executionId?: string;
+}
+
 /**
  * Payload pour les entrées de type 'chat'
  * ⭐ FIX QA: Added imageBase64, mimeType, fileName for media persistence in chat
  */
-export interface ChatJournalPayload {
+export interface ChatJournalPayload extends JournalCorrelationIds {
     role: 'user' | 'agent' | 'tool' | 'tool_result';
     content: string;
     llmProvider?: string;
@@ -136,7 +142,7 @@ export interface ChatJournalPayload {
 /**
  * Payload pour les entrées de type 'error'
  */
-export interface ErrorJournalPayload {
+export interface ErrorJournalPayload extends JournalCorrelationIds {
     errorCode: string;
     message: string;
     source: 'llm_service' | 'tool_executor' | 'frontend' | 'system';
@@ -148,7 +154,7 @@ export interface ErrorJournalPayload {
 /**
  * Payload pour les entrées de type 'media'
  */
-export interface MediaJournalPayload extends MediaPayload {
+export interface MediaJournalPayload extends MediaPayload, JournalCorrelationIds {
     generationPrompt?: string;
     generationModel?: string;
     generationTime?: number;        // temps de génération en ms
@@ -157,7 +163,7 @@ export interface MediaJournalPayload extends MediaPayload {
 /**
  * Payload pour les entrées de type 'task'
  */
-export interface TaskJournalPayload {
+export interface TaskJournalPayload extends JournalCorrelationIds {
     taskName: string;
     taskStatus: 'started' | 'progress' | 'completed' | 'failed' | 'cancelled';
     reasoning?: string;
@@ -169,7 +175,7 @@ export interface TaskJournalPayload {
 /**
  * Payload pour les entrées de type 'system'
  */
-export interface SystemJournalPayload {
+export interface SystemJournalPayload extends JournalCorrelationIds {
     event: 'instance_created' | 'instance_started' | 'instance_paused' | 
            'instance_resumed' | 'instance_stopped' | 'config_changed' | 
            'persistence_config_updated' | 'status_changed' | 
@@ -178,15 +184,50 @@ export interface SystemJournalPayload {
     triggeredBy?: string;           // userId ou 'system'
 }
 
+interface ToolInvocationJournalPayloadBase extends JournalCorrelationIds {
+    toolCallId: string;
+    toolName: string;
+    toolId?: string;
+    functionId?: string;
+}
+
+export interface ToolInvocationStartedJournalPayload extends ToolInvocationJournalPayloadBase {
+    phase: 'started';
+    executionId?: string;
+}
+
+export interface ToolInvocationSettledJournalPayload extends ToolInvocationJournalPayloadBase {
+    phase: 'completed' | 'failed';
+    executionId: string;
+}
+
 /**
- * Union des payloads selon le type
+ * Projection conversationnelle légère d'un appel outil.
+ * La vérité d'exécution détaillée reste dans user_tool_runs.
+ */
+export type ToolInvocationJournalPayload =
+    | ToolInvocationStartedJournalPayload
+    | ToolInvocationSettledJournalPayload;
+
+/**
+ * Union des payloads selon le type persiste en base.
  */
 export type JournalPayload = 
-    | { type: 'chat'; data: ChatJournalPayload }
-    | { type: 'error'; data: ErrorJournalPayload }
-    | { type: 'media'; data: MediaJournalPayload }
-    | { type: 'task'; data: TaskJournalPayload }
-    | { type: 'system'; data: SystemJournalPayload };
+    | ChatJournalPayload
+    | ErrorJournalPayload
+    | MediaJournalPayload
+    | TaskJournalPayload
+    | SystemJournalPayload
+    | ToolInvocationJournalPayload;
+
+export interface JournalPayloadByType {
+    chat: ChatJournalPayload;
+    error: ErrorJournalPayload;
+    media: MediaJournalPayload;
+    task: TaskJournalPayload;
+    system: SystemJournalPayload;
+    tool_invocation: ToolInvocationJournalPayload;
+}
 
 // ============================================
 // INTERFACES POUR LES MODÈLES MONGOOSE

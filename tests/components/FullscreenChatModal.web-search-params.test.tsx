@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { FullscreenChatModal } from '../../components/modals/FullscreenChatModal';
 import { LLMProvider, RobotId } from '../../types';
 import type { UserFunction } from '../../types/function.types';
+import apiClient from '../../utils/apiClient';
 
 let runtimeStoreState: Record<string, unknown>;
 let designStoreState: Record<string, unknown>;
@@ -13,7 +14,21 @@ jest.mock('../../components/modals/ConfirmationModal', () => ({ ConfirmationModa
 jest.mock('../../components/panels/ImageGenerationPanel', () => ({ ImageGenerationPanel: () => null }));
 jest.mock('../../components/panels/VideoGenerationConfigPanel', () => ({ VideoGenerationConfigPanel: () => null }));
 jest.mock('../../components/panels/MapsGroundingConfigPanel', () => ({ MapsGroundingConfigPanel: () => null }));
-jest.mock('../../hooks/useLocalization', () => ({ useLocalization: () => ({ t: (key: string) => key }) }));
+jest.mock('../../utils/apiClient', () => ({ __esModule: true, default: { get: jest.fn() } }));
+jest.mock('../../hooks/useLocalization', () => ({
+  useLocalization: () => ({
+    t: (key: string, fallbackOrParams?: string | Record<string, string | number>, params?: Record<string, string | number>) => {
+      if (typeof fallbackOrParams === 'string') {
+        return Object.entries(params ?? {}).reduce(
+          (value, [paramKey, paramValue]) => value.replace(`{${paramKey}}`, String(paramValue)),
+          fallbackOrParams,
+        );
+      }
+
+      return key;
+    },
+  }),
+}));
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ isAuthenticated: true, accessToken: 'token-123' }) }));
 jest.mock('../../hooks/useAgentChat', () => ({ useAgentChat: () => ({ handleSendMessage: jest.fn(), loadingMessage: '' }) }));
 jest.mock('../../services/webSearchParamsConfigService', () => ({ persistInstanceWebSearchParams: jest.fn(async () => undefined) }));
@@ -38,6 +53,8 @@ jest.mock('../../stores/useFunctionStore', () => ({
 
 describe('FullscreenChatModal web search params entrypoint', () => {
   beforeEach(() => {
+    (apiClient.get as jest.Mock).mockResolvedValue({ data: { chatMessages: [] } });
+
     runtimeStoreState = {
       fullscreenChatNodeId: 'node-instance-1',
       fullscreenChatAgent: null,

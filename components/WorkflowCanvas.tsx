@@ -7,6 +7,7 @@ import ReactFlow, {
   useEdgesState,
   addEdge,
   Connection,
+  ConnectionMode,
   Node,
   NodeTypes,
   useReactFlow,
@@ -26,6 +27,7 @@ import { Agent, WorkflowNode, LLMConfig, AgentInstance } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useAuth } from '../contexts/AuthContext';
+import { isValidWorkflowConnection } from './workflow/connectionContracts';
 
 interface WorkflowCanvasProps {
   nodes?: WorkflowNode[];
@@ -347,6 +349,10 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
   // Handlers stables avec useCallback
   const onConnect = useCallback((connection: Connection) => {
+    if (!isValidWorkflowConnection(connection)) {
+      return;
+    }
+
     setEdges((eds) => addEdge(connection, eds));
   }, [setEdges]);
 
@@ -449,7 +455,9 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          isValidConnection={isValidWorkflowConnection}
           onPaneClick={handlePaneClick}
+          connectionMode={ConnectionMode.Strict}
           nodeTypes={NODE_TYPES}
           style={{ background: 'transparent' }}
           defaultViewport={{ x: 0, y: 0, zoom: 0.7 }}

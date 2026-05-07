@@ -12,7 +12,7 @@ import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { API_BASE_URL } from '../../config/api.config';
 import { FunctionSelector } from '../FunctionSelector';
 import { useFunctionStore } from '../../stores/useFunctionStore';
-import { buildToolSelectionsFromFunctions, deriveSelectedToolIds } from '../../services/toolSelectionResolver';
+import { deriveSelectedToolIds, normalizeToolSelections } from '../../services/toolSelectionResolver';
 
 interface AgentFormModalProps {
   onClose: () => void;
@@ -110,7 +110,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     return [...new Set(defaultCaps)];
   });
   const [tools, setTools] = useState<Tool[]>([]);
-  const [selectedFunctionIds, setSelectedFunctionIds] = useState<string[]>([]);
+  const [selectedToolSelections, setSelectedToolSelections] = useState<ToolSelection[]>([]);
   const [outputConfig, setOutputConfig] = useState<OutputConfig>(defaultOutputConfig);
   const [historyConfig, setHistoryConfig] = useState<HistoryConfig>(() => {
     const availableModels = getAvailableModels(enabledLLMProvider);
@@ -252,7 +252,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       setSelectedCapabilities(existingAgent.capabilities);
       setHistoryConfig(prev => ({ ...defaultHistoryConfig, ...prev, ...(existingAgent.historyConfig || {}) }));
       setTools(existingAgent.tools || []);
-      setSelectedFunctionIds(deriveSelectedToolIds(existingAgent.toolSelections, existingAgent.functionIds));
+      setSelectedToolSelections(normalizeToolSelections(existingAgent.toolSelections, existingAgent.functionIds, availableFunctions));
       setOutputConfig(existingAgent.outputConfig || defaultOutputConfig);
     }
   }, [isEditing, existingAgent, localLLMProfiles]);
@@ -477,7 +477,8 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
     const capabilitiesForSave = selectedCapabilities.includes(LLMCapability.Chat)
       ? selectedCapabilities
       : [LLMCapability.Chat, ...selectedCapabilities];
-    const toolSelections = buildToolSelectionsFromFunctions(selectedFunctionIds, availableFunctions);
+    const toolSelections = normalizeToolSelections(selectedToolSelections, undefined, availableFunctions);
+    const selectedFunctionIds = deriveSelectedToolIds(toolSelections);
 
     onSave({
       name,
@@ -983,8 +984,8 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
           )}
           {activeTab === 'fonctions' && (
             <FunctionSelector
-              selectedIds={selectedFunctionIds}
-              onChange={setSelectedFunctionIds}
+              selectedToolSelections={selectedToolSelections}
+              onChangeToolSelections={setSelectedToolSelections}
             />
           )}
         </div>

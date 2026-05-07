@@ -338,7 +338,7 @@ describe('userToolStartupSync service', () => {
             workflowId: null as any,
             language: 'python',
             codePath: 'backend/python/native/web_search_py.py',
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: [], npm: [] },
             isReadonly: true,
             version: 'v-ready',
             updatedAt: new Date('2026-03-31T12:00:00.000Z')

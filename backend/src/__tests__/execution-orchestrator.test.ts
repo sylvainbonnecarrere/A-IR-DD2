@@ -617,7 +617,7 @@ describe('ExecutionOrchestrator', () => {
                 tags: [],
                 inputSchema: { type: 'object' },
                 outputSchema: { type: 'object' },
-                codeInline: 'export function run(context: FunctionContext, args: { user_name: string; is_admin: boolean }): unknown { return { result: `Bonjour ${args.user_name}. Ton nom est maintenant enregistré dans ma mémoire.`, admin: args.is_admin, depth: context.depth }; }',
+                codeInline: 'export function run(context: FunctionContext, args: { user_name: string }): unknown { const userName = typeof args.user_name === "string" && args.user_name.trim().length > 0 ? args.user_name.trim() : "inconnu"; return { result: `Ton nom, ${userName}, est maintenant enregistré dans ma mémoire` }; }',
                 dependencies: { npm: [], python: [] },
                 isEnabled: true,
                 isReadonly: false,
@@ -626,7 +626,7 @@ describe('ExecutionOrchestrator', () => {
                 updatedAt: new Date()
             } as any,
             userId: new mongoose.Types.ObjectId().toString(),
-            args: { user_name: 'Ada', is_admin: false },
+            args: { user_name: 'Ada' },
             launchContext: 'editor_test'
         });
 
@@ -637,7 +637,7 @@ describe('ExecutionOrchestrator', () => {
             sourceCode: expect.not.stringContaining('context: FunctionContext')
         }));
         expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-            sourceCode: expect.stringContaining('Bonjour ')
+            sourceCode: expect.stringContaining('Ton nom, ')
         }));
     });
 

@@ -29,7 +29,9 @@ import {
     MediaJournalPayload,
     TaskJournalPayload,
     SystemJournalPayload,
+    ToolInvocationJournalPayload,
     JournalPayload,
+    JournalPayloadByType,
     FileMetadata,
     MediaPayload
 } from '../types/persistence';
@@ -52,6 +54,8 @@ export interface JournalResult {
     reason?: string;
     /** Erreur éventuelle */
     error?: string;
+    /** ID existant quand l'entree a ete dedupliquee */
+    existingEntryId?: string;
 }
 
 /**
@@ -119,6 +123,11 @@ export interface LogTaskParams {
     error?: string;
 }
 
+interface JournalDeduplicationConfig {
+    query: Record<string, unknown>;
+    reason: string;
+}
+
 // ============================================
 // SERVICE PRINCIPAL
 // ============================================
@@ -158,6 +167,7 @@ export class JournalService {
     ): boolean {
         switch (type) {
             case 'chat':
+            case 'tool_invocation':
                 return config.saveChatHistory ?? config.saveChat ?? true;
             case 'error':
                 return config.saveErrors ?? true;
@@ -192,6 +202,22 @@ export class JournalService {
         });
 
         return entry;
+    }
+
+    private getDisabledReason(type: JournalEntryType): string {
+        switch (type) {
+            case 'chat':
+            case 'tool_invocation':
+                return 'saveChat is false in persistenceConfig';
+            case 'error':
+                return 'saveErrors is false in persistenceConfig';
+            case 'media':
+                return 'saveMedia is false in persistenceConfig';
+            case 'task':
+                return 'saveTaskExecution is false in persistenceConfig';
+            default:
+                return 'Persistence disabled for this journal type';
+        }
     }
 
     /**
@@ -232,9 +258,105 @@ export class JournalService {
         }
     }
 
+    private getDeduplicationConfig<T extends keyof JournalPayloadByType>(
+        instance: IAgentInstance,
+        type: T,
+        payload: JournalPayloadByType[T]
+    ): JournalDeduplicationConfig | null {
+        if (type === 'tool_invocation') {
+            const toolInvocationPayload = payload as ToolInvocationJournalPayload;
+
+            return {
+                query: {
+                    agentInstanceId: instance._id,
+                    type: 'tool_invocation',
+                    'payload.toolCallId': toolInvocationPayload.toolCallId,
+                    'payload.phase': toolInvocationPayload.phase
+                },
+                reason: 'Duplicate tool invocation - entry already exists'
+            };
+        }
+
+        if (payload?.messageId) {
+            return {
+                query: {
+                    agentInstanceId: instance._id,
+                    'payload.messageId': payload.messageId
+                },
+                reason: 'Duplicate messageId - entry already exists'
+            };
+        }
+
+        return null;
+    }
+
     // ============================================
     // MÉTHODES PUBLIQUES - JOURNALISATION
     // ============================================
+
+    async persistJournalEntry<T extends keyof JournalPayloadByType>(
+        params: {
+            instanceId: string;
+            type: T;
+            payload: JournalPayloadByType[T];
+        },
+        options: JournalOptions = {}
+    ): Promise<JournalResult> {
+        try {
+            const instance = await this.getInstanceWithConfig(params.instanceId);
+            if (!instance) {
+                return {
+                    success: false,
+                    saved: false,
+                    error: 'Instance not found'
+                };
+            }
+
+            const deduplicationConfig = this.getDeduplicationConfig(instance, params.type, params.payload);
+            if (deduplicationConfig) {
+                const existingEntry = await AgentJournal.findOne(deduplicationConfig.query)
+                    .select('_id')
+                    .lean<{ _id: mongoose.Types.ObjectId } | null>();
+
+                if (existingEntry) {
+                    return {
+                        success: true,
+                        saved: false,
+                        reason: deduplicationConfig.reason,
+                        existingEntryId: existingEntry._id.toString()
+                    };
+                }
+            }
+
+            if (!this.shouldSaveEvent(params.type, instance.persistenceConfig)) {
+                return {
+                    success: true,
+                    saved: false,
+                    reason: this.getDisabledReason(params.type)
+                };
+            }
+
+            const entry = await this.createJournalEntry(
+                instance,
+                params.type,
+                params.payload,
+                options
+            );
+
+            return {
+                success: true,
+                saved: true,
+                entryId: entry._id.toString()
+            };
+        } catch (error) {
+            console.error('[JournalService] persistJournalEntry error:', error);
+            return {
+                success: false,
+                saved: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            };
+        }
+    }
 
     /**
      * Journaliser un message de chat
@@ -256,16 +378,6 @@ export class JournalService {
                 };
             }
 
-            // Vérifier la config de persistance
-            if (!this.shouldSaveEvent('chat', instance.persistenceConfig)) {
-                return {
-                    success: true,
-                    saved: false,
-                    reason: 'Chat history disabled in persistence config'
-                };
-            }
-
-            // Construire le payload typé
             const chatData: ChatJournalPayload = {
                 role: params.role === 'assistant' ? 'agent' : params.role as 'user' | 'agent' | 'tool' | 'tool_result',
                 content: params.content,
@@ -278,29 +390,19 @@ export class JournalService {
                 }))
             };
 
-            const payload: JournalPayload = {
+            const result = await this.persistJournalEntry({
+                instanceId: params.instanceId,
                 type: 'chat',
-                data: chatData
-            };
+                payload: chatData
+            }, options);
 
-            // Créer l'entrée
-            const entry = await this.createJournalEntry(
-                instance,
-                'chat',
-                payload,
-                options
-            );
+            if (result.saved) {
+                this.updateInstanceState(params.instanceId, {
+                    lastActivity: new Date()
+                });
+            }
 
-            // Mettre à jour l'état de l'instance (non-bloquant)
-            this.updateInstanceState(params.instanceId, {
-                lastActivity: new Date()
-            });
-
-            return {
-                success: true,
-                saved: true,
-                entryId: entry._id.toString()
-            };
+            return result;
 
         } catch (error) {
             console.error('[JournalService] logChat error:', error);
@@ -332,16 +434,6 @@ export class JournalService {
                 };
             }
 
-            // Vérifier la config de persistance
-            if (!this.shouldSaveEvent('error', instance.persistenceConfig)) {
-                return {
-                    success: true,
-                    saved: false,
-                    reason: 'Error logging disabled in persistence config'
-                };
-            }
-
-            // Construire le payload typé
             const errorData: ErrorJournalPayload = {
                 errorCode: params.code,
                 message: params.message,
@@ -351,32 +443,21 @@ export class JournalService {
                 stack: params.stack
             };
 
-            const payload: JournalPayload = {
+            const result = await this.persistJournalEntry({
+                instanceId: params.instanceId,
                 type: 'error',
-                data: errorData
-            };
-
-            // Créer l'entrée avec sévérité 'error' par défaut
-            const entry = await this.createJournalEntry(
-                instance,
-                'error',
-                payload,
-                { ...options, severity: options.severity || 'error' }
-            );
+                payload: errorData
+            }, { ...options, severity: options.severity || 'error' });
 
             // Mettre à jour le statut de l'instance si erreur non récupérable
-            if (!params.recoverable) {
+            if (result.saved && !params.recoverable) {
                 await AgentInstance.findByIdAndUpdate(
                     params.instanceId,
                     { $set: { status: 'error' } }
                 );
             }
 
-            return {
-                success: true,
-                saved: true,
-                entryId: entry._id.toString()
-            };
+            return result;
 
         } catch (error) {
             console.error('[JournalService] logError error:', error);
@@ -409,15 +490,6 @@ export class JournalService {
                 };
             }
 
-            // Vérifier la config de persistance
-            if (!this.shouldSaveEvent('media', instance.persistenceConfig)) {
-                return {
-                    success: true,
-                    saved: false,
-                    reason: 'Media storage disabled in persistence config'
-                };
-            }
-
             // Sauvegarder le fichier via MediaStorageService
             const mediaPayload: MediaPayload = await this.mediaStorage.saveMedia(
                 params.file,
@@ -437,29 +509,20 @@ export class JournalService {
                 generationModel: params.metadata.generatedBy
             };
 
-            const payload: JournalPayload = {
+            const result = await this.persistJournalEntry({
+                instanceId: params.instanceId,
                 type: 'media',
-                data: mediaData
-            };
-
-            // Créer l'entrée de journal avec le payload média
-            const entry = await this.createJournalEntry(
-                instance,
-                'media',
-                payload,
-                options
-            );
+                payload: mediaData
+            }, options);
 
             // Mettre à jour l'état de l'instance
-            this.updateInstanceState(params.instanceId, {
-                lastActivity: new Date()
-            });
+            if (result.saved) {
+                this.updateInstanceState(params.instanceId, {
+                    lastActivity: new Date()
+                });
+            }
 
-            return {
-                success: true,
-                saved: true,
-                entryId: entry._id.toString()
-            };
+            return result;
 
         } catch (error) {
             console.error('[JournalService] logMedia error:', error);
@@ -491,25 +554,10 @@ export class JournalService {
                 };
             }
 
-            // Vérifier la config de persistance
-            if (!this.shouldSaveEvent('task', instance.persistenceConfig)) {
-                return {
-                    success: true,
-                    saved: false,
-                    reason: 'Task execution logging disabled in persistence config'
-                };
-            }
-
-            // Construire le payload typé
             const taskData: TaskJournalPayload = {
                 taskName: params.taskName,
                 taskStatus: params.status,
                 duration: params.duration
-            };
-
-            const payload: JournalPayload = {
-                type: 'task',
-                data: taskData
             };
 
             // Déterminer la sévérité selon le status
@@ -520,25 +568,21 @@ export class JournalService {
                 severity = 'warn';
             }
 
-            // Créer l'entrée
-            const entry = await this.createJournalEntry(
-                instance,
-                'task',
-                payload,
-                { ...options, severity: options.severity || severity }
-            );
+            const result = await this.persistJournalEntry({
+                instanceId: params.instanceId,
+                type: 'task',
+                payload: taskData
+            }, { ...options, severity: options.severity || severity });
 
             // Mettre à jour l'état de l'instance
-            this.updateInstanceState(params.instanceId, {
-                lastActivity: new Date(),
-                currentTask: params.status === 'started' ? params.taskName : undefined
-            });
+            if (result.saved) {
+                this.updateInstanceState(params.instanceId, {
+                    lastActivity: new Date(),
+                    currentTask: params.status === 'started' ? params.taskName : undefined
+                });
+            }
 
-            return {
-                success: true,
-                saved: true,
-                entryId: entry._id.toString()
-            };
+            return result;
 
         } catch (error) {
             console.error('[JournalService] logTask error:', error);
@@ -572,8 +616,6 @@ export class JournalService {
                 };
             }
 
-            // Construire le payload typé
-            // Mapper l'event string vers les valeurs autorisées si possible
             const systemEvent = event as SystemJournalPayload['event'];
             
             const systemData: SystemJournalPayload = {
@@ -582,24 +624,11 @@ export class JournalService {
                 triggeredBy: 'system'
             };
 
-            const payload: JournalPayload = {
+            return this.persistJournalEntry({
+                instanceId,
                 type: 'system',
-                data: systemData
-            };
-
-            // Créer l'entrée (toujours sauvegardée)
-            const entry = await this.createJournalEntry(
-                instance,
-                'system',
-                payload,
-                options
-            );
-
-            return {
-                success: true,
-                saved: true,
-                entryId: entry._id.toString()
-            };
+                payload: systemData
+            }, options);
 
         } catch (error) {
             console.error('[JournalService] logSystem error:', error);

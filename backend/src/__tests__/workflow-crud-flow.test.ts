@@ -117,7 +117,7 @@ describe('Workflow CRUD Flow - Cycle de vie complet', () => {
                     content: {
                         type: 'chat',
                         role: 'tool_result',
-                        message: 'QUERY_TRANSFORMATION_FAILED: Timeout hidden LLM après 45s.',
+                        message: 'La fonction web search est en cours d\'implémentation',
                         metadata: {
                             source: 'tool_executor',
                             retryable: true,
@@ -136,7 +136,7 @@ describe('Workflow CRUD Flow - Cycle de vie complet', () => {
                 expect.objectContaining({
                     type: 'chat',
                     role: 'tool_result',
-                    message: 'QUERY_TRANSFORMATION_FAILED: Timeout hidden LLM après 45s.',
+                    message: 'La fonction web search est en cours d\'implémentation',
                 }),
             ]));
         });

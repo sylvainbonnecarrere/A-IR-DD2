@@ -27,8 +27,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.function_context import FunctionContext
-from core.security_guard import SecurityGuard
-
 # ─── Registre des fonctions natives ──────────────────────────────────────────
 # Whitelist explicite — évite toute exécution de fonctions inattendues
 from native.agent_py import run as agent_py_run

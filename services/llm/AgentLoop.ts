@@ -97,6 +97,7 @@ export interface AgentLoopEvent {
     iteration: number;
     toolCall?: ParsedToolCall;
     toolResult?: unknown;
+    toolCallRecord?: ToolCallRecord;
     response?: string;
     traceMessage?: string;
 }
@@ -109,6 +110,14 @@ const TOOL_CALL_DEDUP_WINDOW_MS = 30_000;
 let _idCounter = 0;
 function generateId(): string {
     return `tc_${Date.now()}_${++_idCounter}`;
+}
+
+function ensureToolCallId(toolCall: ParsedToolCall): ParsedToolCall & { id: string } {
+    const explicitId = typeof toolCall.id === 'string' ? toolCall.id.trim() : '';
+    return {
+        ...toolCall,
+        id: explicitId || generateId(),
+    };
 }
 
 type ToolExecutionErrorDetails = {
@@ -232,26 +241,6 @@ function isDeterministicFailureRecord(record?: ToolCallRecord | null): boolean {
     return Boolean(record?.status === 'error' && record.deterministicFailure);
 }
 
-function isBlockingWebSearchFailureRecord(record?: ToolCallRecord | null): boolean {
-    if (!record || record.functionName !== 'web_search_py' || record.status !== 'error') {
-        return false;
-    }
-
-    if (record.errorCode === 'QUERY_TRANSFORMATION_FAILED') {
-        return true;
-    }
-
-    if (record.errorCode === 'TIMEOUT' || record.failureKind === 'timeout') {
-        return true;
-    }
-
-    const payload = toPlainObject(record.result);
-    const payloadCode = asNonEmptyString(payload?.code);
-    const payloadFailureKind = asNonEmptyString(payload?.failureKind);
-
-    return payloadCode === 'TIMEOUT' || payloadFailureKind === 'timeout';
-}
-
 function isRecordStillFresh(record: ToolCallRecord, now: number): boolean {
     return now - record.timestamp.getTime() <= TOOL_CALL_DEDUP_WINDOW_MS;
 }
@@ -267,7 +256,7 @@ function buildDuplicateSuppressedRecord(input: {
         : { result: input.previous.result };
 
     return {
-        id: generateId(),
+        id: input.toolCall.id ?? generateId(),
         toolId: input.fn.id,
         functionId: input.fn.legacyFunctionId ?? input.fn.id,
         functionName: input.toolCall.name,
@@ -305,21 +294,6 @@ function getLatestUserMessage(messages: ChatMessage[]): ChatMessage | null {
     return null;
 }
 
-function toolAcceptsStringArgument(fn: ToolRegistryReadModel, argumentName: string): boolean {
-    const schema = fn.inputSchema as {
-        properties?: Record<string, { type?: string | string[] }>;
-    } | null;
-    const property = schema?.properties?.[argumentName];
-
-    if (!property?.type) {
-        return true;
-    }
-
-    return Array.isArray(property.type)
-        ? property.type.includes('string')
-        : property.type === 'string';
-}
-
 function inferPromptLanguage(text: string): 'fr' | 'en' {
     return /\b(le|la|les|des|une|un|du|de|demain|aujourd'hui|aujourd’hui|meteo|météo|temperature|température|cherche|consulte|internet|temps|quel|quelle|quels|quelles|films?|fran[cç]ais|voir|aller|moment|salle|affiche|actuellement)\b/i.test(text)
         ? 'fr'
@@ -330,57 +304,6 @@ function toPlainObject(value: unknown): Record<string, unknown> | null {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
         ? value as Record<string, unknown>
         : null;
-}
-
-function toObjectArray(value: unknown): Record<string, unknown>[] {
-    return Array.isArray(value)
-        ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
-        : [];
-}
-
-function classifyWebSearchLogicalFailure(result: unknown): ToolExecutionError | null {
-    const payload = toPlainObject(result);
-    const errorPayload = toPlainObject(payload?.error);
-    const message = typeof errorPayload?.message === 'string'
-        ? errorPayload.message
-        : typeof payload?.error === 'string'
-            ? payload.error
-            : null;
-
-    if (!message) {
-        return null;
-    }
-
-    const step = typeof errorPayload?.step === 'string' ? errorPayload.step : undefined;
-    const isQueryTransformationFailure = message.includes('QUERY_TRANSFORMATION_FAILED');
-    const isDeterministicTemplateFailure = /lmstudio api error:\s*400|error rendering prompt with jinja template|no user query found in messages/i.test(message);
-    const retryable = /timeout hidden llm|endpoint hidden llm injoignable|503|tempor/i.test(message) && !isDeterministicTemplateFailure;
-
-    return new ToolExecutionError(message, {
-        code: isQueryTransformationFailure ? 'QUERY_TRANSFORMATION_FAILED' : 'WEB_SEARCH_TOOL_ERROR',
-        subsystem: 'tool_logic',
-        retryable,
-        deterministic: isDeterministicTemplateFailure,
-        failureKind: step,
-        rawError: result,
-    });
-}
-
-function buildBlockingWebSearchFailureResponse(record: ToolCallRecord): AgentLoopResult {
-    const payload = toPlainObject(record.result);
-    const errorMessage = typeof payload?.error === 'string'
-        ? payload.error
-        : typeof toPlainObject(payload?.error)?.message === 'string'
-            ? String(toPlainObject(payload?.error)?.message)
-            : 'web_search_py a échoué avant l’exécution de la recherche.';
-
-    return {
-        finalResponse: `[Erreur outil] ${errorMessage}`,
-        toolCallLog: [record],
-        iterations: 1,
-        finishReason: 'error',
-        traceLog: ['tool.web_search_py.blocking_failure'],
-    };
 }
 
 function toSingleLine(value: string, maxLength = 220): string {
@@ -401,66 +324,6 @@ function asNonEmptyString(value: unknown): string | null {
     return trimmed ? trimmed : null;
 }
 
-function buildWebSearchEmptyResponseFallback(
-    record: ToolCallRecord,
-    history: ChatMessage[]
-): string | null {
-    const result = toPlainObject(record.result);
-    if (!result) {
-        return null;
-    }
-
-    const latestUserMessage = getLatestUserMessage(history);
-    const query = asNonEmptyString(result.query) ?? latestUserMessage?.text.trim() ?? 'votre demande';
-    const normalizedQuery = asNonEmptyString(result.normalized_query);
-    const totalResults = typeof result.total_results === 'number'
-        ? result.total_results
-        : toObjectArray(result.results).length;
-    const trace = toPlainObject(result.trace);
-    const plannedQueries = toObjectArray(trace?.queries);
-    const completedQueries = plannedQueries.filter((item) => item.status === 'completed').length;
-    const results = toObjectArray(result.results);
-    const primaryResult = results[0] ?? toObjectArray(trace?.selected_sources)[0] ?? null;
-    const primaryTitle = asNonEmptyString(primaryResult?.title);
-    const primaryUrl = asNonEmptyString(primaryResult?.url);
-    const primarySnippet = asNonEmptyString(primaryResult?.snippet);
-    const language = inferPromptLanguage(latestUserMessage?.text ?? query);
-
-    if (language === 'fr') {
-        const lines = [
-            `J'ai bien exécuté la recherche web pour "${query}".`,
-            normalizedQuery && normalizedQuery !== query ? `Requête normalisée: ${normalizedQuery}.` : null,
-            plannedQueries.length > 0
-                ? `${plannedQueries.length} requête(s) candidate(s) préparée(s)${completedQueries > 0 ? `, ${completedQueries} terminée(s)` : ''}.`
-                : null,
-            `${totalResults} résultat(s) retenu(s).`,
-            primaryTitle || primaryUrl
-                ? `Source principale: ${primaryTitle ?? 'source web'}${primaryUrl ? ` (${primaryUrl})` : ''}.`
-                : null,
-            primarySnippet ? `Extrait: ${toSingleLine(primarySnippet)}.` : null,
-            `Le modèle local n'a pas produit de synthèse après l'outil, j'affiche donc le résultat vérifiable directement.`,
-        ].filter((line): line is string => Boolean(line));
-
-        return lines.join('\n');
-    }
-
-    const lines = [
-        `I executed the web search for "${query}" successfully.`,
-        normalizedQuery && normalizedQuery !== query ? `Normalized query: ${normalizedQuery}.` : null,
-        plannedQueries.length > 0
-            ? `${plannedQueries.length} candidate query(ies) prepared${completedQueries > 0 ? `, ${completedQueries} completed` : ''}.`
-            : null,
-        `${totalResults} result(s) selected.`,
-        primaryTitle || primaryUrl
-            ? `Primary source: ${primaryTitle ?? 'web source'}${primaryUrl ? ` (${primaryUrl})` : ''}.`
-            : null,
-        primarySnippet ? `Snippet: ${toSingleLine(primarySnippet)}.` : null,
-        `The local model did not produce a post-tool summary, so I am showing the verified result directly.`,
-    ].filter((line): line is string => Boolean(line));
-
-    return lines.join('\n');
-}
-
 function buildPostToolEmptyResponseFallback(
     history: ChatMessage[],
     toolCallLog: ToolCallRecord[]
@@ -468,16 +331,6 @@ function buildPostToolEmptyResponseFallback(
     const latestSuccessfulRecord = [...toolCallLog].reverse().find((record) => record.status === 'success');
     if (!latestSuccessfulRecord) {
         return null;
-    }
-
-    if (latestSuccessfulRecord.functionName === 'web_search_py') {
-        const response = buildWebSearchEmptyResponseFallback(latestSuccessfulRecord, history);
-        if (response) {
-            return {
-                response,
-                traceKey: `llm.empty_response_after_tool_result_fallback.${latestSuccessfulRecord.functionName}`,
-            };
-        }
     }
 
     const latestUserMessage = getLatestUserMessage(history);
@@ -491,53 +344,6 @@ function buildPostToolEmptyResponseFallback(
             ? `L'outil ${latestSuccessfulRecord.functionName} s'est exécuté correctement, mais le modèle local n'a pas produit de synthèse. Résultat direct: ${fallbackText}`
             : `The ${latestSuccessfulRecord.functionName} tool completed successfully, but the local model did not produce a summary. Direct result: ${fallbackText}`,
         traceKey: `llm.empty_response_after_tool_result_fallback.${latestSuccessfulRecord.functionName}`,
-    };
-}
-
-function buildEmptyResponseFallbackToolCall(
-    history: ChatMessage[],
-    functions: ToolRegistryReadModel[]
-): ParsedToolCall | null {
-    if (history.some((message) => message.sender === 'tool_result')) {
-        return null;
-    }
-
-    const latestUserMessage = getLatestUserMessage(history);
-    if (!latestUserMessage) {
-        return null;
-    }
-
-    const query = latestUserMessage.text.trim();
-    const explicitWebIntent = /(internet|web|en ligne|online|search|recherche|consulte|actualité|actualite|news|météo|meteo|weather|température|temperature|forecast|prévision|prevision)/i.test(query);
-    const implicitWeatherIntent = /(quel\s+temps|temps\s+fera|fera(?:[-'\s])?t(?:[-'\s])?il|fera(?:[-'\s])?t(?:[-'\s])?elle|pleuvra|pluie|averses?|orage|orages|neigera|neige|ensoleill[eé]|temp[eé]ratures?\s+max|temp[eé]ratures?\s+min)/i.test(query);
-    const implicitCurrentInfoIntent = /(en\s+ce\s+moment|actuellement|en\s+salle|a(?:\s+l['’])?affiche|sort(?:ent|ie|ies)|quels?\s+films?|films?\s+fran[cç]ais|cin[eé]ma|cin[eé]mas|aller\s+voir|s[eé]ances?|programme)/i.test(query);
-    if (!explicitWebIntent && !implicitWeatherIntent && !implicitCurrentInfoIntent) {
-        return null;
-    }
-
-    const webSearchTool = functions.find((fn) => (
-        fn.isEnabled
-        && fn.name === 'web_search_py'
-        && toolAcceptsStringArgument(fn, 'query')
-    ));
-
-    if (!webSearchTool) {
-        return null;
-    }
-
-    const argumentsPayload: Record<string, unknown> = {
-        query,
-    };
-
-    if (toolAcceptsStringArgument(webSearchTool, 'language')) {
-        argumentsPayload.language = inferPromptLanguage(query);
-    }
-
-    return {
-        name: webSearchTool.name,
-        arguments: argumentsPayload,
-        raw: '<tool_call source="agentloop_empty_response_fallback" />',
-        confidence: 0.2,
     };
 }
 
@@ -557,8 +363,7 @@ function findFunction(name: string, functions: ToolRegistryReadModel[]): ToolReg
 async function executeFunction(
     fn: ToolRegistryReadModel,
     args: Record<string, unknown>,
-    authToken?: string,
-    privateContext?: Record<string, unknown>
+    authToken?: string
 ): Promise<{
     result: unknown;
     durationMs: number;
@@ -585,7 +390,6 @@ async function executeFunction(
                 },
             } satisfies ToolSelection,
             testArgs: args,
-            ...(privateContext ? { privateContext } : {})
         }),
     });
 
@@ -642,14 +446,13 @@ export interface AgentLoopOptions {
     language?: 'fr' | 'en';
     /** Progress callback for UI updates. */
     onEvent?: (event: AgentLoopEvent) => void;
-    /** Hidden execution context injected for a specific tool call. */
+    /** Optional argument override hook for a specific tool call. */
     prepareToolExecution?: (input: {
         fn: ToolRegistryReadModel;
         toolCall: ParsedToolCall;
         iteration: number;
     }) => {
         args?: Record<string, unknown>;
-        privateContext?: Record<string, unknown>;
     };
 }
 
@@ -730,19 +533,12 @@ export async function runAgentLoop(
                     };
                 }
 
-                const fallbackToolCall = buildEmptyResponseFallbackToolCall(history, runtimeFunctions);
-                if (fallbackToolCall) {
-                    traceLog.push(`llm.empty_response_fallback.${fallbackToolCall.name}`);
-                    response.toolCalls = [fallbackToolCall];
-                    response.finishReason = 'tool_calls';
-                } else {
                 return {
                     ...buildEmptyLocalResponseError(adapter),
                     toolCallLog,
                     iterations: iteration,
                     traceLog: [...traceLog, 'llm.empty_response_without_tool_call'],
                 };
-                }
             }
 
             if (!response.toolCalls || response.toolCalls.length === 0) {
@@ -774,7 +570,8 @@ export async function runAgentLoop(
         let duplicateDeterministicSuppressions = 0;
         let executedSandboxCalls = 0;
 
-        for (const tc of response.toolCalls) {
+        for (const rawToolCall of response.toolCalls) {
+            const tc = ensureToolCallId(rawToolCall);
             onEvent?.({ type: 'tool_call_start', iteration, toolCall: tc });
 
             const fn = findFunction(tc.name, runtimeFunctions);
@@ -784,7 +581,7 @@ export async function runAgentLoop(
             if (!fn) {
                 // Unknown function — emit an error tool_result and continue
                 record = {
-                    id: generateId(),
+                    id: tc.id,
                     toolId: undefined,
                     functionId: '',
                     functionName: tc.name,
@@ -827,19 +624,11 @@ export async function runAgentLoop(
                     const { result, durationMs, executionId, runner, exitCode, failureKind, artifacts } = await executeFunction(
                         fn,
                         executionArgs,
-                        authToken,
-                        preparedExecution?.privateContext
+                        authToken
                     );
 
-                    const logicalToolError = fn.name === 'web_search_py'
-                        ? classifyWebSearchLogicalFailure(result)
-                        : null;
-                    if (logicalToolError) {
-                        throw logicalToolError;
-                    }
-
                     record = {
-                        id: generateId(),
+                        id: tc.id,
                         toolId: fn.id,
                         functionId: fn.legacyFunctionId ?? fn.id,
                         functionName: tc.name,
@@ -861,7 +650,7 @@ export async function runAgentLoop(
                         : new ToolExecutionError(err instanceof Error ? err.message : String(err));
 
                     record = {
-                        id: generateId(),
+                        id: tc.id,
                         toolId: fn.id,
                         functionId: fn.legacyFunctionId ?? fn.id,
                         functionName: tc.name,
@@ -885,7 +674,7 @@ export async function runAgentLoop(
 
             toolCallLog.push(record);
             iterationRecords.push(record);
-            onEvent?.({ type: 'tool_call_done', iteration, toolCall: tc, toolResult: record.result });
+            onEvent?.({ type: 'tool_call_done', iteration, toolCall: tc, toolResult: record.result, toolCallRecord: record });
 
             // Append tool_result message to history so the LLM can see the output
             history = [
@@ -900,17 +689,6 @@ export async function runAgentLoop(
                     timestamp: record.timestamp,
                 } as ChatMessage,
             ];
-        }
-
-        const blockingWebSearchFailure = iterationRecords.find((record) => isBlockingWebSearchFailureRecord(record));
-
-        if (blockingWebSearchFailure) {
-            return {
-                ...buildBlockingWebSearchFailureResponse(blockingWebSearchFailure),
-                toolCallLog,
-                iterations: iteration,
-                traceLog: [...traceLog, 'tool.web_search_py.blocking_failure'],
-            };
         }
 
         if (executedSandboxCalls === 0 && duplicateDeterministicSuppressions > 0) {

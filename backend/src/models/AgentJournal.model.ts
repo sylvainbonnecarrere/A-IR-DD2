@@ -27,7 +27,8 @@ import {
     ErrorJournalPayload,
     MediaJournalPayload,
     TaskJournalPayload,
-    SystemJournalPayload
+    SystemJournalPayload,
+    ToolInvocationJournalPayload
 } from '../types/persistence';
 
 // ============================================
@@ -48,7 +49,7 @@ export interface IAgentJournal extends Document {
     
     // Contenu polymorphe
     payload: ChatJournalPayload | ErrorJournalPayload | MediaJournalPayload | 
-             TaskJournalPayload | SystemJournalPayload;
+             TaskJournalPayload | SystemJournalPayload | ToolInvocationJournalPayload;
     
     // Groupement optionnel
     sessionId?: string;
@@ -182,7 +183,7 @@ const AgentJournalSchema = new Schema<IAgentJournal>({
     // Classification
     type: {
         type: String,
-        enum: ['chat', 'error', 'media', 'task', 'system'] as JournalEntryType[],
+        enum: ['chat', 'error', 'media', 'task', 'system', 'tool_invocation'] as JournalEntryType[],
         required: true
     },
     severity: {

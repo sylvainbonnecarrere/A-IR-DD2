@@ -12,9 +12,8 @@ import { runAgentLoop } from '../services/llm/AgentLoop';
 import { useFunctionStore } from '../stores/useFunctionStore';
 import { useDesignStore } from '../stores/useDesignStore';
 import { deriveSelectedToolIds } from '../services/toolSelectionResolver';
-import { executeAgentToolCall, buildWebSearchExecutionArgs } from '../services/agentToolExecution';
-// ⭐ AUTO-SAVE: Import persistence service for chat content
-import { PersistenceService } from '../services/persistenceService';
+import { executeAgentToolCall } from '../services/agentToolExecution';
+import { useAgentJournalPersistence } from './useAgentJournalPersistence';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -45,7 +44,8 @@ interface UseAgentChatReturn {
  * Principe SOLID : Single Responsibility - Ce hook gère UNIQUEMENT la logique de chat
  * Utilisé par V2AgentNode et FullscreenChatModal pour garantir un comportement identique
  * 
- * ⭐ AUTO-SAVE: Chat messages are automatically persisted to backend when authenticated
+ * Les messages runtime restent en Zustand.
+ * La persistance durable passe par le journal partage avec V2AgentNode.
  */
 export const useAgentChat = ({
     nodeId,
@@ -67,53 +67,15 @@ export const useAgentChat = ({
     const allFunctions = useFunctionStore((state) => state.functions);
     const loadFunctions = useFunctionStore((state) => state.loadFunctions);
     const agentInstances = useDesignStore((state) => state.agentInstances);
+    const workflowId = instanceId
+        ? agentInstances.find((inst) => inst.id === instanceId)?.workflowId
+        : undefined;
 
     const [loadingMessage, setLoadingMessage] = useState('');
-
-    /**
-     * ⭐ AUTO-SAVE: Persist chat message to backend immediately
-     * Called after each addNodeMessage for authenticated users
-     */
-    const persistChatMessage = async (message: ChatMessage) => {
-        if (!instanceId || !isAuthenticated || !accessToken) {
-            return; // Skip for guest mode or missing instanceId
-        }
-
-        try {
-            await PersistenceService.addAgentInstanceContent(
-                instanceId,
-                {
-                    type: message.isError ? 'error' : 'chat',
-                    role: message.sender,
-                    message: message.text,
-                    timestamp: new Date(),
-                    metadata: {
-                        messageId: message.id,
-                        hasImage: !!message.image,
-                        hasFile: !!message.filename,
-                        toolCalls: message.toolCalls,
-                        toolCallId: message.toolCallId,
-                        toolName: message.toolName,
-                        toolCallRecord: message.toolCallRecord,
-                        isError: message.isError ?? false,
-                    }
-                },
-                { isAuthenticated, accessToken }
-            );
-            console.log('[useAgentChat] ✅ Message persisted:', message.id);
-        } catch (err) {
-            console.warn('[useAgentChat] ⚠️ Failed to persist message:', err);
-            // Don't block UI - message is in runtime state
-        }
-    };
-
-    /**
-     * Wrapper: Add message to runtime store AND persist to backend
-     */
-    const addAndPersistMessage = async (nodeId: string, message: ChatMessage) => {
-        addNodeMessage(nodeId, message);
-        await persistChatMessage(message);
-    };
+    const { persistJournalEntry, persistToolInvocation, resetToolInvocationDedup } = useAgentJournalPersistence({
+        workflowId,
+        instanceId,
+    });
 
     const parseToolArguments = (rawArguments: string): Record<string, unknown> => {
         try {
@@ -129,9 +91,6 @@ export const useAgentChat = ({
         : [];
     const selectedIdSet = new Set(selectedToolIds);
     const scopedFunctions = allFunctions.filter((fn) => fn.isEnabled && (selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false)));
-    const workflowId = instanceId
-        ? agentInstances.find((inst) => inst.id === instanceId)?.workflowId
-        : undefined;
 
     const extractToolExecutionMetadata = (toolResult: unknown): Pick<ToolCallRecord, 'executionId' | 'runner' | 'exitCode' | 'failureKind' | 'artifacts'> => {
         if (!toolResult || typeof toolResult !== 'object') {
@@ -173,6 +132,7 @@ export const useAgentChat = ({
             return;
         }
 
+        resetToolInvocationDedup();
         setNodeExecuting(nodeId, true);
 
         const userMessage: ChatMessage = {
@@ -198,7 +158,17 @@ export const useAgentChat = ({
             }
         }
 
-        await addAndPersistMessage(nodeId, userMessage);
+        addNodeMessage(nodeId, userMessage);
+        persistJournalEntry('chat', {
+            messageId: userMessage.id,
+            role: 'user',
+            content: trimmedInput,
+            llmProvider: agent.llmProvider,
+            modelUsed: agent.model,
+            ...(userMessage.image ? { imageBase64: userMessage.image } : {}),
+            ...(userMessage.mimeType ? { mimeType: userMessage.mimeType } : {}),
+            ...(userMessage.filename ? { fileName: userMessage.filename } : {}),
+        });
 
         const agentRuntime = resolveAgentRuntimeConfig(agent, llmConfigs, localLLMProfiles);
         const agentConfig = agentRuntime.config;
@@ -211,7 +181,15 @@ export const useAgentChat = ({
                 isError: true,
                 timestamp: new Date()
             };
-            await addAndPersistMessage(nodeId, errorMessage);
+            addNodeMessage(nodeId, errorMessage);
+            persistJournalEntry('error', {
+                messageId: errorMessage.id,
+                errorCode: 'LLM_NOT_CONFIGURED',
+                message: errorMessage.text,
+                source: 'llm_service',
+                retryable: false,
+                attempts: 1,
+            });
             setNodeExecuting(nodeId, false);
             return;
         }
@@ -312,27 +290,18 @@ export const useAgentChat = ({
                     agent.systemPrompt ?? '',
                     {
                         authToken: accessToken ?? undefined,
-                        prepareToolExecution: ({ fn, toolCall }) => {
-                            if (fn.name !== 'web_search_py' || !agent.webSearchParams || !accessToken) {
-                                return { args: toolCall.arguments };
-                            }
-
-                            return {
-                                args: buildWebSearchExecutionArgs(toolCall.arguments, agent),
-                                privateContext: {
-                                    web_search: {
-                                        params: agent.webSearchParams,
-                                        llm: {
-                                            provider: agent.llmProvider,
-                                            model: agent.model,
-                                            localLLMProfileId: agent.localLLMProfileId ?? null,
-                                        },
-                                    },
-                                },
-                            };
-                        },
                         onEvent: (event) => {
                             if (event.type === 'tool_call_start') {
+                                if (event.toolCall?.id) {
+                                    const matchedFunction = enabledFunctions.find((fn) => fn.name === event.toolCall?.name);
+                                    persistToolInvocation({
+                                        toolCallId: event.toolCall.id,
+                                        toolName: event.toolCall.name,
+                                        phase: 'started',
+                                        toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                                        functionId: matchedFunction?._id,
+                                    });
+                                }
                                 setLoadingMessage(`🔧 ${event.toolCall?.name ?? '…'}`);
                             } else if (event.type === 'llm_start') {
                                 setLoadingMessage(t('loading'));
@@ -364,7 +333,15 @@ export const useAgentChat = ({
                             timestamp: record.timestamp,
                         },
                     };
-                    await addAndPersistMessage(nodeId, toolMessage);
+                    addNodeMessage(nodeId, toolMessage);
+                    persistToolInvocation({
+                        toolCallId: record.id,
+                        toolName: record.functionName,
+                        phase: record.status === 'error' ? 'failed' : 'completed',
+                        executionId: record.executionId,
+                        toolId: record.toolId,
+                        functionId: record.functionId,
+                    });
 
                     const toolResultMessage: ChatMessage = {
                         id: generateMessageId('tool-result'),
@@ -375,7 +352,7 @@ export const useAgentChat = ({
                         timestamp: record.timestamp,
                         isError: record.status === 'error',
                     };
-                    await addAndPersistMessage(nodeId, toolResultMessage);
+                    addNodeMessage(nodeId, toolResultMessage);
                 }
 
                 if (loopResult.finalResponse.trim() || loopResult.finishReason === 'error') {
@@ -386,7 +363,16 @@ export const useAgentChat = ({
                         isError: loopResult.finishReason === 'error',
                         timestamp: new Date(),
                     };
-                    await addAndPersistMessage(nodeId, agentMsg);
+                    addNodeMessage(nodeId, agentMsg);
+                    if (loopResult.finalResponse.trim()) {
+                        persistJournalEntry('chat', {
+                            messageId: agentMsg.id,
+                            role: 'agent',
+                            content: loopResult.finalResponse,
+                            llmProvider: agent.llmProvider,
+                            modelUsed: agent.model,
+                        });
+                    }
                 }
 
                 return;
@@ -456,15 +442,42 @@ export const useAgentChat = ({
                     };
 
                     const existingMessages = getNodeMessages(nodeId);
-                    setNodeMessages(nodeId, existingMessages.map(m =>
-                        m.id === agentMessageId ? toolMessage : m
-                    ));
+                    const existingAgentMessage = existingMessages.find(m => m.id === agentMessageId);
+                    if (existingAgentMessage) {
+                        setNodeMessages(nodeId, existingMessages.map(m =>
+                            m.id === agentMessageId ? toolMessage : m
+                        ));
+                    } else {
+                        addNodeMessage(nodeId, toolMessage);
+                    }
+
+                    for (const toolCall of toolCalls) {
+                        const matchedFunction = scopedFunctions.find((fn) => fn.isEnabled && fn.name === toolCall.name);
+                        persistToolInvocation({
+                            toolCallId: toolCall.id,
+                            toolName: toolCall.name,
+                            phase: 'started',
+                            toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                            functionId: matchedFunction?._id,
+                        });
+                    }
                 }
+            }
+
+            if (currentResponse.trim() && !toolCalls.length) {
+                persistJournalEntry('chat', {
+                    messageId: agentMessageId,
+                    role: 'agent',
+                    content: currentResponse,
+                    llmProvider: agent.llmProvider,
+                    modelUsed: agent.model,
+                });
             }
 
             // Execute tools if any
             if (toolCalls.length > 0) {
                 for (const toolCall of toolCalls) {
+                    const matchedFunction = scopedFunctions.find((fn) => fn.isEnabled && fn.name === toolCall.name);
                     const toolTimestamp = new Date();
 
                     try {
@@ -485,6 +498,8 @@ export const useAgentChat = ({
                             isError: toolExecutionError,
                             toolCallRecord: {
                                 id: toolCall.id,
+                                toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                                functionId: matchedFunction?._id,
                                 functionName: toolCall.name,
                                 arguments: execution.executedArguments,
                                 result: toolResult,
@@ -497,7 +512,15 @@ export const useAgentChat = ({
                                 artifacts: execution.artifacts,
                             },
                         };
-                        await addAndPersistMessage(nodeId, toolMessage);
+                        addNodeMessage(nodeId, toolMessage);
+                        persistToolInvocation({
+                            toolCallId: toolCall.id,
+                            toolName: toolCall.name,
+                            phase: toolExecutionError ? 'failed' : 'completed',
+                            executionId: execution.executionId,
+                            toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                            functionId: matchedFunction?._id,
+                        });
 
                         const serializedToolResult = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
                         const toolResultMessage: ChatMessage = {
@@ -511,7 +534,7 @@ export const useAgentChat = ({
                             timestamp: toolTimestamp,
                             isError: toolExecutionError,
                         };
-                        await addAndPersistMessage(nodeId, toolResultMessage);
+                        addNodeMessage(nodeId, toolResultMessage);
                     } catch (error) {
                         const toolErrorText = `Erreur: ${error instanceof Error ? error.message : String(error)}`;
                         const toolMessage: ChatMessage = {
@@ -523,6 +546,8 @@ export const useAgentChat = ({
                             isError: true,
                             toolCallRecord: {
                                 id: toolCall.id,
+                                toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                                functionId: matchedFunction?._id,
                                 functionName: toolCall.name,
                                 arguments: parseToolArguments(toolCall.arguments),
                                 result: { error: toolErrorText },
@@ -530,7 +555,14 @@ export const useAgentChat = ({
                                 timestamp: toolTimestamp,
                             },
                         };
-                        await addAndPersistMessage(nodeId, toolMessage);
+                        addNodeMessage(nodeId, toolMessage);
+                        persistToolInvocation({
+                            toolCallId: toolCall.id,
+                            toolName: toolCall.name,
+                            phase: 'failed',
+                            toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                            functionId: matchedFunction?._id,
+                        });
 
                         const errorMessage: ChatMessage = {
                             id: generateMessageId('tool-error'),
@@ -541,7 +573,7 @@ export const useAgentChat = ({
                             isError: true,
                             timestamp: toolTimestamp,
                         };
-                        await addAndPersistMessage(nodeId, errorMessage);
+                        addNodeMessage(nodeId, errorMessage);
                     }
                 }
 
@@ -550,6 +582,15 @@ export const useAgentChat = ({
                 setNodeMessages(nodeId, existingMessages.map(m =>
                     m.status === 'executing_tool' ? { ...m, status: undefined } : m
                 ));
+
+                persistJournalEntry('chat', {
+                    messageId: agentMessageId,
+                    role: 'agent',
+                    content: currentResponse,
+                    llmProvider: agent.llmProvider,
+                    modelUsed: agent.model,
+                    toolCalls,
+                });
 
                 // If agent has Chat capability, continue generation with tool results
                 if (agent?.capabilities?.includes(LLMCapability.Chat)) {
@@ -631,6 +672,16 @@ export const useAgentChat = ({
                             }
                         }
                     }
+
+                    if (followUpResponse.trim()) {
+                        persistJournalEntry('chat', {
+                            messageId: followUpMessageId,
+                            role: 'agent',
+                            content: followUpResponse,
+                            llmProvider: agent.llmProvider,
+                            modelUsed: agent.model,
+                        });
+                    }
                 }
             }
 
@@ -642,21 +693,18 @@ export const useAgentChat = ({
                 isError: true,
                 timestamp: new Date()
             };
-            // ⭐ AUTO-SAVE: Persist error message
-            await addAndPersistMessage(nodeId, errorMessage);
+            addNodeMessage(nodeId, errorMessage);
+            persistJournalEntry('error', {
+                messageId: errorMessage.id,
+                errorCode: 'AGENT_CHAT_ERROR',
+                message: error instanceof Error ? error.message : String(error),
+                source: 'llm_service',
+                retryable: true,
+                attempts: 1,
+            });
         } finally {
             setNodeExecuting(nodeId, false);
             setLoadingMessage('');
-            
-            // ⭐ AUTO-SAVE: After streaming is complete, persist the final agent response
-            if (instanceId && isAuthenticated && accessToken) {
-                const finalMessages = getNodeMessages(nodeId);
-                // Find the latest agent message that was added during this interaction
-                const latestAgentMessage = [...finalMessages].reverse().find(m => m.sender === 'agent');
-                if (latestAgentMessage && !latestAgentMessage.isError) {
-                    await persistChatMessage(latestAgentMessage);
-                }
-            }
         }
     };
 

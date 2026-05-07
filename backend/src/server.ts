@@ -26,9 +26,7 @@ import workspacesTransitionRoutes from './routes/workspaces.routes';
 import toolsRoutes from './routes/tools.routes';
 import runsRoutes from './routes/runs.routes';
 import mediaRoutes from './routes/media.routes';
-import functionsRoutes from './routes/functions.routes';
 import sandboxRoutes from './routes/sandbox.routes';
-import webSearchHiddenLlmRoutes from './routes/web-search-hidden-llm.routes';
 import { initializeDatabase } from './services/databaseInit';
 
 // SOLID: Valider la configuration au démarrage (fail-fast pattern)
@@ -131,9 +129,7 @@ app.use('/api/runs', runsRoutes);
 app.use('/api/media', mediaRoutes);
 
 // ⭐ Tools V2 — Bibliothèque de fonctions personnalisées (Phil Robot)
-app.use('/api/functions', functionsRoutes);
 app.use('/api/sandbox', sandboxRoutes);
-app.use('/api/web-search/hidden-llm', webSearchHiddenLlmRoutes);
 
 // Routes proxy LMStudio (legacy)
 app.use('/api/lmstudio', lmstudioRoutes);

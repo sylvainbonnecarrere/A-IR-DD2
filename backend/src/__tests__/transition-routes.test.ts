@@ -68,8 +68,9 @@ describe('J8 transition routes', () => {
         await UserToolRun.deleteMany({});
         await UserTool.deleteMany({
             $or: [
+                { name: 'hello_test' },
                 { name: /transition-route-test-/i },
-                { name: 'web_search_py' }
+                { name: /web_(search|fetch)_py/i }
             ]
         });
         await Workspace.deleteMany({ logicalRoot: /transition-route-test-/i });
@@ -175,7 +176,107 @@ describe('J8 transition routes', () => {
         }));
     });
 
-    it('exposes a unified readiness status for web_search_py when platform provisioning is still missing', async () => {
+    it('exposes shared hello_test but hides foreign private custom tools from GET /api/tools', async () => {
+        const requester = await User.create({
+            email: `transition-route-test-shared-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionshared${Date.now()}`
+        });
+
+        const foreignOwner = await User.create({
+            email: `transition-route-test-foreign-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionforeign${Date.now()}`
+        });
+
+        await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'user',
+            workflowId: null,
+            name: 'hello_test',
+            displayName: 'Hello Test Shared',
+            description: 'Shared custom hello test example',
+            runtime: 'typescript',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v2',
+                contentHash: 'hello-test-shared-v2',
+                sourceMode: 'inline',
+                sourceInline: 'export function run(context, args) { return { result: `Ton nom, ${args.user_name}, est maintenant enregistré dans ma mémoire` }; }',
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v2',
+                contentHash: 'hello-test-shared-v2',
+                sourceMode: 'inline',
+                sourceInline: 'export function run(context, args) { return { result: `Ton nom, ${args.user_name}, est maintenant enregistré dans ma mémoire` }; }',
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['shared'],
+            dependencies: { npm: [], python: [] },
+            policy: { networkMode: 'none' },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        await UserTool.create({
+            ownerUserId: foreignOwner._id,
+            workspaceId: null,
+            scopeType: 'user',
+            workflowId: null,
+            name: `transition-route-test-private-${Date.now()}`,
+            displayName: 'Foreign Private Tool',
+            description: 'Should stay private to its owner',
+            runtime: 'typescript',
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: {
+                versionTag: 'v1',
+                contentHash: 'foreign-private-v1',
+                sourceMode: 'inline',
+                sourceInline: 'export function run() { return { ok: true }; }',
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v1',
+                contentHash: 'foreign-private-v1',
+                sourceMode: 'inline',
+                sourceInline: 'export function run() { return { ok: true }; }',
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: [],
+            dependencies: { npm: [], python: [] },
+            policy: { networkMode: 'none' },
+            isReadonly: false,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: requester.id, email: requester.email, role: requester.role });
+
+        const response = await request(app)
+            .get('/api/tools')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body.items.some((item: any) => item.name === 'hello_test')).toBe(true);
+        expect(response.body.items.some((item: any) => String(item.name).startsWith('transition-route-test-private-'))).toBe(false);
+    });
+
+    it('exposes a unified readiness status for web_fetch_py when platform provisioning is still missing', async () => {
         const user = await User.create({
             email: `transition-route-test-web-search-missing-${Date.now()}@test.com`,
             password: 'test-only-password-123',
@@ -187,17 +288,17 @@ describe('J8 transition routes', () => {
             workspaceId: null,
             scopeType: 'native',
             workflowId: null,
-            name: 'web_search_py',
-            displayName: 'Web Search',
-            description: 'Recherche web native',
+            name: 'web_fetch_py',
+            displayName: 'Web Fetch',
+            description: 'Recuperation web native',
             runtime: 'python',
             status: 'ready',
             trustLevel: 'internal',
             currentVersion: {
                 versionTag: 'v1',
-                contentHash: 'web-search-v1-missing',
+                contentHash: 'web-fetch-v1-missing',
                 sourceMode: 'path',
-                sourcePath: 'backend/python/native/web_search_py.py',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
                 sourceInline: null,
                 createdAt: new Date(),
                 buildStatus: 'not_built',
@@ -205,9 +306,9 @@ describe('J8 transition routes', () => {
             },
             versions: [{
                 versionTag: 'v1',
-                contentHash: 'web-search-v1-missing',
+                contentHash: 'web-fetch-v1-missing',
                 sourceMode: 'path',
-                sourcePath: 'backend/python/native/web_search_py.py',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
                 sourceInline: null,
                 createdAt: new Date(),
                 buildStatus: 'not_built',
@@ -215,8 +316,8 @@ describe('J8 transition routes', () => {
             }],
             inputSchema: { type: 'object' },
             outputSchema: { type: 'object' },
-            tags: ['search', 'native'],
-            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            tags: ['fetch', 'native'],
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
             policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
             isReadonly: true,
             isEnabled: true
@@ -231,7 +332,7 @@ describe('J8 transition routes', () => {
 
         expect(response.body.tool).toEqual(expect.objectContaining({
             id: tool.id,
-            name: 'web_search_py',
+            name: 'web_fetch_py',
             readinessStatus: expect.objectContaining({
                 requirement: 'platform_provision',
                 state: 'waiting_for_provisioning',
@@ -243,7 +344,7 @@ describe('J8 transition routes', () => {
         }));
     });
 
-    it('exposes web_search_py readiness from GET /api/tools when platform provisioning is still missing', async () => {
+    it('exposes web_fetch_py readiness from GET /api/tools when platform provisioning is still missing', async () => {
         const user = await User.create({
             email: `transition-route-test-web-search-list-missing-${Date.now()}@test.com`,
             password: 'test-only-password-123',
@@ -255,17 +356,17 @@ describe('J8 transition routes', () => {
             workspaceId: null,
             scopeType: 'native',
             workflowId: null,
-            name: 'web_search_py',
-            displayName: 'Web Search',
-            description: 'Recherche web native',
+            name: 'web_fetch_py',
+            displayName: 'Web Fetch',
+            description: 'Recuperation web native',
             runtime: 'python',
             status: 'ready',
             trustLevel: 'internal',
             currentVersion: {
                 versionTag: 'v-list-missing',
-                contentHash: 'web-search-list-missing',
+                contentHash: 'web-fetch-list-missing',
                 sourceMode: 'path',
-                sourcePath: 'backend/python/native/web_search_py.py',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
                 sourceInline: null,
                 createdAt: new Date(),
                 buildStatus: 'not_built',
@@ -273,9 +374,9 @@ describe('J8 transition routes', () => {
             },
             versions: [{
                 versionTag: 'v-list-missing',
-                contentHash: 'web-search-list-missing',
+                contentHash: 'web-fetch-list-missing',
                 sourceMode: 'path',
-                sourcePath: 'backend/python/native/web_search_py.py',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
                 sourceInline: null,
                 createdAt: new Date(),
                 buildStatus: 'not_built',
@@ -283,8 +384,8 @@ describe('J8 transition routes', () => {
             }],
             inputSchema: { type: 'object' },
             outputSchema: { type: 'object' },
-            tags: ['search', 'native'],
-            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            tags: ['fetch', 'native'],
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
             policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
             isReadonly: true,
             isEnabled: true
@@ -300,7 +401,7 @@ describe('J8 transition routes', () => {
         expect(response.body.items).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: tool.id,
-                name: 'web_search_py',
+                name: 'web_fetch_py',
                 readinessStatus: expect.objectContaining({
                     requirement: 'platform_provision',
                     state: 'waiting_for_provisioning',
@@ -313,7 +414,7 @@ describe('J8 transition routes', () => {
         ]));
     });
 
-    it('exposes a unified readiness status for web_search_py when platform provisioning is complete', async () => {
+    it('exposes a unified readiness status for web_fetch_py when platform provisioning is complete', async () => {
         const user = await User.create({
             email: `transition-route-test-web-search-ready-${Date.now()}@test.com`,
             password: 'test-only-password-123',
@@ -325,17 +426,17 @@ describe('J8 transition routes', () => {
             workspaceId: null,
             scopeType: 'native',
             workflowId: null,
-            name: 'web_search_py',
-            displayName: 'Web Search',
-            description: 'Recherche web native',
+            name: 'web_fetch_py',
+            displayName: 'Web Fetch',
+            description: 'Recuperation web native',
             runtime: 'python',
             status: 'ready',
             trustLevel: 'internal',
             currentVersion: {
                 versionTag: 'v2',
-                contentHash: 'web-search-v2-ready',
+                contentHash: 'web-fetch-v2-ready',
                 sourceMode: 'path',
-                sourcePath: 'backend/python/native/web_search_py.py',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
                 sourceInline: null,
                 createdAt: new Date(),
                 buildStatus: 'built',
@@ -343,9 +444,9 @@ describe('J8 transition routes', () => {
             },
             versions: [{
                 versionTag: 'v2',
-                contentHash: 'web-search-v2-ready',
+                contentHash: 'web-fetch-v2-ready',
                 sourceMode: 'path',
-                sourcePath: 'backend/python/native/web_search_py.py',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
                 sourceInline: null,
                 createdAt: new Date(),
                 buildStatus: 'built',
@@ -353,8 +454,8 @@ describe('J8 transition routes', () => {
             }],
             inputSchema: { type: 'object' },
             outputSchema: { type: 'object' },
-            tags: ['search', 'native'],
-            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            tags: ['fetch', 'native'],
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
             policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
             isReadonly: true,
             isEnabled: true
@@ -369,7 +470,7 @@ describe('J8 transition routes', () => {
 
         expect(response.body.tool).toEqual(expect.objectContaining({
             id: tool.id,
-            name: 'web_search_py',
+            name: 'web_fetch_py',
             readinessStatus: expect.objectContaining({
                 requirement: 'platform_provision',
                 state: 'ready',
@@ -393,17 +494,17 @@ describe('J8 transition routes', () => {
             workspaceId: null,
             scopeType: 'native',
             workflowId: null,
-            name: 'web_search_py',
-            displayName: 'Web Search',
-            description: 'Recherche web native',
+            name: 'web_fetch_py',
+            displayName: 'Web Fetch',
+            description: 'Recuperation web native',
             runtime: 'python',
             status: 'ready',
             trustLevel: 'internal',
             currentVersion: {
                 versionTag: 'v-provision',
-                contentHash: 'web-search-provision',
+                contentHash: 'web-fetch-provision',
                 sourceMode: 'path',
-                sourcePath: 'backend/python/native/web_search_py.py',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
                 sourceInline: null,
                 createdAt: new Date(),
                 buildStatus: 'not_built',
@@ -411,9 +512,9 @@ describe('J8 transition routes', () => {
             },
             versions: [{
                 versionTag: 'v-provision',
-                contentHash: 'web-search-provision',
+                contentHash: 'web-fetch-provision',
                 sourceMode: 'path',
-                sourcePath: 'backend/python/native/web_search_py.py',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
                 sourceInline: null,
                 createdAt: new Date(),
                 buildStatus: 'not_built',
@@ -421,8 +522,8 @@ describe('J8 transition routes', () => {
             }],
             inputSchema: { type: 'object' },
             outputSchema: { type: 'object' },
-            tags: ['search', 'native'],
-            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            tags: ['fetch', 'native'],
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
             policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
             isReadonly: true,
             isEnabled: true
@@ -434,12 +535,12 @@ describe('J8 transition routes', () => {
             'provisionToolVersion'
         ).mockResolvedValue({
             toolId: tool.id,
-            toolName: 'web_search_py',
+            toolName: 'web_fetch_py',
             toolVersionTag: 'v-provision',
             status: 'ready',
             provisionedAt: '2026-03-31T12:00:00.000Z',
-            dependencies: ['duckduckgo-search==6.1.0'],
-            criticalModules: ['duckduckgo_search'],
+            dependencies: ['requests==2.32.3'],
+            criticalModules: ['requests'],
             sitePackagesPath: '/tmp/site-packages',
             reportPath: '/tmp/provision-report.json'
         });
@@ -458,7 +559,7 @@ describe('J8 transition routes', () => {
         provisionSpy.mockRestore();
     });
 
-    it('exposes web_search_py readiness from GET /api/tools when platform provisioning is complete', async () => {
+    it('exposes web_fetch_py readiness from GET /api/tools when platform provisioning is complete', async () => {
         const user = await User.create({
             email: `transition-route-test-web-search-list-ready-${Date.now()}@test.com`,
             password: 'test-only-password-123',
@@ -470,17 +571,17 @@ describe('J8 transition routes', () => {
             workspaceId: null,
             scopeType: 'native',
             workflowId: null,
-            name: 'web_search_py',
-            displayName: 'Web Search',
-            description: 'Recherche web native',
+            name: 'web_fetch_py',
+            displayName: 'Web Fetch',
+            description: 'Recuperation web native',
             runtime: 'python',
             status: 'ready',
             trustLevel: 'internal',
             currentVersion: {
                 versionTag: 'v-list-ready',
-                contentHash: 'web-search-list-ready',
+                contentHash: 'web-fetch-list-ready',
                 sourceMode: 'path',
-                sourcePath: 'backend/python/native/web_search_py.py',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
                 sourceInline: null,
                 createdAt: new Date(),
                 buildStatus: 'built',
@@ -488,9 +589,9 @@ describe('J8 transition routes', () => {
             },
             versions: [{
                 versionTag: 'v-list-ready',
-                contentHash: 'web-search-list-ready',
+                contentHash: 'web-fetch-list-ready',
                 sourceMode: 'path',
-                sourcePath: 'backend/python/native/web_search_py.py',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
                 sourceInline: null,
                 createdAt: new Date(),
                 buildStatus: 'built',
@@ -498,8 +599,8 @@ describe('J8 transition routes', () => {
             }],
             inputSchema: { type: 'object' },
             outputSchema: { type: 'object' },
-            tags: ['search', 'native'],
-            dependencies: { npm: [], python: ['duckduckgo-search==6.1.0'] },
+            tags: ['fetch', 'native'],
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
             policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
             isReadonly: true,
             isEnabled: true
@@ -515,7 +616,7 @@ describe('J8 transition routes', () => {
         expect(response.body.items).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: tool.id,
-                name: 'web_search_py',
+                name: 'web_fetch_py',
                 readinessStatus: expect.objectContaining({
                     requirement: 'platform_provision',
                     state: 'ready',

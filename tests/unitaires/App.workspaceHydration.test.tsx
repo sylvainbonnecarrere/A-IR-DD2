@@ -278,6 +278,8 @@ describe('App workspace hydration orchestration', () => {
     });
 
     it('preserves in-flight runtime chat messages during a resume workspace refresh', async () => {
+        const refreshRuntimeConfigState = jest.fn().mockResolvedValue(undefined);
+
         const payloadWithoutPersistedChat = {
             ...workspacePayload,
             agentInstances: [
@@ -295,7 +297,7 @@ describe('App workspace hydration orchestration', () => {
             localLLMProfiles: [],
             user: { id: 'user-1', email: 'user@example.com' },
             logout: jest.fn(),
-            refreshRuntimeConfigState: jest.fn(),
+            refreshRuntimeConfigState,
             sessionStatus: 'ready',
             error: null
         } as any));
@@ -330,6 +332,7 @@ describe('App workspace hydration orchestration', () => {
         window.dispatchEvent(new Event('focus'));
 
         await waitFor(() => expect(apiClient.get).toHaveBeenCalledTimes(2));
+        expect(refreshRuntimeConfigState).toHaveBeenCalledTimes(1);
 
         expect(mockRuntimeStore.nodeMessages['node-instance-1']).toEqual([
             expect.objectContaining({
@@ -344,5 +347,81 @@ describe('App workspace hydration orchestration', () => {
                 text: '[Erreur LLM] Le modele local a retourne une reponse vide sans appel d\'outil.'
             })
         ]);
+    });
+
+    it('preserves persisted tool block metadata during workspace hydration', async () => {
+        const workspaceWithPersistedToolMessages = {
+            ...workspacePayload,
+            agentInstances: [
+                {
+                    ...workspacePayload.agentInstances[0],
+                    chatMessages: [
+                        {
+                            id: 'persisted-tool-msg',
+                            sender: 'tool',
+                            text: 'Weather Tool({"city":"Paris"}) [exec-1]',
+                            timestamp: '2026-04-29T09:00:00.000Z',
+                            toolCallRecord: {
+                                id: 'call-1',
+                                toolId: 'tool.weather',
+                                functionId: 'legacy-weather',
+                                functionName: 'Weather Tool',
+                                arguments: { city: 'Paris' },
+                                result: { temperature: 21 },
+                                status: 'success',
+                                executionId: 'exec-1',
+                                timestamp: '2026-04-29T09:00:00.000Z'
+                            }
+                        },
+                        {
+                            id: 'persisted-tool-result-msg',
+                            sender: 'tool_result',
+                            text: '[executionId=exec-1] {"temperature":21}',
+                            timestamp: '2026-04-29T09:00:01.000Z',
+                            toolCallId: 'call-1',
+                            toolName: 'Weather Tool'
+                        }
+                    ]
+                }
+            ]
+        };
+
+        mockUseAuth.mockImplementation(() => ({
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState: jest.fn(),
+            sessionStatus: 'ready',
+            error: null
+        } as any));
+
+        (apiClient.get as jest.Mock).mockResolvedValue({ data: workspaceWithPersistedToolMessages });
+
+        render(<App />);
+
+        await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/api/user/workspace'));
+        await waitFor(() => expect(mockRuntimeStore.nodeMessages['node-instance-1']).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: 'persisted-tool-msg',
+                    sender: 'tool',
+                    toolCallRecord: expect.objectContaining({
+                        id: 'call-1',
+                        toolId: 'tool.weather',
+                        functionId: 'legacy-weather',
+                        executionId: 'exec-1'
+                    })
+                }),
+                expect.objectContaining({
+                    id: 'persisted-tool-result-msg',
+                    sender: 'tool_result',
+                    toolCallId: 'call-1',
+                    toolName: 'Weather Tool'
+                })
+            ])
+        ));
     });
 });

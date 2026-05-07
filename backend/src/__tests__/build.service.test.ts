@@ -276,7 +276,7 @@ describe('BuildService', () => {
             inputSchema: {},
             outputSchema: {},
             tags: [],
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: ['requests==2.32.3'], npm: [] },
             policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
             isReadonly: true,
             isEnabled: true
@@ -327,7 +327,7 @@ describe('BuildService', () => {
             inputSchema: {},
             outputSchema: {},
             tags: [],
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: ['requests==2.32.3'], npm: [] },
             policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
             isReadonly: true,
             isEnabled: true
@@ -392,7 +392,7 @@ describe('BuildService', () => {
             inputSchema: {},
             outputSchema: {},
             tags: [],
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: ['requests==2.32.3'], npm: [] },
             policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
             isReadonly: true,
             isEnabled: true
@@ -414,8 +414,8 @@ describe('BuildService', () => {
             toolVersionTag: 'v3',
             status: 'ready',
             provisionedAt: new Date().toISOString(),
-            dependencies: ['duckduckgo-search==6.1.0'],
-            criticalModules: ['duckduckgo_search'],
+            dependencies: ['requests==2.32.3'],
+            criticalModules: ['requests'],
             sitePackagesPath: '/opt/airdd2/backend-python/.provisioned/native-tools/native_versioned_tool_report_recovery/v3/site-packages',
             reportPath
         }, null, 2), 'utf-8');
@@ -443,7 +443,7 @@ describe('BuildService', () => {
             inputSchema: {},
             outputSchema: {},
             codeInline: 'def run(args):\n    return {"ok": True}',
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: ['requests==2.32.3'], npm: [] },
             isEnabled: true,
             isReadonly: true,
             version: 1,
@@ -488,7 +488,7 @@ describe('BuildService', () => {
             inputSchema: {},
             outputSchema: {},
             tags: [],
-            dependencies: { python: ['duckduckgo-search==6.1.0'], npm: [] },
+            dependencies: { python: ['requests==2.32.3'], npm: [] },
             policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
             isReadonly: true,
             isEnabled: true

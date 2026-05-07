@@ -17,7 +17,7 @@ import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
 import { FunctionSelector } from '../FunctionSelector';
 import { useFunctionStore } from '../../stores/useFunctionStore';
-import { buildToolSelectionsFromFunctions, deriveSelectedToolIds } from '../../services/toolSelectionResolver';
+import { deriveSelectedToolIds, normalizeToolSelections } from '../../services/toolSelectionResolver';
 
 type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence' | 'links' | 'tasks' | 'logs' | 'errors';
 
@@ -48,7 +48,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
 
     // J6: Function Inheritance
     const [inheritFromPrototype, setInheritFromPrototype] = useState(true);
-    const [overrideFunctionIds, setOverrideFunctionIds] = useState<string[]>([]);
+    const [overrideToolSelections, setOverrideToolSelections] = useState<ToolSelection[]>([]);
     const availableFunctions = useFunctionStore(state => state.functions);
 
     // Récupérer l'instance et le prototype (peut être null)
@@ -146,10 +146,18 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         // J6: Load function inheritance state
         const fi = instanceConfig?.functionInheritance;
         setInheritFromPrototype(fi?.inheritFromPrototype !== false);
-        setOverrideFunctionIds(deriveSelectedToolIds(fi?.overrideToolSelections, fi?.overrideFunctionIds));
+        setOverrideToolSelections(normalizeToolSelections(fi?.overrideToolSelections, fi?.overrideFunctionIds, availableFunctions));
 
         setHasChanges(false);
     }, [configModalInstanceId, getResolvedInstance, localLLMProfiles]);
+
+    const prototypeToolSelections = useMemo(() => {
+        if (!resolved) {
+            return [];
+        }
+
+        return normalizeToolSelections(resolved.prototype.toolSelections, resolved.prototype.functionIds, availableFunctions);
+    }, [availableFunctions, resolved]);
 
     // Recalculate capabilities when LLM provider or model changes
     // This ensures buttons show/hide correctly when user changes LLM in the modal
@@ -209,12 +217,12 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             // J6: Function inheritance
             functionInheritance: {
                 inheritFromPrototype,
-                overrideFunctionIds: inheritFromPrototype ? [] : overrideFunctionIds,
-                overrideToolSelections: inheritFromPrototype ? [] : buildToolSelectionsFromFunctions(overrideFunctionIds, availableFunctions),
+                overrideFunctionIds: inheritFromPrototype ? [] : deriveSelectedToolIds(overrideToolSelections),
+                overrideToolSelections: inheritFromPrototype ? [] : normalizeToolSelections(overrideToolSelections, undefined, availableFunctions),
             },
             toolSelections: inheritFromPrototype
-                ? (prototype.toolSelections || buildToolSelectionsFromFunctions(prototype.functionIds || [], availableFunctions))
-                : buildToolSelectionsFromFunctions(overrideFunctionIds, availableFunctions),
+                ? prototypeToolSelections
+                : normalizeToolSelections(overrideToolSelections, undefined, availableFunctions),
             // Preserve runtime data (logs, errors, tasks, links)
             logs: instance.configuration_json?.logs || [],
             errors: instance.configuration_json?.errors || [],
@@ -339,7 +347,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                     <TabButton
                         active={activeTab === 'fonctions'}
                         onClick={() => setActiveTab('fonctions')}
-                        badge={inheritFromPrototype ? (prototype.functionIds?.length || undefined) : (overrideFunctionIds.length || undefined)}
+                        badge={inheritFromPrototype ? (prototypeToolSelections.length || undefined) : (overrideToolSelections.length || undefined)}
                     >
                         {t('agentConfig_tab_functions')}
                     </TabButton>
@@ -414,10 +422,10 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                     {activeTab === 'fonctions' && (
                         <FunctionsTab
                             inheritFromPrototype={inheritFromPrototype}
-                            overrideFunctionIds={overrideFunctionIds}
-                            prototypeFunctionIds={prototype.functionIds || []}
+                            overrideToolSelections={overrideToolSelections}
+                            prototypeToolSelections={prototypeToolSelections}
                             onInheritChange={(val) => { setInheritFromPrototype(val); setHasChanges(true); }}
-                            onOverrideChange={(ids) => { setOverrideFunctionIds(ids); setHasChanges(true); }}
+                            onOverrideChange={(toolSelections) => { setOverrideToolSelections(toolSelections); setHasChanges(true); }}
                             t={t}
                         />
                     )}
@@ -1279,12 +1287,12 @@ const HistoryTab: React.FC<{
 // Functions Tab Component
 const FunctionsTab: React.FC<{
     inheritFromPrototype: boolean;
-    overrideFunctionIds: string[];
-    prototypeFunctionIds: string[];
+    overrideToolSelections: ToolSelection[];
+    prototypeToolSelections: ToolSelection[];
     onInheritChange: (val: boolean) => void;
-    onOverrideChange: (ids: string[]) => void;
+    onOverrideChange: (toolSelections: ToolSelection[]) => void;
     t: (key: string) => string;
-}> = ({ inheritFromPrototype, overrideFunctionIds, prototypeFunctionIds, onInheritChange, onOverrideChange }) => {
+}> = ({ inheritFromPrototype, overrideToolSelections, prototypeToolSelections, onInheritChange, onOverrideChange }) => {
     return (
         <div className="space-y-4">
             {/* Toggle héritage */}
@@ -1296,17 +1304,16 @@ const FunctionsTab: React.FC<{
                 />
                 <p className="mt-2 text-xs text-gray-400">
                     {inheritFromPrototype
-                        ? `Les fonctions définies sur le prototype sont utilisées automatiquement (${prototypeFunctionIds.length} fonction(s)).`
+                        ? `Les fonctions définies sur le prototype sont utilisées automatiquement (${prototypeToolSelections.length} fonction(s)).`
                         : 'Personnalisez les fonctions pour cette instance en ignorant le prototype.'}
                 </p>
             </div>
 
             {/* Sélecteur ou affichage hérité */}
             {inheritFromPrototype ? (
-                prototypeFunctionIds.length > 0 ? (
+                prototypeToolSelections.length > 0 ? (
                     <FunctionSelector
-                        selectedIds={prototypeFunctionIds}
-                        onChange={() => {}}
+                        selectedToolSelections={prototypeToolSelections}
                         readOnly
                     />
                 ) : (
@@ -1317,8 +1324,8 @@ const FunctionsTab: React.FC<{
                 )
             ) : (
                 <FunctionSelector
-                    selectedIds={overrideFunctionIds}
-                    onChange={onOverrideChange}
+                    selectedToolSelections={overrideToolSelections}
+                    onChangeToolSelections={onOverrideChange}
                 />
             )}
         </div>

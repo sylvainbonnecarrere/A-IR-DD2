@@ -34,6 +34,7 @@ import { WorkflowSwitchOverlay } from './components/WorkflowSwitchOverlay';
 import { HyperspaceReveal } from './components/HyperspaceReveal';
 // ⭐ AUTO-SAVE: Import PersistenceService for immediate instance creation
 import { PersistenceService } from './services/persistenceService';
+import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from './services/persistedChatMessages';
 // ⭐ V2: Import apiClient for workflow switch orchestration
 import apiClient from './utils/apiClient';
 // ⭐ FIX QA: Import useJournalQueue for image persistence
@@ -178,59 +179,6 @@ const mapInstanceToV2Node = (instance: any, workflowId: string | undefined, prot
       isMaximized: hydratedInstance.isMaximized
     }
   };
-};
-
-const mapChatMessages = (messages: any[] = []): ChatMessage[] => messages.map((message: any, index: number) => ({
-  id: message.id || `chat-${index}-${message.timestamp || Date.now()}`,
-  sender: message.sender === 'user'
-    ? 'user'
-    : message.sender === 'tool'
-      ? 'tool'
-      : message.sender === 'tool_result'
-        ? 'tool_result'
-        : 'agent',
-  text: message.text || '',
-  timestamp: new Date(message.timestamp || Date.now()),
-  image: message.image,
-  mimeType: message.mimeType,
-  filename: message.fileName || message.filename,
-  toolCalls: message.toolCalls
-}));
-
-const buildMessageIdentity = (message: ChatMessage) => [
-  message.id || '',
-  message.sender,
-  message.text,
-  message.timestamp instanceof Date ? message.timestamp.toISOString() : new Date(message.timestamp || Date.now()).toISOString(),
-  message.toolCallId || '',
-  message.toolName || ''
-].join('::');
-
-const mergeRuntimeMessages = (persistedMessages: ChatMessage[], currentMessages: ChatMessage[]): ChatMessage[] => {
-  if (persistedMessages.length === 0) {
-    return currentMessages;
-  }
-
-  if (currentMessages.length === 0) {
-    return persistedMessages;
-  }
-
-  const merged = [...persistedMessages];
-  const seen = new Set(persistedMessages.map(buildMessageIdentity));
-
-  for (const message of currentMessages) {
-    const identity = buildMessageIdentity(message);
-    if (!seen.has(identity)) {
-      seen.add(identity);
-      merged.push(message);
-    }
-  }
-
-  return merged.sort((left, right) => {
-    const leftTime = left.timestamp instanceof Date ? left.timestamp.getTime() : new Date(left.timestamp).getTime();
-    const rightTime = right.timestamp instanceof Date ? right.timestamp.getTime() : new Date(right.timestamp).getTime();
-    return leftTime - rightTime;
-  });
 };
 
 /**
@@ -421,9 +369,9 @@ export function AppContent() {
         continue;
       }
       const nodeId = `node-${instanceId}`;
-      const persistedMessages = mapChatMessages(instance.chatMessages);
+      const persistedMessages = mapPersistedChatMessages(instance.chatMessages);
       const nextMessages = options?.preserveRuntimeMessages
-        ? mergeRuntimeMessages(persistedMessages, getNodeMessages(nodeId))
+        ? mergePersistedAndRuntimeMessages(persistedMessages, getNodeMessages(nodeId))
         : persistedMessages;
       setNodeMessages(nodeId, nextMessages);
     }
@@ -559,10 +507,19 @@ export function AppContent() {
       }
 
       lastResumeWorkspaceRefreshAtRef.current = now;
-      void reloadWorkspaceSnapshot({
-        reason,
-        mode: 'resume',
-      });
+
+      void (async () => {
+        try {
+          await refreshRuntimeConfigState();
+        } catch (err) {
+          console.warn('[App] Runtime config refresh failed during resume:', err);
+        }
+
+        await reloadWorkspaceSnapshot({
+          reason,
+          mode: 'resume',
+        });
+      })();
     };
 
     const handleFocus = () => requestResumeWorkspaceRefresh('window-focus');
@@ -585,7 +542,7 @@ export function AppContent() {
       window.removeEventListener('pageshow', handlePageShow);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [reloadWorkspaceSnapshot, sessionReadyForWorkspaceHydration, user?.id]);
+  }, [refreshRuntimeConfigState, reloadWorkspaceSnapshot, sessionReadyForWorkspaceHydration, user?.id]);
 
   /**
    * ⭐ V2 SWITCH WORKFLOW: Fonction unifiée de réhydratation complète

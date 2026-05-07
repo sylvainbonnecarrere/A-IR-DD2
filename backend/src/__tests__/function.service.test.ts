@@ -113,4 +113,61 @@ describe('FunctionService workspace path migration', () => {
         expect(nativeFunction?.codePathRoot).toBe('native_repo');
         expect(nativeFunction?.resolvedCodePath).toBe('backend/python/native/native_repo_tool.py');
     });
+
+    it('exposes shared hello_test globally but keeps foreign custom functions private', async () => {
+        const requester = await User.create({
+            email: `function-service-requester-${Date.now()}@test.com`,
+            password: 'hashedpassword12345',
+            username: `functionservicerequester${Date.now()}`
+        });
+
+        const foreignOwner = await User.create({
+            email: `function-service-foreign-${Date.now()}@test.com`,
+            password: 'hashedpassword12345',
+            username: `functionserviceforeign${Date.now()}`
+        });
+
+        await UserFunction.create({
+            name: 'hello_test',
+            description: 'Shared hello test example',
+            language: 'typescript',
+            origin: 'custom',
+            userId: null,
+            workflowId: null,
+            inputSchema: {},
+            outputSchema: {},
+            codeInline: 'export function run(context, args) { return { result: `Ton nom, ${args.user_name}, est maintenant enregistré dans ma mémoire` }; }',
+            dependencies: { python: [], npm: [] },
+            isEnabled: true,
+            isReadonly: true,
+            version: 2,
+            tags: ['shared']
+        });
+
+        await UserFunction.create({
+            name: `foreign_private_${Date.now()}`,
+            description: 'Foreign private custom function',
+            language: 'typescript',
+            origin: 'custom',
+            userId: foreignOwner._id,
+            workflowId: null,
+            inputSchema: {},
+            outputSchema: {},
+            codeInline: 'export function run() { return { ok: true }; }',
+            dependencies: { python: [], npm: [] },
+            isEnabled: true,
+            isReadonly: false,
+            version: 1,
+            tags: []
+        });
+
+        const functions = await functionService.listFunctions(requester.id);
+
+        expect(functions.find((fn) => fn.name === 'hello_test')).toEqual(expect.objectContaining({
+            userId: null,
+            isReadonly: true,
+            origin: 'custom'
+        }));
+        expect(functions.some((fn) => fn.name.startsWith('foreign_private_'))).toBe(false);
+    });
 });
