@@ -59,12 +59,15 @@ A-IR-DD2 lets you build complex AI workflows through a **visual node-based edito
 
 ## 🚀 Quick start
 
-> **Prerequisites:** Node.js 20+, MongoDB 6+ (or Docker), Python 3.11+
+> **Prerequisites:** Node.js 24.15.x, MongoDB 6+ (or Docker), Python 3.11+
 
 ```bash
 # 1. Clone
 git clone https://github.com/sylvainbonnecarrere/A-IR-DD2.git
 cd A-IR-DD2
+
+# Runtime pin
+# .nvmrc and .node-version target Node 24.15.0
 
 # 2. Install dependencies
 npm install

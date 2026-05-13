@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Backend service for executing Python tools for the LLM Agent Workflow Orchestrator.",
   "main": "dist/server.js",
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
   "scripts": {
     "start": "node dist/server.js",
     "build": "tsc",
@@ -18,10 +21,9 @@
     "runtime:ci": "npm run runtime:rebuild && npm run runtime:verify:provisioning",
     "runtime:scan": "node scripts/runtime/scan-runtime.cjs --fail-on-severity=high",
     "runtime:maintain": "node scripts/runtime/maintain-runtime.cjs --fail-on-severity=high",
-    "migrate:up": "node --env-file=.env --import tsx src/migrations/004_tools_v2_function_registry.ts up",
-    "migrate:down": "node --env-file=.env --import tsx src/migrations/004_tools_v2_function_registry.ts down",
-    "seed:functions": "node --env-file=.env --import tsx src/seeds/nativeFunctions.seed.ts",
-    "setup:tools-v2": "npm run migrate:up && npm run seed:functions && echo 'Tools V2 setup terminé'"
+    "migrate:user-functions:eol": "node --env-file=.env --import tsx src/migrations/005_user_functions_eol.ts up",
+    "seed:tools": "node --env-file=.env --import tsx src/scripts/setupToolsV2.ts --seed-only",
+    "setup:tools-v2": "node --env-file=.env --import tsx src/scripts/setupToolsV2.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1045.0",

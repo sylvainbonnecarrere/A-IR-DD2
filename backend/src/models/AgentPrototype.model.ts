@@ -46,8 +46,8 @@ export interface IAgentPrototype extends Document {
     capabilities: string[];
     historyConfig?: object;
     webSearchParams?: object;
-    // ⭐ Tools V2: Références vers user_functions (rétrocompat : legacyTools conservé)
-    tools?: mongoose.Types.ObjectId[];     // Références vers user_functions._id
+    // ⭐ Tools V2: Références vers user_tools (rétrocompat : legacyTools conservé)
+    tools?: mongoose.Types.ObjectId[];     // Références vers user_tools._id
     toolSelections?: IToolSelection[];     // Références versionnées vers user_tools
     legacyTools?: object[];               // Ancien format inline (migration rétrocompat)
     outputConfig?: object;
@@ -128,10 +128,10 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
     }],
     historyConfig: Schema.Types.Mixed,
     webSearchParams: Schema.Types.Mixed,
-    // ⭐ Tools V2: tableau de références ObjectId vers user_functions
+    // ⭐ Tools V2: tableau de références ObjectId vers user_tools
     tools: [{
         type: Schema.Types.ObjectId,
-        ref: 'UserFunction'
+        ref: 'UserTool'
     }],
     toolSelections: [ToolSelectionSchema],
     // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)

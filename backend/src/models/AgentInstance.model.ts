@@ -135,8 +135,8 @@ export interface IAgentInstance extends Document {
     llmModel: string;
     capabilities: string[];
     historyConfig?: object;
-    // ⭐ Tools V2: références vers user_functions + héritage prototype
-    tools?: mongoose.Types.ObjectId[];   // Références vers user_functions._id
+    // ⭐ Tools V2: références vers user_tools + héritage prototype
+    tools?: mongoose.Types.ObjectId[];   // Références vers user_tools._id
     toolSelections?: IToolSelection[];   // Références versionnées effectives pour cette instance
     legacyTools?: object[];              // Ancien format inline (migration rétrocompat)
     functionInheritance?: {
@@ -236,10 +236,10 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         type: String
     }],
     historyConfig: Schema.Types.Mixed,
-    // ⭐ Tools V2: tableau de références ObjectId vers user_functions
+    // ⭐ Tools V2: tableau de références ObjectId vers user_tools
     tools: [{
         type: Schema.Types.ObjectId,
-        ref: 'UserFunction'
+        ref: 'UserTool'
     }],
     toolSelections: [{
         toolId: { type: String, required: true, trim: true },

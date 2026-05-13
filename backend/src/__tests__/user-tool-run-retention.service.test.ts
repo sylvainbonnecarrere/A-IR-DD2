@@ -3,7 +3,6 @@ import os from 'os';
 import path from 'path';
 import mongoose from 'mongoose';
 import { User } from '../models/User.model';
-import { UserFunction } from '../models/UserFunction.model';
 import { UserTool } from '../models/UserTool.model';
 import { Workspace } from '../models/Workspace.model';
 import { UserToolRun } from '../models/UserToolRun.model';
@@ -17,7 +16,6 @@ describe('UserToolRunRetentionService', () => {
         await UserToolRun.deleteMany({});
         await UserTool.deleteMany({});
         await Workspace.deleteMany({});
-        await UserFunction.deleteMany({ name: /retention-test-/i });
         await User.deleteMany({ email: /retention-test-/i });
         if (tempRoot) {
             await fs.rm(tempRoot, { recursive: true, force: true });
@@ -39,30 +37,15 @@ describe('UserToolRunRetentionService', () => {
         });
 
         const workflowId = new mongoose.Types.ObjectId();
-        const fn = await UserFunction.create({
-            userId: user._id,
-            workflowId,
-            name: `retention-test-${Date.now()}`,
-            description: 'Retention cleanup test',
-            language: 'typescript',
-            origin: 'custom',
-            tags: ['test'],
-            inputSchema: { type: 'object' },
-            outputSchema: { type: 'object' },
-            codeInline: 'function run() { return { ok: true }; }',
-            isEnabled: true,
-            isReadonly: false,
-            version: 1
-        });
-
-        await UserTool.create({
-            _id: fn._id,
+        const sourceInline = 'function run() { return { ok: true }; }';
+        const fn = await UserTool.create({
+            _id: new mongoose.Types.ObjectId(),
             ownerUserId: user._id,
             workspaceId: null,
             scopeType: 'user',
             workflowId,
-            name: fn.name,
-            description: fn.description,
+            name: `retention-test-${Date.now()}`,
+            description: 'Retention cleanup test',
             runtime: 'typescript',
             status: 'ready',
             trustLevel: 'user_private',
@@ -71,7 +54,7 @@ describe('UserToolRunRetentionService', () => {
                 contentHash: 'hash-retention-test',
                 sourceMode: 'inline',
                 sourcePath: null,
-                sourceInline: fn.codeInline,
+                sourceInline,
                 entrypoint: null,
                 createdAt: new Date(),
                 createdBy: user._id,
@@ -83,7 +66,7 @@ describe('UserToolRunRetentionService', () => {
                 contentHash: 'hash-retention-test',
                 sourceMode: 'inline',
                 sourcePath: null,
-                sourceInline: fn.codeInline,
+                sourceInline,
                 entrypoint: null,
                 createdAt: new Date(),
                 createdBy: user._id,
