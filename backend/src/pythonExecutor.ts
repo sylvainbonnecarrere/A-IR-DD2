@@ -1,21 +1,45 @@
 import mongoose from 'mongoose';
-import { UserFunction, IUserFunction } from './models/UserFunction.model';
-import { syncUserToolMirrorFromLegacyFunction } from './services/userToolMirror.service';
-import { ExecutionOrchestrator } from './services/runtime/ExecutionOrchestrator';
-import { buildGlobalLegacyFunctionClauses, buildOwnedLegacyFunctionClause } from './utils/sharedExampleAccess';
+import { ExecutionOrchestrator, type ExecutionOrchestratorRequest } from './services/runtime/ExecutionOrchestrator';
+import { UserToolQueryService, type ToolTransitionReadModel } from './services/userToolQuery.service';
 
 const executionOrchestrator = new ExecutionOrchestrator();
+const userToolQueryService = new UserToolQueryService();
+
+function parseLegacyVersion(versionTag?: string | null): number {
+    if (!versionTag) {
+        return 1;
+    }
+
+    const match = versionTag.match(/(\d+)/);
+    return match ? Number.parseInt(match[1], 10) : 1;
+}
+
+function mapToolToExecutionFunction(tool: ToolTransitionReadModel): ExecutionOrchestratorRequest['fn'] {
+    return {
+        _id: tool.id,
+        name: tool.name,
+        language: tool.runtime,
+        origin: tool.origin,
+        codeInline: tool.currentVersion?.sourceInline ?? null,
+        codePath: tool.currentVersion?.sourcePath ?? null,
+        workflowId: tool.workflowId ?? null,
+        dependencies: tool.dependencies,
+        version: parseLegacyVersion(tool.currentVersion?.versionTag),
+        toolVersionTag: tool.currentVersion?.versionTag,
+        toolContentHash: tool.currentVersion?.contentHash,
+        policySnapshot: tool.policy
+    };
+}
 
 /**
- * J7.4 — Execute a UserFunction (Tools V2) identified by its MongoDB _id.
+ * J7.4 — Execute a legacy function identifier through the canonical Tools V2 catalog.
  *
  * Flow:
- *  1. Load IUserFunction from DB (ownership: native OR belongs to userId)
+ *  1. Load the canonical tool from DB (ownership: native/shared OR belongs to userId)
  *  2. Validate enabled status
- *  3. Keep the legacy user_functions -> user_tools mirror convergent during transition
- *  4. Delegate execution to the sandbox orchestrator and return its output
+ *  3. Adapt it to the runtime execution contract and delegate to the sandbox orchestrator
  *
- * @param fnId    ObjectId string of the UserFunction document
+ * @param fnId    ObjectId string of the legacy function/tool identifier
  * @param args    Key/value map of function arguments
  * @param userId  Authenticated user id (for ownership gate)
  * @param agentId Optional agent id for context (audit / logging)
@@ -26,29 +50,21 @@ export const executeFunctionById = async (
     userId: string,
     agentId?: string
 ): Promise<object> => {
-    // --- 1. Load from DB with ownership gate ---
+    // --- 1. Load from canonical catalog with ownership gate ---
     if (!mongoose.Types.ObjectId.isValid(fnId)) {
         throw new Error(`Invalid function id: ${fnId}`);
     }
 
-    const fn = await UserFunction.findOne({
-        _id: new mongoose.Types.ObjectId(fnId),
-        $or: [
-            ...buildGlobalLegacyFunctionClauses(),
-            buildOwnedLegacyFunctionClause(userId)
-        ]
-    }).lean<IUserFunction>();
+    const tool = await userToolQueryService.getToolById(fnId, userId);
 
-    if (!fn) {
+    if (!tool) {
         throw new Error(`Function '${fnId}' not found or access denied for user '${userId}'.`);
     }
-    if (!fn.isEnabled) {
-        throw new Error(`Function '${fn.name}' is disabled.`);
+    if (!tool.isEnabled) {
+        throw new Error(`Function '${tool.name}' is disabled.`);
     }
 
-    await syncUserToolMirrorFromLegacyFunction(fn).catch((error) => {
-        console.warn('[pythonExecutor] user_tools mirror sync warning:', error instanceof Error ? error.message : String(error));
-    });
+    const fn = mapToolToExecutionFunction(tool);
 
     const result = await executionOrchestrator.execute({
         fn,

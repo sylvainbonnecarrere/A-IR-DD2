@@ -1,11 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { buildPythonNativeWrapper } from '../services/runtime/runtimeWrappers';
-
-const execFileAsync = promisify(execFile);
 
 function resolveWorkspaceRoot(): string {
     return path.resolve(__dirname, '../../../');
@@ -15,6 +12,76 @@ function resolvePythonExecutable(workspaceRoot: string): string {
     return process.platform === 'win32'
         ? path.join(workspaceRoot, '.venv', 'Scripts', 'python.exe')
         : path.join(workspaceRoot, '.venv', 'bin', 'python');
+}
+
+async function runPythonWrapper(
+    pythonExecutable: string,
+    wrapper: string,
+    workspaceRoot: string,
+    stdinPayload: string,
+): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+        const child = spawn(pythonExecutable, ['-c', wrapper], {
+            cwd: workspaceRoot,
+            env: {
+                ...process.env,
+                PYTHONIOENCODING: 'utf-8',
+                SANDBOX_WORKSPACE_DIR: workspaceRoot,
+            },
+            stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
+        });
+
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+        const timeout = setTimeout(() => {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            child.kill();
+            reject(new Error('Python native wrapper test timed out'));
+        }, 30_000);
+
+        child.stdout.on('data', (chunk: Buffer | string) => {
+            stdout += chunk.toString();
+        });
+
+        child.stderr.on('data', (chunk: Buffer | string) => {
+            stderr += chunk.toString();
+        });
+
+        child.on('error', (error) => {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            clearTimeout(timeout);
+            reject(error);
+        });
+
+        child.on('close', (exitCode) => {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            clearTimeout(timeout);
+
+            if ((exitCode ?? 1) !== 0) {
+                reject(new Error(`Python wrapper exited with code ${exitCode}: ${stderr}`));
+                return;
+            }
+
+            resolve({ stdout, stderr });
+        });
+
+        child.stdin.write(stdinPayload);
+        child.stdin.end();
+    });
 }
 
 describe('buildPythonNativeWrapper', () => {
@@ -48,20 +115,16 @@ describe('buildPythonNativeWrapper', () => {
                 privateContext: {}
             });
 
-            const { stdout, stderr } = await execFileAsync(pythonExecutable, ['-c', wrapper], {
-                cwd: workspaceRoot,
-                timeout: 30000,
-                input: stdinPayload,
-                env: {
-                    ...process.env,
-                    PYTHONIOENCODING: 'utf-8',
-                    SANDBOX_WORKSPACE_DIR: workspaceRoot,
-                },
-            } as any);
+            const { stdout, stderr } = await runPythonWrapper(
+                pythonExecutable,
+                wrapper,
+                workspaceRoot,
+                stdinPayload,
+            );
 
-            expect(stderr.toString()).toBe('');
+            expect(stderr).toBe('');
 
-            const payload = JSON.parse(stdout.toString().trim()) as {
+            const payload = JSON.parse(stdout.trim()) as {
                 success: boolean;
                 output: { echoed: string };
                 stdout: string;

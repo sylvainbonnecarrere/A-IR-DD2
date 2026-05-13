@@ -188,8 +188,8 @@ class ToolRepository {
 
     async runInSandbox(functionId: string | undefined, testArgs: Record<string, unknown>, toolSelection?: ToolSelection) {
         return apiClient.post<SandboxRunResult>('/api/sandbox/run', {
-            ...(functionId ? { functionId } : {}),
             ...(toolSelection ? { toolSelection } : {}),
+            ...(!toolSelection && functionId ? { functionId } : {}),
             testArgs,
         });
     }

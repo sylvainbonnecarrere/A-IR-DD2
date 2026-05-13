@@ -11,7 +11,7 @@ describe('AgentLoop canonical tool registry convergence', () => {
         jest.restoreAllMocks();
     });
 
-    it('executes sandbox runs with canonical toolId and legacy functionId compatibility payload', async () => {
+    it('executes sandbox runs with canonical toolSelection payload only', async () => {
         const adapterResponses: LLMResponse[] = [
             {
                 content: 'Calling tool',
@@ -186,7 +186,6 @@ describe('AgentLoop canonical tool registry convergence', () => {
 
         const [, requestInit] = (global.fetch as jest.Mock).mock.calls[0];
         expect(JSON.parse(String(requestInit?.body))).toEqual(expect.objectContaining({
-            functionId: 'fn-web',
             testArgs: { query: 'meteo paris demain' },
             toolSelection: {
                 toolId: 'tool-web',
@@ -197,6 +196,7 @@ describe('AgentLoop canonical tool registry convergence', () => {
                 }
             }
         }));
+        expect(JSON.parse(String(requestInit?.body))).not.toHaveProperty('functionId');
         expect(JSON.parse(String(requestInit?.body))).not.toHaveProperty('privateContext');
     });
 

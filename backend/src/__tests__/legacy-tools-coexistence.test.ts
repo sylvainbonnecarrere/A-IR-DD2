@@ -237,6 +237,83 @@ describe('Legacy functions and target tools coexistence', () => {
         ]);
     });
 
+    it('keeps /api/tools writes out of user_functions while preserving /api/functions read compatibility', async () => {
+        const user = await User.create({
+            email: `coexistence-function-canonical-projection-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `coexistenceprojection${Date.now()}`
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const createResponse = await request(app)
+            .post('/api/tools')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                name: `coexistence_function_projection_${Date.now()}`,
+                description: 'Canonical tools write path must not create a legacy user_functions document.',
+                language: 'typescript',
+                codeInline: 'export function run() { return { ok: true, source: "canonical" }; }',
+                tags: ['coexistence', 'projection']
+            })
+            .expect(201);
+
+        const toolId = createResponse.body.tool.id;
+
+        expect(await UserTool.findById(toolId).lean()).toEqual(expect.objectContaining({
+            _id: expect.anything(),
+            name: createResponse.body.tool.name,
+            scopeType: 'user'
+        }));
+        expect(await UserFunction.findById(toolId).lean()).toBeNull();
+
+        const legacyDetailAfterCreate = await request(app)
+            .get(`/api/functions/${toolId}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(legacyDetailAfterCreate.body).toEqual(expect.objectContaining({
+            _id: toolId,
+            name: createResponse.body.tool.name,
+            description: 'Canonical tools write path must not create a legacy user_functions document.'
+        }));
+
+        await request(app)
+            .put(`/api/tools/${toolId}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                description: 'Updated through canonical tools write path without legacy persistence.',
+                codeInline: 'export function run() { return { ok: true, source: "updated" }; }'
+            })
+            .expect(200);
+
+        expect(await UserFunction.findById(toolId).lean()).toBeNull();
+
+        const legacyDetailAfterUpdate = await request(app)
+            .get(`/api/functions/${toolId}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(legacyDetailAfterUpdate.body).toEqual(expect.objectContaining({
+            _id: toolId,
+            description: 'Updated through canonical tools write path without legacy persistence.'
+        }));
+
+        await request(app)
+            .patch(`/api/tools/${toolId}/toggle`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({ allowBashPy: false })
+            .expect(200);
+
+        expect(await UserFunction.findById(toolId).lean()).toBeNull();
+
+        await request(app)
+            .delete(`/api/tools/${toolId}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(204);
+
+        expect(await UserFunction.findById(toolId).lean()).toBeNull();
+    });
+
     it('rejects legacy write routes and points clients to canonical command surfaces', async () => {
         const user = await User.create({
             email: `coexistence-function-canonical-${Date.now()}@test.com`,

@@ -1,8 +1,24 @@
-import { FunctionService, type FunctionReadModel } from './function.service';
+import { createHash } from 'crypto';
+import mongoose from 'mongoose';
+import {
+    UserTool,
+    type IUserTool,
+    type IUserToolDependencies,
+    type IUserToolPolicy,
+    type IUserToolVersion,
+} from '../models/UserTool.model';
+import { buildGlobalToolClauses, buildOwnedToolClause } from '../utils/sharedExampleAccess';
 import { ToolReadAdapterService } from './toolReadAdapter.service';
 import type { ToolTransitionReadModel } from './userToolQuery.service';
 
 type ToolRuntime = 'python' | 'typescript';
+
+const DEFAULT_VERSION_TAG = '1';
+const DEFAULT_CUSTOM_POLICY: IUserToolPolicy = {
+    networkMode: 'none',
+    writablePaths: [],
+    secretAliases: [],
+};
 
 export interface CreateToolCommandInput {
     name: string;
@@ -20,24 +36,43 @@ export interface CreateToolCommandInput {
 export interface UpdateToolCommandInput extends Partial<Omit<CreateToolCommandInput, 'name'>> {}
 
 export class ToolCommandService {
-    private readonly functionService = new FunctionService();
     private readonly toolReadAdapterService = new ToolReadAdapterService();
 
-    async createLegacyFunction(ownerUserId: string, data: CreateToolCommandInput): Promise<FunctionReadModel> {
-        return this.functionService.createFunction(ownerUserId, this.normalizeCreateInput(data));
-    }
-
     async createTool(ownerUserId: string, data: CreateToolCommandInput): Promise<ToolTransitionReadModel> {
-        const created = await this.createLegacyFunction(ownerUserId, data);
-        return this.requireToolById(created._id.toString(), ownerUserId);
-    }
+        const ownerObjectId = new mongoose.Types.ObjectId(ownerUserId);
+        const runtime = this.resolveLanguage(data);
+        const dependencies = this.normalizeDependencies(data.dependencies, runtime);
+        const currentVersion = this.buildVersionPayload({
+            name: data.name,
+            runtime,
+            codeInline: data.codeInline ?? null,
+            dependencies,
+            versionTag: DEFAULT_VERSION_TAG,
+            createdBy: ownerObjectId,
+        });
 
-    async updateLegacyFunction(
-        toolId: string,
-        ownerUserId: string,
-        data: UpdateToolCommandInput
-    ): Promise<FunctionReadModel | null> {
-        return this.functionService.updateFunction(toolId, ownerUserId, this.normalizeUpdateInput(data));
+        const created = await UserTool.create({
+            ownerUserId: ownerObjectId,
+            workspaceId: null,
+            scopeType: 'user',
+            workflowId: this.resolveWorkflowId(data.workflowId),
+            name: data.name,
+            description: data.description,
+            runtime,
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion,
+            versions: [currentVersion],
+            inputSchema: data.inputSchema ?? {},
+            outputSchema: data.outputSchema ?? {},
+            tags: Array.isArray(data.tags) ? data.tags : [],
+            dependencies,
+            policy: { ...DEFAULT_CUSTOM_POLICY },
+            isReadonly: false,
+            isEnabled: true,
+        });
+
+        return this.requireToolById(created._id.toString(), ownerUserId);
     }
 
     async updateTool(
@@ -45,24 +80,59 @@ export class ToolCommandService {
         ownerUserId: string,
         data: UpdateToolCommandInput
     ): Promise<ToolTransitionReadModel | null> {
-        const updated = await this.updateLegacyFunction(toolId, ownerUserId, data);
-        if (!updated) {
+        const existing = await this.findOwnedMutableTool(toolId, ownerUserId);
+        if (!existing) {
             return null;
         }
 
-        return this.requireToolById(updated._id.toString(), ownerUserId);
+        const runtime = data.language || data.runtime
+            ? this.resolveLanguage(data)
+            : existing.runtime;
+        const dependencies = this.normalizeDependencies(data.dependencies, runtime, existing.dependencies);
+        const nextVersion = this.buildVersionPayload({
+            name: existing.name,
+            runtime,
+            codeInline: data.codeInline !== undefined ? data.codeInline ?? null : existing.currentVersion.sourceInline ?? null,
+            dependencies,
+            versionTag: existing.currentVersion?.versionTag || DEFAULT_VERSION_TAG,
+            createdBy: existing.currentVersion?.createdBy ?? existing.ownerUserId ?? null,
+            createdAt: existing.currentVersion?.createdAt,
+            existingVersion: existing.currentVersion,
+            existingVersions: existing.versions,
+        });
+
+        await UserTool.updateOne(
+            { _id: existing._id },
+            {
+                $set: {
+                    description: data.description ?? existing.description,
+                    runtime,
+                    workflowId: data.workflowId !== undefined
+                        ? this.resolveWorkflowId(data.workflowId)
+                        : (existing.workflowId ?? null),
+                    inputSchema: data.inputSchema ?? existing.inputSchema,
+                    outputSchema: data.outputSchema ?? existing.outputSchema,
+                    tags: data.tags ?? existing.tags,
+                    dependencies,
+                    currentVersion: nextVersion,
+                    versions: [nextVersion],
+                    status: existing.isEnabled ? 'ready' : 'disabled',
+                }
+            },
+            { runValidators: true }
+        );
+
+        return this.requireToolById(existing._id.toString(), ownerUserId);
     }
 
     async deleteTool(toolId: string, ownerUserId: string): Promise<boolean> {
-        return this.functionService.deleteFunction(toolId, ownerUserId);
-    }
+        const result = await UserTool.deleteOne({
+            _id: new mongoose.Types.ObjectId(toolId),
+            ...buildOwnedToolClause(ownerUserId),
+            isReadonly: false,
+        });
 
-    async toggleLegacyFunction(
-        toolId: string,
-        ownerUserId: string,
-        options?: { allowBashPy?: boolean }
-    ): Promise<FunctionReadModel | null> {
-        return this.functionService.toggleFunction(toolId, ownerUserId, options);
+        return result.deletedCount > 0;
     }
 
     async toggleTool(
@@ -70,14 +140,30 @@ export class ToolCommandService {
         ownerUserId: string,
         options?: { allowBashPy?: boolean }
     ): Promise<{ id: string; isEnabled: boolean } | null> {
-        const updated = await this.toggleLegacyFunction(toolId, ownerUserId, options);
-        if (!updated) {
+        const tool = await UserTool.findOne({
+            _id: new mongoose.Types.ObjectId(toolId),
+            $or: [
+                ...buildGlobalToolClauses(),
+                buildOwnedToolClause(ownerUserId)
+            ]
+        });
+
+        if (!tool) {
             return null;
         }
 
+        const wouldEnable = !tool.isEnabled;
+        if (tool.name === 'bash_py' && wouldEnable && !options?.allowBashPy) {
+            throw new Error('bash_py requiert un consentement explicite (allowBashPy: true)');
+        }
+
+        tool.isEnabled = wouldEnable;
+        tool.status = wouldEnable ? 'ready' : 'disabled';
+        await tool.save();
+
         return {
-            id: updated._id.toString(),
-            isEnabled: updated.isEnabled,
+            id: tool._id.toString(),
+            isEnabled: tool.isEnabled,
         };
     }
 
@@ -90,27 +176,108 @@ export class ToolCommandService {
         return tool;
     }
 
-    private normalizeCreateInput(data: CreateToolCommandInput) {
-        return {
-            name: data.name,
-            description: data.description,
-            language: this.resolveLanguage(data),
-            workflowId: data.workflowId,
-            inputSchema: data.inputSchema,
-            outputSchema: data.outputSchema,
-            codeInline: data.codeInline,
-            dependencies: data.dependencies,
-            tags: data.tags,
-        };
+    private async findOwnedMutableTool(toolId: string, ownerUserId: string): Promise<IUserTool | null> {
+        return UserTool.findOne({
+            _id: new mongoose.Types.ObjectId(toolId),
+            ...buildOwnedToolClause(ownerUserId),
+            isReadonly: false,
+        });
     }
 
-    private normalizeUpdateInput(data: UpdateToolCommandInput) {
-        return {
-            ...data,
-            ...(data.language || data.runtime
-                ? { language: this.resolveLanguage(data) }
-                : {})
+    private resolveWorkflowId(workflowId?: string | null): mongoose.Types.ObjectId | null {
+        if (!workflowId) {
+            return null;
+        }
+
+        return new mongoose.Types.ObjectId(workflowId);
+    }
+
+    private normalizeDependencies(
+        dependencies: string[] | undefined,
+        runtime: ToolRuntime,
+        fallback?: IUserToolDependencies
+    ): IUserToolDependencies {
+        if (!dependencies) {
+            return fallback ?? { npm: [], python: [] };
+        }
+
+        return runtime === 'python'
+            ? { npm: [], python: dependencies }
+            : { npm: dependencies, python: [] };
+    }
+
+    private buildVersionPayload(options: {
+        name: string;
+        runtime: ToolRuntime;
+        codeInline: string | null;
+        dependencies: IUserToolDependencies;
+        versionTag: string;
+        createdBy: mongoose.Types.ObjectId | null;
+        createdAt?: Date;
+        existingVersion?: IUserToolVersion | null;
+        existingVersions?: IUserToolVersion[] | null;
+    }): IUserToolVersion {
+        const contentHash = this.buildContentHash({
+            name: options.name,
+            runtime: options.runtime,
+            codeInline: options.codeInline,
+            dependencies: options.dependencies,
+            versionTag: options.versionTag,
+        });
+
+        const baseVersion: IUserToolVersion = {
+            versionTag: options.versionTag,
+            contentHash,
+            sourceMode: 'inline',
+            sourcePath: null,
+            sourceInline: options.codeInline,
+            entrypoint: null,
+            createdAt: options.createdAt ?? new Date(),
+            createdBy: options.createdBy,
+            buildStatus: 'not_built',
+            validationStatus: 'unknown',
         };
+
+        const matchingExistingVersion = options.existingVersions?.find(
+            (candidate) => candidate.versionTag === baseVersion.versionTag && candidate.contentHash === baseVersion.contentHash
+        );
+        const existingVersion = matchingExistingVersion ?? options.existingVersion;
+
+        if (
+            existingVersion
+            && existingVersion.versionTag === baseVersion.versionTag
+            && existingVersion.contentHash === baseVersion.contentHash
+        ) {
+            return {
+                ...baseVersion,
+                createdAt: existingVersion.createdAt ?? baseVersion.createdAt,
+                createdBy: existingVersion.createdBy ?? baseVersion.createdBy,
+                buildStatus: existingVersion.buildStatus ?? baseVersion.buildStatus,
+                validationStatus: existingVersion.validationStatus ?? baseVersion.validationStatus,
+            };
+        }
+
+        return baseVersion;
+    }
+
+    private buildContentHash(options: {
+        name: string;
+        runtime: ToolRuntime;
+        codeInline: string | null;
+        dependencies: IUserToolDependencies;
+        versionTag: string;
+    }): string {
+        return createHash('sha256')
+            .update(JSON.stringify({
+                name: options.name,
+                runtime: options.runtime,
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: options.codeInline,
+                dependencies: options.dependencies,
+                version: options.versionTag,
+            }))
+            .digest('hex');
     }
 
     private resolveLanguage(data: Pick<CreateToolCommandInput, 'language' | 'runtime'>): ToolRuntime {

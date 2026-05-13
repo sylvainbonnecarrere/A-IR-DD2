@@ -330,4 +330,53 @@ describe('useAgentChat local AgentLoop path', () => {
       expect.objectContaining({ name: 'web_search_py' }),
     ]);
   });
+
+  it('does not crash when a legacy partial historyConfig is enabled on the first chat turn', async () => {
+    const agent: Agent = {
+      id: 'agent-partial-history-1',
+      name: 'Legacy History Agent',
+      role: 'assistant',
+      systemPrompt: 'Use tools when relevant',
+      llmProvider: LLMProvider.LMStudio,
+      model: 'local-model',
+      capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
+      toolSelections: [{ toolId: '507f1f77bcf86cd799439022' }],
+      historyConfig: {
+        enabled: true,
+        llmProvider: LLMProvider.Gemini,
+        model: 'gemini-2.0-flash',
+        role: 'Summarizer',
+        systemPrompt: 'Summarize previous turns only.',
+      } as Agent['historyConfig'],
+      creator_id: RobotId.Archi,
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-01T00:00:00.000Z',
+    };
+
+    const { result } = renderHook(() => useAgentChat({
+      nodeId: 'node-1',
+      agent,
+      llmConfigs: [],
+      t: (key: string) => key,
+      instanceId: 'instance-1',
+      accessToken: 'token-123',
+    }));
+
+    await act(async () => {
+      await result.current.handleSendMessage('Bonjour, je suis Sylvain', null);
+    });
+
+    await waitFor(() => {
+      expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
+    });
+
+    expect(runtimeState.addNodeMessage).not.toHaveBeenCalledWith(
+      'node-1',
+      expect.objectContaining({
+        sender: 'agent',
+        isError: true,
+        text: expect.stringContaining("reading 'char'"),
+      })
+    );
+  });
 });

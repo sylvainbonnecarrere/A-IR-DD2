@@ -1,4 +1,3 @@
-import type { IUserFunction } from '../models/UserFunction.model';
 import type { IUserTool } from '../models/UserTool.model';
 
 export type PreparationRequirement = 'none' | 'author_build' | 'platform_provision';
@@ -25,9 +24,9 @@ export interface ExecutionPreparationPolicyDecision {
 }
 
 interface FunctionPreparationTarget {
-    origin: IUserFunction['origin'];
+    origin: 'native' | 'custom';
     isReadonly: boolean;
-    workflowId?: string | null | IUserFunction['workflowId'];
+    workflowId?: string | null | { toString(): string };
     dependencies?: {
         npm?: string[];
         python?: string[];

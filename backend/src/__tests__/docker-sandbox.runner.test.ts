@@ -293,4 +293,44 @@ describe('DockerSandboxRunner', () => {
             args: { value: 'hello' }
         });
     });
+
+    it('checks Python syntax inside the Docker runtime image instead of relying on the host interpreter', async () => {
+        const processRunner = new FakeDockerProcessRunner({
+            stdout: JSON.stringify({ valid: true, errors: [] })
+        });
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+
+        const result = await runner.checkPythonSyntax('def run(args):\n    return {"ok": True}');
+
+        expect(result).toEqual({ valid: true, errors: [] });
+        const call = processRunner.calls[0];
+        expect(call.command).toBe('docker');
+        expect(call.args).toEqual(expect.arrayContaining([
+            'run',
+            '--rm',
+            '--interactive',
+            '--network=none',
+            'airdd2-runtime-python:3.12-ubuntu-noble',
+            'python3',
+            '-c'
+        ]));
+        expect(call.stdin).toBe('def run(args):\n    return {"ok": True}');
+    });
+
+    it('returns normalized syntax errors when the sandbox parser rejects Python code', async () => {
+        const processRunner = new FakeDockerProcessRunner({
+            stdout: JSON.stringify({
+                valid: false,
+                errors: [{ line: 2, message: 'expected an indented block' }]
+            })
+        });
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+
+        const result = await runner.checkPythonSyntax('def run(args):\nreturn {"ok": True}');
+
+        expect(result).toEqual({
+            valid: false,
+            errors: [{ line: 2, message: 'expected an indented block' }]
+        });
+    });
 });

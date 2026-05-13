@@ -35,6 +35,7 @@ import { HyperspaceReveal } from './components/HyperspaceReveal';
 // ⭐ AUTO-SAVE: Import PersistenceService for immediate instance creation
 import { PersistenceService } from './services/persistenceService';
 import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from './services/persistedChatMessages';
+import { normalizeAgentToolReferences } from './services/toolSelectionResolver';
 // ⭐ V2: Import apiClient for workflow switch orchestration
 import apiClient from './utils/apiClient';
 // ⭐ FIX QA: Import useJournalQueue for image persistence
@@ -81,27 +82,34 @@ interface WorkspaceSnapshot {
   agentPrototypes?: any[];
 }
 
-const mapPrototypeToAgent = (prototype: any, fallbackTimestamp: string): Agent => ({
-  id: prototype.id || prototype._id,
-  name: prototype.name,
-  role: prototype.role || prototype.description || 'assistant',
-  systemPrompt: prototype.systemPrompt || prototype.description || '',
-  llmProvider: (prototype.provider as LLMProvider) || LLMProvider.Gemini,
-  model: prototype.model || 'gemini-2.0-flash',
-  capabilities: Array.isArray(prototype.capabilities) ? prototype.capabilities : [],
-  tools: Array.isArray(prototype.tools) ? prototype.tools : [],
-  functionIds: Array.isArray(prototype.functionIds)
-    ? prototype.functionIds
-    : (Array.isArray(prototype.tools)
-        ? prototype.tools.map((tool: any) => tool?.toString ? tool.toString() : String(tool))
-        : []),
-  toolSelections: Array.isArray(prototype.toolSelections) ? prototype.toolSelections : [],
-  outputConfig: prototype.outputConfig || {},
-  historyConfig: prototype.historyConfig || {},
-  creator_id: prototype.robotId || RobotId.Archi,
-  created_at: prototype.created_at || fallbackTimestamp,
-  updated_at: prototype.updated_at || fallbackTimestamp
-});
+const mapPrototypeToAgent = (prototype: any, fallbackTimestamp: string): Agent => {
+  const normalizedToolReferences = normalizeAgentToolReferences(
+    Array.isArray(prototype.toolSelections) ? prototype.toolSelections : undefined,
+    Array.isArray(prototype.functionIds)
+      ? prototype.functionIds
+      : (Array.isArray(prototype.tools)
+          ? prototype.tools.map((tool: any) => tool?.toString ? tool.toString() : String(tool))
+          : []),
+  );
+
+  return {
+    id: prototype.id || prototype._id,
+    name: prototype.name,
+    role: prototype.role || prototype.description || 'assistant',
+    systemPrompt: prototype.systemPrompt || prototype.description || '',
+    llmProvider: (prototype.provider as LLMProvider) || LLMProvider.Gemini,
+    model: prototype.model || 'gemini-2.0-flash',
+    capabilities: Array.isArray(prototype.capabilities) ? prototype.capabilities : [],
+    tools: Array.isArray(prototype.tools) ? prototype.tools : [],
+    functionIds: normalizedToolReferences.functionIds,
+    toolSelections: normalizedToolReferences.toolSelections,
+    outputConfig: prototype.outputConfig || {},
+    historyConfig: prototype.historyConfig || {},
+    creator_id: prototype.robotId || RobotId.Archi,
+    created_at: prototype.created_at || fallbackTimestamp,
+    updated_at: prototype.updated_at || fallbackTimestamp
+  };
+};
 
 const buildInstanceConfiguration = (instance: any, prototype?: Agent) => (
   instance.configuration_json || {

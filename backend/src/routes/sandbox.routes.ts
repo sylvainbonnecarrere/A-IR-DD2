@@ -190,12 +190,49 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
 // ─── POST /api/sandbox/check ──────────────────────────────────────────────────
 router.post('/check', requireAuth, validateRequest(checkSyntaxSchema), async (req, res) => {
     try {
+        const user = req.user as IUser;
         const { language, code } = req.body;
+
+        console.info('[SandboxRoute] POST /check start', {
+            userId: user.id,
+            language,
+            codeLength: code.length,
+        });
+
         const result = await sandboxService.checkSyntax(language, code);
+
+        console.info('[SandboxRoute] POST /check done', {
+            userId: user.id,
+            language,
+            valid: result.valid,
+            errorCount: result.errors.length,
+        });
+
         res.json(result);
-    } catch (error) {
+    } catch (error: any) {
         console.error('[SandboxRoute] POST /check error:', error);
-        res.status(500).json({ error: 'Erreur lors de la vérification syntaxique' });
+
+        if (error instanceof RuntimeNotReadyError) {
+            return res.status(503).json({
+                error: error.message,
+                errorDetails: buildSandboxErrorDetails({
+                    message: error.message,
+                    code: 'RUNTIME_NOT_READY',
+                    subsystem: 'runtime_readiness',
+                    retryable: true,
+                })
+            });
+        }
+
+        res.status(500).json({
+            error: 'Erreur lors de la vérification syntaxique',
+            errorDetails: buildSandboxErrorDetails({
+                message: 'Erreur lors de la vérification syntaxique',
+                code: 'SANDBOX_SYNTAX_CHECK_ERROR',
+                subsystem: 'sandbox_runtime',
+                retryable: false,
+            })
+        });
     }
 });
 

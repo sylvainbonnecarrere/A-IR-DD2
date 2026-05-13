@@ -1,6 +1,6 @@
 import { mapLegacyFunctionToUserToolFields } from '../utils/userToolLegacyMapper';
 
-export type UserToolStartupSyncPhase = 'legacy-authority' | 'repair-only';
+export type UserToolStartupSyncPhase = 'repair-only';
 
 interface StartupSyncSummary {
     phase: UserToolStartupSyncPhase;
@@ -47,61 +47,7 @@ function normalizeDate(value: unknown): Date {
 }
 
 function resolveStartupSyncPhase(): UserToolStartupSyncPhase {
-    const rawValue = String(process.env.USER_TOOLS_STARTUP_SYNC_PHASE ?? 'legacy-authority')
-        .trim()
-        .toLowerCase();
-
-    if (rawValue === 'repair-only') {
-        return 'repair-only';
-    }
-
-    return 'legacy-authority';
-}
-
-class LegacyAuthorityStartupSyncPolicy implements StartupSyncPolicy {
-    readonly phase: UserToolStartupSyncPhase = 'legacy-authority';
-
-    async synchronize(db: any): Promise<StartupSyncSummary> {
-        const legacyFunctions = await db.collection('user_functions').find({}).toArray();
-        const userToolsCol = db.collection('user_tools');
-        let created = 0;
-        let updated = 0;
-
-        for (const legacyFn of legacyFunctions) {
-            const existingMirror = await userToolsCol.findOne({ _id: legacyFn._id });
-            const mapped = mapLegacyFunctionToUserToolFields(legacyFn, existingMirror);
-            const createdAt = normalizeDate(legacyFn.createdAt);
-            const updatedAt = normalizeDate(legacyFn.updatedAt);
-
-            const result = await userToolsCol.updateOne(
-                { _id: legacyFn._id },
-                {
-                    $set: {
-                        ...mapped,
-                        updatedAt
-                    },
-                    $setOnInsert: {
-                        createdAt
-                    }
-                },
-                { upsert: true }
-            );
-
-            if (result.upsertedCount > 0) {
-                created++;
-            } else if (result.modifiedCount > 0) {
-                updated++;
-            }
-        }
-
-        return {
-            phase: this.phase,
-            scanned: legacyFunctions.length,
-            created,
-            updated,
-            skippedExisting: 0
-        };
-    }
+    return 'repair-only';
 }
 
 class RepairOnlyStartupSyncPolicy implements StartupSyncPolicy {
@@ -156,10 +102,7 @@ class RepairOnlyStartupSyncPolicy implements StartupSyncPolicy {
 }
 
 function createStartupSyncPolicy(): StartupSyncPolicy {
-    const phase = resolveStartupSyncPhase();
-    return phase === 'repair-only'
-        ? new RepairOnlyStartupSyncPolicy()
-        : new LegacyAuthorityStartupSyncPolicy();
+    return new RepairOnlyStartupSyncPolicy();
 }
 
 export async function syncUserToolsFromLegacyFunctionsOnStartup(db: any): Promise<StartupSyncSummary> {
