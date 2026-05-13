@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Agent, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance } from './types';
+import { Agent, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, Tool } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
 import { AgentFormModal } from './components/modals/AgentFormModal';
@@ -82,6 +82,41 @@ interface WorkspaceSnapshot {
   agentPrototypes?: any[];
 }
 
+function sanitizeProviderTools(rawTools: unknown): Tool[] {
+  if (!Array.isArray(rawTools)) {
+    return [];
+  }
+
+  return rawTools.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      return [];
+    }
+
+    const name = typeof (candidate as Record<string, unknown>).name === 'string'
+      ? (candidate as Record<string, unknown>).name.trim()
+      : '';
+
+    if (name.length === 0) {
+      return [];
+    }
+
+    const description = typeof (candidate as Record<string, unknown>).description === 'string'
+      ? (candidate as Record<string, unknown>).description
+      : '';
+    const parameters = (candidate as Record<string, unknown>).parameters;
+    const outputSchema = (candidate as Record<string, unknown>).outputSchema;
+
+    return [{
+      name,
+      description,
+      parameters: parameters && typeof parameters === 'object' && !Array.isArray(parameters)
+        ? parameters
+        : { type: 'object' },
+      ...(outputSchema !== undefined ? { outputSchema } : {}),
+    } satisfies Tool];
+  });
+}
+
 const mapPrototypeToAgent = (prototype: any, fallbackTimestamp: string): Agent => {
   const normalizedToolReferences = normalizeAgentToolReferences(
     Array.isArray(prototype.toolSelections) ? prototype.toolSelections : undefined,
@@ -100,7 +135,7 @@ const mapPrototypeToAgent = (prototype: any, fallbackTimestamp: string): Agent =
     llmProvider: (prototype.provider as LLMProvider) || LLMProvider.Gemini,
     model: prototype.model || 'gemini-2.0-flash',
     capabilities: Array.isArray(prototype.capabilities) ? prototype.capabilities : [],
-    tools: Array.isArray(prototype.tools) ? prototype.tools : [],
+    tools: sanitizeProviderTools(prototype.tools),
     functionIds: normalizedToolReferences.functionIds,
     toolSelections: normalizedToolReferences.toolSelections,
     outputConfig: prototype.outputConfig || {},
@@ -111,21 +146,39 @@ const mapPrototypeToAgent = (prototype: any, fallbackTimestamp: string): Agent =
   };
 };
 
-const buildInstanceConfiguration = (instance: any, prototype?: Agent) => (
-  instance.configuration_json || {
+const buildInstanceConfiguration = (instance: any, prototype?: Agent) => {
+  const rawConfiguration = instance.configuration_json;
+
+  if (rawConfiguration && typeof rawConfiguration === 'object') {
+    return {
+      ...rawConfiguration,
+      role: rawConfiguration.role || instance.role || prototype?.role || 'assistant',
+      model: rawConfiguration.model || instance.llmModel || instance.model || prototype?.model || 'gemini-2.0-flash',
+      llmProvider: rawConfiguration.llmProvider || instance.llmProvider || instance.provider || prototype?.llmProvider || LLMProvider.Gemini,
+      systemPrompt: rawConfiguration.systemPrompt || instance.systemPrompt || instance.systemInstruction || prototype?.systemPrompt || '',
+      capabilities: Array.isArray(rawConfiguration.capabilities) ? rawConfiguration.capabilities : (Array.isArray(instance.capabilities) ? instance.capabilities : (prototype?.capabilities || [])),
+      tools: sanitizeProviderTools(rawConfiguration.tools),
+      toolSelections: Array.isArray(rawConfiguration.toolSelections) ? rawConfiguration.toolSelections : (Array.isArray(instance.toolSelections) ? instance.toolSelections : (prototype?.toolSelections || [])),
+      historyConfig: rawConfiguration.historyConfig || instance.historyConfig || prototype?.historyConfig || {},
+      outputConfig: rawConfiguration.outputConfig || instance.outputConfig || prototype?.outputConfig || {},
+      position: rawConfiguration.position || instance.position || { x: 0, y: 0 },
+    };
+  }
+
+  return {
     role: instance.role || prototype?.role || 'assistant',
     model: instance.llmModel || instance.model || prototype?.model || 'gemini-2.0-flash',
     llmProvider: instance.llmProvider || instance.provider || prototype?.llmProvider || LLMProvider.Gemini,
     systemPrompt: instance.systemPrompt || instance.systemInstruction || prototype?.systemPrompt || '',
     capabilities: Array.isArray(instance.capabilities) ? instance.capabilities : (prototype?.capabilities || []),
-    tools: Array.isArray(instance.tools) ? instance.tools : (prototype?.tools || []),
+    tools: sanitizeProviderTools(instance.tools ?? prototype?.tools),
     toolSelections: Array.isArray(instance.toolSelections) ? instance.toolSelections : (prototype?.toolSelections || []),
     functionInheritance: instance.functionInheritance || undefined,
     historyConfig: instance.historyConfig || prototype?.historyConfig || {},
     outputConfig: instance.outputConfig || prototype?.outputConfig || {},
     position: instance.position || { x: 0, y: 0 }
-  }
-);
+  };
+};
 
 const mapInstanceToAgentInstance = (instance: any, workflowId?: string, prototype?: Agent): AgentInstance => ({
   id: instance.id || instance._id,

@@ -2,23 +2,15 @@ import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
 import { seedNativeFunctions, seedSharedExampleFunctions } from '../services/databaseInit';
 
 describe('databaseInit canonical tool seeding', () => {
-    it('seeds native startup tools directly into user_tools and only cleans legacy global user_functions residues', async () => {
+    it('seeds native startup tools directly into user_tools without touching legacy persistence', async () => {
         const userToolsCol = {
             findOne: jest.fn().mockResolvedValue(null),
             updateOne: jest.fn().mockResolvedValue({ upsertedCount: 1, modifiedCount: 0 }),
-        };
-        const legacyFunctionsCol = {
-            updateOne: jest.fn(),
-            deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
         };
         const db = {
             collection: jest.fn((name: string) => {
                 if (name === 'user_tools') {
                     return userToolsCol;
-                }
-
-                if (name === 'user_functions') {
-                    return legacyFunctionsCol;
                 }
 
                 throw new Error(`Unexpected collection ${name}`);
@@ -43,32 +35,19 @@ describe('databaseInit canonical tool seeding', () => {
             }),
             { upsert: true },
         );
-        expect(legacyFunctionsCol.deleteMany).toHaveBeenCalledWith({
-            name: { $in: nativeFunctionsSeed.map((fn) => fn.name) },
-            userId: null,
-            origin: 'native',
-        });
-        expect(legacyFunctionsCol.updateOne).not.toHaveBeenCalled();
+        expect(db.collection).not.toHaveBeenCalledWith('user_functions');
     });
 
-    it('seeds the shared hello_test example directly into user_tools and removes the legacy global copy', async () => {
+    it('seeds the shared hello_test example directly into user_tools without touching legacy persistence', async () => {
         const userToolsCol = {
             findOne: jest.fn().mockResolvedValue(null),
             updateOne: jest.fn().mockResolvedValue({ upsertedCount: 1, modifiedCount: 0 }),
             deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
         };
-        const legacyFunctionsCol = {
-            deleteMany: jest.fn().mockResolvedValue({ deletedCount: 1 }),
-            updateOne: jest.fn(),
-        };
         const db = {
             collection: jest.fn((name: string) => {
                 if (name === 'user_tools') {
                     return userToolsCol;
-                }
-
-                if (name === 'user_functions') {
-                    return legacyFunctionsCol;
                 }
 
                 throw new Error(`Unexpected collection ${name}`);
@@ -101,10 +80,6 @@ describe('databaseInit canonical tool seeding', () => {
             }),
             { upsert: true },
         );
-        expect(legacyFunctionsCol.deleteMany).toHaveBeenCalledWith({
-            name: 'hello_test',
-            userId: null,
-        });
-        expect(legacyFunctionsCol.updateOne).not.toHaveBeenCalled();
+        expect(db.collection).not.toHaveBeenCalledWith('user_functions');
     });
 });

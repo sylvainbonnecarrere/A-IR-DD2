@@ -238,14 +238,30 @@ function mapUserFunctionToProviderTool(fn: UserFunction): Tool {
   };
 }
 
+function isProviderToolCandidate(tool: unknown): tool is Tool {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+    return false;
+  }
+
+  const candidate = tool as Partial<Tool>;
+  return typeof candidate.name === 'string'
+    && candidate.name.trim().length > 0
+    && candidate.parameters !== undefined;
+}
+
 function mergeProviderTools(agentTools: Tool[] | undefined, selectedFunctions: UserFunction[]): Tool[] | undefined {
+  const sanitizedAgentTools = (agentTools ?? []).filter(isProviderToolCandidate).map((tool) => ({
+    ...tool,
+    name: tool.name.trim(),
+  }));
+
   if (selectedFunctions.length === 0) {
-    return agentTools;
+    return sanitizedAgentTools.length > 0 ? sanitizedAgentTools : undefined;
   }
 
   const mergedTools = new Map<string, Tool>();
 
-  for (const tool of agentTools ?? []) {
+  for (const tool of sanitizedAgentTools) {
     mergedTools.set(tool.name, tool);
   }
 

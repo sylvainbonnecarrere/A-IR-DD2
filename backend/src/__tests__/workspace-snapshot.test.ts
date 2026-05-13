@@ -316,10 +316,13 @@ describe('Workspace snapshot contract', () => {
                 })
             })
         ]));
+        expect(restoredInstance.tools).toEqual([]);
+        expect(restoredInstance.configuration_json.tools).toEqual([]);
         expect(restoredInstance.configuration_json.position).toMatchObject({ x: 120, y: 180 });
 
         const restoredPrototype = response.body.agentPrototypes.find((prototype: any) => prototype.id === fixture.prototypeId);
         expect(restoredPrototype).toEqual(expect.objectContaining({
+            tools: [],
             functionIds: ['tool.snapshot'],
             toolSelections: [expect.objectContaining({ toolId: 'tool.snapshot' })]
         }));

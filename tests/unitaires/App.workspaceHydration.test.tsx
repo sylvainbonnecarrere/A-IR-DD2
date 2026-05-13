@@ -545,4 +545,63 @@ describe('App workspace hydration orchestration', () => {
             toolSelections: [{ toolId: 'tool.web-search' }],
         }));
     });
+
+    it('drops legacy tool id arrays from hydrated provider tool payloads after workspace refresh while preserving canonical selections', async () => {
+        const workspaceWithLegacyToolIds = {
+            ...workspacePayload,
+            agentPrototypes: [
+                {
+                    ...workspacePayload.agentPrototypes[0],
+                    tools: ['legacy-tool-id-1', 'legacy-tool-id-2'],
+                    functionIds: ['tool.web-fetch', 'tool.hello-test'],
+                    toolSelections: [
+                        { toolId: 'tool.web-fetch' },
+                        { toolId: 'tool.hello-test' },
+                    ],
+                }
+            ],
+            agentInstances: [
+                {
+                    ...workspacePayload.agentInstances[0],
+                    tools: ['legacy-tool-id-1', 'legacy-tool-id-2'],
+                    configuration_json: {
+                        ...workspacePayload.agentInstances[0].configuration_json,
+                        tools: ['legacy-tool-id-1', 'legacy-tool-id-2'],
+                        toolSelections: [
+                            { toolId: 'tool.web-fetch' },
+                            { toolId: 'tool.hello-test' },
+                        ],
+                    },
+                }
+            ],
+        };
+
+        (apiClient.get as jest.Mock).mockResolvedValue({ data: workspaceWithLegacyToolIds });
+
+        render(<App />);
+
+        await waitFor(() => expect(mockDesignStore.hydrateFromServer).toHaveBeenCalled());
+
+        const hydratedSnapshot = mockDesignStore.hydrateFromServer.mock.calls.at(-1)?.[0] as {
+            agents: any[];
+            agentInstances: any[];
+        };
+
+        expect(hydratedSnapshot.agents[0]).toEqual(expect.objectContaining({
+            tools: [],
+            functionIds: ['tool.web-fetch', 'tool.hello-test'],
+            toolSelections: [
+                { toolId: 'tool.web-fetch' },
+                { toolId: 'tool.hello-test' },
+            ],
+        }));
+
+        expect(hydratedSnapshot.agentInstances[0]?.configuration_json).toEqual(expect.objectContaining({
+            tools: [],
+            toolSelections: [
+                { toolId: 'tool.web-fetch' },
+                { toolId: 'tool.hello-test' },
+            ],
+        }));
+    });
 });

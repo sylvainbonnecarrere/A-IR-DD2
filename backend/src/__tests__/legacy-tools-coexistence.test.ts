@@ -1,9 +1,9 @@
+import mongoose from 'mongoose';
 import express from 'express';
 import passport from 'passport';
 import request from 'supertest';
 import '../middleware/auth.middleware';
 import { User } from '../models/User.model';
-import { UserFunction } from '../models/UserFunction.model';
 import { UserTool } from '../models/UserTool.model';
 import functionsRoutes from '../routes/functions.routes';
 import toolsRoutes from '../routes/tools.routes';
@@ -15,6 +15,24 @@ app.use(express.json());
 app.use(passport.initialize());
 app.use('/api/functions', functionsRoutes);
 app.use('/api/tools', toolsRoutes);
+
+async function deleteLegacyFunctionResidues(name: RegExp): Promise<void> {
+    const db = mongoose.connection.db;
+    if (!db) {
+        return;
+    }
+
+    await db.collection('user_functions').deleteMany({ name });
+}
+
+async function findLegacyFunctionDoc(id: string): Promise<Record<string, unknown> | null> {
+    const db = mongoose.connection.db;
+    if (!db) {
+        return null;
+    }
+
+    return db.collection('user_functions').findOne({ _id: new mongoose.Types.ObjectId(id) });
+}
 
 describe('Legacy functions and target tools coexistence', () => {
     const runtimeHealthSpy = jest.spyOn(RuntimeHealthService.prototype, 'getHealthReport');
@@ -62,7 +80,7 @@ describe('Legacy functions and target tools coexistence', () => {
     afterEach(async () => {
         runtimeHealthSpy.mockReset();
         await UserTool.deleteMany({ name: /coexistence-function-/i });
-        await UserFunction.deleteMany({ name: /coexistence-function-/i });
+        await deleteLegacyFunctionResidues(/coexistence-function-/i);
         await User.deleteMany({ email: /coexistence-function-/i });
     });
 
@@ -264,7 +282,7 @@ describe('Legacy functions and target tools coexistence', () => {
             name: createResponse.body.tool.name,
             scopeType: 'user'
         }));
-        expect(await UserFunction.findById(toolId).lean()).toBeNull();
+        expect(await findLegacyFunctionDoc(toolId)).toBeNull();
 
         const legacyDetailAfterCreate = await request(app)
             .get(`/api/functions/${toolId}`)
@@ -286,7 +304,7 @@ describe('Legacy functions and target tools coexistence', () => {
             })
             .expect(200);
 
-        expect(await UserFunction.findById(toolId).lean()).toBeNull();
+        expect(await findLegacyFunctionDoc(toolId)).toBeNull();
 
         const legacyDetailAfterUpdate = await request(app)
             .get(`/api/functions/${toolId}`)
@@ -304,14 +322,14 @@ describe('Legacy functions and target tools coexistence', () => {
             .send({ allowBashPy: false })
             .expect(200);
 
-        expect(await UserFunction.findById(toolId).lean()).toBeNull();
+        expect(await findLegacyFunctionDoc(toolId)).toBeNull();
 
         await request(app)
             .delete(`/api/tools/${toolId}`)
             .set('Authorization', `Bearer ${accessToken}`)
             .expect(204);
 
-        expect(await UserFunction.findById(toolId).lean()).toBeNull();
+        expect(await findLegacyFunctionDoc(toolId)).toBeNull();
     });
 
     it('rejects legacy write routes and points clients to canonical command surfaces', async () => {

@@ -5,7 +5,7 @@
  */
 
 import mongoose from 'mongoose';
-import { Workflow, IWorkflow } from '../src/models/Workflow.model';
+import { Workflow } from '../src/models/Workflow.model';
 import { User, IUser } from '../src/models/User.model';
 
 const TEST_ONLY_PASSWORD = 'test-only-password-123';
@@ -15,7 +15,8 @@ describe('❌ Workflows Unit Tests - Phase 1', () => {
     let testUserId: string;
 
     beforeAll(async () => {
-        await Workflow.syncIndexes();
+        // Ensure declared indexes exist without the heavier syncIndexes() path.
+        await Workflow.init();
     });
     
     beforeEach(async () => {

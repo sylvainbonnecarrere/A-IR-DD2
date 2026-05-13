@@ -210,7 +210,7 @@ function transformAgentPrototypeForFrontend(proto: any) {
         role: proto.role,
         systemPrompt: proto.systemPrompt,
         capabilities: Array.isArray(proto.capabilities) ? proto.capabilities : [],
-        tools: legacyToolIds,
+        tools: [],
         functionIds,
         toolSelections: Array.isArray(proto.toolSelections)
             ? proto.toolSelections

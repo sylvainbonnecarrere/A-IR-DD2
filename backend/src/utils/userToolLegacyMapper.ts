@@ -45,6 +45,31 @@ export interface LegacyFunctionExecutionMetadata {
     policySnapshot: IUserToolPolicy;
 }
 
+export interface LegacyFunctionExecutionSource {
+    _id?: mongoose.Types.ObjectId | string | { toString(): string };
+    workflowId?: mongoose.Types.ObjectId | string | { toString(): string } | null;
+    name: string;
+    language: 'python' | 'typescript';
+    origin: 'native' | 'custom';
+    version?: number | string;
+    toolVersionTag?: string;
+    toolContentHash?: string;
+    policySnapshot?: IUserToolPolicy;
+    codePath?: string | null;
+    codeInline?: string | null;
+    dependencies?: LegacyDependencies;
+}
+
+type LegacyFunctionSourceSignature = Pick<
+    LegacyFunctionLike,
+    'name' | 'language' | 'codePath' | 'codeInline' | 'dependencies' | 'version'
+>;
+
+type LegacyFunctionPolicySignature = Pick<
+    LegacyFunctionLike,
+    'policySnapshot' | 'origin' | 'name'
+>;
+
 interface ExistingUserToolVersionLike {
     versionTag?: string;
     contentHash?: string;
@@ -94,7 +119,7 @@ function normalizeDependencies(
     };
 }
 
-function buildSourceMode(legacy: LegacyFunctionLike): 'inline' | 'path' {
+function buildSourceMode(legacy: Pick<LegacyFunctionLike, 'codePath'>): 'inline' | 'path' {
     return legacy.codePath ? 'path' : 'inline';
 }
 
@@ -105,7 +130,7 @@ function buildVersionTag(version: number | string | undefined): string {
     return String(version);
 }
 
-function buildContentHash(legacy: LegacyFunctionLike): string {
+function buildContentHash(legacy: LegacyFunctionSourceSignature): string {
     const sourceMode = buildSourceMode(legacy);
     const dependencies = normalizeDependencies(legacy.dependencies, legacy.language);
 
@@ -122,7 +147,7 @@ function buildContentHash(legacy: LegacyFunctionLike): string {
         .digest('hex');
 }
 
-function buildDefaultPolicy(legacy: LegacyFunctionLike): IUserToolPolicy {
+function buildDefaultPolicy(legacy: LegacyFunctionPolicySignature): IUserToolPolicy {
     if (legacy.policySnapshot) {
         return legacy.policySnapshot;
     }
@@ -220,7 +245,7 @@ export function mapLegacyFunctionToUserToolFields(
 }
 
 export function deriveExecutionMetadataFromLegacyFunction(
-    legacy: LegacyFunctionLike
+    legacy: LegacyFunctionExecutionSource
 ): LegacyFunctionExecutionMetadata {
     if (!legacy._id) {
         throw new Error('Legacy function _id is required to derive execution metadata');

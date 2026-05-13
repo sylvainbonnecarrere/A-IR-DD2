@@ -20,11 +20,7 @@
 import mongoose from 'mongoose';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
 import { NativePythonProvisioningService } from './nativePythonProvisioning.service';
-import {
-  getRepairOnlyProtectedFields,
-  syncUserToolsFromLegacyFunctionsOnStartup
-} from './userToolStartupSync.service';
-import { mapLegacyFunctionToUserToolFields } from '../utils/userToolLegacyMapper';
+import { mapLegacyFunctionToUserToolFields, type LegacyFunctionLike } from '../utils/userToolLegacyMapper';
 
 const nativePythonProvisioningService = new NativePythonProvisioningService();
 const SHARED_HELLO_TEST_TOOL_NAME = 'hello_test';
@@ -247,28 +243,6 @@ const COLLECTION_SCHEMAS = {
     }
   },
 
-  user_functions: {
-    validator: {
-      $jsonSchema: {
-        bsonType: 'object',
-        additionalProperties: true,
-        properties: {
-          _id: { bsonType: 'objectId' },
-          name: { bsonType: 'string' },
-          description: { bsonType: 'string' },
-          language: { bsonType: 'string' },
-          origin: { bsonType: 'string' },
-          userId: { bsonType: ['objectId', 'null'] },
-          workflowId: { bsonType: ['objectId', 'null'] },
-          isEnabled: { bsonType: 'bool' },
-          isReadonly: { bsonType: 'bool' },
-          createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
-  },
-
   workspaces: {
     validator: {
       $jsonSchema: {
@@ -404,11 +378,6 @@ const INDEX_DEFINITIONS = {
   local_llm_profiles: [
     { spec: { userId: 1, name: 1 }, options: { unique: true } },
     { spec: { userId: 1 }, options: {} }
-  ],
-  user_functions: [
-    { spec: { userId: 1, workflowId: 1, isEnabled: 1 }, options: { name: 'idx_user_workflow_enabled' } },
-    { spec: { origin: 1, isEnabled: 1 }, options: { name: 'idx_origin_enabled' } },
-    { spec: { name: 1, userId: 1 }, options: { unique: true, sparse: false, name: 'idx_name_user_unique' } }
   ],
   workspaces: [
     { spec: { ownerUserId: 1, scopeType: 1, scopeId: 1 }, options: { unique: true, name: 'uq_workspace_owner_scope' } },
@@ -556,7 +525,6 @@ export async function initializeDatabase(): Promise<void> {
     // ─── Toujours seeder les fonctions natives (idempotent) ───────────────
     await seedNativeFunctions(db);
     await seedSharedExampleFunctions(db);
-    await syncUserToolsFromLegacyFunctions(db);
     await provisionNativePythonToolsOnStartup();
 
     console.info('🎯 Database initialization complete!');
@@ -766,7 +734,7 @@ async function createIndexesForNewCollections(
 async function upsertCanonicalSeedTool(
   userToolsCol: any,
   filter: Record<string, unknown>,
-  legacySeed: Record<string, unknown>,
+  legacySeed: LegacyFunctionLike,
   overrides?: Record<string, unknown>
 ): Promise<{ upsertedCount: number; modifiedCount: number }> {
   const existingTool = await userToolsCol.findOne(filter, {
@@ -802,12 +770,10 @@ async function upsertCanonicalSeedTool(
 /**
  * Seed des 11 fonctions natives directement dans user_tools.
  * Idempotent : upsert par (scopeType:native, ownerUserId:null, name).
- * Supprime ensuite le reliquat global legacy dans user_functions.
  */
 export async function seedNativeFunctions(db: any): Promise<void> {
   try {
     const userToolsCol = db.collection('user_tools');
-    const legacyFunctionsCol = db.collection('user_functions');
     let upserted = 0;
     let updated = 0;
 
@@ -821,22 +787,12 @@ export async function seedNativeFunctions(db: any): Promise<void> {
       else if (result.modifiedCount > 0) updated++;
     }
 
-    const legacyCleanup = await legacyFunctionsCol.deleteMany({
-      name: { $in: nativeFunctionsSeed.map((fn) => fn.name) },
-      userId: null,
-      origin: 'native',
-    });
-
     if (upserted > 0) {
       console.info(`🌱 ${upserted} outil(s) natif(s) seedé(s) dans user_tools`);
     } else if (updated > 0) {
       console.info(`🔁 ${updated} outil(s) natif(s) mis à jour dans user_tools`);
     } else {
       console.debug('  ✓ Outils natifs déjà convergents dans user_tools');
-    }
-
-    if (legacyCleanup.deletedCount > 0) {
-      console.info(`🧹 ${legacyCleanup.deletedCount} seed(s) natif(s) legacy supprimé(s) de user_functions`);
     }
   } catch (err) {
     // Non-bloquant : log mais ne crashe pas le démarrage
@@ -848,7 +804,6 @@ export async function seedSharedExampleFunctions(db: any): Promise<void> {
   try {
     const userToolsCol = db.collection('user_tools');
     const helloTestInline = `// Exemple de fonction TypeScript partagée\nexport function run(\n  context: { userId: string; agentId?: string; workflowId?: string; depth: number },\n  args: { user_name?: string; name?: string }\n): unknown {\n  // Compatibilité transitoire: accepte encore args.name pour les anciens prompts déjà persistés.\n  const legacyName = typeof args.name === "string" && args.name.trim().length > 0\n    ? args.name.trim()\n    : null;\n\n  const userName = typeof args.user_name === "string" && args.user_name.trim().length > 0\n    ? args.user_name.trim()\n    : legacyName ?? "inconnu";\n\n  return { result: \`Ton nom, ${'${'}userName}, est maintenant enregistré dans ma mémoire\` };\n}\n`;
-    const legacyFunctionsCol = db.collection('user_functions');
 
     const staleToolMirrors = await userToolsCol.deleteMany({
       name: SHARED_HELLO_TEST_TOOL_NAME,
@@ -906,11 +861,6 @@ export async function seedSharedExampleFunctions(db: any): Promise<void> {
       },
     );
 
-    const legacyCleanup = await legacyFunctionsCol.deleteMany({
-      name: SHARED_HELLO_TEST_TOOL_NAME,
-      userId: null,
-    });
-
     if (result.upsertedCount > 0) {
       console.info('🌱 Exemple partagé hello_test seedé dans user_tools');
     } else if (result.modifiedCount > 0) {
@@ -918,34 +868,8 @@ export async function seedSharedExampleFunctions(db: any): Promise<void> {
     } else {
       console.debug('  ✓ Exemple partagé hello_test déjà convergent');
     }
-
-    if (legacyCleanup.deletedCount > 0) {
-      console.info(`🧹 Nettoyage hello_test: ${legacyCleanup.deletedCount} entrée(s) globales legacy supprimée(s) de user_functions`);
-    }
   } catch (err) {
     console.warn('⚠️  seedSharedExampleFunctions warning:', err instanceof Error ? err.message : String(err));
-  }
-}
-
-async function syncUserToolsFromLegacyFunctions(db: any): Promise<void> {
-  try {
-    const summary = await syncUserToolsFromLegacyFunctionsOnStartup(db);
-
-    if (summary.created > 0 || summary.updated > 0) {
-      console.info(
-        `🔁 startup projection legacy user_functions -> user_tools [${summary.phase}] scanned=${summary.scanned} created=${summary.created} updated=${summary.updated} skipped=${summary.skippedExisting}`
-      );
-    } else {
-      console.debug(
-        `  ✓ startup projection user_tools déjà convergente [${summary.phase}] scanned=${summary.scanned} skipped=${summary.skippedExisting}`
-      );
-    }
-
-    console.info(
-      `🛡️ startup sync repair-only protège les champs cibles: ${getRepairOnlyProtectedFields().join(', ')}`
-    );
-  } catch (err) {
-    console.warn('⚠️  syncUserToolsFromLegacyFunctions warning:', err instanceof Error ? err.message : String(err));
   }
 }
 

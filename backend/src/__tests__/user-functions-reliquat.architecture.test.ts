@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import path from 'path';
 
 function collectSourceFiles(rootDir: string): string[] {
@@ -22,12 +22,10 @@ describe('user_functions reliquat architecture guard', () => {
     it('keeps UserFunction persistence confined to the approved legacy boundary', () => {
         const sourceRoot = path.resolve(__dirname, '../');
         const sourceFiles = collectSourceFiles(sourceRoot);
+        const userFunctionModelPath = path.resolve(__dirname, '../models/UserFunction.model.ts');
+        const databaseInitPath = path.resolve(__dirname, '../services/databaseInit.ts');
 
         const userFunctionModelImporters = sourceFiles.filter((filePath) => {
-            if (filePath === path.resolve(__dirname, '../models/UserFunction.model.ts')) {
-                return false;
-            }
-
             const source = readFileSync(filePath, 'utf8');
             return source.includes('UserFunction.model');
         }).sort();
@@ -48,17 +46,20 @@ describe('user_functions reliquat architecture guard', () => {
                 || source.includes('collection: "user_functions"');
         }).sort();
 
-        expect(userFunctionModelImporters).toEqual([
-            path.resolve(__dirname, '../models/index.ts'),
-        ].sort());
+        expect(existsSync(userFunctionModelPath)).toBe(false);
+
+        expect(userFunctionModelImporters).toEqual([]);
 
         expect(userFunctionIndexImporters).toEqual([]);
 
         expect(rawUserFunctionsPersistenceUsers).toEqual([
-            path.resolve(__dirname, '../migrations/004_tools_v2_function_registry.ts'),
-            path.resolve(__dirname, '../models/UserFunction.model.ts'),
-            path.resolve(__dirname, '../services/databaseInit.ts'),
-            path.resolve(__dirname, '../services/userToolStartupSync.service.ts'),
+            path.resolve(__dirname, '../migrations/005_user_functions_eol.ts'),
         ].sort());
+
+        const databaseInitSource = readFileSync(databaseInitPath, 'utf8');
+        expect(databaseInitSource).not.toContain('user_functions: {');
+        expect(databaseInitSource).not.toContain('user_functions: [');
+        expect(databaseInitSource).not.toContain("collection('user_functions')");
+        expect(databaseInitSource).not.toContain('collection("user_functions")');
     });
 });
