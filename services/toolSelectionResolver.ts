@@ -1,4 +1,4 @@
-import type { ToolSelection } from '../types';
+import type { Agent, AgentInstance, ToolSelection } from '../types';
 import type { UserFunction } from '../types/function.types';
 
 export interface ResolvedToolSelection {
@@ -95,6 +95,98 @@ export function deriveSelectedToolIds(
     }
 
     return legacyFunctionIds ?? [];
+}
+
+function normalizeToolIdList(rawValues: unknown[] | undefined): string[] {
+    if (!Array.isArray(rawValues)) {
+        return [];
+    }
+
+    return rawValues
+        .map((value) => {
+            if (typeof value === 'string') {
+                return value;
+            }
+
+            if (value && typeof value === 'object' && 'toolId' in (value as Record<string, unknown>) && typeof (value as Record<string, unknown>).toolId === 'string') {
+                return (value as Record<string, unknown>).toolId as string;
+            }
+
+            if (value && typeof value === 'object' && 'toString' in (value as Record<string, unknown>) && typeof (value as Record<string, unknown>).toString === 'function') {
+                const stringValue = String(value);
+                return stringValue !== '[object Object]' ? stringValue : '';
+            }
+
+            return '';
+        })
+        .filter((value): value is string => value.trim().length > 0);
+}
+
+export function resolveAgentSelectedToolIds(agent: Agent, agentInstance: AgentInstance | undefined): string[] {
+    const instanceConfig = agentInstance?.configuration_json;
+    const inheritance = instanceConfig?.functionInheritance;
+
+    const instanceSelectionIds = inheritance?.inheritFromPrototype === false
+        ? deriveSelectedToolIds(inheritance.overrideToolSelections, inheritance.overrideFunctionIds)
+        : deriveSelectedToolIds(instanceConfig?.toolSelections || agentInstance?.toolSelections, undefined);
+
+    const prototypeSelectionIds = deriveSelectedToolIds(agent.toolSelections, agent.functionIds);
+    const fallbackToolIds = normalizeToolIdList((instanceConfig as Record<string, unknown> | undefined)?.tools as unknown[] | undefined)
+        .concat(normalizeToolIdList((agentInstance as unknown as Record<string, unknown> | undefined)?.tools as unknown[] | undefined))
+        .concat(normalizeToolIdList((agent as unknown as Record<string, unknown>).tools as unknown[] | undefined));
+
+    return instanceSelectionIds.length > 0
+        ? instanceSelectionIds
+        : prototypeSelectionIds.length > 0
+            ? prototypeSelectionIds
+            : fallbackToolIds;
+}
+
+export function resolveAgentToolScope(agent: Agent, agentInstance: AgentInstance | undefined, availableFunctions: UserFunction[]): UserFunction[] {
+    const selectedIds = resolveAgentSelectedToolIds(agent, agentInstance);
+
+    if (selectedIds.length === 0) {
+        return [];
+    }
+
+    const selectedIdSet = new Set(selectedIds);
+    return availableFunctions.filter((fn) => {
+        if (!fn.isEnabled) {
+            return false;
+        }
+
+        return selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false);
+    });
+}
+
+export function hasLegacySelectedToolNamed(agent: Agent, agentInstance: AgentInstance | undefined, toolName: string): boolean {
+    const candidateToolLists = [
+        agentInstance?.configuration_json?.tools,
+        (agentInstance as unknown as Record<string, unknown> | undefined)?.tools,
+        agent.tools,
+    ];
+
+    return candidateToolLists.some((toolList) => Array.isArray(toolList) && toolList.some((tool) => {
+        if (!tool || typeof tool !== 'object') {
+            return false;
+        }
+
+        return (tool as Record<string, unknown>).name === toolName;
+    }));
+}
+
+export function hasSelectedToolNamed(
+    agent: Agent,
+    agentInstance: AgentInstance | undefined,
+    availableFunctions: UserFunction[],
+    toolName: string
+): boolean {
+    if (hasLegacySelectedToolNamed(agent, agentInstance, toolName)) {
+        return true;
+    }
+
+    const selectedIdSet = new Set(resolveAgentSelectedToolIds(agent, agentInstance));
+    return availableFunctions.some((fn) => fn.isEnabled && fn.name === toolName && (selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false)));
 }
 
 export function resolveToolSelections(

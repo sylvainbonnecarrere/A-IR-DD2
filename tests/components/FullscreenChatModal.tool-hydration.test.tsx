@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { FullscreenChatModal } from '../../components/modals/FullscreenChatModal';
 import { LLMProvider, RobotId } from '../../types';
 import type { UserFunction } from '../../types/function.types';
@@ -8,6 +8,7 @@ import apiClient from '../../utils/apiClient';
 let runtimeStoreState: Record<string, any>;
 let designStoreState: Record<string, any>;
 let functionStoreState: { functions: UserFunction[] };
+const mockUseAgentChat = jest.fn(() => ({ handleSendMessage: jest.fn(), loadingMessage: '', isHistorySynthesisActive: false }));
 
 jest.mock('../../components/workflow/ToolCallBlock', () => ({ ToolCallBlock: () => <div data-testid="tool-call-block" /> }));
 jest.mock('../../components/modals/ConfirmationModal', () => ({ ConfirmationModal: () => null }));
@@ -17,7 +18,7 @@ jest.mock('../../components/panels/VideoGenerationConfigPanel', () => ({ VideoGe
 jest.mock('../../components/panels/MapsGroundingConfigPanel', () => ({ MapsGroundingConfigPanel: () => null }));
 jest.mock('../../hooks/useLocalization', () => ({ useLocalization: () => ({ t: (key: string) => key }) }));
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ isAuthenticated: true, accessToken: 'token-123' }) }));
-jest.mock('../../hooks/useAgentChat', () => ({ useAgentChat: () => ({ handleSendMessage: jest.fn(), loadingMessage: '' }) }));
+jest.mock('../../hooks/useAgentChat', () => ({ useAgentChat: () => mockUseAgentChat() }));
 jest.mock('../../services/webSearchParamsConfigService', () => ({ persistInstanceWebSearchParams: jest.fn(async () => undefined) }));
 jest.mock('../../utils/apiClient', () => ({
   __esModule: true,
@@ -33,11 +34,16 @@ jest.mock('../../stores/useRuntimeStore', () => ({
   )),
 }));
 
-jest.mock('../../stores/useDesignStore', () => ({
-  useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-    selector ? selector(designStoreState) : designStoreState
-  )),
-}));
+jest.mock('../../stores/useDesignStore', () => {
+  const actual = jest.requireActual('../../stores/useDesignStore');
+
+  return {
+    ...actual,
+    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
+      selector ? selector(designStoreState) : designStoreState
+    )),
+  };
+});
 
 jest.mock('../../stores/useFunctionStore', () => ({
   useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[] }) => unknown) => (
@@ -149,5 +155,19 @@ describe('FullscreenChatModal tool projection hydration', () => {
         })
       ])
     ));
+  });
+
+  it('shows the synthesis icon in the chat loader when history synthesis is active', () => {
+    runtimeStoreState.isNodeExecuting = jest.fn(() => true);
+    mockUseAgentChat.mockReturnValue({
+      handleSendMessage: jest.fn(),
+      loadingMessage: 'agentNode_history_summarizing',
+      isHistorySynthesisActive: true,
+    });
+
+    render(<FullscreenChatModal />);
+
+    expect(screen.getByText('agentNode_history_summarizing')).toBeInTheDocument();
+    expect(screen.getByTestId('history-synthesis-icon')).toBeInTheDocument();
   });
 });

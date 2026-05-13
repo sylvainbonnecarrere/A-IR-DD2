@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, Tool, OutputConfig, OutputFormat, RobotId, LocalLLMProfile, ToolSelection } from '../../types';
+import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, HistoryLimitKey, Tool, OutputConfig, OutputFormat, RobotId, LocalLLMProfile, ToolSelection } from '../../types';
 import { Button, Modal, ToggleSwitch } from '../UI';
 import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels } from '../../llmModels';
 import { useLocalization } from '../../hooks/useLocalization';
@@ -13,6 +13,8 @@ import { API_BASE_URL } from '../../config/api.config';
 import { FunctionSelector } from '../FunctionSelector';
 import { useFunctionStore } from '../../stores/useFunctionStore';
 import { deriveSelectedToolIds, normalizeToolSelections } from '../../services/toolSelectionResolver';
+import { HISTORY_LIMIT_KEYS } from '../../services/historySynthesisPolicy';
+import { createDefaultHistoryConfig } from '../../utils/historyConfigDefaults';
 
 interface AgentFormModalProps {
   onClose: () => void;
@@ -22,14 +24,6 @@ interface AgentFormModalProps {
   localLLMProfiles?: LocalLLMProfile[];
 }
 
-const defaultHistoryConfig: Omit<HistoryConfig, 'llmProvider' | 'model'> = {
-  enabled: false,
-  role: 'Archiviste Concis',
-  systemPrompt: 'Résume la conversation suivante de manière factuelle et concise, en conservant les points clés et les décisions prises. Le résumé servira de mémoire pour un autre agent IA.',
-  limits: { char: 5000, word: 1000, token: 800, sentence: 50, message: 20 }
-};
-
-
 const defaultOutputConfig: OutputConfig = {
   enabled: false,
   format: 'json',
@@ -37,6 +31,8 @@ const defaultOutputConfig: OutputConfig = {
 };
 
 const outputFormats: OutputFormat[] = ['json', 'xml', 'yaml', 'shell', 'powershell', 'python', 'html', 'css', 'javascript', 'typescript', 'php', 'sql', 'mysql', 'mongodb'];
+
+const getHistoryLimitLabelKey = (limitKey: HistoryLimitKey) => `history_limit_${limitKey}`;
 
 export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, existingAgent, localLLMProfiles: propLocalLLMProfiles = [] }: AgentFormModalProps) => {
   const { t } = useLocalization();
@@ -113,6 +109,7 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
   const [selectedToolSelections, setSelectedToolSelections] = useState<ToolSelection[]>([]);
   const [outputConfig, setOutputConfig] = useState<OutputConfig>(defaultOutputConfig);
   const [historyConfig, setHistoryConfig] = useState<HistoryConfig>(() => {
+    const defaultHistoryConfig = createDefaultHistoryConfig();
     const availableModels = getAvailableModels(enabledLLMProvider);
     return {
       ...defaultHistoryConfig,
@@ -250,7 +247,22 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
         setModel(existingAgent.model);
       }
       setSelectedCapabilities(existingAgent.capabilities);
-      setHistoryConfig(prev => ({ ...defaultHistoryConfig, ...prev, ...(existingAgent.historyConfig || {}) }));
+      const defaultHistoryConfig = createDefaultHistoryConfig();
+      setHistoryConfig(prev => ({
+        ...defaultHistoryConfig,
+        ...prev,
+        ...(existingAgent.historyConfig || {}),
+        limits: {
+          ...defaultHistoryConfig.limits,
+          ...prev.limits,
+          ...(existingAgent.historyConfig?.limits || {}),
+        },
+        enabledLimits: {
+          ...defaultHistoryConfig.enabledLimits,
+          ...prev.enabledLimits,
+          ...(existingAgent.historyConfig?.enabledLimits || {}),
+        },
+      }));
       setTools(existingAgent.tools || []);
       setSelectedToolSelections(normalizeToolSelections(existingAgent.toolSelections, existingAgent.functionIds, availableFunctions));
       setOutputConfig(existingAgent.outputConfig || defaultOutputConfig);
@@ -917,19 +929,37 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
                 <div className="p-3 bg-gray-900/50 rounded-lg space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentForm_history_thresholdsLabel')}</label>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                      {Object.keys(historyConfig.limits).map(key => (
-                        <div key={key}>
-                          <label htmlFor={`limit-${key}`} className="text-xs text-gray-400 capitalize">{key}</label>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      {HISTORY_LIMIT_KEYS.map((key) => {
+                        const isEnabled = historyConfig.enabledLimits[key];
+                        return (
+                        <div key={key} className="rounded-md border border-gray-700 bg-gray-800/40 p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <label htmlFor={`limit-${key}`} className="text-xs font-medium text-gray-300">{t(getHistoryLimitLabelKey(key))}</label>
+                            <label className="flex items-center gap-2 text-xs text-gray-400">
+                              <input
+                                type="checkbox"
+                                checked={isEnabled}
+                                aria-label={`${t('history_limit_active')} ${t(getHistoryLimitLabelKey(key))}`}
+                                onChange={e => setHistoryConfig(p => ({
+                                  ...p,
+                                  enabledLimits: { ...p.enabledLimits, [key]: e.target.checked }
+                                }))}
+                                className="h-4 w-4 rounded border-gray-500 bg-gray-700 text-indigo-500 focus:ring-indigo-500"
+                              />
+                              <span>{t('history_limit_active')}</span>
+                            </label>
+                          </div>
                           <input
                             id={`limit-${key}`}
                             type="number"
-                            value={historyConfig.limits[key as keyof typeof historyConfig.limits]}
-                            onChange={e => setHistoryConfig(p => ({ ...p, limits: { ...p.limits, [key]: parseInt(e.target.value) || 0 } }))}
-                            className="w-full p-1.5 mt-1 text-sm bg-gray-700 border border-gray-600 rounded-md"
+                            value={historyConfig.limits[key]}
+                            onChange={e => setHistoryConfig(p => ({ ...p, limits: { ...p.limits, [key]: parseInt(e.target.value, 10) || 0 } }))}
+                            disabled={!isEnabled}
+                            className="w-full p-1.5 text-sm bg-gray-700 border border-gray-600 rounded-md disabled:cursor-not-allowed disabled:opacity-50"
                           />
                         </div>
-                      ))}
+                      )})}
                     </div>
                   </div>
 

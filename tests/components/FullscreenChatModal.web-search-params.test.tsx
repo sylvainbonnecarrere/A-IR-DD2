@@ -39,11 +39,16 @@ jest.mock('../../stores/useRuntimeStore', () => ({
   )),
 }));
 
-jest.mock('../../stores/useDesignStore', () => ({
-  useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-    selector ? selector(designStoreState) : designStoreState
-  )),
-}));
+jest.mock('../../stores/useDesignStore', () => {
+  const actual = jest.requireActual('../../stores/useDesignStore');
+
+  return {
+    ...actual,
+    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
+      selector ? selector(designStoreState) : designStoreState
+    )),
+  };
+});
 
 jest.mock('../../stores/useFunctionStore', () => ({
   useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[] }) => unknown) => (

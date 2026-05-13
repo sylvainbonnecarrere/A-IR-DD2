@@ -59,9 +59,9 @@ describe('buildPythonNativeWrapper', () => {
                 },
             } as any);
 
-            expect(stderr).toBe('');
+            expect(stderr.toString()).toBe('');
 
-            const payload = JSON.parse(stdout.trim()) as {
+            const payload = JSON.parse(stdout.toString().trim()) as {
                 success: boolean;
                 output: { echoed: string };
                 stdout: string;

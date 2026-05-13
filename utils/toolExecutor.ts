@@ -1,6 +1,5 @@
 // utils/toolExecutor.ts
 import { ToolCall } from '../types';
-import { API_BASE_URL } from '../config/api.config';
 
 // Mock function for getting weather
 const get_weather = (location: string): object => {
@@ -20,40 +19,13 @@ const get_current_time = (): object => {
     return { currentTime: new Date().toLocaleString() };
 };
 
-const executePythonToolOnBackend = async (toolName: string, args: object): Promise<object> => {
-    const backendUrl = `${API_BASE_URL}/api/execute-python-tool`;
-    
-    try {
-        const response = await fetch(backendUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ toolName, args }),
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: `Backend server responded with status ${response.status}` }));
-            throw new Error(errorData.error || `Backend server error.`);
-        }
-
-        const data = await response.json();
-        if (data.success) {
-            return data.result;
-        } else {
-            throw new Error(data.error || 'Backend execution failed.');
-        }
-    } catch (error) {
-        const fetchError = `Backend service not available at ${backendUrl}. Python tools are disabled.`;
-        console.warn(fetchError, error);
-        // Return a graceful degradation instead of throwing an error
-        const isFetchError = error instanceof TypeError && error.message.includes('fetch');
-        return { 
-            error: isFetchError ? 'Backend service not available' : (error as Error).message,
-            message: 'Python tools require backend service. Please start the backend server to use Python tools.',
-            toolName,
-            backendRequired: true
-        };
-    }
-};
+const buildSandboxRequiredResult = (toolName: string): object => ({
+    error: `L'outil '${toolName}' doit etre execute via le sandbox authentifie.`,
+    message: "Le fallback legacy direct sur l'hote a ete supprime. Selectionnez un tool moderne et executez-le via le sandbox authentifie.",
+    toolName,
+    sandboxRequired: true,
+    legacyRouteRemoved: true,
+});
 
 
 export const executeTool = async (toolCall: ToolCall): Promise<object> => {
@@ -63,9 +35,9 @@ export const executeTool = async (toolCall: ToolCall): Promise<object> => {
         const args = JSON.parse(toolCall.arguments);
         
         // --- Tool Router ---
-        // If the tool name ends with '_py', delegate execution to the backend service.
+        // Python tools must now go through the authenticated sandbox path only.
         if (toolCall.name.endsWith('_py')) {
-            return await executePythonToolOnBackend(toolCall.name, args);
+            return buildSandboxRequiredResult(toolCall.name);
         }
 
         // Otherwise, execute local TypeScript functions

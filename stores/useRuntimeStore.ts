@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ChatMessage, LLMConfig, LLMProvider, LocalLLMProfile } from '../types';
+import { ChatMessage, InvisibleHistorySummaryState, LLMConfig, LLMProvider, LocalLLMProfile } from '../types';
 
 const isDevelopmentEnvironment = process.env.NODE_ENV !== 'production';
 
@@ -11,6 +11,7 @@ const isDevelopmentEnvironment = process.env.NODE_ENV !== 'production';
 interface RuntimeStore {
   // Chat & Execution State
   nodeMessages: Record<string, ChatMessage[]>; // nodeId -> messages[]
+  nodeInvisibleHistorySummaries: Record<string, InvisibleHistorySummaryState | null>;
   executingNodes: Set<string>; // nodeIds currently executing
 
   // LLM Configuration (runtime)
@@ -48,6 +49,8 @@ interface RuntimeStore {
   addNodeMessage: (nodeId: string, message: ChatMessage) => void;
   updateNodeMessage: (nodeId: string, messageId: string, updates: Partial<ChatMessage>) => void;
   clearNodeMessages: (nodeId: string) => void;
+  setNodeInvisibleHistorySummary: (nodeId: string, summaryState: InvisibleHistorySummaryState | null) => void;
+  getNodeInvisibleHistorySummary: (nodeId: string) => InvisibleHistorySummaryState | null;
 
   setNodeExecuting: (nodeId: string, isExecuting: boolean) => void;
 
@@ -88,6 +91,7 @@ interface RuntimeStore {
 export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   // Initial state
   nodeMessages: {},
+  nodeInvisibleHistorySummaries: {},
   executingNodes: new Set(),
   llmConfigs: [],
   localLLMProfiles: [],
@@ -125,7 +129,15 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   })),
 
   clearNodeMessages: (nodeId) => set((state) => ({
-    nodeMessages: { ...state.nodeMessages, [nodeId]: [] }
+    nodeMessages: { ...state.nodeMessages, [nodeId]: [] },
+    nodeInvisibleHistorySummaries: { ...state.nodeInvisibleHistorySummaries, [nodeId]: null }
+  })),
+
+  setNodeInvisibleHistorySummary: (nodeId, summaryState) => set((state) => ({
+    nodeInvisibleHistorySummaries: {
+      ...state.nodeInvisibleHistorySummaries,
+      [nodeId]: summaryState,
+    }
   })),
 
   // Execution state
@@ -200,6 +212,11 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     return state.nodeMessages[nodeId] || [];
   },
 
+  getNodeInvisibleHistorySummary: (nodeId) => {
+    const state = get();
+    return state.nodeInvisibleHistorySummaries[nodeId] || null;
+  },
+
   isNodeExecuting: (nodeId) => {
     const state = get();
     return state.executingNodes.has(nodeId);
@@ -271,6 +288,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
    */
   resetAll: () => set({
     nodeMessages: {},
+    nodeInvisibleHistorySummaries: {},
     executingNodes: new Set(),
     minimizedNodeIds: new Set(), // ⭐ RESET: Restore à normal
     lastSavedAt: {}, // ⭐ ÉTAPE 3: Reset save timestamps on logout
@@ -298,6 +316,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     const currentProfiles = get().localLLMProfiles;
     set({
       nodeMessages: {},
+      nodeInvisibleHistorySummaries: {},
       executingNodes: new Set(),
       minimizedNodeIds: new Set(),
       lastSavedAt: {},

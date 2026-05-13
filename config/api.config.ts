@@ -44,11 +44,6 @@ export const API_ENDPOINTS = {
         chat: '/api/lmstudio/chat/completions',
         detectEndpoint: '/api/lmstudio/detect-endpoint',
     },
-
-    // Python tools execution (existant)
-    pythonTools: {
-        execute: '/api/execute-python-tool',
-    },
 } as const;
 
 /**

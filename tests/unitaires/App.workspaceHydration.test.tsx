@@ -1,8 +1,10 @@
 import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import App from '../../App';
+import { selectResolvedAgentExecutionSelectionContext } from '../../stores/useDesignStore';
 import apiClient from '../../utils/apiClient';
 import { useAuth } from '../../contexts/AuthContext';
+import type { UserFunction } from '../../types/function.types';
 
 const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
 
@@ -124,11 +126,16 @@ jest.mock('../../stores/useRuntimeStore', () => ({
     })
 }));
 
-jest.mock('../../stores/useDesignStore', () => ({
-    useDesignStore: Object.assign((selector?: (state: typeof mockDesignStore) => unknown) => selector ? selector(mockDesignStore) : mockDesignStore, {
-        getState: () => mockDesignStore
-    })
-}));
+jest.mock('../../stores/useDesignStore', () => {
+    const actual = jest.requireActual('../../stores/useDesignStore');
+
+    return {
+        ...actual,
+        useDesignStore: Object.assign((selector?: (state: typeof mockDesignStore) => unknown) => selector ? selector(mockDesignStore) : mockDesignStore, {
+            getState: () => mockDesignStore
+        })
+    };
+});
 
 jest.mock('../../stores/useWorkflowStore', () => ({
     useWorkflowStore: Object.assign((selector?: (state: typeof mockWorkflowStore) => unknown) => selector ? selector(mockWorkflowStore) : mockWorkflowStore, {
@@ -423,5 +430,91 @@ describe('App workspace hydration orchestration', () => {
                 })
             ])
         ));
+    });
+
+    it('hydrates canonical tool selections that the runtime selector can resolve after snapshot reload', async () => {
+        const workspaceWithCanonicalToolSelections = {
+            ...workspacePayload,
+            agentPrototypes: [
+                {
+                    ...workspacePayload.agentPrototypes[0],
+                    toolSelections: [],
+                }
+            ],
+            agentInstances: [
+                {
+                    ...workspacePayload.agentInstances[0],
+                    configuration_json: {
+                        ...workspacePayload.agentInstances[0].configuration_json,
+                        toolSelections: [{
+                            toolId: 'tool.web-search',
+                            versionRef: {
+                                versionTag: 'v1',
+                                versionNumber: 1,
+                                workspaceId: 'workflow-1'
+                            }
+                        }],
+                    }
+                }
+            ]
+        };
+
+        const availableFunctions: UserFunction[] = [
+            {
+                _id: 'fn-1',
+                toolId: 'tool.web-search',
+                name: 'web_search_py',
+                description: 'Web search',
+                language: 'python',
+                origin: 'native',
+                userId: null,
+                workflowId: 'workflow-1',
+                inputSchema: {},
+                outputSchema: {},
+                codePath: null,
+                codeInline: null,
+                dependencies: [],
+                isEnabled: true,
+                isReadonly: true,
+                version: 1,
+                versionTag: 'v1',
+                tags: [],
+                createdAt: '2026-01-01T00:00:00.000Z',
+                updatedAt: '2026-01-01T00:00:00.000Z',
+            }
+        ];
+
+        (apiClient.get as jest.Mock).mockResolvedValue({ data: workspaceWithCanonicalToolSelections });
+
+        render(<App />);
+
+        await waitFor(() => expect(mockDesignStore.hydrateFromServer).toHaveBeenCalled());
+
+        const hydratedSnapshot = mockDesignStore.hydrateFromServer.mock.calls.at(-1)?.[0] as {
+            agents: any[];
+            agentInstances: any[];
+        };
+        const staleNodeAgent = {
+            ...hydratedSnapshot.agents[0],
+            toolSelections: [],
+        };
+
+        const selectionContext = selectResolvedAgentExecutionSelectionContext(
+            {
+                agents: hydratedSnapshot.agents,
+                agentInstances: hydratedSnapshot.agentInstances,
+            },
+            staleNodeAgent,
+            'instance-1',
+            availableFunctions,
+        );
+
+        expect(selectionContext.selectedToolIds).toEqual(['tool.web-search']);
+        expect(selectionContext.scopedFunctions).toEqual([
+            expect.objectContaining({
+                name: 'web_search_py',
+                toolId: 'tool.web-search',
+            })
+        ]);
     });
 });

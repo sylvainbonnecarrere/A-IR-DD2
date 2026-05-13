@@ -236,6 +236,81 @@ describe('Archi tool selection modals', () => {
         );
     });
 
+    it('persists per-threshold activation flags from AgentFormModal history settings', () => {
+        const onSave = jest.fn();
+
+        render(
+            <AgentFormModal
+                onClose={jest.fn()}
+                onSave={onSave}
+                llmConfigs={llmConfigs}
+                existingAgent={null}
+                localLLMProfiles={emptyLocalProfiles}
+            />
+        );
+
+        fireEvent.change(screen.getByLabelText('agentForm_nameLabel'), {
+            target: { value: 'Prototype Memoire' },
+        });
+        fireEvent.click(screen.getByText('agentForm_tab_history'));
+        fireEvent.click(screen.getByLabelText('agentForm_history_enableLabel'));
+        fireEvent.click(screen.getByText('agentForm_createButton'));
+
+        expect(onSave).toHaveBeenCalledWith(
+            expect.objectContaining({
+                historyConfig: expect.objectContaining({
+                    enabled: true,
+                    limits: expect.objectContaining({
+                        sentence: 30,
+                        message: 6,
+                    }),
+                    enabledLimits: expect.objectContaining({
+                        char: false,
+                        word: false,
+                        token: false,
+                        sentence: true,
+                        message: true,
+                    }),
+                }),
+            }),
+            undefined,
+        );
+    });
+
+    it('saves individual threshold toggles from AgentFormModal history settings', () => {
+        const onSave = jest.fn();
+
+        render(
+            <AgentFormModal
+                onClose={jest.fn()}
+                onSave={onSave}
+                llmConfigs={llmConfigs}
+                existingAgent={null}
+                localLLMProfiles={emptyLocalProfiles}
+            />
+        );
+
+        fireEvent.change(screen.getByLabelText('agentForm_nameLabel'), {
+            target: { value: 'Prototype Memoire Affine' },
+        });
+        fireEvent.click(screen.getByText('agentForm_tab_history'));
+        fireEvent.click(screen.getByLabelText('agentForm_history_enableLabel'));
+        fireEvent.click(screen.getByLabelText('history_limit_active history_limit_message'));
+        fireEvent.click(screen.getByText('agentForm_createButton'));
+
+        expect(onSave).toHaveBeenCalledWith(
+            expect.objectContaining({
+                historyConfig: expect.objectContaining({
+                    enabledLimits: expect.objectContaining({
+                        sentence: true,
+                        message: false,
+                    }),
+                }),
+            }),
+            undefined,
+        );
+    });
+
     it('saves canonical override tool selections from AgentConfigurationModal', async () => {
         render(<AgentConfigurationModal llmConfigs={llmConfigs} />);
 
@@ -275,6 +350,68 @@ describe('Archi tool selection modals', () => {
                 })
             );
             expect(mockSetConfigModalInstanceId).toHaveBeenCalledWith(null);
+        });
+    });
+
+    it('shows only sentence and message as active defaults for legacy instance history configs without enabledLimits', async () => {
+        designStoreState.getResolvedInstance = jest.fn(() => ({
+            instance: {
+                id: 'instance-db-1',
+                name: 'Agent instance',
+                prototypeId: 'agent-1',
+                position: { x: 10, y: 20 },
+                configuration_json: {
+                    role: 'Analyste',
+                    model: 'gemini-2.5-flash',
+                    llmProvider: LLMProvider.Gemini,
+                    systemPrompt: 'Analyse les donnees',
+                    capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
+                    tools: [],
+                    historyConfig: {
+                        enabled: true,
+                        llmProvider: LLMProvider.Gemini,
+                        model: 'gemini-2.5-flash',
+                        role: 'Archiviste',
+                        systemPrompt: 'Résumé',
+                        limits: {
+                            char: 5000,
+                            word: 1000,
+                            token: 800,
+                            sentence: 30,
+                            message: 6,
+                        },
+                    },
+                    logs: [],
+                    errors: [],
+                    tasks: [],
+                    links: [],
+                },
+                persistenceConfig: undefined,
+            },
+            prototype: {
+                id: 'agent-1',
+                name: 'Prototype meteo',
+                role: 'Analyste',
+                model: 'gemini-2.5-flash',
+                llmProvider: LLMProvider.Gemini,
+                systemPrompt: 'Analyse les donnees',
+                capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
+                tools: [],
+                functionIds: ['legacy-weather'],
+                toolSelections: [{ toolId: 'tool.weather' }],
+            },
+        }));
+
+        render(<AgentConfigurationModal llmConfigs={llmConfigs} />);
+
+        fireEvent.click(screen.getByText('agentConfig_tab_history'));
+
+        await waitFor(() => {
+            expect(screen.getByLabelText('history_limit_active history_limit_char')).not.toBeChecked();
+            expect(screen.getByLabelText('history_limit_active history_limit_word')).not.toBeChecked();
+            expect(screen.getByLabelText('history_limit_active history_limit_token')).not.toBeChecked();
+            expect(screen.getByLabelText('history_limit_active history_limit_sentence')).toBeChecked();
+            expect(screen.getByLabelText('history_limit_active history_limit_message')).toBeChecked();
         });
     });
 });

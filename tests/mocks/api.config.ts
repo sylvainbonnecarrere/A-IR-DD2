@@ -16,9 +16,6 @@ export const API_ENDPOINTS = {
         chat: '/api/lmstudio/chat/completions',
         detectEndpoint: '/api/lmstudio/detect-endpoint',
     },
-    pythonTools: {
-        execute: '/api/execute-python-tool',
-    },
 } as const;
 
 export function buildBackendUrl(endpoint: string, queryParams?: Record<string, string>): string {

@@ -9,7 +9,7 @@ import { RuntimeHealthService } from './runtimeHealth.service';
 import { ExecutionOrchestrator } from './runtime/ExecutionOrchestrator';
 import type { SandboxExecutionMetadata, SandboxExecutionResourceUsage } from './runtime/execution.types';
 import { getSandboxErrorDetailsFromExecutionResult, RuntimeNotReadyError, type SandboxErrorDetails } from './runtime/errors';
-import type { IUserToolPolicy } from '../models/UserTool.model';
+import type { IUserToolPolicy, IUserToolVersion } from '../models/UserTool.model';
 import { buildGlobalLegacyFunctionClauses, buildGlobalToolClauses, buildOwnedLegacyFunctionClause, buildOwnedToolClause } from '../utils/sharedExampleAccess';
 
 export interface SandboxResult {
@@ -289,7 +289,7 @@ export class SandboxService {
     }
 
     private findMatchingToolVersion(
-        versions: Array<{ versionTag: string }>,
+        versions: IUserToolVersion[],
         requestedVersionTag?: string,
         requestedVersionNumber?: number
     ) {
