@@ -65,6 +65,11 @@ const NODE_TYPES: NodeTypes = Object.freeze({
   customAgent: V2AgentNode,
 });
 
+const EDGE_TYPES = Object.freeze({});
+const REACT_FLOW_STYLE = Object.freeze({ background: 'transparent' });
+const DEFAULT_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 0.7 });
+const PRO_OPTIONS = Object.freeze({ hideAttribution: true });
+
 // Composant interne avec accès à useReactFlow
 const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCanvasProps) {
   const {
@@ -459,9 +464,10 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           onPaneClick={handlePaneClick}
           connectionMode={ConnectionMode.Strict}
           nodeTypes={NODE_TYPES}
-          style={{ background: 'transparent' }}
-          defaultViewport={{ x: 0, y: 0, zoom: 0.7 }}
-          proOptions={{ hideAttribution: true }}
+          edgeTypes={EDGE_TYPES}
+          style={REACT_FLOW_STYLE}
+          defaultViewport={DEFAULT_VIEWPORT}
+          proOptions={PRO_OPTIONS}
           nodesDraggable={true}
           nodesConnectable={true}
           elementsSelectable={false}

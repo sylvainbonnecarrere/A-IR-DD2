@@ -1,19 +1,18 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, ToolCallRecord } from '../types';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import * as llmService from '../services/llmService';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
-import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
 import { isLLMConfigured } from '../utils/llmProviderUtils';
-import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
+import { resolveAgentRuntimeConfig } from '../services/runtimeConfigResolver';
 import { createAdapter } from '../services/adapters/AdapterFactory';
 import { runAgentLoop } from '../services/llm/AgentLoop';
 import { useFunctionStore } from '../stores/useFunctionStore';
-import { useDesignStore } from '../stores/useDesignStore';
-import { deriveSelectedToolIds } from '../services/toolSelectionResolver';
+import { selectAgentExecutionSelectionContext, useDesignStore } from '../stores/useDesignStore';
 import { executeAgentToolCall } from '../services/agentToolExecution';
 import { useAgentJournalPersistence } from './useAgentJournalPersistence';
+import { prepareConversationHistoryForAPI } from '../services/historySynthesisService';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -37,6 +36,7 @@ interface UseAgentChatOptions {
 interface UseAgentChatReturn {
     handleSendMessage: (userInput: string, attachedFile: File | null) => Promise<void>;
     loadingMessage: string;
+    isHistorySynthesisActive: boolean;
 }
 
 /**
@@ -63,15 +63,20 @@ export const useAgentChat = ({
         setNodeMessages,
         setNodeExecuting,
         localLLMProfiles,
+        getNodeInvisibleHistorySummary = () => null,
+        setNodeInvisibleHistorySummary = () => undefined,
     } = useRuntimeStore();
     const allFunctions = useFunctionStore((state) => state.functions);
     const loadFunctions = useFunctionStore((state) => state.loadFunctions);
     const agentInstances = useDesignStore((state) => state.agentInstances);
-    const workflowId = instanceId
-        ? agentInstances.find((inst) => inst.id === instanceId)?.workflowId
-        : undefined;
+    const { workflowId, scopedFunctions, selectedToolIds } = useMemo(
+        () => selectAgentExecutionSelectionContext({ agentInstances }, agent, instanceId, allFunctions),
+        [agent, agentInstances, allFunctions, instanceId]
+    );
+    const selectedIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
 
     const [loadingMessage, setLoadingMessage] = useState('');
+    const [isHistorySynthesisActive, setIsHistorySynthesisActive] = useState(false);
     const { persistJournalEntry, persistToolInvocation, resetToolInvocationDedup } = useAgentJournalPersistence({
         workflowId,
         instanceId,
@@ -85,12 +90,6 @@ export const useAgentChat = ({
             return {};
         }
     };
-
-    const selectedToolIds = agent
-        ? deriveSelectedToolIds(agent.toolSelections, agent.functionIds)
-        : [];
-    const selectedIdSet = new Set(selectedToolIds);
-    const scopedFunctions = allFunctions.filter((fn) => fn.isEnabled && (selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false)));
 
     const extractToolExecutionMetadata = (toolResult: unknown): Pick<ToolCallRecord, 'executionId' | 'runner' | 'exitCode' | 'failureKind' | 'artifacts'> => {
         if (!toolResult || typeof toolResult !== 'object') {
@@ -134,6 +133,7 @@ export const useAgentChat = ({
 
         resetToolInvocationDedup();
         setNodeExecuting(nodeId, true);
+        const visibleMessagesBeforeSend = getNodeMessages(nodeId);
 
         const userMessage: ChatMessage = {
             id: generateMessageId('user'),
@@ -195,76 +195,29 @@ export const useAgentChat = ({
         }
 
         try {
-            const messages = getNodeMessages(nodeId);
-
-            // Gestion de l'historique avec messages d'information
-            let conversationHistoryForAPI: ChatMessage[];
-            const historyConfig = agent.historyConfig;
-            const currentFullHistory = [...messages, userMessage];
-
-            if (historyConfig?.enabled && messages.length > 0) {
-                const { limits } = historyConfig;
-                const stats = {
-                    tokens: countTokens(currentFullHistory),
-                    words: countWords(currentFullHistory),
-                    sentences: countSentences(currentFullHistory),
-                    messages: countMessages(currentFullHistory),
-                };
-
-                const shouldSummarize = stats.tokens >= limits.token ||
-                    stats.words >= limits.word ||
-                    stats.sentences >= limits.sentence ||
-                    stats.messages >= limits.message;
-
-                if (shouldSummarize) {
-                    setLoadingMessage(t('agentNode_history_summarizing'));
-                    const summarizationRuntime = resolveHistoryRuntimeConfig(
-                        historyConfig,
-                        llmConfigs,
-                        localLLMProfiles,
-                        agent.localLLMProfileId
-                    );
-                    const summarizationConfig = summarizationRuntime.config;
-
-                    if (!summarizationConfig) {
-                        throw new Error(`Summarization LLM ${historyConfig.llmProvider} not configured.`);
+            const preparedConversation = await prepareConversationHistoryForAPI({
+                visibleMessagesBeforeSend,
+                userMessage,
+                historyConfig: agent.historyConfig,
+                invisibleSummaryState: getNodeInvisibleHistorySummary(nodeId),
+                llmConfigs,
+                localLLMProfiles,
+                inheritedLocalLLMProfileId: agent.localLLMProfileId,
+                t,
+                accessToken,
+                onSummarizingChange: (isSummarizing) => {
+                    if (isSummarizing) {
+                        setIsHistorySynthesisActive(true);
+                        setLoadingMessage(t('agentNode_history_summarizing'));
+                        return;
                     }
 
-                    const summarizationPrompt = `${t('conversation_to_summarize')}:\n\n${currentFullHistory.map(m => `${m.sender}: ${m.text}`).join('\n')}`;
-                    const summarizationHistory: ChatMessage[] = [{
-                        id: generateMessageId('summary-prompt'),
-                        sender: 'user',
-                        text: summarizationPrompt,
-                        timestamp: new Date()
-                    }];
-
-                    const { text: summary } = await llmService.generateContent(
-                        summarizationConfig.provider,
-                        summarizationRuntime.credential,
-                        historyConfig.model,
-                        historyConfig.systemPrompt,
-                        summarizationHistory,
-                        undefined,
-                        undefined,
-                        summarizationRuntime.credential
-                    );
-
-                    const summaryMessage: ChatMessage = {
-                        id: generateMessageId('summary'),
-                        sender: 'agent',
-                        text: `(Résumé de l'historique): ${summary}`,
-                        timestamp: new Date()
-                    };
-
-                    conversationHistoryForAPI = [summaryMessage, userMessage];
-                    setNodeMessages(nodeId, [summaryMessage, userMessage]);
                     setLoadingMessage('');
-                } else {
-                    conversationHistoryForAPI = currentFullHistory;
-                }
-            } else {
-                conversationHistoryForAPI = historyConfig?.enabled ? currentFullHistory : [userMessage];
-            }
+                },
+            });
+
+            setNodeInvisibleHistorySummary(nodeId, preparedConversation.invisibleSummaryState);
+            const conversationHistoryForAPI = preparedConversation.conversationHistoryForAPI;
 
             const credential = agentRuntime.credential;
             const adapter = createAdapter(
@@ -705,11 +658,13 @@ export const useAgentChat = ({
         } finally {
             setNodeExecuting(nodeId, false);
             setLoadingMessage('');
+            setIsHistorySynthesisActive(false);
         }
     };
 
     return {
         handleSendMessage,
         loadingMessage,
+        isHistorySynthesisActive,
     };
 };

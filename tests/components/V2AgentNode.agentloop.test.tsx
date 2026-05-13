@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { V2AgentNode } from '../../components/V2AgentNode';
 import { LLMCapability, LLMProvider, RobotId, type Agent } from '../../types';
 import type { UserFunction } from '../../types/function.types';
@@ -10,6 +10,9 @@ const mockAddNodeMessage = jest.fn();
 const mockSetNodeExecuting = jest.fn();
 const mockEnqueueEntry = jest.fn();
 const mockLoadFunctions = jest.fn();
+const llmServiceMocks = jest.requireMock('../../services/llmService') as { generateContent: jest.Mock };
+const textUtilsMocks = jest.requireMock('../../utils/textUtils') as { countChars: jest.Mock; countTokens: jest.Mock; countWords: jest.Mock; countSentences: jest.Mock; countMessages: jest.Mock };
+const runtimeConfigResolverMocks = jest.requireMock('../../services/runtimeConfigResolver') as { resolveHistoryRuntimeConfig: jest.Mock };
 
 let runtimeStoreState: Record<string, unknown>;
 let designStoreState: Record<string, unknown>;
@@ -43,6 +46,7 @@ jest.mock('../../components/Icons', () => ({
     ImageIcon: () => null,
     ErrorIcon: () => null,
     ExpandIcon: () => null,
+    HistorySynthesisIcon: (props: React.HTMLAttributes<HTMLDivElement>) => <div data-testid="history-synthesis-icon" {...props} />,
     MaximizeIcon: () => null,
 }));
 
@@ -82,11 +86,16 @@ jest.mock('../../stores/useRuntimeStore', () => ({
     )),
 }));
 
-jest.mock('../../stores/useDesignStore', () => ({
-    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-        selector ? selector(designStoreState) : designStoreState
-    )),
-}));
+jest.mock('../../stores/useDesignStore', () => {
+    const actual = jest.requireActual('../../stores/useDesignStore');
+
+    return {
+        ...actual,
+        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
+            selector ? selector(designStoreState) : designStoreState
+        )),
+    };
+});
 
 jest.mock('../../stores/useFunctionStore', () => ({
     useFunctionStore: Object.assign(
@@ -136,6 +145,7 @@ jest.mock('../../utils/toolExecutor', () => ({
 }));
 
 jest.mock('../../utils/textUtils', () => ({
+    countChars: jest.fn(() => 0),
     countTokens: jest.fn(() => 0),
     countWords: jest.fn(() => 0),
     countSentences: jest.fn(() => 0),
@@ -214,13 +224,25 @@ describe('V2AgentNode AgentLoop integration', () => {
         });
         jest.spyOn(console, 'warn').mockImplementation(() => {});
 
+        const executingNodeIds = new Set<string>();
+
         runtimeStoreState = {
             getIsNodeMinimized: jest.fn(() => false),
             getNodeMessages: jest.fn(() => []),
+            getNodeInvisibleHistorySummary: jest.fn(() => null),
             addNodeMessage: mockAddNodeMessage,
+            setNodeInvisibleHistorySummary: jest.fn(),
             setNodeMessages: jest.fn(),
-            isNodeExecuting: jest.fn(() => false),
-            setNodeExecuting: mockSetNodeExecuting,
+            isNodeExecuting: jest.fn((nodeId: string) => executingNodeIds.has(nodeId)),
+            setNodeExecuting: jest.fn((nodeId: string, isExecuting: boolean) => {
+                mockSetNodeExecuting(nodeId, isExecuting);
+                if (isExecuting) {
+                    executingNodeIds.add(nodeId);
+                    return;
+                }
+
+                executingNodeIds.delete(nodeId);
+            }),
             setImagePanelOpen: jest.fn(),
             setImageModificationPanelOpen: jest.fn(),
             setFullscreenImage: jest.fn(),
@@ -228,6 +250,17 @@ describe('V2AgentNode AgentLoop integration', () => {
             llmConfigs: [],
             localLLMProfiles: [],
         };
+
+        textUtilsMocks.countChars.mockReturnValue(0);
+        textUtilsMocks.countTokens.mockReturnValue(0);
+        textUtilsMocks.countWords.mockReturnValue(0);
+        textUtilsMocks.countSentences.mockReturnValue(0);
+        textUtilsMocks.countMessages.mockReturnValue(0);
+        llmServiceMocks.generateContent.mockResolvedValue({ text: 'Résumé invisible' });
+        runtimeConfigResolverMocks.resolveHistoryRuntimeConfig.mockReturnValue({
+            config: null,
+            credential: null,
+        });
 
         designStoreState = {
             agentInstances: [agentInstance],
@@ -838,5 +871,77 @@ describe('V2AgentNode AgentLoop integration', () => {
                 isError: true,
             })
         );
+    });
+
+    it('shows the synthesis icon in the chat loader while a history summary is being prepared for the turn', async () => {
+        let resolveSummary: ((value: { text: string }) => void) | null = null;
+        const summaryPromise = new Promise<{ text: string }>((resolve) => {
+            resolveSummary = resolve;
+        });
+
+        const agentWithHistory: Agent = {
+            ...baseAgent,
+            historyConfig: {
+                enabled: true,
+                llmProvider: LLMProvider.Gemini,
+                model: 'gemini-2.0-flash',
+                role: 'Summarizer',
+                systemPrompt: 'Summarize previous turns only',
+                limits: { char: 1, word: 1000, token: 1000, sentence: 1000, message: 1000 },
+                enabledLimits: { char: true, word: false, token: false, sentence: false, message: false },
+            },
+        };
+
+        runtimeStoreState.getNodeMessages = jest.fn(() => ([
+            {
+                id: 'prior-visible-msg',
+                sender: 'agent',
+                text: 'Historique visible',
+                timestamp: new Date('2026-03-23T10:00:00.000Z'),
+            },
+        ]));
+        runtimeConfigResolverMocks.resolveHistoryRuntimeConfig.mockReturnValue({
+            config: { provider: LLMProvider.Gemini, enabled: true, apiKey: 'summary-key' },
+            credential: 'summary-key',
+        });
+        textUtilsMocks.countChars.mockReturnValue(10);
+        llmServiceMocks.generateContent.mockReturnValue(summaryPromise);
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'archi',
+                    label: 'Archi',
+                    agent: agentWithHistory,
+                    workflowId: 'wf-1',
+                    agentInstance,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        const historyTextarea = screen.getByPlaceholderText('type_message_placeholder') as HTMLTextAreaElement;
+        fireEvent.change(historyTextarea, {
+            target: { value: 'Bonjour synthese' },
+        });
+        expect(historyTextarea.value).toBe('Bonjour synthese');
+        fireEvent.submit(historyTextarea.closest('form')!);
+
+        await waitFor(() => {
+            expect(screen.getByText('agentNode_history_summarizing')).toBeInTheDocument();
+            expect(screen.getByTestId('history-synthesis-icon')).toBeInTheDocument();
+        });
+
+        await act(async () => {
+            resolveSummary?.({ text: 'Résumé invisible' });
+            await Promise.resolve();
+        });
     });
 });

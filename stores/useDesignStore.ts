@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { Agent, V2WorkflowNode, V2WorkflowEdge, RobotId, AgentInstance, ResolvedAgentInstance, defaultWebSearchParams } from '../types';
+import type { UserFunction } from '../types/function.types';
 import { GovernanceService } from '../services/governanceService';
+import { hasSelectedToolNamed, resolveAgentSelectedToolIds, resolveAgentToolScope } from '../services/toolSelectionResolver';
 import apiClient from '../utils/apiClient';
 
 /**
@@ -15,6 +17,18 @@ interface Workflow {
   isDefault: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface AgentExecutionSelectionContext {
+  agentInstance: AgentInstance | undefined;
+  workflowId: string | undefined;
+  selectedToolIds: string[];
+  scopedFunctions: UserFunction[];
+}
+
+export interface ResolvedAgentExecutionSelectionContext extends AgentExecutionSelectionContext {
+  storedPrototype: Agent | undefined;
+  resolvedAgent: Agent | null;
 }
 
 /**
@@ -119,6 +133,76 @@ interface DesignStore {
   deleteWorkflow: (id: string) => Promise<void>;
   getActiveWorkflow: () => Workflow | undefined;
   getWorkflowStats: (id: string) => Promise<{ agentInstanceCount: number; nodeCount: number } | null>;
+}
+
+export function selectAgentExecutionSelectionContext(
+  state: Pick<DesignStore, 'agentInstances'>,
+  agent: Agent | null,
+  instanceId: string | undefined,
+  availableFunctions: UserFunction[]
+): AgentExecutionSelectionContext {
+  const agentInstances = state.agentInstances ?? [];
+  const agentInstance = instanceId
+    ? agentInstances.find((instance) => instance.id === instanceId)
+    : undefined;
+
+  if (!agent) {
+    return {
+      agentInstance,
+      workflowId: agentInstance?.workflowId,
+      selectedToolIds: [],
+      scopedFunctions: [],
+    };
+  }
+
+  return {
+    agentInstance,
+    workflowId: agentInstance?.workflowId,
+    selectedToolIds: resolveAgentSelectedToolIds(agent, agentInstance),
+    scopedFunctions: resolveAgentToolScope(agent, agentInstance, availableFunctions),
+  };
+}
+
+export function selectStoredAgentPrototype(
+  state: Pick<DesignStore, 'agents'>,
+  agentId: string | undefined
+): Agent | undefined {
+  const agents = state.agents ?? [];
+
+  return agentId
+    ? agents.find((candidate) => candidate.id === agentId)
+    : undefined;
+}
+
+export function selectResolvedAgentExecutionSelectionContext(
+  state: Pick<DesignStore, 'agents' | 'agentInstances'>,
+  agent: Agent | null,
+  instanceId: string | undefined,
+  availableFunctions: UserFunction[]
+): ResolvedAgentExecutionSelectionContext {
+  const storedPrototype = selectStoredAgentPrototype(state, agent?.id);
+  const resolvedAgent = storedPrototype ?? agent;
+  const selectionContext = selectAgentExecutionSelectionContext(state, resolvedAgent, instanceId, availableFunctions);
+
+  return {
+    storedPrototype,
+    resolvedAgent,
+    ...selectionContext,
+  };
+}
+
+export function selectResolvedAgentHasToolNamed(
+  state: Pick<DesignStore, 'agents' | 'agentInstances'>,
+  agent: Agent | null,
+  instanceId: string | undefined,
+  availableFunctions: UserFunction[],
+  toolName: string
+): boolean {
+  const { resolvedAgent, agentInstance } = selectResolvedAgentExecutionSelectionContext(state, agent, instanceId, availableFunctions);
+
+  return resolvedAgent
+    ? hasSelectedToolNamed(resolvedAgent, agentInstance, availableFunctions, toolName)
+    : false;
 }
 
 export const useDesignStore = create<DesignStore>((set, get) => ({

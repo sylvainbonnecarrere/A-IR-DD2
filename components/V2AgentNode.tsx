@@ -2,13 +2,13 @@ import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from '
 import { Handle, Position, NodeProps } from 'reactflow';
 import { Agent, ChatMessage, LLMCapability, LLMProvider, Tool, ToolCall, AgentInstance, ToolCallRecord } from '../types';
 import { Button } from './UI';
-import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon, MaximizeIcon } from './Icons';
+import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon, HistorySynthesisIcon, MaximizeIcon } from './Icons';
 import { ConfirmationModal } from './modals/ConfirmationModal';
 import { WebSearchParamsModal } from './modals/WebSearchParamsModal';
 
 import { WebSearchGroundingPanel } from './panels/WebSearchGroundingPanel';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
-import { useDesignStore } from '../stores/useDesignStore';
+import { selectResolvedAgentExecutionSelectionContext, selectResolvedAgentHasToolNamed, useDesignStore } from '../stores/useDesignStore';
 import { useFunctionStore } from '../stores/useFunctionStore';
 import { useWorkflowCanvasContext } from '../contexts/WorkflowCanvasContext';
 import * as llmService from '../services/llmService';
@@ -17,19 +17,18 @@ import { runAgentLoop } from '../services/llm/AgentLoop';
 import { ToolCallBlock } from './workflow/ToolCallBlock';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
-import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
 import { isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
 import { useLocalization } from '../hooks/useLocalization';
 import { useAgentJournalPersistence } from '../hooks/useAgentJournalPersistence';
 import { useAuth } from '../hooks/useAuth';
-import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
+import { resolveAgentRuntimeConfig } from '../services/runtimeConfigResolver';
 import { buildBosHydrationFingerprint, hydrateToolMessagesFromPersistedRuns } from '../services/bosRunProjectionService';
-import { deriveSelectedToolIds } from '../services/toolSelectionResolver';
 import { persistInstanceWebSearchParams } from '../services/webSearchParamsConfigService';
 import type { UserFunction } from '../types/function.types';
 import { executeAgentToolCall, parseToolCallArguments } from '../services/agentToolExecution';
 import { shouldSuppressVisualToolResult } from '../utils/toolResultVisibility';
 import { AGENT_NODE_HANDLES } from './workflow/connectionContracts';
+import { prepareConversationHistoryForAPI } from '../services/historySynthesisService';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -257,99 +256,15 @@ function mergeProviderTools(agentTools: Tool[] | undefined, selectedFunctions: U
   return Array.from(mergedTools.values());
 }
 
-function resolveAgentSelectedToolIds(agent: Agent, agentInstance: AgentInstance | undefined): string[] {
-  const instanceConfig = agentInstance?.configuration_json;
-  const inheritance = instanceConfig?.functionInheritance;
-
-  const normalizeToolIdList = (rawValues: unknown[] | undefined): string[] => {
-    if (!Array.isArray(rawValues)) {
-      return [];
-    }
-
-    return rawValues
-      .map((value) => {
-        if (typeof value === 'string') {
-          return value;
-        }
-
-        if (value && typeof value === 'object' && 'toolId' in (value as Record<string, unknown>) && typeof (value as Record<string, unknown>).toolId === 'string') {
-          return (value as Record<string, unknown>).toolId as string;
-        }
-
-        if (value && typeof value === 'object' && 'toString' in (value as Record<string, unknown>) && typeof (value as Record<string, unknown>).toString === 'function') {
-          const stringValue = String(value);
-          return stringValue !== '[object Object]' ? stringValue : '';
-        }
-
-        return '';
-      })
-      .filter((value): value is string => value.trim().length > 0);
-  };
-
-  const instanceSelectionIds = inheritance?.inheritFromPrototype === false
-    ? deriveSelectedToolIds(inheritance.overrideToolSelections, inheritance.overrideFunctionIds)
-    : deriveSelectedToolIds(instanceConfig?.toolSelections || agentInstance?.toolSelections, undefined);
-
-  const prototypeSelectionIds = deriveSelectedToolIds(agent.toolSelections, agent.functionIds);
-  const fallbackToolIds = normalizeToolIdList((instanceConfig as any)?.tools)
-    .concat(normalizeToolIdList((agentInstance as any)?.tools))
-    .concat(normalizeToolIdList((agent as any).tools));
-
-  return instanceSelectionIds.length > 0
-    ? instanceSelectionIds
-    : prototypeSelectionIds.length > 0
-      ? prototypeSelectionIds
-      : fallbackToolIds;
-}
-
-function resolveAgentToolScope(agent: Agent, agentInstance: AgentInstance | undefined, allFunctions: UserFunction[]): UserFunction[] {
-  const selectedIds = resolveAgentSelectedToolIds(agent, agentInstance);
-
-  if (selectedIds.length === 0) {
-    return [];
-  }
-
-  const selectedIdSet = new Set(selectedIds);
-  return allFunctions.filter((fn) => {
-    if (!fn.isEnabled) {
-      return false;
-    }
-
-    return selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false);
-  });
-}
-
-function hasLegacyWebSearchTool(agent: Agent, agentInstance: AgentInstance | undefined): boolean {
-  const candidateToolLists = [
-    agentInstance?.configuration_json?.tools,
-    (agentInstance as any)?.tools,
-    agent.tools,
-  ];
-
-  return candidateToolLists.some((toolList) => Array.isArray(toolList) && toolList.some((tool) => {
-    if (!tool || typeof tool !== 'object') {
-      return false;
-    }
-
-    return (tool as Record<string, unknown>).name === 'web_search_py';
-  }));
-}
-
 export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: NodeProps<V2AgentNodeData>) {
   const { t } = useLocalization();
-  const { agent, agentInstance: agentInstanceProp } = data;
+  const { agent: nodeAgent, agentInstance: agentInstanceProp } = data;
   
   // Read minimize state from store
   const isMinimized = useRuntimeStore((state) => state.getIsNodeMinimized(id));
 
-  // Read agentInstance from store to get fresh config when updated via settings modal
-  const agentInstances = useDesignStore((state) => state.agentInstances);
-  const agentInstance = agentInstanceProp?.id
-    ? agentInstances.find(inst => inst.id === agentInstanceProp.id)
-    : agentInstanceProp;
-
   // Protection: if agent is null, show error state
-  if (!agent) {
+  if (!nodeAgent) {
     return (
       <div className="min-w-80 bg-red-900/50 border-2 border-red-500 rounded-lg p-4">
         <div className="text-red-300 font-medium">{t('agent_not_found')}</div>
@@ -359,6 +274,63 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
       </div>
     );
   }
+
+  // Runtime store for messages and execution state
+  const {
+    getNodeMessages,
+    addNodeMessage,
+    setNodeMessages,
+    isNodeExecuting,
+    setNodeExecuting,
+    llmConfigs,
+    localLLMProfiles,
+    getNodeInvisibleHistorySummary = () => null,
+    setNodeInvisibleHistorySummary = () => undefined,
+  } = useRuntimeStore();
+
+  // WorkflowCanvas context for navigation and node operations
+  const {
+    navigationHandler,
+    onDeleteNode,
+    onToggleNodeMinimize,
+    onUpdateNodePosition,
+    onOpenImagePanel,
+    onOpenImageModificationPanel,
+    onOpenVideoPanel,
+    onOpenMapsPanel,    onOpenFullscreen
+  } = useWorkflowCanvasContext();
+
+  // Design store for agent data (not node operations)
+  const selectAgent = useDesignStore((state) => state.selectAgent);
+  const updateInstanceConfig = useDesignStore((state) => state.updateInstanceConfig);
+  const designAgents = useDesignStore((state) => state.agents);
+  const designAgentInstances = useDesignStore((state) => state.agentInstances);
+
+  // J8 — Functions available for AgentLoop (emulated FC for local LLMs)
+  const allFunctions = useFunctionStore(state => state.functions);
+  const loadFunctions = useFunctionStore(state => state.loadFunctions);
+  const {
+    storedPrototype,
+    resolvedAgent,
+    agentInstance,
+    workflowId: resolvedWorkflowId,
+    selectedToolIds: configuredToolIds,
+    scopedFunctions,
+  } = useMemo(
+    () => selectResolvedAgentExecutionSelectionContext(
+      {
+        agents: designAgents,
+        agentInstances: designAgentInstances,
+      },
+      nodeAgent,
+      agentInstanceProp?.id,
+      allFunctions
+    ),
+    [allFunctions, agentInstanceProp?.id, designAgentInstances, designAgents, nodeAgent]
+  );
+  const agent = resolvedAgent ?? nodeAgent;
+  const effectiveWorkflowId = data.workflowId || resolvedWorkflowId;
+  const hasWebSearchPyTool = useDesignStore((state) => selectResolvedAgentHasToolNamed(state, nodeAgent, agentInstanceProp?.id, allFunctions, 'web_search_py'));
 
   // Use instance name if available, otherwise use prototype name with null safety
   const displayName = agentInstance?.name || agent?.name || 'Unknown Agent';
@@ -380,79 +352,18 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     localLLMProfileId: (agentInstance.configuration_json as any)?.localLLMProfileId || agent.localLLMProfileId,
   } : agent;
 
-  // Runtime store for messages and execution state
-  const {
-    getNodeMessages,
-    addNodeMessage,
-    setNodeMessages,
-    isNodeExecuting,
-    setNodeExecuting,
-    llmConfigs,
-    localLLMProfiles
-  } = useRuntimeStore();
-
-  // WorkflowCanvas context for navigation and node operations
-  const {
-    navigationHandler,
-    onDeleteNode,
-    onToggleNodeMinimize,
-    onUpdateNodePosition,
-    onOpenImagePanel,
-    onOpenImageModificationPanel,
-    onOpenVideoPanel,
-    onOpenMapsPanel,    onOpenFullscreen
-  } = useWorkflowCanvasContext();
-
-  // Design store for agent data (not node operations)
-  const { selectAgent, updateInstanceConfig } = useDesignStore();
-
-  // J8 — Functions available for AgentLoop (emulated FC for local LLMs)
-  const allFunctions = useFunctionStore(state => state.functions);
-  const loadFunctions = useFunctionStore(state => state.loadFunctions);
-  const effectiveWorkflowId = data.workflowId || agentInstance?.workflowId;
-  const configuredToolIds = useMemo(
-    () => resolveAgentSelectedToolIds(effectiveAgent, agentInstance),
-    [effectiveAgent, agentInstance]
-  );
-
-  const scopedFunctions = useMemo(
-    () => resolveAgentToolScope(effectiveAgent, agentInstance, allFunctions),
-    [effectiveAgent, agentInstance, allFunctions]
-  );
-
-  const hasLegacyWebSearchPyTool = useMemo(
-    () => hasLegacyWebSearchTool(effectiveAgent, agentInstance),
-    [effectiveAgent, agentInstance]
-  );
-
-  const hasWebSearchPyTool = useMemo(
-    () => {
-      if (hasLegacyWebSearchPyTool) {
-        return true;
-      }
-
-      const selectedIdSet = new Set(configuredToolIds);
-      return allFunctions.some((fn) => fn.isEnabled && fn.name === 'web_search_py' && (selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false)));
-    },
-    [allFunctions, configuredToolIds, hasLegacyWebSearchPyTool]
-  );
-
   const providerTools = useMemo(
     () => mergeProviderTools(effectiveAgent.tools, scopedFunctions),
     [effectiveAgent.tools, scopedFunctions]
   );
 
   useEffect(() => {
-    if (hasLegacyWebSearchPyTool) {
-      return;
-    }
-
-    if (configuredToolIds.length === 0 || allFunctions.length > 0) {
+    if (hasWebSearchPyTool || configuredToolIds.length === 0 || allFunctions.length > 0) {
       return;
     }
 
     void loadFunctions(effectiveWorkflowId ?? undefined);
-  }, [allFunctions.length, configuredToolIds.length, effectiveWorkflowId, hasLegacyWebSearchPyTool, loadFunctions]);
+  }, [allFunctions.length, configuredToolIds.length, effectiveWorkflowId, hasWebSearchPyTool, loadFunctions]);
 
   // C1 FIX: Auth token pour les appels sandbox (requireAuth)
   const { accessToken } = useAuth();
@@ -461,6 +372,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   const [userInput, setUserInput] = useState('');
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [loadingMessage, setLoadingMessage] = useState('');
+  const [isHistorySynthesisActive, setIsHistorySynthesisActive] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showThinking, setShowThinking] = useState(true);
   const [webFetchEnabled, setWebFetchEnabled] = useState(false);
@@ -799,75 +711,29 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     }
 
     try {
-      // Gestion de l'historique avec messages d'information
-      let conversationHistoryForAPI: ChatMessage[];
-      const historyConfig = effectiveAgent.historyConfig;
-      const currentFullHistory = [...messages, userMessage];
-
-      if (historyConfig?.enabled && messages.length > 0) {
-        const { limits } = historyConfig;
-        const stats = {
-          tokens: countTokens(currentFullHistory),
-          words: countWords(currentFullHistory),
-          sentences: countSentences(currentFullHistory),
-          messages: countMessages(currentFullHistory),
-        };
-
-        const shouldSummarize = stats.tokens >= limits.token ||
-          stats.words >= limits.word ||
-          stats.sentences >= limits.sentence ||
-          stats.messages >= limits.message;
-
-        if (shouldSummarize) {
-          setLoadingMessage(t('agentNode_history_summarizing'));
-          const summarizationRuntime = resolveHistoryRuntimeConfig(
-            historyConfig,
-            llmConfigs,
-            localLLMProfiles,
-            effectiveAgent.localLLMProfileId
-          );
-          const summarizationConfig = summarizationRuntime.config;
-
-          if (!summarizationConfig) {
-            throw new Error(`Summarization LLM ${historyConfig.llmProvider} not configured.`);
+      const preparedConversation = await prepareConversationHistoryForAPI({
+        visibleMessagesBeforeSend: messages,
+        userMessage,
+        historyConfig: effectiveAgent.historyConfig,
+        invisibleSummaryState: getNodeInvisibleHistorySummary(id),
+        llmConfigs,
+        localLLMProfiles,
+        inheritedLocalLLMProfileId: effectiveAgent.localLLMProfileId,
+        t,
+        accessToken,
+        onSummarizingChange: (isSummarizing) => {
+          if (isSummarizing) {
+            setIsHistorySynthesisActive(true);
+            setLoadingMessage(t('agentNode_history_summarizing'));
+            return;
           }
 
-          const summarizationPrompt = `${t('conversation_to_summarize')}:\n\n${currentFullHistory.map(m => `${m.sender}: ${m.text}`).join('\n')}`;
-          const summarizationHistory: ChatMessage[] = [{
-            id: `msg-summary-prompt-${Date.now()}`,
-            sender: 'user',
-            text: summarizationPrompt,
-            timestamp: new Date()
-          }];
-
-          const { text: summary } = await llmService.generateContent(
-            summarizationConfig.provider,
-            summarizationRuntime.credential,
-            historyConfig.model,
-            historyConfig.systemPrompt,
-            summarizationHistory,
-            undefined, // tools
-            undefined, // outputConfig
-            summarizationRuntime.credential, // endpoint for LMStudio
-            accessToken ?? undefined
-          );
-
-          const summaryMessage: ChatMessage = {
-            id: generateMessageId('summary'),
-            sender: 'agent',
-            text: `(Résumé de l'historique): ${summary}`,
-            timestamp: new Date()
-          };
-
-          conversationHistoryForAPI = [summaryMessage, userMessage];
-          setNodeMessages(id, [summaryMessage, userMessage]);
           setLoadingMessage('');
-        } else {
-          conversationHistoryForAPI = currentFullHistory;
         }
-      } else {
-        conversationHistoryForAPI = historyConfig?.enabled ? currentFullHistory : [userMessage];
-      }
+      });
+
+      setNodeInvisibleHistorySummary(id, preparedConversation.invisibleSummaryState);
+      const conversationHistoryForAPI = preparedConversation.conversationHistoryForAPI;
       // Stream LLM response
       // ⭐ NEW: Resolve local endpoint from profile if available, fallback to llm_configs
       const credential = agentRuntime.credential;
@@ -895,11 +761,15 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           });
 
           await loadFunctions(effectiveWorkflowId ?? undefined);
-          enabledFunctions = resolveAgentToolScope(
-            effectiveAgent,
-            agentInstance,
+          enabledFunctions = selectResolvedAgentExecutionSelectionContext(
+            {
+              agents: designAgents,
+              agentInstances: designAgentInstances,
+            },
+            nodeAgent,
+            agentInstanceProp?.id,
             useFunctionStore.getState().functions
-          );
+          ).scopedFunctions;
         }
 
         console.info('[V2AgentNode] Local AgentLoop tool scope', {
@@ -1311,6 +1181,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     } finally {
       setNodeExecuting(id, false);
       setLoadingMessage('');
+      setIsHistorySynthesisActive(false);
     }
   };
 
@@ -1804,9 +1675,15 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
             {messages.map(renderMessage)}
 
             {/* Loading message d'information système */}
-            {isLoading && loadingMessage && (
-              <div className="text-center text-xs text-gray-400 animate-pulse">
-                {loadingMessage}
+            {isLoading && (
+              <div className="flex justify-start mb-2">
+                <div className="inline-flex items-center gap-2 rounded-lg border border-gray-700/70 bg-gray-800/90 px-3 py-2 text-xs text-gray-200 shadow-lg shadow-cyan-900/10">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent"></div>
+                  {isHistorySynthesisActive && (
+                    <HistorySynthesisIcon data-testid="history-synthesis-icon" className="h-4 w-4 animate-pulse text-cyan-300" />
+                  )}
+                  <span className="whitespace-pre-wrap break-words">{loadingMessage || t('loading')}</span>
+                </div>
               </div>
             )}
 

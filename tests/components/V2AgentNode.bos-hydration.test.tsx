@@ -68,11 +68,16 @@ jest.mock('../../stores/useRuntimeStore', () => ({
     )),
 }));
 
-jest.mock('../../stores/useDesignStore', () => ({
-    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-        selector ? selector(designStoreState) : designStoreState
-    )),
-}));
+jest.mock('../../stores/useDesignStore', () => {
+    const actual = jest.requireActual('../../stores/useDesignStore');
+
+    return {
+        ...actual,
+        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
+            selector ? selector(designStoreState) : designStoreState
+        )),
+    };
+});
 
 jest.mock('../../stores/useFunctionStore', () => ({
     useFunctionStore: jest.fn((selector?: (state: { functions: unknown[] }) => unknown) => (
@@ -100,6 +105,7 @@ jest.mock('../../services/llm/AgentLoop', () => ({ runAgentLoop: jest.fn() }));
 jest.mock('../../utils/fileUtils', () => ({ fileToBase64: jest.fn(), fileToText: jest.fn() }));
 jest.mock('../../utils/toolExecutor', () => ({ executeTool: jest.fn() }));
 jest.mock('../../utils/textUtils', () => ({
+    countChars: jest.fn(() => 0),
     countTokens: jest.fn(() => 0),
     countWords: jest.fn(() => 0),
     countSentences: jest.fn(() => 0),

@@ -772,12 +772,13 @@ async function seedNativeFunctions(db: any): Promise<void> {
     const col = db.collection('user_functions');
     let upserted = 0;
     for (const fn of nativeFunctionsSeed) {
+      const { version, ...seedOnInsert } = fn;
       const result = await col.updateOne(
         { name: fn.name, userId: null },
         {
           // Corrige la version (number) sur les docs existants seedés avec l'ancienne string '1.0.0'
-          $set: { version: fn.version },
-          $setOnInsert: { ...fn, createdAt: new Date(), updatedAt: new Date() }
+          $set: { version },
+          $setOnInsert: { ...seedOnInsert, createdAt: new Date(), updatedAt: new Date() }
         },
         { upsert: true }
       );

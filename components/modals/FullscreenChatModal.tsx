@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '../UI';
-import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon, ErrorIcon } from '../Icons';
+import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon, ErrorIcon, HistorySynthesisIcon } from '../Icons';
 import { ToolCallBlock } from '../workflow/ToolCallBlock';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
-import { useDesignStore } from '../../stores/useDesignStore';
+import { selectResolvedAgentHasToolNamed, useDesignStore } from '../../stores/useDesignStore';
 import { useFunctionStore } from '../../stores/useFunctionStore';
 import { useAgentChat } from '../../hooks/useAgentChat';
 import { useLocalization } from '../../hooks/useLocalization';
@@ -14,7 +14,6 @@ import { WebSearchParamsModal } from './WebSearchParamsModal';
 import { ImageGenerationPanel } from '../panels/ImageGenerationPanel';
 import { VideoGenerationConfigPanel } from '../panels/VideoGenerationConfigPanel';
 import { MapsGroundingConfigPanel } from '../panels/MapsGroundingConfigPanel';
-import { deriveSelectedToolIds } from '../../services/toolSelectionResolver';
 import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from '../../services/persistedChatMessages';
 import { persistInstanceWebSearchParams } from '../../services/webSearchParamsConfigService';
 import apiClient from '../../utils/apiClient';
@@ -150,26 +149,13 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
       }
     : agentPrototype || null;
 
-  const selectedToolIds = React.useMemo(() => {
-    if (!agent) {
-      return [] as string[];
-    }
-
-    const inheritance = agentInstance?.configuration_json?.functionInheritance;
-    if (inheritance?.inheritFromPrototype === false) {
-      return deriveSelectedToolIds(inheritance.overrideToolSelections, inheritance.overrideFunctionIds);
-    }
-
-    return deriveSelectedToolIds(
-      agentInstance?.configuration_json?.toolSelections || (agentInstance as any)?.toolSelections || agent.toolSelections,
-      agent.functionIds
-    );
-  }, [agent, agentInstance]);
-
-  const hasWebSearchPyTool = React.useMemo(() => {
-    const selectedIdSet = new Set(selectedToolIds);
-    return functions.some((fn) => fn.isEnabled && fn.name === 'web_search_py' && (selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false)));
-  }, [functions, selectedToolIds]);
+  const hasWebSearchPyTool = useDesignStore((state) => selectResolvedAgentHasToolNamed(
+    state,
+    agentPrototype ?? fullscreenChatAgent,
+    inferredInstanceId ?? undefined,
+    functions,
+    'web_search_py'
+  ));
 
   const handleSaveWebSearchParams = async (webSearchParams: NonNullable<Agent['webSearchParams']>) => {
     if (!agentInstance?.id || !agentInstance.configuration_json) {
@@ -199,7 +185,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   
   const instanceId = agentInstance?.id;
 
-  const { handleSendMessage: sendMessageToLLM, loadingMessage } = useAgentChat({
+  const { handleSendMessage: sendMessageToLLM, loadingMessage, isHistorySynthesisActive } = useAgentChat({
     nodeId: fullscreenChatNodeId || '',
     agent,
     llmConfigs,
@@ -516,6 +502,9 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   <div className="bg-gray-700 text-gray-100 mr-12 px-4 py-2 rounded-lg">
                     <div className="flex items-center space-x-2">
                       <div className="animate-spin w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full"></div>
+                      {isHistorySynthesisActive && (
+                        <HistorySynthesisIcon data-testid="history-synthesis-icon" className="w-4 h-4 text-cyan-300 animate-pulse" />
+                      )}
                       <span>{loadingMessage || 'Agent en cours de réflexion...'}</span>
                     </div>
                   </div>

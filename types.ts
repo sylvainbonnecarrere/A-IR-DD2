@@ -56,19 +56,26 @@ export interface LLMConfig {
   needsReconfig?: boolean; // True when backend decryption failed (encryption key mismatch)
 }
 
+export type HistoryLimitKey = 'char' | 'word' | 'token' | 'sentence' | 'message';
+
+export type HistoryLimitValues = Record<HistoryLimitKey, number>;
+
+export type HistoryLimitEnabledMap = Record<HistoryLimitKey, boolean>;
+
 export interface HistoryConfig {
   enabled: boolean;
   llmProvider: LLMProvider;
   model: string;
   role: string;
   systemPrompt: string;
-  limits: {
-    char: number;
-    word: number;
-    token: number;
-    sentence: number;
-    message: number;
-  };
+  limits: HistoryLimitValues;
+  enabledLimits: HistoryLimitEnabledMap;
+}
+
+export interface InvisibleHistorySummaryState {
+  summary: string;
+  coveredThroughMessageId: string;
+  updatedAt: string;
 }
 
 export interface Tool {

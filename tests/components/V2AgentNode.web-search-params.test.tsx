@@ -51,11 +51,16 @@ jest.mock('../../stores/useRuntimeStore', () => ({
   )),
 }));
 
-jest.mock('../../stores/useDesignStore', () => ({
-  useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-    selector ? selector(designStoreState) : designStoreState
-  )),
-}));
+jest.mock('../../stores/useDesignStore', () => {
+  const actual = jest.requireActual('../../stores/useDesignStore');
+
+  return {
+    ...actual,
+    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
+      selector ? selector(designStoreState) : designStoreState
+    )),
+  };
+});
 
 jest.mock('../../stores/useFunctionStore', () => ({
   useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> }) => unknown) => (
@@ -132,6 +137,7 @@ describe('V2AgentNode web search params entrypoint', () => {
     };
 
     designStoreState = {
+      agents: [agent],
       agentInstances: [
         {
           id: 'instance-1',
@@ -274,6 +280,55 @@ describe('V2AgentNode web search params entrypoint', () => {
         dragging={false}
         zIndex={1}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] as any }}
+      />
+    );
+
+    expect(screen.getByTitle("Paramètres Web Search de l'agent")).toBeInTheDocument();
+  });
+
+  it('recovers the globe button when the prototype is rehydrated from the store after an initially stale node payload', async () => {
+    const staleNodeAgent: Agent = {
+      ...agent,
+      toolSelections: [],
+      functionIds: [],
+    };
+    const inheritedInstance = {
+      ...(designStoreState.agentInstances[0] as any),
+      toolSelections: [],
+      configuration_json: {
+        ...(designStoreState.agentInstances[0] as any).configuration_json,
+        toolSelections: [],
+      },
+    };
+
+    designStoreState.agents = [];
+    designStoreState.agentInstances = [inheritedInstance];
+
+    const view = render(
+      <V2AgentNode
+        id="node-1"
+        selected={false}
+        xPos={0}
+        yPos={0}
+        dragging={false}
+        zIndex={1}
+        data={{ robotId: RobotId.Archi, label: 'Archi', agent: staleNodeAgent, agentInstance: inheritedInstance }}
+      />
+    );
+
+    expect(screen.queryByTitle("Paramètres Web Search de l'agent")).not.toBeInTheDocument();
+
+    designStoreState.agents = [agent];
+
+    view.rerender(
+      <V2AgentNode
+        id="node-1"
+        selected
+        xPos={0}
+        yPos={0}
+        dragging={false}
+        zIndex={1}
+        data={{ robotId: RobotId.Archi, label: 'Archi', agent: staleNodeAgent, agentInstance: inheritedInstance }}
       />
     );
 

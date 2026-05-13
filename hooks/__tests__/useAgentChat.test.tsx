@@ -38,19 +38,24 @@ jest.mock('../../stores/useFunctionStore', () => ({
     }),
 }));
 
-jest.mock('../../stores/useDesignStore', () => ({
-    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-        const state = {
-            agentInstances: [
-                {
-                    id: 'instance-1',
-                    workflowId: 'workflow-1',
-                }
-            ],
-        };
-        return selector ? selector(state) : state;
-    }),
-}));
+jest.mock('../../stores/useDesignStore', () => {
+    const actual = jest.requireActual('../../stores/useDesignStore');
+
+    return {
+        ...actual,
+        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+            const state = {
+                agentInstances: [
+                    {
+                        id: 'instance-1',
+                        workflowId: 'workflow-1',
+                    }
+                ],
+            };
+            return selector ? selector(state) : state;
+        }),
+    };
+});
 
 const { useAgentChat } = require('../useAgentChat');
 
