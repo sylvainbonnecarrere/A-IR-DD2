@@ -1,4 +1,5 @@
-import type { IUserFunction } from '../../models/UserFunction.model';
+import type { IUserToolPolicy } from '../../models/UserTool.model';
+
 import type {
     IUserToolRunArtifact,
     IUserToolRunPolicySnapshot,
@@ -47,10 +48,36 @@ export interface SandboxExecutionMetadata {
 
 export interface SandboxExecutionResourceUsage extends IUserToolRunResourceUsage {}
 
+export interface SandboxSyntaxCheckResult {
+    valid: boolean;
+    errors: Array<{ line?: number; message: string }>;
+}
+
+export interface LegacyExecutionFunctionRef {
+    _id: string | { toString(): string };
+    name: string;
+    language: 'python' | 'typescript';
+    origin: 'native' | 'custom';
+    codeInline?: string | null;
+    codePath?: string | null;
+    workflowId?: string | { toString(): string } | null;
+}
+
+export interface ExecutionFunctionRef extends LegacyExecutionFunctionRef {
+    dependencies?: {
+        python?: string[];
+        npm?: string[];
+    } | string[] | null;
+    version?: number | string;
+    toolVersionTag?: string;
+    toolContentHash?: string;
+    policySnapshot?: IUserToolPolicy;
+}
+
 export interface SandboxExecutionRequest {
     executionId: string;
     userId: string;
-    function: Pick<IUserFunction, '_id' | 'name' | 'language' | 'origin' | 'codeInline' | 'codePath' | 'workflowId'>;
+    function: LegacyExecutionFunctionRef;
     toolVersionTag?: string;
     runtime: UserToolRunRuntime;
     launchContext: UserToolRunLaunchContext;

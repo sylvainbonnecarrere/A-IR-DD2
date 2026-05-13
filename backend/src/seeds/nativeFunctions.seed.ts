@@ -8,13 +8,14 @@
  * NB: bash_py est isEnabled: false par mesure de sécurité (docker requis).
  */
 
-import { FunctionLanguage, FunctionOrigin } from '../models/UserFunction.model';
+type NativeFunctionLanguage = 'python' | 'typescript';
+type NativeFunctionOrigin = 'native';
 
 interface NativeFunctionSeed {
     name: string;
     description: string;
-    language: FunctionLanguage;
-    origin: FunctionOrigin;
+    language: NativeFunctionLanguage;
+    origin: NativeFunctionOrigin;
     userId: null;
     workflowId: null;
     inputSchema: object;

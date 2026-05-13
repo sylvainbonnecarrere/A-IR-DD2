@@ -3,7 +3,6 @@ import path from 'path';
 import mongoose from 'mongoose';
 import type { IUserToolRun, IUserToolRunArtifact } from '../models/UserToolRun.model';
 import { UserToolRun } from '../models/UserToolRun.model';
-import { FunctionService } from './function.service';
 import { UserToolQueryService } from './userToolQuery.service';
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
 
@@ -57,7 +56,6 @@ export interface ArtifactFileReadModel {
 }
 
 export class UserToolRunQueryService {
-    private readonly functionService = new FunctionService();
     private readonly userToolQueryService = new UserToolQueryService();
     private readonly workspaceManager = createWorkspaceManager();
 
@@ -108,14 +106,14 @@ export class UserToolRunQueryService {
             sortOrder?: 'asc' | 'desc';
         } = {}
     ): Promise<FunctionRunListResult | null> {
-        const fn = await this.functionService.getFunctionById(functionId, ownerUserId);
-        if (!fn) {
+        const resolvedToolId = await this.resolveToolIdFromFunctionAlias(functionId, ownerUserId);
+        if (!resolvedToolId) {
             return null;
         }
 
         const query: Record<string, unknown> = {
             ownerUserId: new mongoose.Types.ObjectId(ownerUserId),
-            toolId: new mongoose.Types.ObjectId(functionId)
+            toolId: resolvedToolId
         };
 
         if (options.status) {
@@ -293,53 +291,22 @@ export class UserToolRunQueryService {
         executionId: string,
         artifactPath: string
     ): Promise<ArtifactPreviewReadModel | null> {
-        this.validateArtifactPathFormat(artifactPath);
-
-        const fn = await this.functionService.getFunctionById(functionId, ownerUserId);
-        if (!fn) {
+        const resolved = await this.resolveArtifactContext(functionId, ownerUserId, executionId, artifactPath);
+        if (!resolved) {
             return null;
         }
 
-        const run = await UserToolRun.findOne({
-            executionId,
-            ownerUserId: new mongoose.Types.ObjectId(ownerUserId),
-            toolId: new mongoose.Types.ObjectId(functionId)
-        }).lean<IUserToolRun>();
-
-        if (!run) {
-            return null;
-        }
-
-        const declaredArtifact = run.outputs?.artifacts?.find((artifact) => artifact.path === artifactPath);
-        if (!declaredArtifact) {
-            return null;
-        }
-
-        if (!run.workflowId) {
-            throw new Error('Artifact preview is only available for workflow-scoped runs.');
-        }
-
-        const workspace = await this.workspaceManager.getWorkspace({
-            ownerUserId,
-            scopeType: 'workflow',
-            scopeId: run.workflowId.toString()
-        });
-
-        if (!workspace) {
-            throw new Error('Workspace introuvable pour ce run.');
-        }
-
-        const resolvedArtifactPath = this.resolveArtifactPath(workspace.runtimeRoots.outputRoot, artifactPath);
+        const resolvedArtifactPath = resolved.absolutePath;
         const stats = await fs.stat(resolvedArtifactPath);
         const maxPreviewBytes = 256_000;
         const raw = await fs.readFile(resolvedArtifactPath);
         const truncated = raw.byteLength > maxPreviewBytes;
         const previewBuffer = truncated ? raw.subarray(0, maxPreviewBytes) : raw;
-        const contentType = this.getContentType(declaredArtifact, resolvedArtifactPath);
-        const previewable = this.isPreviewable(declaredArtifact, resolvedArtifactPath);
+        const contentType = this.getContentType(resolved.artifact, resolvedArtifactPath);
+        const previewable = this.isPreviewable(resolved.artifact, resolvedArtifactPath);
 
         const artifact: ArtifactPreviewReadModel['artifact'] = {
-            ...declaredArtifact,
+            ...resolved.artifact,
             sizeBytes: stats.size,
             previewable,
             truncated,
@@ -349,7 +316,7 @@ export class UserToolRunQueryService {
         if (previewable) {
             const textContent = previewBuffer.toString('utf-8');
             artifact.textContent = textContent;
-            if (declaredArtifact.kind === 'json') {
+            if (resolved.artifact.kind === 'json') {
                 try {
                     artifact.jsonContent = JSON.parse(textContent);
                 } catch {
@@ -359,7 +326,7 @@ export class UserToolRunQueryService {
         }
 
         return {
-            executionId: run.executionId,
+            executionId: resolved.run.executionId,
             artifact
         };
     }
@@ -467,15 +434,15 @@ export class UserToolRunQueryService {
     ): Promise<{ run: IUserToolRun; artifact: IUserToolRunArtifact; absolutePath: string } | null> {
         this.validateArtifactPathFormat(artifactPath);
 
-        const fn = await this.functionService.getFunctionById(functionId, ownerUserId);
-        if (!fn) {
+        const resolvedToolId = await this.resolveToolIdFromFunctionAlias(functionId, ownerUserId);
+        if (!resolvedToolId) {
             return null;
         }
 
         const run = await UserToolRun.findOne({
             executionId,
             ownerUserId: new mongoose.Types.ObjectId(ownerUserId),
-            toolId: new mongoose.Types.ObjectId(functionId)
+            toolId: resolvedToolId
         }).lean<IUserToolRun>();
 
         if (!run) {
@@ -506,6 +473,22 @@ export class UserToolRunQueryService {
             artifact: declaredArtifact,
             absolutePath: this.resolveArtifactPath(workspace.runtimeRoots.outputRoot, artifactPath)
         };
+    }
+
+    private async resolveToolIdFromFunctionAlias(
+        functionId: string,
+        ownerUserId: string
+    ): Promise<mongoose.Types.ObjectId | null> {
+        if (!mongoose.Types.ObjectId.isValid(functionId)) {
+            return null;
+        }
+
+        const tool = await this.userToolQueryService.getToolById(functionId, ownerUserId);
+        if (!tool) {
+            return null;
+        }
+
+        return new mongoose.Types.ObjectId(tool.id);
     }
 
     private async resolveArtifactContextForTool(

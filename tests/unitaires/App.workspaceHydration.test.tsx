@@ -517,4 +517,32 @@ describe('App workspace hydration orchestration', () => {
             })
         ]);
     });
+
+    it('derives legacy functionIds from canonical prototype toolSelections during hydration when the alias is empty', async () => {
+        const workspaceWithPrototypeSelectionAliasGap = {
+            ...workspacePayload,
+            agentPrototypes: [
+                {
+                    ...workspacePayload.agentPrototypes[0],
+                    functionIds: [],
+                    toolSelections: [{ toolId: 'tool.web-search' }],
+                }
+            ],
+        };
+
+        (apiClient.get as jest.Mock).mockResolvedValue({ data: workspaceWithPrototypeSelectionAliasGap });
+
+        render(<App />);
+
+        await waitFor(() => expect(mockDesignStore.hydrateFromServer).toHaveBeenCalled());
+
+        const hydratedSnapshot = mockDesignStore.hydrateFromServer.mock.calls.at(-1)?.[0] as {
+            agents: any[];
+        };
+
+        expect(hydratedSnapshot.agents[0]).toEqual(expect.objectContaining({
+            functionIds: ['tool.web-search'],
+            toolSelections: [{ toolId: 'tool.web-search' }],
+        }));
+    });
 });

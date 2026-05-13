@@ -75,6 +75,15 @@ describe('agentToolExecution', () => {
         num_results: 3,
       }));
       expect(payload.testArgs.num_results).not.toBe(5);
+      expect(payload.toolSelection).toEqual({
+        toolId: '507f1f77bcf86cd799439022',
+        versionRef: {
+          versionTag: '1.0.0',
+          versionNumber: 1,
+          workspaceId: null,
+        },
+      });
+      expect(payload).not.toHaveProperty('functionId');
       expect(payload.privateContext).toEqual(expect.objectContaining({
         web_search: expect.objectContaining({
           params: expect.objectContaining({
@@ -133,6 +142,15 @@ describe('agentToolExecution', () => {
       });
       expect(JSON.stringify(payload.testArgs)).not.toContain('query_transformation');
       expect(JSON.stringify(payload.testArgs)).not.toContain('duckduckgo.com');
+      expect(payload.toolSelection).toEqual({
+        toolId: '507f1f77bcf86cd799439022',
+        versionRef: {
+          versionTag: '1.0.0',
+          versionNumber: 1,
+          workspaceId: null,
+        },
+      });
+      expect(payload).not.toHaveProperty('functionId');
 
       expect(payload.privateContext).toEqual(expect.objectContaining({
         web_search: expect.objectContaining({

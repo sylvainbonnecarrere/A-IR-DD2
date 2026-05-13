@@ -6,7 +6,8 @@ import type {
     SandboxExecutionFailureKind,
     SandboxExecutionMetadata,
     SandboxExecutionRequest,
-    SandboxExecutionResult
+    SandboxExecutionResult,
+    SandboxSyntaxCheckResult
 } from './execution.types';
 import { inferSandboxFailureSubsystem } from './errors';
 import {
@@ -190,6 +191,43 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         };
     }
 
+    async checkPythonSyntax(code: string): Promise<SandboxSyntaxCheckResult> {
+        const result = await this.processRunner.run('docker', this.buildDockerPythonSyntaxCheckArgs(), {
+            stdin: code,
+            timeoutMs: 5_000
+        });
+
+        if (result.timedOut) {
+            return {
+                valid: false,
+                errors: [{ message: 'Timeout: verification syntaxique Python interrompue dans la sandbox.' }]
+            };
+        }
+
+        const stdout = result.stdout.trim();
+        const stderr = result.stderr.trim();
+
+        try {
+            const parsed = stdout ? JSON.parse(stdout) : null;
+            if (
+                parsed
+                && typeof parsed === 'object'
+                && 'valid' in parsed
+                && 'errors' in parsed
+                && Array.isArray((parsed as SandboxSyntaxCheckResult).errors)
+            ) {
+                return parsed as SandboxSyntaxCheckResult;
+            }
+        } catch {
+            // Fall through to normalized sandbox error response.
+        }
+
+        return {
+            valid: false,
+            errors: [{ message: stderr || result.errorMessage || 'Erreur interne de verification syntaxique Python dans la sandbox.' }]
+        };
+    }
+
     private buildDockerArgs(request: SandboxExecutionRequest, maxMemoryMb: number, containerWorkspaceDir: string): string[] {
         const networkMode = this.resolveDockerNetworkMode(request.policySnapshot.networkMode);
         const baseArgs = [
@@ -247,6 +285,36 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
             '--input-type=commonjs',
             '--eval',
             buildTypescriptWrapper()
+        ];
+    }
+
+    private buildDockerPythonSyntaxCheckArgs(): string[] {
+        return [
+            'run',
+            '--rm',
+            '--interactive',
+            '--network=none',
+            '--cpus=0.25',
+            '--pids-limit=64',
+            '--memory=128m',
+            '--read-only',
+            '--tmpfs', '/sandbox/tmp:size=16m,noexec,nosuid,nodev',
+            '--security-opt', 'no-new-privileges',
+            '--cap-drop=ALL',
+            '--workdir', '/sandbox/tmp',
+            '--env', 'PYTHONDONTWRITEBYTECODE=1',
+            '--env', 'PYTHONUNBUFFERED=1',
+            'airdd2-runtime-python:3.12-ubuntu-noble',
+            'python3',
+            '-c',
+            [
+                'import ast, json, sys',
+                'try:',
+                '    ast.parse(sys.stdin.read())',
+                '    print(json.dumps({"valid": True, "errors": []}))',
+                'except SyntaxError as exc:',
+                '    print(json.dumps({"valid": False, "errors": [{"line": exc.lineno, "message": str(exc.msg)}]}))',
+            ].join('\n')
         ];
     }
 

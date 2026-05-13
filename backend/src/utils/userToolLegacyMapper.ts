@@ -48,6 +48,7 @@ export interface LegacyFunctionExecutionMetadata {
 interface ExistingUserToolVersionLike {
     versionTag?: string;
     contentHash?: string;
+    createdAt?: Date | string;
     buildStatus?: 'not_built' | 'building' | 'built' | 'failed';
     validationStatus?: 'unknown' | 'valid' | 'invalid';
 }
@@ -159,6 +160,7 @@ function preserveVersionRuntimeState(
 
     return {
         ...mappedVersion,
+        createdAt: normalizeDate(existingVersion.createdAt) ?? mappedVersion.createdAt,
         buildStatus: existingVersion.buildStatus ?? mappedVersion.buildStatus,
         validationStatus: existingVersion.validationStatus ?? mappedVersion.validationStatus,
     };

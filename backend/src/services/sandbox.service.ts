@@ -1,16 +1,13 @@
-import { spawn } from 'child_process';
 import mongoose from 'mongoose';
-import { UserFunction, IUserFunction } from '../models/UserFunction.model';
 import { UserTool } from '../models/UserTool.model';
-import { syncUserToolMirrorFromLegacyFunction } from './userToolMirror.service';
 import { BuildPreparationError, BuildService } from './build.service';
 import { NativePythonProvisioningService } from './nativePythonProvisioning.service';
 import { RuntimeHealthService } from './runtimeHealth.service';
 import { ExecutionOrchestrator } from './runtime/ExecutionOrchestrator';
-import type { SandboxExecutionMetadata, SandboxExecutionResourceUsage } from './runtime/execution.types';
+import type { ExecutionFunctionRef, SandboxExecutionMetadata, SandboxExecutionResourceUsage, SandboxSyntaxCheckResult } from './runtime/execution.types';
 import { getSandboxErrorDetailsFromExecutionResult, RuntimeNotReadyError, type SandboxErrorDetails } from './runtime/errors';
 import type { IUserToolPolicy, IUserToolVersion } from '../models/UserTool.model';
-import { buildGlobalLegacyFunctionClauses, buildGlobalToolClauses, buildOwnedLegacyFunctionClause, buildOwnedToolClause } from '../utils/sharedExampleAccess';
+import { buildGlobalToolClauses, buildOwnedToolClause } from '../utils/sharedExampleAccess';
 
 export interface SandboxResult {
     success: boolean;
@@ -27,10 +24,7 @@ export interface SandboxResult {
     errorDetails?: SandboxErrorDetails;
 }
 
-export interface SyntaxCheckResult {
-    valid: boolean;
-    errors: Array<{ line?: number; message: string }>;
-}
+export type SyntaxCheckResult = SandboxSyntaxCheckResult;
 
 interface SandboxToolSelection {
     toolId: string;
@@ -41,7 +35,8 @@ interface SandboxToolSelection {
     };
 }
 
-interface VersionedExecutionTarget extends IUserFunction {
+interface VersionedExecutionTarget extends ExecutionFunctionRef {
+    isEnabled: boolean;
     toolVersionTag?: string;
     toolContentHash?: string;
     toolBuildStatus?: 'not_built' | 'building' | 'built' | 'failed';
@@ -49,55 +44,16 @@ interface VersionedExecutionTarget extends IUserFunction {
 }
 
 export class SandboxService {
-    // C9.1: Exécutable Python détecté dynamiquement (python3 ou python selon l'OS)
-    private pythonExecutable: string = 'python3';
-    private pythonDetected: boolean = false;
     private readonly buildService = new BuildService();
     private readonly nativePythonProvisioningService = new NativePythonProvisioningService();
     private readonly runtimeHealthService = new RuntimeHealthService();
     private readonly executionOrchestrator = new ExecutionOrchestrator();
 
     /**
-     * Vérifie la disponibilité du sandbox Python.
-     * Détecte l'exécutable python3 ou python disponible sur l'OS courant.
-     * Windows utilise souvent 'python', Linux/Mac 'python3'.
+     * Retourne l'etat de sante du runtime sandbox via le service de health dedie.
      */
     async checkHealth() {
         return this.runtimeHealthService.getHealthReport();
-    }
-
-    /**
-     * Détecte l'exécutable Python disponible (python3 > python).
-     * Met en cache le résultat dans this.pythonExecutable.
-     */
-    private async _detectPython(): Promise<{ available: boolean; version?: string; executable: string }> {
-        for (const exe of ['python3', 'python']) {
-            try {
-                const result = await new Promise<{ code: number; stdout: string }>((resolve) => {
-                    const proc = spawn(exe, ['--version']);
-                    let stdout = '';
-                    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-                    proc.stderr.on('data', (d: Buffer) => { stdout += d.toString(); }); // python --version écrit sur stderr
-                    proc.on('close', (code) => resolve({ code: code ?? 1, stdout }));
-                    proc.on('error', () => resolve({ code: 1, stdout: '' }));
-                });
-                if (result.code === 0) {
-                    this.pythonExecutable = exe;
-                    this.pythonDetected = true;
-                    return { available: true, version: result.stdout.trim(), executable: exe };
-                }
-            } catch { /* essayer le suivant */ }
-        }
-        return { available: false, executable: 'python3' };
-    }
-
-    /**
-     * S'assure que l'exécutable Python est détecté avant utilisation.
-     */
-    private async _ensurePythonDetected(): Promise<void> {
-        if (!this.pythonDetected) {
-            await this._detectPython();
-        }
     }
 
     /**
@@ -112,20 +68,11 @@ export class SandboxService {
         privateContext?: Record<string, unknown>,
         authHeader?: string
     ): Promise<SandboxResult> {
-        // 1. Charger la fonction depuis la BDD
-        // C9.1 FIX: S'assurer que Python est détecté avant execution
-        await this._ensurePythonDetected();
-
+        // 1. Resoudre la cible d'execution depuis le catalogue canonique user_tools
         const fn = toolSelection
             ? await this.resolveVersionedExecutionTarget(toolSelection, userId)
             : functionId
-                ? await UserFunction.findOne({
-                    _id: functionId,
-                    $or: [
-                        ...buildGlobalLegacyFunctionClauses(),
-                        buildOwnedLegacyFunctionClause(userId)
-                    ]
-                }).lean<IUserFunction>()
+                ? await this.resolveLegacyFunctionExecutionTarget(functionId, userId)
                 : null;
 
         if (!fn) {
@@ -180,10 +127,6 @@ export class SandboxService {
 
         await this.ensureRuntimeReadyForRun(fn.language);
 
-        await syncUserToolMirrorFromLegacyFunction(fn).catch((error) => {
-            console.warn('[SandboxService] user_tools mirror sync warning:', error instanceof Error ? error.message : String(error));
-        });
-
         const executionResult = await this.executionOrchestrator.execute({
             fn,
             userId,
@@ -205,17 +148,7 @@ export class SandboxService {
         toolSelection: SandboxToolSelection,
         userId: string
     ): Promise<VersionedExecutionTarget | null> {
-        if (!mongoose.Types.ObjectId.isValid(toolSelection.toolId)) {
-            return null;
-        }
-
-        const tool = await UserTool.findOne({
-            _id: toolSelection.toolId,
-            $or: [
-                ...buildGlobalToolClauses(),
-                buildOwnedToolClause(userId)
-            ]
-        }).lean();
+        const tool = await this.loadOwnedOrNativeTool(toolSelection.toolId, userId);
 
         if (!tool) {
             return null;
@@ -233,31 +166,60 @@ export class SandboxService {
         const versionNumber = toolSelection.versionRef?.versionNumber
             ?? this.parseVersionNumber(resolvedVersion.versionTag);
 
+        return this.mapToolVersionToExecutionTarget(tool, resolvedVersion, versionNumber);
+    }
+
+    private async resolveLegacyFunctionExecutionTarget(
+        functionId: string,
+        userId: string
+    ): Promise<VersionedExecutionTarget | null> {
+        const tool = await this.loadOwnedOrNativeTool(functionId, userId);
+        if (!tool) {
+            return null;
+        }
+
+        return this.mapToolVersionToExecutionTarget(
+            tool,
+            tool.currentVersion,
+            this.parseVersionNumber(tool.currentVersion.versionTag)
+        );
+    }
+
+    private async loadOwnedOrNativeTool(toolId: string, userId: string) {
+        if (!mongoose.Types.ObjectId.isValid(toolId)) {
+            return null;
+        }
+
+        return UserTool.findOne({
+            _id: toolId,
+            $or: [
+                ...buildGlobalToolClauses(),
+                buildOwnedToolClause(userId)
+            ]
+        }).lean();
+    }
+
+    private mapToolVersionToExecutionTarget(
+        tool: Awaited<ReturnType<SandboxService['loadOwnedOrNativeTool']>> extends infer T ? NonNullable<T> : never,
+        version: IUserToolVersion,
+        versionNumber: number
+    ): VersionedExecutionTarget {
         return {
             _id: tool._id,
             name: tool.name,
-            displayName: tool.displayName,
-            description: tool.description,
             language: tool.runtime,
             origin: tool.scopeType === 'native' ? 'native' : 'custom',
-            tags: tool.tags,
-            userId: tool.ownerUserId,
             workflowId: tool.workflowId,
-            inputSchema: tool.inputSchema,
-            outputSchema: tool.outputSchema,
-            codePath: resolvedVersion.sourcePath ?? undefined,
-            codeInline: resolvedVersion.sourceInline ?? undefined,
+            codePath: version.sourcePath ?? undefined,
+            codeInline: version.sourceInline ?? undefined,
             dependencies: tool.dependencies,
-            isEnabled: tool.isEnabled,
-            isReadonly: tool.isReadonly,
             version: versionNumber,
-            toolVersionTag: resolvedVersion.versionTag,
-            toolContentHash: resolvedVersion.contentHash,
-            toolBuildStatus: resolvedVersion.buildStatus,
+            toolVersionTag: version.versionTag,
+            toolContentHash: version.contentHash,
+            toolBuildStatus: version.buildStatus,
             policySnapshot: tool.policy,
-            createdAt: tool.createdAt,
-            updatedAt: tool.updatedAt,
-        } as VersionedExecutionTarget;
+            isEnabled: tool.isEnabled,
+        };
     }
 
     private parseVersionNumber(versionTag?: string): number {
@@ -334,46 +296,7 @@ export class SandboxService {
         language: 'python' | 'typescript',
         code: string
     ): Promise<SyntaxCheckResult> {
-        if (language === 'python') {
-            return this._checkPythonSyntax(code);
-        }
-        // TypeScript syntax check stub — à implémenter avec un parser TS en V2
-        return { valid: true, errors: [] };
-    }
-
-    /**
-     * Vérification syntaxique Python via `python3 -m py_compile`
-     */
-    private _checkPythonSyntax(code: string): Promise<SyntaxCheckResult> {
-        return new Promise((resolve) => {
-            // Écrire le code sur stdin de py_compile
-            // C9.1 FIX: utiliser l'exécutable détecté
-            const proc = spawn(this.pythonExecutable, ['-c', `
-import ast, sys, json
-try:
-    ast.parse(sys.stdin.read())
-    print(json.dumps({"valid": True, "errors": []}))
-except SyntaxError as e:
-    print(json.dumps({"valid": False, "errors": [{"line": e.lineno, "message": str(e.msg)}]}))
-`]);
-
-            let output = '';
-            proc.stdout.on('data', (d: Buffer) => { output += d.toString(); });
-            proc.stdin.write(code);
-            proc.stdin.end();
-
-            proc.on('close', () => {
-                try {
-                    resolve(JSON.parse(output));
-                } catch {
-                    resolve({ valid: false, errors: [{ message: 'Erreur interne de vérification syntaxique' }] });
-                }
-            });
-
-            proc.on('error', () => {
-                resolve({ valid: false, errors: [{ message: 'Python3 non disponible' }] });
-            });
-        });
+        return this.executionOrchestrator.checkSyntax(language, code);
     }
 
 }

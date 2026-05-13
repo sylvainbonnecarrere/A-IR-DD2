@@ -380,7 +380,6 @@ async function executeFunction(
         method: 'POST',
         headers,
         body: JSON.stringify({
-            functionId: fn.legacyFunctionId ?? fn.id,
             toolSelection: {
                 toolId: fn.id,
                 versionRef: {

@@ -1,6 +1,14 @@
 import type { ToolSelection } from '../../types';
 import type { UserFunction } from '../../types/function.types';
-import { buildToolSelectionFromFunction, normalizeToolSelections } from '../../services/toolSelectionResolver';
+import {
+    buildSelectableToolCatalog,
+    buildToolSelectionFromFunction,
+    buildToolSelectionsFromFunctions,
+    deriveSelectedToolIds,
+    normalizeAgentToolReferences,
+    normalizeToolSelections,
+    resolveToolSelections,
+} from '../../services/toolSelectionResolver';
 
 const createFunction = (overrides: Partial<UserFunction> = {}): UserFunction => ({
     _id: 'legacy-weather',
@@ -27,6 +35,46 @@ const createFunction = (overrides: Partial<UserFunction> = {}): UserFunction => 
     updatedAt: '2026-03-23T10:00:00.000Z',
     ...overrides,
 });
+
+const availableFunctions: UserFunction[] = [
+    {
+        _id: 'fn-1',
+        toolId: 'tool-1',
+        name: 'tool_alpha',
+        description: 'Alpha tool',
+        language: 'python',
+        origin: 'custom',
+        userId: 'user-1',
+        workflowId: 'wf-1',
+        inputSchema: {},
+        outputSchema: {},
+        codePath: 'tools/tool_alpha.py',
+        resolvedCodePath: 'tools/tool_alpha.py',
+        codePathRoot: 'workspace_source',
+        codeInline: 'def run(args):\n    return args',
+        dependencies: [],
+        isEnabled: true,
+        isReadonly: false,
+        version: 3,
+        versionTag: 'v3',
+        tags: [],
+        workspaceContext: {
+            workspaceId: 'ws-1',
+            logicalRoot: 'wf-1',
+            runtimeRoots: {
+                sourceRoot: 'source',
+                manifestsRoot: 'manifests',
+                buildRoot: 'build',
+                outputRoot: 'output',
+            },
+            manifests: {},
+            status: 'active',
+            lastScanAt: null,
+        },
+        createdAt: '2026-03-19T00:00:00.000Z',
+        updatedAt: '2026-03-19T00:00:00.000Z',
+    },
+];
 
 describe('normalizeToolSelections', () => {
     it('builds a canonical tool selection for Phil sandbox runs from the loaded function read model', () => {
@@ -72,53 +120,7 @@ describe('normalizeToolSelections', () => {
             }),
         ]);
     });
-});import {
-    buildSelectableToolCatalog,
-    buildToolSelectionsFromFunctions,
-    deriveSelectedToolIds,
-    resolveToolSelections,
-} from '../../services/toolSelectionResolver';
-import type { UserFunction } from '../../types/function.types';
-
-const availableFunctions: UserFunction[] = [
-    {
-        _id: 'fn-1',
-        toolId: 'tool-1',
-        name: 'tool_alpha',
-        description: 'Alpha tool',
-        language: 'python',
-        origin: 'custom',
-        userId: 'user-1',
-        workflowId: 'wf-1',
-        inputSchema: {},
-        outputSchema: {},
-        codePath: 'tools/tool_alpha.py',
-        resolvedCodePath: 'tools/tool_alpha.py',
-        codePathRoot: 'workspace_source',
-        codeInline: 'def run(args):\n    return args',
-        dependencies: [],
-        isEnabled: true,
-        isReadonly: false,
-        version: 3,
-        versionTag: 'v3',
-        tags: [],
-        workspaceContext: {
-            workspaceId: 'ws-1',
-            logicalRoot: 'wf-1',
-            runtimeRoots: {
-                sourceRoot: 'source',
-                manifestsRoot: 'manifests',
-                buildRoot: 'build',
-                outputRoot: 'output',
-            },
-            manifests: {},
-            status: 'active',
-            lastScanAt: null,
-        },
-        createdAt: '2026-03-19T00:00:00.000Z',
-        updatedAt: '2026-03-19T00:00:00.000Z',
-    },
-];
+});
 
 describe('toolSelectionResolver', () => {
     it('builds versioned tool selections from selected function ids', () => {
@@ -181,5 +183,22 @@ describe('toolSelectionResolver', () => {
 
     it('keeps legacy functionIds selectable during compatibility fallback', () => {
         expect(buildSelectableToolCatalog(availableFunctions, ['fn-1'])[0].selected).toBe(true);
+    });
+
+    it('treats toolSelections as the primary agent contract and derives functionIds from them', () => {
+        expect(normalizeAgentToolReferences(
+            [{ toolId: 'tool-1' }],
+            ['legacy-stale-id'],
+        )).toEqual({
+            functionIds: ['tool-1'],
+            toolSelections: [{ toolId: 'tool-1' }],
+        });
+    });
+
+    it('backfills minimal toolSelections from legacy functionIds when canonical selections are missing', () => {
+        expect(normalizeAgentToolReferences(undefined, ['tool-1', 'tool-1'])).toEqual({
+            functionIds: ['tool-1'],
+            toolSelections: [{ toolId: 'tool-1' }],
+        });
     });
 });

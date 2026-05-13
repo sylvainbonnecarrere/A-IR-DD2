@@ -122,6 +122,32 @@ function normalizeToolIdList(rawValues: unknown[] | undefined): string[] {
         .filter((value): value is string => value.trim().length > 0);
 }
 
+export function buildMinimalToolSelections(toolIds: string[]): ToolSelection[] {
+    return Array.from(new Set(normalizeToolIdList(toolIds))).map((toolId) => ({ toolId }));
+}
+
+export function normalizeAgentToolReferences(
+    toolSelections: ToolSelection[] | undefined | null,
+    legacyFunctionIds: string[] | undefined | null,
+): { functionIds: string[]; toolSelections: ToolSelection[] } {
+    const sanitizedToolSelections = (toolSelections ?? []).filter(
+        (selection): selection is ToolSelection => typeof selection?.toolId === 'string' && selection.toolId.trim().length > 0,
+    );
+
+    if (sanitizedToolSelections.length > 0) {
+        return {
+            functionIds: Array.from(new Set(sanitizedToolSelections.map((selection) => selection.toolId))),
+            toolSelections: sanitizedToolSelections,
+        };
+    }
+
+    const functionIds = Array.from(new Set(normalizeToolIdList(legacyFunctionIds ?? [])));
+    return {
+        functionIds,
+        toolSelections: buildMinimalToolSelections(functionIds),
+    };
+}
+
 export function resolveAgentSelectedToolIds(agent: Agent, agentInstance: AgentInstance | undefined): string[] {
     const instanceConfig = agentInstance?.configuration_json;
     const inheritance = instanceConfig?.functionInheritance;

@@ -2,7 +2,6 @@ import { Dirent, promises as fs } from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
 import ts from 'typescript';
-import type { IUserFunction } from '../../models/UserFunction.model';
 import type { UserToolRunLaunchContext } from '../../models/UserToolRun.model';
 import type { IUserToolRunArtifact } from '../../models/UserToolRun.model';
 import { deriveExecutionMetadataFromLegacyFunction } from '../../utils/userToolLegacyMapper';
@@ -15,15 +14,17 @@ import { createSandboxRunnerFactory } from './SandboxRunner';
 import { DockerSandboxRunner } from './DockerSandboxRunner';
 import { FirecrackerRunner } from './FirecrackerRunner';
 import type {
+    ExecutionFunctionRef,
     OrchestratedExecutionResult,
     SandboxExecutionFailureKind,
     SandboxExecutionRequest,
-    SandboxExecutionResourceUsage
+    SandboxExecutionResourceUsage,
+    SandboxSyntaxCheckResult
 } from './execution.types';
 import { buildSandboxErrorDetails, inferSandboxFailureSubsystem, RuntimeNotReadyError } from './errors';
 
 export interface ExecutionOrchestratorRequest {
-    fn: IUserFunction;
+    fn: ExecutionFunctionRef;
     userId: string;
     args: Record<string, unknown>;
     privateContext?: Record<string, unknown>;
@@ -51,6 +52,24 @@ export class ExecutionOrchestrator {
             runner: selectedRunnerPort,
             readiness: selectedRunnerPort.getReadiness(runtimeReport, runtime)
         };
+    }
+
+    async checkSyntax(language: 'python' | 'typescript', code: string): Promise<SandboxSyntaxCheckResult> {
+        if (language === 'typescript') {
+            return { valid: true, errors: [] };
+        }
+
+        const { report: runtimeReport, runner: selectedRunnerPort, readiness } = await this.getPreferredRunnerReadiness('python');
+        if (!readiness.ready) {
+            throw new RuntimeNotReadyError(readiness.reason ?? runtimeReport.summary);
+        }
+
+        const selectedRunnerId = this.normalizeRunnerId(selectedRunnerPort.getRunnerId());
+        if (selectedRunnerId !== 'docker_sandbox') {
+            throw new RuntimeNotReadyError(`Le runner prefere '${selectedRunnerPort.getLabel()}' ne supporte pas encore la verification syntaxique Python.`);
+        }
+
+        return this.dockerRunner.checkPythonSyntax(code);
     }
 
     async execute(request: ExecutionOrchestratorRequest): Promise<OrchestratedExecutionResult> {
@@ -217,7 +236,7 @@ export class ExecutionOrchestrator {
         };
     }
 
-    private async resolveWorkspace(fn: IUserFunction, userId: string): Promise<WorkspaceProvisioningResult | null> {
+    private async resolveWorkspace(fn: Pick<ExecutionFunctionRef, 'workflowId'>, userId: string): Promise<WorkspaceProvisioningResult | null> {
         if (!fn.workflowId) {
             return null;
         }
@@ -226,7 +245,7 @@ export class ExecutionOrchestrator {
     }
 
     private async resolveSourceCode(
-        fn: IUserFunction,
+        fn: ExecutionFunctionRef,
         userId: string,
         workspace: WorkspaceProvisioningResult | null
     ): Promise<string | undefined> {
@@ -291,7 +310,7 @@ export class ExecutionOrchestrator {
         return transpiled.outputText;
     }
 
-    private resolveSourcePath(fn: Pick<IUserFunction, 'codePath' | 'origin'>, workspace: WorkspaceProvisioningResult | null): string | null {
+    private resolveSourcePath(fn: Pick<ExecutionFunctionRef, 'codePath' | 'origin'>, workspace: WorkspaceProvisioningResult | null): string | null {
         if (!fn.codePath) {
             return null;
         }
@@ -311,7 +330,7 @@ export class ExecutionOrchestrator {
         return path.resolve(process.cwd(), fn.codePath);
     }
 
-    private resolveExecutionMode(fn: Pick<IUserFunction, 'language' | 'origin'>): SandboxExecutionRequest['mode'] {
+    private resolveExecutionMode(fn: Pick<ExecutionFunctionRef, 'language' | 'origin'>): SandboxExecutionRequest['mode'] {
         if (fn.language === 'python') {
             return fn.origin === 'native' ? 'python-native' : 'python-custom';
         }

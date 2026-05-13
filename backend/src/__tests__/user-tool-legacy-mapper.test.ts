@@ -46,12 +46,14 @@ describe('userToolLegacyMapper', () => {
 
         expect(mapped.currentVersion).toEqual(expect.objectContaining({
             versionTag: 'v-ready',
+            createdAt: legacyFunction.updatedAt,
             buildStatus: 'built',
             validationStatus: 'valid'
         }));
         expect(mapped.versions).toEqual([
             expect.objectContaining({
                 versionTag: 'v-ready',
+                createdAt: legacyFunction.updatedAt,
                 buildStatus: 'built',
                 validationStatus: 'valid'
             })

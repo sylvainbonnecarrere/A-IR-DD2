@@ -1,7 +1,8 @@
 import * as llmService from './llmService';
 import { resolveHistoryRuntimeConfig } from './runtimeConfigResolver';
 import { computeHistoryLimitStats, getTriggeredHistoryLimits, type HistoryLimitStats } from './historySynthesisPolicy';
-import { ChatMessage, HistoryConfig, HistoryLimitKey, InvisibleHistorySummaryState, LLMConfig, LocalLLMProfile } from '../types';
+import { ChatMessage, HistoryConfig, HistoryLimitKey, InvisibleHistorySummaryState, LLMConfig, LLMProvider, LocalLLMProfile } from '../types';
+import { validateAndRepairHistoryConfig } from '../utils/historyConfigDefaults';
 
 const HIDDEN_HISTORY_SUMMARY_MESSAGE_ID = '__hidden-history-summary__';
 
@@ -71,6 +72,17 @@ function toConversationLines(messages: ChatMessage[]): string {
   return messages.map((message) => `${message.sender}: ${message.text}`).join('\n');
 }
 
+function resolveAvailableHistoryProviders(
+  historyConfig: HistoryConfig | null | undefined,
+  llmConfigs: LLMConfig[],
+): LLMProvider[] {
+  return Array.from(new Set([
+    historyConfig?.llmProvider,
+    ...llmConfigs.filter((config) => config.enabled).map((config) => config.provider),
+    LLMProvider.Gemini,
+  ].filter((provider): provider is LLMProvider => Boolean(provider))));
+}
+
 export async function prepareConversationHistoryForAPI({
   visibleMessagesBeforeSend,
   userMessage,
@@ -83,7 +95,11 @@ export async function prepareConversationHistoryForAPI({
   accessToken = null,
   onSummarizingChange,
 }: PrepareConversationHistoryOptions): Promise<PreparedConversationHistory> {
-  if (!historyConfig?.enabled) {
+  const effectiveHistoryConfig = historyConfig
+    ? validateAndRepairHistoryConfig(historyConfig, resolveAvailableHistoryProviders(historyConfig, llmConfigs))
+    : null;
+
+  if (!effectiveHistoryConfig?.enabled) {
     return {
       conversationHistoryForAPI: [userMessage],
       invisibleSummaryState,
@@ -103,7 +119,7 @@ export async function prepareConversationHistoryForAPI({
 
   const candidateConversation = [...conversationBase, userMessage];
   const historyStats = computeHistoryLimitStats(candidateConversation);
-  const triggeredLimitKeys = getTriggeredHistoryLimits(historyConfig, historyStats);
+  const triggeredLimitKeys = getTriggeredHistoryLimits(effectiveHistoryConfig, historyStats);
   const hasHistoryToSummarize = visibleMessagesBeforeSend.length > 0 && (!activeSummaryState || unsummarizedMessages.length > 0);
 
   if (triggeredLimitKeys.length === 0 || !hasHistoryToSummarize) {
@@ -119,7 +135,7 @@ export async function prepareConversationHistoryForAPI({
 
   try {
     const summarizationRuntime = resolveHistoryRuntimeConfig(
-      historyConfig,
+      effectiveHistoryConfig,
       llmConfigs,
       localLLMProfiles,
       inheritedLocalLLMProfileId,
@@ -127,7 +143,7 @@ export async function prepareConversationHistoryForAPI({
     const summarizationConfig = summarizationRuntime.config;
 
     if (!summarizationConfig) {
-      throw new Error(`Summarization LLM ${historyConfig.llmProvider} not configured.`);
+      throw new Error(`Summarization LLM ${effectiveHistoryConfig.llmProvider} not configured.`);
     }
 
     const summarizationSource = activeSummaryState
@@ -145,8 +161,8 @@ export async function prepareConversationHistoryForAPI({
     const { text: summaryText } = await llmService.generateContent(
       summarizationConfig.provider,
       summarizationRuntime.credential,
-      historyConfig.model,
-      historyConfig.systemPrompt,
+      effectiveHistoryConfig.model,
+      effectiveHistoryConfig.systemPrompt,
       summarizationHistory,
       undefined,
       undefined,

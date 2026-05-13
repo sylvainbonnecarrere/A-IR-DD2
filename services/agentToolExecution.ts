@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '../config/api.config';
 import type { Agent, ToolCall, ToolSelection } from '../types';
 import type { UserFunction } from '../types/function.types';
+import { buildToolSelectionFromFunction } from './toolSelectionResolver';
 import { executeTool } from '../utils/toolExecutor';
 
 export interface ExecutedAgentToolCall {
@@ -67,15 +68,7 @@ async function executeUserFunctionViaSandbox(
     method: 'POST',
     headers,
     body: JSON.stringify({
-      functionId: fn._id,
-      toolSelection: {
-        toolId: fn.toolId ?? fn._id,
-        versionRef: {
-          versionTag: fn.versionTag,
-          versionNumber: fn.version,
-          workspaceId: fn.workspaceContext?.workspaceId ?? null,
-        },
-      } satisfies ToolSelection,
+      toolSelection: buildToolSelectionFromFunction(fn) satisfies ToolSelection,
       testArgs: args,
       ...(privateContext ? { privateContext } : {}),
     }),

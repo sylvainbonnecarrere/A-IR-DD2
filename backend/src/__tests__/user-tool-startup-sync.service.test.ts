@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import {
+    getUserToolStartupSyncPhase,
     syncUserToolsFromLegacyFunctionsOnStartup,
     getRepairOnlyProtectedFields
 } from '../services/userToolStartupSync.service';
@@ -173,73 +174,73 @@ describe('userToolStartupSync service', () => {
         process.env.USER_TOOLS_STARTUP_SYNC_PHASE = originalPhase;
     });
 
-    it('mirrors and updates legacy functions in legacy-authority mode', async () => {
+    it('forces repair-only as the only startup phase even when legacy-authority is requested', () => {
+        delete process.env.USER_TOOLS_STARTUP_SYNC_PHASE;
+        expect(getUserToolStartupSyncPhase()).toBe('repair-only');
+
+        process.env.USER_TOOLS_STARTUP_SYNC_PHASE = 'legacy-authority';
+        expect(getUserToolStartupSyncPhase()).toBe('repair-only');
+
+        process.env.USER_TOOLS_STARTUP_SYNC_PHASE = 'repair-only';
+        expect(getUserToolStartupSyncPhase()).toBe('repair-only');
+    });
+
+    it('never updates an existing canonical tool during startup sync, even when legacy-authority is requested', async () => {
         process.env.USER_TOOLS_STARTUP_SYNC_PHASE = 'legacy-authority';
 
         const legacyFunction = buildLegacyFunction();
-        const userFunctions = new FakeCollection([legacyFunction]);
-        const userTools = new FakeCollection();
-        const db = new FakeDb({
-            user_functions: userFunctions,
-            user_tools: userTools
-        });
-
-        const firstSummary = await syncUserToolsFromLegacyFunctionsOnStartup(db as any);
-
-        expect(firstSummary).toEqual({
-            phase: 'legacy-authority',
-            scanned: 1,
-            created: 1,
-            updated: 0,
-            skippedExisting: 0
-        });
-
-        const firstMirror = userTools.getById(legacyFunction._id);
-        expect(firstMirror).toEqual(expect.objectContaining({
-            workflowId: legacyFunction.workflowId.toString(),
-            name: 'transcribe_report',
-            displayName: 'Transcribe Report',
-            description: 'Legacy tool description',
-            runtime: 'python',
-            status: 'ready'
-        }));
-        expect(firstMirror.currentVersion).toEqual(expect.objectContaining({
-            versionTag: '1',
-            sourceMode: 'path',
-            sourcePath: 'tools/transcribe.py'
-        }));
-
-        const updatedLegacyFunction = buildLegacyFunction({
+        const userFunctions = new FakeCollection([buildLegacyFunction({
             ...legacyFunction,
             description: 'Updated legacy description',
             isEnabled: false,
             version: 2,
             updatedAt: new Date('2026-03-17T10:30:00.000Z')
-        });
-        const replacementFunctions = new FakeCollection([updatedLegacyFunction]);
-        const updatedDb = new FakeDb({
-            user_functions: replacementFunctions,
+        })]);
+        const userTools = new FakeCollection([{
+            _id: legacyFunction._id,
+            workflowId: legacyFunction.workflowId.toString(),
+            name: 'transcribe_report',
+            displayName: 'Transcribe Report',
+            description: 'Canonical target-owned description',
+            runtime: 'python',
+            status: 'ready',
+            currentVersion: {
+                versionTag: 'target-owned-version',
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'target-owned-version',
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }],
+            updatedAt: '2026-03-17T09:00:00.000Z'
+        }]);
+        const db = new FakeDb({
+            user_functions: userFunctions,
             user_tools: userTools
         });
 
-        const secondSummary = await syncUserToolsFromLegacyFunctionsOnStartup(updatedDb as any);
+        const summary = await syncUserToolsFromLegacyFunctionsOnStartup(db as any);
 
-        expect(secondSummary).toEqual({
-            phase: 'legacy-authority',
+        expect(summary).toEqual({
+            phase: 'repair-only',
             scanned: 1,
             created: 0,
-            updated: 1,
-            skippedExisting: 0
+            updated: 0,
+            skippedExisting: 1
         });
 
-        const updatedMirror = userTools.getById(legacyFunction._id);
-        expect(updatedMirror).toEqual(expect.objectContaining({
-            description: 'Updated legacy description',
-            status: 'disabled',
-            updatedAt: '2026-03-17T10:30:00.000Z'
+        const preservedMirror = userTools.getById(legacyFunction._id);
+        expect(preservedMirror).toEqual(expect.objectContaining({
+            description: 'Canonical target-owned description',
+            status: 'ready',
+            updatedAt: '2026-03-17T09:00:00.000Z'
         }));
-        expect(updatedMirror.currentVersion).toEqual(expect.objectContaining({
-            versionTag: '2'
+        expect(preservedMirror.currentVersion).toEqual(expect.objectContaining({
+            versionTag: 'target-owned-version',
+            buildStatus: 'built',
+            validationStatus: 'valid'
         }));
     });
 
@@ -327,8 +328,8 @@ describe('userToolStartupSync service', () => {
         }));
     });
 
-    it('preserves version readiness state in legacy-authority mode when the mirrored source is unchanged', async () => {
-        process.env.USER_TOOLS_STARTUP_SYNC_PHASE = 'legacy-authority';
+    it('preserves version readiness state in repair-only mode when the canonical tool already exists', async () => {
+        process.env.USER_TOOLS_STARTUP_SYNC_PHASE = 'repair-only';
 
         const legacyFunction = buildLegacyFunction({
             _id: new mongoose.Types.ObjectId(),
@@ -373,11 +374,11 @@ describe('userToolStartupSync service', () => {
         const summary = await syncUserToolsFromLegacyFunctionsOnStartup(db as any);
 
         expect(summary).toEqual({
-            phase: 'legacy-authority',
+            phase: 'repair-only',
             scanned: 1,
             created: 0,
-            updated: 1,
-            skippedExisting: 0
+            updated: 0,
+            skippedExisting: 1
         });
 
         const preservedMirror = db.collection('user_tools').getById(legacyFunction._id);

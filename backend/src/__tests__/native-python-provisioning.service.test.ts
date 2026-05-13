@@ -112,7 +112,7 @@ describe('NativePythonProvisioningService', () => {
         expect(result.toolName).toBe('web_fetch_py');
         expect(result.sitePackagesPath).toContain(path.join('web_fetch_py', 'v-ready', 'site-packages'));
         await expect(fs.readFile(result.reportPath, 'utf-8')).resolves.toContain('"status": "ready"');
-        expect(result.criticalModules).toEqual(['requests']);
+        expect(result.criticalModules).toEqual(['requests', 'bs4', 'lxml']);
 
         expect(runner.calls).toHaveLength(1);
         expect(runner.calls[0]?.command).toBe('docker');

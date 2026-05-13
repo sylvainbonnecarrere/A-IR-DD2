@@ -3,10 +3,25 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { User } from '../models/User.model';
 import { Workflow } from '../models/Workflow.model';
-import { UserFunction } from '../models/UserFunction.model';
 import { UserTool } from '../models/UserTool.model';
 import { Workspace } from '../models/Workspace.model';
 import { BuildPreparationError, BuildService } from '../services/build.service';
+
+function createToolVersion(overrides: Record<string, unknown> = {}) {
+    return {
+        versionTag: 'v1',
+        contentHash: 'hash-v1',
+        sourceMode: 'inline',
+        sourcePath: null,
+        sourceInline: 'function run(args) { return args; }',
+        entrypoint: null,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        createdBy: null,
+        buildStatus: 'not_built',
+        validationStatus: 'unknown',
+        ...overrides,
+    };
+}
 
 async function createOwnedWorkflowFixture() {
     const suffix = Date.now().toString();
@@ -57,28 +72,39 @@ describe('BuildService', () => {
 
         await Workspace.deleteMany({});
         await UserTool.deleteMany({});
-        await UserFunction.deleteMany({});
         await Workflow.deleteMany({});
         await User.deleteMany({});
     });
 
-    it('prepares a workflow-scoped typescript function into workspace source, manifests and build roots', async () => {
+    it('prepares a workflow-scoped typescript tool through the legacy function build alias', async () => {
         const { user, workflow } = await createOwnedWorkflowFixture();
 
-        const fn = await UserFunction.create({
+        const fn = await UserTool.create({
             name: 'ts_buildable_tool',
             description: 'TypeScript buildable tool',
-            language: 'typescript',
-            origin: 'custom',
-            userId: user._id,
+            runtime: 'typescript',
+            ownerUserId: user._id,
+            workspaceId: null,
+            scopeType: 'user',
             workflowId: workflow._id,
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: createToolVersion({
+                versionTag: 'v2',
+                contentHash: 'hash-ts-v2',
+                sourceInline: 'function run(args) { return { echoed: args.value ?? null }; }',
+            }),
+            versions: [createToolVersion({
+                versionTag: 'v2',
+                contentHash: 'hash-ts-v2',
+                sourceInline: 'function run(args) { return { echoed: args.value ?? null }; }',
+            })],
             inputSchema: {},
             outputSchema: {},
-            codeInline: 'function run(args) { return { echoed: args.value ?? null }; }',
             dependencies: { python: [], npm: ['zod@3.22.4'] },
+            policy: { networkMode: 'none', writablePaths: [], secretAliases: [] },
             isEnabled: true,
             isReadonly: false,
-            version: 2,
             tags: []
         });
 
@@ -97,31 +123,39 @@ describe('BuildService', () => {
         const emittedArtifact = await fs.readFile(result.artifactPaths[0], 'utf-8');
         expect(emittedArtifact).toContain('function run(args)');
 
-        const persistedFunction = await UserFunction.findById(fn._id).lean();
-        expect(persistedFunction?.codePath).toBe(path.join('tools', 'ts_buildable_tool.ts'));
+        const persistedTool = await UserTool.findById(fn._id).lean();
+        expect(persistedTool?.currentVersion.sourcePath).toBe(path.join('tools', 'ts_buildable_tool.ts'));
 
         const buildStatus = await buildService.getBuildStatus(fn._id.toString(), user.id);
         expect(buildStatus?.status).toBe('ready');
         expect(buildStatus?.functionId).toBe(fn._id.toString());
     });
 
-    it('prepares a workflow-scoped python function into manifests and build roots without using run-time install', async () => {
+    it('prepares a workflow-scoped python tool through the legacy function build alias', async () => {
         const { user, workflow } = await createOwnedWorkflowFixture();
 
-        const fn = await UserFunction.create({
+        const fn = await UserTool.create({
             name: 'py_buildable_tool',
             description: 'Python buildable tool',
-            language: 'python',
-            origin: 'custom',
-            userId: user._id,
+            runtime: 'python',
+            ownerUserId: user._id,
+            workspaceId: null,
+            scopeType: 'user',
             workflowId: workflow._id,
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: createToolVersion({
+                sourceInline: 'def run(args):\n    return {"echoed": args.get("value")}',
+            }),
+            versions: [createToolVersion({
+                sourceInline: 'def run(args):\n    return {"echoed": args.get("value")}',
+            })],
             inputSchema: {},
             outputSchema: {},
-            codeInline: 'def run(args):\n    return {"echoed": args.get("value")}',
             dependencies: { python: ['httpx==0.27.0'], npm: [] },
+            policy: { networkMode: 'none', writablePaths: [], secretAliases: [] },
             isEnabled: true,
             isReadonly: false,
-            version: 1,
             tags: []
         });
 
@@ -143,23 +177,31 @@ describe('BuildService', () => {
         expect(emittedArtifact).toContain('def run(args):');
     });
 
-    it('blocks runtime preparation for dependency-bearing functions until an explicit build has been completed', async () => {
+    it('blocks runtime preparation for dependency-bearing tools when accessed through the legacy function alias until an explicit build has been completed', async () => {
         const { user, workflow } = await createOwnedWorkflowFixture();
 
-        const fn = await UserFunction.create({
+        const fn = await UserTool.create({
             name: 'guarded_ts_tool',
             description: 'Function guarded by build preparation',
-            language: 'typescript',
-            origin: 'custom',
-            userId: user._id,
+            runtime: 'typescript',
+            ownerUserId: user._id,
+            workspaceId: null,
+            scopeType: 'user',
             workflowId: workflow._id,
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: createToolVersion({
+                sourceInline: 'function run(args) { return { ok: true, args }; }',
+            }),
+            versions: [createToolVersion({
+                sourceInline: 'function run(args) { return { ok: true, args }; }',
+            })],
             inputSchema: {},
             outputSchema: {},
-            codeInline: 'function run(args) { return { ok: true, args }; }',
             dependencies: { python: [], npm: ['zod@3.22.4'] },
+            policy: { networkMode: 'none', writablePaths: [], secretAliases: [] },
             isEnabled: true,
             isReadonly: false,
-            version: 1,
             tags: []
         });
 
@@ -430,68 +472,36 @@ describe('BuildService', () => {
         expect(refreshed?.versions[0]?.buildStatus).toBe('built');
     });
 
-    it('requires platform provisioning for dependency-bearing native legacy functions until the mirrored tool is marked built', async () => {
+    it('requires platform provisioning for dependency-bearing native legacy build aliases until the canonical tool is marked built', async () => {
         const { user, workflow } = await createOwnedWorkflowFixture();
 
-        const fn = await UserFunction.create({
+        const fn = await UserTool.create({
             name: 'native_legacy_tool',
             description: 'Legacy native function requiring platform provisioning',
-            language: 'python',
-            origin: 'native',
-            userId: null,
-            workflowId: workflow._id,
-            inputSchema: {},
-            outputSchema: {},
-            codeInline: 'def run(args):\n    return {"ok": True}',
-            dependencies: { python: ['requests==2.32.3'], npm: [] },
-            isEnabled: true,
-            isReadonly: true,
-            version: 1,
-            tags: []
-        });
-
-        await UserTool.create({
-            _id: fn._id,
+            runtime: 'python',
             ownerUserId: null,
             workspaceId: null,
             scopeType: 'native',
             workflowId: workflow._id,
-            name: fn.name,
-            description: fn.description,
-            runtime: 'python',
             status: 'ready',
             trustLevel: 'internal',
-            currentVersion: {
+            currentVersion: createToolVersion({
                 versionTag: '1',
                 contentHash: 'legacy-native-hash',
-                sourceMode: 'inline',
-                sourcePath: null,
-                sourceInline: fn.codeInline,
-                entrypoint: null,
-                createdAt: new Date(),
-                createdBy: null,
-                buildStatus: 'not_built',
-                validationStatus: 'unknown'
-            },
-            versions: [{
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+            }),
+            versions: [createToolVersion({
                 versionTag: '1',
                 contentHash: 'legacy-native-hash',
-                sourceMode: 'inline',
-                sourcePath: null,
-                sourceInline: fn.codeInline,
-                entrypoint: null,
-                createdAt: new Date(),
-                createdBy: null,
-                buildStatus: 'not_built',
-                validationStatus: 'unknown'
-            }],
+                sourceInline: 'def run(args):\n    return {"ok": True}',
+            })],
             inputSchema: {},
             outputSchema: {},
-            tags: [],
             dependencies: { python: ['requests==2.32.3'], npm: [] },
             policy: { networkMode: 'restricted', writablePaths: [], secretAliases: [] },
+            isEnabled: true,
             isReadonly: true,
-            isEnabled: true
+            tags: []
         });
 
         await expect(buildService.ensureBuildReadyForRun(fn._id.toString(), user.id))

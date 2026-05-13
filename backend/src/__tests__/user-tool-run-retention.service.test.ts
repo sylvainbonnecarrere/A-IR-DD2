@@ -4,6 +4,7 @@ import path from 'path';
 import mongoose from 'mongoose';
 import { User } from '../models/User.model';
 import { UserFunction } from '../models/UserFunction.model';
+import { UserTool } from '../models/UserTool.model';
 import { Workspace } from '../models/Workspace.model';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { UserToolRunRetentionService } from '../services/userToolRunRetention.service';
@@ -14,6 +15,7 @@ describe('UserToolRunRetentionService', () => {
 
     afterEach(async () => {
         await UserToolRun.deleteMany({});
+        await UserTool.deleteMany({});
         await Workspace.deleteMany({});
         await UserFunction.deleteMany({ name: /retention-test-/i });
         await User.deleteMany({ email: /retention-test-/i });
@@ -51,6 +53,55 @@ describe('UserToolRunRetentionService', () => {
             isEnabled: true,
             isReadonly: false,
             version: 1
+        });
+
+        await UserTool.create({
+            _id: fn._id,
+            ownerUserId: user._id,
+            workspaceId: null,
+            scopeType: 'user',
+            workflowId,
+            name: fn.name,
+            description: fn.description,
+            runtime: 'typescript',
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: {
+                versionTag: '1',
+                contentHash: 'hash-retention-test',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: fn.codeInline,
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: user._id,
+                buildStatus: 'built',
+                validationStatus: 'unknown'
+            },
+            versions: [{
+                versionTag: '1',
+                contentHash: 'hash-retention-test',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline: fn.codeInline,
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: user._id,
+                buildStatus: 'built',
+                validationStatus: 'unknown'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['test'],
+            dependencies: { npm: [], python: [] },
+            policy: {
+                networkMode: 'restricted',
+                timeoutSeconds: 30,
+                maxMemoryMb: 256,
+                secretAliases: []
+            },
+            isReadonly: false,
+            isEnabled: true
         });
 
         await Workspace.create({

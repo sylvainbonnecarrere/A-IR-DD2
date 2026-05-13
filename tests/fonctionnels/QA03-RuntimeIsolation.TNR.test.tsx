@@ -53,19 +53,24 @@ jest.mock('../../contexts/AuthContext', () => ({
     })),
 }));
 
-jest.mock('../../stores/useDesignStore', () => ({
-    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-        const state = {
-            agentInstances: [
-                { id: 'instance-alpha', workflowId: 'wf-1' },
-                { id: 'instance-beta', workflowId: 'wf-1' },
-                { id: 'instance-multi-turn', workflowId: 'wf-1' },
-                { id: 'instance-follow-up', workflowId: 'wf-1' },
-            ],
-        };
-        return selector ? selector(state) : state;
-    }),
-}));
+jest.mock('../../stores/useDesignStore', () => {
+    const actual = jest.requireActual('../../stores/useDesignStore');
+
+    return {
+        ...actual,
+        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+            const state = {
+                agentInstances: [
+                    { id: 'instance-alpha', workflowId: 'wf-1' },
+                    { id: 'instance-beta', workflowId: 'wf-1' },
+                    { id: 'instance-multi-turn', workflowId: 'wf-1' },
+                    { id: 'instance-follow-up', workflowId: 'wf-1' },
+                ],
+            };
+            return selector ? selector(state) : state;
+        }),
+    };
+});
 
 import * as llmService from '../../services/llmService';
 import { executeTool } from '../../utils/toolExecutor';
