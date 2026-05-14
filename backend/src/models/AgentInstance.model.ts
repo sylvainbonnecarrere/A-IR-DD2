@@ -17,8 +17,10 @@ export interface IPersistenceConfig {
     saveTaskExecution?: boolean;   // ⭐ Alias pour saveTasks (compatibilité)
     saveLinks: boolean;            // Défaut: false - Sauvegarder les liens entre agents
     saveMedia?: boolean;           // ⭐ Activer sauvegarde des fichiers médias
+    allowWorkspaceWrite?: boolean; // ⭐ Autorise aussi une publication workspace si demandée
     saveHistorySummary: boolean;   // Défaut: false - Générer et stocker un résumé périodique
     mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
+    cloudConnectionProfileId?: string;
     cloudStorageConfig?: {         // ⭐ FIX QA: Config cloud S3/GCS
         provider?: 'aws' | 'gcs';
         bucket?: string;
@@ -376,6 +378,8 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
             saveTasks: { type: Boolean, default: false },
             // ⭐ FIX QA: Added saveMedia field for media persistence toggle
             saveMedia: { type: Boolean, default: false },
+            allowWorkspaceWrite: { type: Boolean, default: false },
+            cloudConnectionProfileId: { type: String, default: undefined },
             mediaStorage: { 
                 type: String, 
                 enum: ['db', 'local', 'cloud'], 
@@ -394,6 +398,7 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
             saveLinks: false,
             saveTasks: false,
             saveMedia: false,
+            allowWorkspaceWrite: false,
             mediaStorage: 'db',
             cloudStorageConfig: null
         }

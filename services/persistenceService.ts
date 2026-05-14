@@ -22,7 +22,7 @@
  */
 
 import { GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
-import { PersistenceConfig } from '../types';
+import { PersistenceConfig, normalizeMediaStorageType, normalizePersistenceConfig, summarizePersistenceConfig } from '../types';
 import { API_BASE_URL } from '../config/api.config';
 import { buildGovernanceHeaders } from '../utils/governanceHeaders';
 
@@ -74,9 +74,24 @@ export interface AgentInstanceSaveData {
         saveLinks?: boolean;
         saveTasks?: boolean;
         saveMedia?: boolean;
-        mediaStorage?: 'db' | 'local' | 'cloud';
+        mediaStorage?: 'db' | 'workspace' | 'cloud';
+        allowWorkspaceWrite?: boolean;
+        cloudConnectionProfileId?: string;
         cloudStorageConfig?: any;
     };
+}
+
+function normalizePersistenceConfigForApi<T extends { mediaStorage?: string }>(
+    config?: (PersistenceConfig & T) | null
+): (PersistenceConfig & T) | undefined {
+    if (!config) {
+        return undefined;
+    }
+
+    return normalizePersistenceConfig({
+        ...config,
+        mediaStorage: normalizeMediaStorageType(config.mediaStorage as any)
+    }) as PersistenceConfig & T;
 }
 
 export interface AgentInstanceContent {
@@ -279,7 +294,7 @@ export async function createAgentInstance(
             prototypeId: data.prototypeId,
             name: data.name,
             position: data.position,
-            persistenceConfig: data.persistenceConfig
+            persistenceConfig: summarizePersistenceConfig(normalizePersistenceConfigForApi(data.persistenceConfig))
         });
 
         const response = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/instances/from-prototype`, {
@@ -292,7 +307,7 @@ export async function createAgentInstance(
                 position: data.position,
                 name: data.name,
                 configuration_json: data.configuration_json,
-                persistenceConfig: data.persistenceConfig // ⭐ Pass override config to backend
+                persistenceConfig: normalizePersistenceConfigForApi(data.persistenceConfig)
             })
         });
 
@@ -362,7 +377,10 @@ export async function saveAgentInstance(
             headers: buildGovernanceHeaders(options.accessToken, {
                 'Content-Type': 'application/json'
             }),
-            body: JSON.stringify(data)
+            body: JSON.stringify({
+                ...data,
+                persistenceConfig: normalizePersistenceConfigForApi(data.persistenceConfig as any)
+            })
         });
 
         if (!response.ok) {

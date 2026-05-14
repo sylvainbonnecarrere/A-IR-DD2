@@ -24,7 +24,9 @@ import {
     CreateInstanceResponse,
     DEFAULT_PERSISTENCE_CONFIG,
     PersistenceConfig,
-    AgentInstanceConfiguration
+    AgentInstanceConfiguration,
+    normalizePersistenceConfigForPersistence,
+    sanitizePersistenceConfigForInstanceEgress,
 } from '../types/persistence';
 import { IUser } from '../models/User.model';
 import { CanonicalRobotIdEnum, DEFAULT_ROBOT_ID } from '../types/robotIds';
@@ -62,6 +64,7 @@ const PersistenceOptionsSchema = z.object({
     saveTaskExecution: z.boolean().optional(),
     saveLinks: z.boolean().optional(),
     saveMedia: z.boolean().optional(),
+    allowWorkspaceWrite: z.boolean().optional(),
     mediaStorage: z.enum(['db', 'local', 'cloud']).optional(),
     saveHistorySummary: z.boolean().optional(),
     // ⭐ Legacy properties (backward compatibility)
@@ -145,8 +148,10 @@ export class WorkflowController {
             try {
                 // 1. Créer l'instance d'agent
                 const persistenceConfig: PersistenceConfig = {
-                    ...DEFAULT_PERSISTENCE_CONFIG,
-                    ...body.persistenceOptions
+                    ...normalizePersistenceConfigForPersistence({
+                        ...DEFAULT_PERSISTENCE_CONFIG,
+                        ...body.persistenceOptions
+                    })
                 };
 
                 // ✅ ÉTAPE 1: Créer en AgentInstance (table réelle, pas V2)
@@ -241,7 +246,7 @@ export class WorkflowController {
                         name: instance.name,
                         role: instance.role,
                         status: instance.status,
-                        persistenceConfig: instance.persistenceConfig,
+                        persistenceConfig: sanitizePersistenceConfigForInstanceEgress(instance.persistenceConfig),
                         // ✅ ÉTAPE 1: Inclure configuration complète pour le frontend
                         configuration_json: {
                             llmProvider: instance.llmProvider,

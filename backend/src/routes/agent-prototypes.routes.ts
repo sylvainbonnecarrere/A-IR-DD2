@@ -8,6 +8,7 @@ import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
 import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
+import { normalizePersistenceConfigForPersistence, normalizePersistenceConfigForProduct } from '../types/persistence';
 
 const router = Router();
 
@@ -19,6 +20,31 @@ const toolSelectionSchema = z.object({
         workspaceId: z.string().nullable().optional()
     }).optional()
 });
+
+const persistenceConfigSchema = z.object({
+    saveChat: z.boolean().optional(),
+    saveChatHistory: z.boolean().optional(),
+    saveErrors: z.boolean().optional(),
+    saveHistorySummary: z.boolean().optional(),
+    saveTasks: z.boolean().optional(),
+    saveTaskExecution: z.boolean().optional(),
+    saveLinks: z.boolean().optional(),
+    saveMedia: z.boolean().optional(),
+    allowWorkspaceWrite: z.boolean().optional(),
+    mediaStorage: z.enum(['db', 'local', 'workspace', 'cloud']).optional(),
+    cloudConnectionProfileId: z.string().optional(),
+    retentionDays: z.number().int().positive().optional(),
+}).strict().optional();
+
+function buildPrototypeResponse(prototype: any): Record<string, any> {
+    const responseObj: Record<string, any> = prototype.toObject();
+    responseObj.functionIds = (prototype.tools || []).map((id: any) => id.toString());
+    responseObj.toolSelections = prototype.toolSelections || responseObj.functionIds.map((toolId: string) => ({ toolId }));
+    const rawPersistenceConfig = prototype.persistenceConfig?.toObject?.() ?? prototype.persistenceConfig;
+    responseObj.persistenceConfig = normalizePersistenceConfigForProduct(rawPersistenceConfig);
+
+    return responseObj;
+}
 
 // Schema validation
 // ⭐ J4.5: Robot IDs must match frontend RobotId enum in types.ts
@@ -36,6 +62,7 @@ const createAgentPrototypeSchema = z.object({
     functionIds: z.array(z.string()).optional(),                 // V2 — ids stables de tools, alias frontend vers user_tools
     toolSelections: z.array(toolSelectionSchema).optional(),     // V2 cible — refs versionnées
     outputConfig: z.object({}).passthrough().optional(),
+    persistenceConfig: persistenceConfigSchema,
     robotId: CanonicalRobotIdEnum,
     workflowId: z.string().optional(), // ⭐ V2: Optional workflow scope
     localLLMProfileId: z.string().optional() // ⭐ NEW: Optional local LLM profile reference
@@ -72,7 +99,7 @@ router.get('/', requireAuth, async (req, res) => {
         }
 
         const prototypes = await AgentPrototype.find(query).sort({ createdAt: -1 });
-        res.json(prototypes);
+        res.json(prototypes.map(buildPrototypeResponse));
     } catch (error) {
         console.error('[AgentPrototypes] GET error:', error);
         res.status(500).json({ error: 'Erreur récupération prototypes' });
@@ -94,7 +121,7 @@ router.get('/:id',
                 return res.status(404).json({ error: 'Prototype introuvable' });
             }
 
-            res.json(prototype);
+            res.json(buildPrototypeResponse(prototype));
         } catch (error) {
             console.error('[AgentPrototypes] GET/:id error:', error);
             res.status(500).json({ error: 'Erreur récupération prototype' });
@@ -116,10 +143,13 @@ router.post('/',
             const user = req.user as IUser;
 
             // C3 FIX: Extraire functionIds et mapper vers tools (ObjectId[])
-            const { functionIds, toolSelections, tools, webSearchParams, ...rest } = req.body;
+            const { functionIds, toolSelections, tools, webSearchParams, persistenceConfig, ...rest } = req.body;
             const prototypeData: Record<string, any> = { userId: user.id, ...rest };
             if (webSearchParams !== undefined) {
                 prototypeData.webSearchParams = parseWebSearchParams(webSearchParams);
+            }
+            if (persistenceConfig !== undefined) {
+                prototypeData.persistenceConfig = normalizePersistenceConfigForPersistence(persistenceConfig);
             }
             const canonicalFunctionIds = Array.isArray(functionIds) && functionIds.length > 0
                 ? functionIds
@@ -143,11 +173,7 @@ router.post('/',
             await prototype.save();
 
             // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
-            const responseObj: Record<string, any> = prototype.toObject();
-            responseObj.functionIds = (prototype.tools || []).map((id: any) => id.toString());
-            responseObj.toolSelections = prototype.toolSelections || responseObj.functionIds.map((toolId: string) => ({ toolId }));
-
-            res.status(201).json(responseObj);
+            res.status(201).json(buildPrototypeResponse(prototype));
         } catch (error) {
             console.error('[AgentPrototypes] POST error:', error);
             if (error instanceof z.ZodError) {
@@ -195,7 +221,7 @@ router.put('/:id',
             }
 
             // ⭐ SECURITY FIX: Whitelist allowed fields to prevent mass assignment
-            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, webSearchParams, tools, functionIds, toolSelections, outputConfig, robotId, workflowId, localLLMProfileId } = req.body;
+            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, webSearchParams, tools, functionIds, toolSelections, outputConfig, persistenceConfig, robotId, workflowId, localLLMProfileId } = req.body;
 
             // Update only whitelisted fields (userId never modifiable)
             if (name !== undefined) prototype.name = name;
@@ -223,6 +249,7 @@ router.put('/:id',
                 prototype.legacyTools = tools;
             }
             if (outputConfig !== undefined) prototype.outputConfig = outputConfig;
+            if (persistenceConfig !== undefined) prototype.persistenceConfig = normalizePersistenceConfigForPersistence(persistenceConfig);
             if (robotId !== undefined) prototype.robotId = robotId;
             if (workflowId !== undefined) prototype.workflowId = workflowId;
             if (localLLMProfileId !== undefined) prototype.localLLMProfileId = localLLMProfileId;
@@ -230,11 +257,7 @@ router.put('/:id',
             await prototype.save();
 
             // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
-            const responseObj: Record<string, any> = prototype.toObject();
-            responseObj.functionIds = (prototype.tools || []).map((id: any) => id.toString());
-            responseObj.toolSelections = prototype.toolSelections || responseObj.functionIds.map((toolId: string) => ({ toolId }));
-
-            res.json(responseObj);
+            res.json(buildPrototypeResponse(prototype));
         } catch (error) {
             console.error('[AgentPrototypes] PUT error:', error);
             if (error instanceof z.ZodError) {

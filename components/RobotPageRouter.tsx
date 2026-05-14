@@ -1,5 +1,5 @@
 import React from 'react';
-import { RobotId, LLMConfig, Agent, WorkflowNode, AgentInstance } from '../types';
+import { RobotId, LLMConfig, Agent, WorkflowNode, AgentInstance, AgentBatchDeleteResult, AgentDeletionMediaPolicy } from '../types';
 import { ArchiPrototypingPage } from './ArchiPrototypingPage';
 import WorkflowCanvas from './WorkflowCanvas';
 import { ComConnectionsPage } from './ComConnectionsPage';
@@ -19,7 +19,7 @@ interface RobotPageRouterProps {
   agents?: Agent[];
   workflowNodes?: WorkflowNode[];
   onDeleteNode?: (nodeId: string) => void;
-  onDeleteNodes?: (instanceIds: string[]) => void; // Batch delete nodes by instanceId
+  onDeleteNodes?: (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Batch delete nodes by instanceId
   onUpdateNodeMessages?: (nodeId: string, messages: any[]) => void;
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;

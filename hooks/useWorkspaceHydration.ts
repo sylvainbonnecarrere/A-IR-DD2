@@ -28,7 +28,7 @@ import { GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
-import type { AgentInstance, V2WorkflowNode, V2WorkflowEdge } from '../types';
+import { normalizePersistenceConfig, type AgentInstance, type V2WorkflowNode, type V2WorkflowEdge } from '../types';
 import { API_BASE_URL } from '../config/api.config';
 import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from '../services/persistedChatMessages';
 import { getWorkspaceSessionGateState } from '../utils/workspaceSessionGate';
@@ -134,7 +134,8 @@ export interface WorkspaceData {
             saveLinks: boolean;
             saveTasks: boolean;
             saveMedia: boolean;
-            mediaStorage: 'db' | 'local' | 'cloud';
+            allowWorkspaceWrite: boolean;
+            mediaStorage: 'db' | 'workspace' | 'cloud';
         };
     }>;
     llmConfigs: Array<{
@@ -409,15 +410,7 @@ export const useWorkspaceHydration = (): UseWorkspaceHydrationResult => {
                     isMinimized: inst.isMinimized ?? false,
                     isMaximized: inst.isMaximized ?? false,
                     // ⭐ FIX QA: Include persistenceConfig for media storage options
-                    persistenceConfig: inst.persistenceConfig || {
-                        saveChat: true,
-                        saveErrors: true,
-                        saveHistorySummary: false,
-                        saveLinks: false,
-                        saveTasks: false,
-                        saveMedia: false,
-                        mediaStorage: 'db'
-                    },
+                    persistenceConfig: normalizePersistenceConfig(inst.persistenceConfig),
                     // ⭐ CRITICAL FIX #5: Use configuration_json from backend (NO reconstruction needed!)
                     // Backend now returns BOTH individual fields AND reconstructed configuration_json object
                     // This includes all capabilities, historyConfig, outputConfig, etc.

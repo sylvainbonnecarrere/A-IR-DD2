@@ -15,6 +15,12 @@ jest.mock('../../components/workflow/WorkflowCard', () => ({
   __esModule: true,
   default: () => <div data-testid="workflow-card">WorkflowCard</div>
 }));
+jest.mock('../../components/modals/BosMediaModal', () => ({
+  __esModule: true,
+  default: ({ isOpen, workflowId, workflowName }: { isOpen: boolean; workflowId: string | null; workflowName?: string | null }) => (
+    isOpen ? <div data-testid="bos-media-modal">{`${workflowId}:${workflowName}`}</div> : null
+  )
+}));
 jest.mock('../../components/modals/EditWorkflowDialog', () => ({
   __esModule: true,
   default: () => <div data-testid="edit-dialog">EditDialog</div>
@@ -36,7 +42,7 @@ describe('BosWorkflowManagementPage', () => {
     jest.clearAllMocks();
     
     (useLocalization as unknown as jest.Mock).mockReturnValue({
-      t: (key: string) => key
+      t: (key: string, fallback?: string) => fallback || key
     });
   });
 
@@ -129,6 +135,30 @@ describe('BosWorkflowManagementPage', () => {
     // Dialog should appear (mocked in this test)
     expect(createButton).toBeInTheDocument();
   });
+
+  it('opens BOS media modal for the active workflow', async () => {
+    (useAuth as unknown as jest.Mock).mockReturnValue({
+      isAuthenticated: true
+    });
+
+    (useDesignStore as unknown as jest.Mock).mockReturnValue({
+      workflows: [mockWorkflow],
+      currentWorkflowId: 'wf-1',
+      isLoadingWorkflows: false,
+      workflowLoadError: null,
+      loadUserWorkflows: jest.fn().mockResolvedValue(undefined),
+      selectWorkflow: jest.fn(),
+      createWorkflow: jest.fn(),
+      updateWorkflow: jest.fn(),
+      deleteWorkflow: jest.fn()
+    });
+
+    render(<BosWorkflowManagementPage />);
+
+    fireEvent.click(screen.getByText('Media BOS'));
+
+    expect(await screen.findByTestId('bos-media-modal')).toHaveTextContent('wf-1:Test Workflow');
+  });
 });
 
 describe('CreerWorkflowDialog', () => {
@@ -136,7 +166,7 @@ describe('CreerWorkflowDialog', () => {
     jest.clearAllMocks();
     
     (useLocalization as unknown as jest.Mock).mockReturnValue({
-      t: (key: string) => key
+      t: (key: string, fallback?: string) => fallback || key
     });
   });
 

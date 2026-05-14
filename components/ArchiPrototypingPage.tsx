@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Agent, LLMConfig, RobotId, PersistenceConfig } from '../types';
+import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, LLMConfig, RobotId, PersistenceConfig } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useAuth } from '../contexts/AuthContext';
@@ -22,7 +22,7 @@ interface ArchiPrototypingPageProps {
   llmConfigs: LLMConfig[];
   onNavigateToWorkflow?: () => void;
   onAddToWorkflow?: (agent: Agent) => void;
-  onDeleteNodes?: (instanceIds: string[]) => void; // Callback to delete nodes by instanceId
+  onDeleteNodes?: (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Callback to delete nodes by instanceId
 }
 
 export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({

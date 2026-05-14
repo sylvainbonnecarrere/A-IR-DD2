@@ -621,6 +621,45 @@ describe('App workspace hydration orchestration', () => {
         }));
     });
 
+    it('hydrates prototype persistenceConfig cloud profile references from the workspace snapshot', async () => {
+        const workspaceWithPrototypePersistenceConfig = {
+            ...workspacePayload,
+            agentPrototypes: [
+                {
+                    ...workspacePayload.agentPrototypes[0],
+                    persistenceConfig: {
+                        saveChat: true,
+                        saveErrors: true,
+                        saveHistorySummary: false,
+                        saveLinks: false,
+                        saveTasks: false,
+                        saveMedia: true,
+                        mediaStorage: 'cloud',
+                        allowWorkspaceWrite: true,
+                        cloudConnectionProfileId: 'cloud-profile-1',
+                    },
+                }
+            ],
+        };
+
+        (apiClient.get as jest.Mock).mockResolvedValue({ data: workspaceWithPrototypePersistenceConfig });
+
+        render(<App />);
+
+        await waitFor(() => expect(mockDesignStore.hydrateFromServer).toHaveBeenCalled());
+
+        const hydratedSnapshot = mockDesignStore.hydrateFromServer.mock.calls.at(-1)?.[0] as {
+            agents: any[];
+        };
+
+        expect(hydratedSnapshot.agents[0]).toEqual(expect.objectContaining({
+            persistenceConfig: expect.objectContaining({
+                mediaStorage: 'cloud',
+                cloudConnectionProfileId: 'cloud-profile-1',
+            }),
+        }));
+    });
+
     it('drops legacy tool id arrays from hydrated provider tool payloads after workspace refresh while preserving canonical selections', async () => {
         const workspaceWithLegacyToolIds = {
             ...workspacePayload,

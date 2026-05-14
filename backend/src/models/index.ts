@@ -137,6 +137,8 @@ export type {
 
 export { LLMConfig } from './LLMConfig.model';
 export type { ILLMConfig } from './LLMConfig.model';
+export { CloudConnectionProfile } from './CloudConnectionProfile.model';
+export type { ICloudConnectionProfile } from './CloudConnectionProfile.model';
 
 // ============================================
 // MODÈLES MEDIA STORAGE

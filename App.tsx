@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Agent, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, Tool } from './types';
+import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, Tool, normalizePersistenceConfig } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
 import { AgentFormModal } from './components/modals/AgentFormModal';
@@ -127,6 +127,9 @@ const mapPrototypeToAgent = (prototype: any, fallbackTimestamp: string): Agent =
     toolSelections: normalizedToolReferences.toolSelections,
     outputConfig: prototype.outputConfig || {},
     historyConfig: prototype.historyConfig || {},
+    persistenceConfig: prototype.persistenceConfig
+      ? normalizePersistenceConfig(prototype.persistenceConfig)
+      : undefined,
     creator_id: prototype.robotId || RobotId.Archi,
     created_at: prototype.created_at || fallbackTimestamp,
     updated_at: prototype.updated_at || fallbackTimestamp
@@ -1087,15 +1090,9 @@ export function AppContent() {
             isMinimized: false,
             isMaximized: false,
             // ⭐ FIX QA: Récupérer persistenceConfig du backend ou du prototype
-            persistenceConfig: result.instance.persistenceConfig || agent.persistenceConfig || {
-              saveChat: true,
-              saveErrors: true,
-              saveHistorySummary: false,
-              saveLinks: false,
-              saveTasks: false,
-              saveMedia: false,
-              mediaStorage: 'db'
-            },
+            persistenceConfig: normalizePersistenceConfig(
+              result.instance.persistenceConfig || agent.persistenceConfig
+            ),
             // ✅ configuration_json contient TOUS les détails de config (role, model, llmProvider, etc.)
             configuration_json: result.instance.configuration_json || {
               role: agent.role,
@@ -1281,31 +1278,48 @@ export function AppContent() {
     }
   }, [workflowNodes, storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, accessToken, getCurrentWorkflowId]);
 
-  const handleDeleteNodes = useCallback(async (instanceIds: string[]) => {
+  const handleDeleteNodes = useCallback(async (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy = 'delete_media'): Promise<AgentBatchDeleteResult> => {
     // Batch delete multiple nodes by instanceId (used when deleting prototype with instances)
-    console.log('[App] handleDeleteNodes called with:', instanceIds);
-    
-    // 1. Supprimer du state legacy
-    setWorkflowNodes(prev => prev.filter(node => !node.instanceId || !instanceIds.includes(node.instanceId)));
-    
-    // 2. Supprimer du store et backend pour chaque instance
+    console.log('[App] handleDeleteNodes called with:', instanceIds, 'policy:', mediaPolicy);
+
+    const failedInstanceIds: string[] = [];
+
     for (const instanceId of instanceIds) {
-      // Supprimer du store
-      deleteNode(`node-${instanceId}`);
-      deleteAgentInstance(instanceId);
-      
-      // Persister au backend
+      let backendDeleted = true;
+
       if (isAuthenticated) {
         const workflowId = getCurrentWorkflowId();
         if (workflowId) {
           try {
-            await apiClient.delete(`/api/workflows/${workflowId}/instances/${instanceId}`);
+            await apiClient.delete(`/api/workflows/${workflowId}/instances/${instanceId}`, {
+              params: {
+                mediaPolicy,
+              },
+            });
           } catch (error) {
+            backendDeleted = false;
+            failedInstanceIds.push(instanceId);
             console.error('[App] Error deleting instance:', instanceId, error);
           }
         }
       }
+
+      if (!backendDeleted) {
+        continue;
+      }
+
+      setWorkflowNodes(prev => prev.filter(node => node.instanceId !== instanceId));
+      deleteNode(`node-${instanceId}`);
+      deleteAgentInstance(instanceId);
     }
+
+    return failedInstanceIds.length > 0
+      ? {
+          success: false,
+          failedInstanceIds,
+          error: `${failedInstanceIds.length} instance(s) n'ont pas pu etre supprimees avec la politique media demandee.`,
+        }
+      : { success: true };
   }, [deleteNode, deleteAgentInstance, isAuthenticated, accessToken, getCurrentWorkflowId]);
 
   const handleUpdateNodePosition = (nodeId: string, position: { x: number; y: number }) => {

@@ -11,7 +11,7 @@
  */
 
 import { getBackendUrl } from '../config/api.config';
-import { Agent } from '../types';
+import { Agent, normalizePersistenceConfig } from '../types';
 import { normalizeAgentToolReferences } from './toolSelectionResolver';
 import { buildGovernanceHeaders } from '../utils/governanceHeaders';
 
@@ -29,6 +29,17 @@ interface APIResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+function sanitizePrototypePersistenceConfig(persistenceConfig?: AgentPrototypePayload['persistenceConfig']) {
+  if (!persistenceConfig) {
+    return undefined;
+  }
+
+  const normalized = normalizePersistenceConfig(persistenceConfig);
+  const { cloudStorageConfig: _cloudStorageConfig, ...sanitized } = normalized;
+
+  return sanitized;
 }
 
 /**
@@ -55,6 +66,7 @@ function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string,
     functionIds,
     toolSelections,
     outputConfig: agentData.outputConfig || undefined,
+    persistenceConfig: sanitizePrototypePersistenceConfig(agentData.persistenceConfig),
     robotId: robotId // Frontend uses 'creator_id', backend expects 'robotId'
   };
   
@@ -101,6 +113,7 @@ export function mapAPIResponseToAgent(apiData: any): Agent {
     toolSelections: normalizedToolReferences.toolSelections,
     outputConfig: apiData.outputConfig,
     webSearchParams: apiData.webSearchParams,
+    persistenceConfig: apiData.persistenceConfig ? normalizePersistenceConfig(apiData.persistenceConfig) : undefined,
     creator_id: apiData.robotId, // Backend uses 'robotId', frontend expects 'creator_id'
     created_at: apiData.createdAt || new Date().toISOString(),
     updated_at: apiData.updatedAt || new Date().toISOString(),
@@ -184,6 +197,7 @@ export async function updateAgentPrototype(
       payload.toolSelections = normalizedToolReferences.toolSelections;
     }
     if (agentData.outputConfig !== undefined) payload.outputConfig = agentData.outputConfig;
+    if (agentData.persistenceConfig !== undefined) payload.persistenceConfig = sanitizePrototypePersistenceConfig(agentData.persistenceConfig);
     if (agentData.localLLMProfileId !== undefined) payload.localLLMProfileId = agentData.localLLMProfileId;
     if (robotId) payload.robotId = robotId;
     

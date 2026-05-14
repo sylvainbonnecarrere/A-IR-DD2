@@ -23,6 +23,40 @@ import { Types } from 'mongoose';
  * - cloud: Stockage externe S3/GCS (future implémentation)
  */
 export type MediaStorageMode = 'database' | 'local' | 'cloud';
+export type ProductMediaStorageType = 'db' | 'workspace' | 'cloud';
+export type PersistedMediaStorageType = 'db' | 'local' | 'cloud';
+
+export function normalizePersistedMediaStorage(
+    value?: ProductMediaStorageType | PersistedMediaStorageType | MediaStorageMode | null
+): ProductMediaStorageType {
+    switch (value) {
+        case 'workspace':
+        case 'cloud':
+        case 'db':
+            return value;
+        case 'local':
+            return 'workspace';
+        case 'database':
+        default:
+            return 'db';
+    }
+}
+
+export function denormalizeMediaStorageForPersistence(
+    value?: ProductMediaStorageType | PersistedMediaStorageType | MediaStorageMode | null
+): PersistedMediaStorageType {
+    const normalized = normalizePersistedMediaStorage(value);
+
+    switch (normalized) {
+        case 'workspace':
+            return 'local';
+        case 'cloud':
+            return 'cloud';
+        case 'db':
+        default:
+            return 'db';
+    }
+}
 
 /**
  * Configuration de persistance d'un agent
@@ -37,9 +71,11 @@ export interface PersistenceConfig {
     saveTaskExecution?: boolean;    // ⭐ Alias pour saveTasks (compatibilité)
     saveLinks: boolean;             // Sauvegarder les liens entre agents
     saveMedia?: boolean;            // ⭐ Activer sauvegarde des fichiers médias
+    allowWorkspaceWrite?: boolean;  // ⭐ Autorise aussi une publication workspace si demandée
 
     // Stratégie de stockage des médias
-    mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' (inline), local (volume), cloud (S3/GCS)
+    mediaStorage?: ProductMediaStorageType | PersistedMediaStorageType; // Défaut: 'db' (inline), local/workspace, cloud (S3/GCS)
+    cloudConnectionProfileId?: string; // Référence vers un profil cloud sécurisé
 
     // Options avancées
     saveHistorySummary: boolean;    // Activer la compression automatique du contexte
@@ -57,10 +93,91 @@ export const DEFAULT_PERSISTENCE_CONFIG: PersistenceConfig = {
     saveTaskExecution: false,
     saveLinks: false,
     saveMedia: true,
+    allowWorkspaceWrite: true,
     mediaStorage: 'db',
     saveHistorySummary: false,
     retentionDays: undefined
 };
+
+export function resolveAllowWorkspaceWrite(
+    saveMedia: boolean,
+    mediaStorage?: ProductMediaStorageType | PersistedMediaStorageType | MediaStorageMode | null,
+    explicitValue?: boolean | null,
+): boolean {
+    if (!saveMedia) {
+        return false;
+    }
+
+    if (normalizePersistedMediaStorage(mediaStorage) === 'workspace') {
+        return true;
+    }
+
+    return explicitValue ?? true;
+}
+
+export function normalizePersistenceConfigForPersistence(
+    config?: Partial<PersistenceConfig> | null,
+): PersistenceConfig {
+    const merged = {
+        ...DEFAULT_PERSISTENCE_CONFIG,
+        ...(config || {}),
+    };
+
+    const saveMedia = merged.saveMedia ?? DEFAULT_PERSISTENCE_CONFIG.saveMedia ?? false;
+    const mediaStorage = denormalizeMediaStorageForPersistence(merged.mediaStorage);
+
+    return {
+        ...merged,
+        saveMedia,
+        mediaStorage,
+        allowWorkspaceWrite: resolveAllowWorkspaceWrite(saveMedia, mediaStorage, merged.allowWorkspaceWrite),
+    };
+}
+
+export function normalizePersistenceConfigForProduct(
+    config?: Partial<PersistenceConfig> | null,
+): PersistenceConfig {
+    const normalized = normalizePersistenceConfigForPersistence(config);
+
+    return {
+        ...normalized,
+        mediaStorage: normalizePersistedMediaStorage(normalized.mediaStorage),
+        allowWorkspaceWrite: resolveAllowWorkspaceWrite(
+            normalized.saveMedia ?? false,
+            normalized.mediaStorage,
+            normalized.allowWorkspaceWrite,
+        ),
+    };
+}
+
+export function sanitizePersistenceConfigForInstanceEgress(
+    config?: Partial<PersistenceConfig> | null,
+): PersistenceConfig {
+    const normalized = normalizePersistenceConfigForProduct(config) as PersistenceConfig & {
+        cloudStorageConfig?: unknown;
+    };
+    const { cloudStorageConfig: _cloudStorageConfig, ...sanitized } = normalized;
+
+    return sanitized;
+}
+
+export function summarizePersistenceConfigBoundary(
+    config?: Partial<PersistenceConfig> | null,
+) {
+    const normalized = normalizePersistenceConfigForProduct(config);
+    const rawCloudConfig = (config as any)?.cloudStorageConfig;
+
+    return {
+        saveChat: normalized.saveChat,
+        saveErrors: normalized.saveErrors,
+        saveMedia: normalized.saveMedia,
+        mediaStorage: normalized.mediaStorage,
+        allowWorkspaceWrite: normalized.allowWorkspaceWrite,
+        cloudConnectionProfileId: (config as any)?.cloudConnectionProfileId ?? null,
+        hasCloudStorageConfig: !!rawCloudConfig,
+        cloudProvider: rawCloudConfig?.provider ?? null,
+    };
+}
 
 // ============================================
 // PAYLOADS MÉDIA

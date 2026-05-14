@@ -20,7 +20,54 @@ import mongoose, { Document, Schema, Types } from 'mongoose';
 // ============================================
 
 export type MediaStorageMode = 'db' | 'local' | 'cloud';
+export type ProductMediaStorageMode = 'db' | 'workspace' | 'cloud';
 export type CloudProvider = 's3' | 'gcs';
+export type MediaOrphanReason = 'agent_deleted' | 'workflow_deleted' | 'source_missing' | 'manual_detach' | 'unknown';
+
+function derivePrimaryStorageMode(storageMode: MediaStorageMode): ProductMediaStorageMode {
+    switch (storageMode) {
+        case 'local':
+            return 'workspace';
+        case 'cloud':
+            return 'cloud';
+        case 'db':
+        default:
+            return 'db';
+    }
+}
+
+function buildCanonicalLocator(source: {
+    storageMode: MediaStorageMode;
+    localPath?: string;
+    gridfsId?: Types.ObjectId;
+    journalEntryId?: Types.ObjectId;
+    cloudKey?: string;
+    cloudProvider?: CloudProvider;
+    cloudBucket?: string;
+}): string | undefined {
+    switch (source.storageMode) {
+        case 'local':
+            return source.localPath ? `workspace://${source.localPath}` : undefined;
+        case 'db':
+            if (source.gridfsId) {
+                return `gridfs://${source.gridfsId.toString()}`;
+            }
+
+            return source.journalEntryId ? `journal://${source.journalEntryId.toString()}` : undefined;
+        case 'cloud':
+            if (!source.cloudKey) {
+                return undefined;
+            }
+
+            if (source.cloudProvider && source.cloudBucket) {
+                return `${source.cloudProvider}://${source.cloudBucket}/${source.cloudKey}`;
+            }
+
+            return `cloud://${source.cloudKey}`;
+        default:
+            return undefined;
+    }
+}
 
 /**
  * Interface du document MediaReference
@@ -36,6 +83,8 @@ export interface IMediaReference extends Document {
     
     // Mode de stockage
     storageMode: MediaStorageMode;
+    primaryStorageMode: ProductMediaStorageMode;
+    canonicalLocator: string;
     
     // Références selon le mode (mutuellement exclusives)
     localPath?: string;             // Mode 'local': chemin relatif users/{userId}/...
@@ -55,6 +104,15 @@ export interface IMediaReference extends Document {
     generatedBy?: string;           // ID/nom de l'agent générateur
     prompt?: string;                // Prompt utilisé pour la génération
     modelUsed?: string;             // Modèle LLM utilisé
+
+    // Métadonnées DDD additives
+    createdByAgentInstanceId?: Types.ObjectId;
+    createdByAgentName?: string;
+    lastModifiedByAgentInstanceId?: Types.ObjectId;
+    lastModifiedByAgentName?: string;
+    isOrphan: boolean;
+    orphanedAt?: Date;
+    orphanReason?: MediaOrphanReason;
     
     // Timestamps
     createdAt: Date;
@@ -71,6 +129,8 @@ export interface IMediaReferenceCreate {
     journalEntryId?: Types.ObjectId | string;
     
     storageMode: MediaStorageMode;
+    primaryStorageMode?: ProductMediaStorageMode;
+    canonicalLocator?: string;
     
     localPath?: string;
     gridfsId?: Types.ObjectId | string;
@@ -87,6 +147,13 @@ export interface IMediaReferenceCreate {
     generatedBy?: string;
     prompt?: string;
     modelUsed?: string;
+    createdByAgentInstanceId?: Types.ObjectId | string;
+    createdByAgentName?: string;
+    lastModifiedByAgentInstanceId?: Types.ObjectId | string;
+    lastModifiedByAgentName?: string;
+    isOrphan?: boolean;
+    orphanedAt?: Date | string;
+    orphanReason?: MediaOrphanReason;
 }
 
 // ============================================
@@ -125,6 +192,18 @@ const MediaReferenceSchema = new Schema<IMediaReference>({
         enum: ['db', 'local', 'cloud'], 
         required: true,
         index: true
+    },
+    primaryStorageMode: {
+        type: String,
+        enum: ['db', 'workspace', 'cloud'],
+        required: true,
+        index: true,
+        default: undefined,
+    },
+    canonicalLocator: {
+        type: String,
+        required: true,
+        trim: true,
     },
     
     // Références stockage
@@ -185,6 +264,42 @@ const MediaReferenceSchema = new Schema<IMediaReference>({
     modelUsed: {
         type: String,
         required: false
+    },
+
+    createdByAgentInstanceId: {
+        type: Schema.Types.ObjectId,
+        ref: 'AgentInstance',
+        required: false,
+    },
+    createdByAgentName: {
+        type: String,
+        required: false,
+        trim: true,
+    },
+    lastModifiedByAgentInstanceId: {
+        type: Schema.Types.ObjectId,
+        ref: 'AgentInstance',
+        required: false,
+    },
+    lastModifiedByAgentName: {
+        type: String,
+        required: false,
+        trim: true,
+    },
+    isOrphan: {
+        type: Boolean,
+        required: true,
+        default: false,
+        index: true,
+    },
+    orphanedAt: {
+        type: Date,
+        required: false,
+    },
+    orphanReason: {
+        type: String,
+        enum: ['agent_deleted', 'workflow_deleted', 'source_missing', 'manual_detach', 'unknown'],
+        required: false,
     }
 }, { 
     timestamps: true,
@@ -200,6 +315,8 @@ MediaReferenceSchema.index({ userId: 1, workflowId: 1 });
 MediaReferenceSchema.index({ userId: 1, createdAt: -1 });
 MediaReferenceSchema.index({ agentInstanceId: 1, createdAt: -1 });
 MediaReferenceSchema.index({ workflowId: 1, storageMode: 1 });
+MediaReferenceSchema.index({ workflowId: 1, primaryStorageMode: 1, isOrphan: 1, updatedAt: -1 });
+MediaReferenceSchema.index({ workflowId: 1, createdByAgentInstanceId: 1, updatedAt: -1 });
 
 // Index pour nettoyage/maintenance
 MediaReferenceSchema.index({ storageMode: 1, createdAt: 1 });
@@ -211,6 +328,37 @@ MediaReferenceSchema.index({ storageMode: 1, createdAt: 1 });
 // Validation: Au moins une référence doit être présente selon le mode
 MediaReferenceSchema.pre('save', function(next) {
     const doc = this as IMediaReference;
+
+    if (!doc.primaryStorageMode) {
+        doc.primaryStorageMode = derivePrimaryStorageMode(doc.storageMode);
+    }
+
+    if (!doc.canonicalLocator) {
+        const canonicalLocator = buildCanonicalLocator(doc);
+        if (canonicalLocator) {
+            doc.canonicalLocator = canonicalLocator;
+        }
+    }
+
+    if (doc.isOrphan) {
+        if (!doc.orphanedAt) {
+            doc.orphanedAt = new Date();
+        }
+        if (!doc.orphanReason) {
+            doc.orphanReason = 'unknown';
+        }
+    } else {
+        doc.orphanedAt = undefined;
+        doc.orphanReason = undefined;
+    }
+
+    if (!doc.lastModifiedByAgentInstanceId && doc.createdByAgentInstanceId) {
+        doc.lastModifiedByAgentInstanceId = doc.createdByAgentInstanceId;
+    }
+
+    if (!doc.lastModifiedByAgentName && doc.createdByAgentName) {
+        doc.lastModifiedByAgentName = doc.createdByAgentName;
+    }
     
     switch (doc.storageMode) {
         case 'local':
@@ -224,8 +372,8 @@ MediaReferenceSchema.pre('save', function(next) {
             break;
             
         case 'db':
-            if (!doc.gridfsId) {
-                return next(new Error('gridfsId requis pour mode "db"'));
+            if (!doc.gridfsId && !doc.journalEntryId) {
+                return next(new Error('gridfsId ou journalEntryId requis pour mode "db"'));
             }
             break;
             
@@ -234,6 +382,10 @@ MediaReferenceSchema.pre('save', function(next) {
                 return next(new Error('cloudKey et cloudProvider requis pour mode "cloud"'));
             }
             break;
+    }
+
+    if (!doc.canonicalLocator) {
+        return next(new Error('canonicalLocator requis pour tout media reference'));
     }
     
     next();
