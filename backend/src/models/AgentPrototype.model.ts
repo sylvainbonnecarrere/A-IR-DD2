@@ -13,8 +13,10 @@ export interface IPersistenceConfig {
     saveTaskExecution?: boolean;   // ⭐ Alias pour saveTasks (compatibilité)
     saveLinks: boolean;            // Défaut: false - Sauvegarder les liens entre agents
     saveMedia?: boolean;           // ⭐ Activer sauvegarde des fichiers médias
+    allowWorkspaceWrite?: boolean; // ⭐ Autorise aussi une publication workspace si demandée
     saveHistorySummary: boolean;   // Défaut: false - Générer et stocker un résumé périodique
     mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
+    cloudConnectionProfileId?: string;
     cloudStorageConfig?: {         // ⭐ FIX QA: Config cloud S3/GCS
         provider?: 'aws' | 'gcs';
         bucket?: string;
@@ -62,10 +64,16 @@ export interface IAgentPrototype extends Document {
 // ⭐ Sub-schema for persistence config
 const PersistenceConfigSchema = new Schema<IPersistenceConfig>({
     saveChat: { type: Boolean, default: true },
+    saveChatHistory: { type: Boolean, default: true },
     saveErrors: { type: Boolean, default: true },
     saveHistorySummary: { type: Boolean, default: false },
     saveLinks: { type: Boolean, default: false },
     saveTasks: { type: Boolean, default: false },
+    saveTaskExecution: { type: Boolean, default: false },
+    saveMedia: { type: Boolean, default: false },
+    allowWorkspaceWrite: { type: Boolean, default: false },
+    retentionDays: { type: Number, default: undefined },
+    cloudConnectionProfileId: { type: String, default: undefined },
     mediaStorage: { 
         type: String, 
         enum: ['db', 'local', 'cloud'], 
@@ -157,10 +165,13 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
         type: PersistenceConfigSchema,
         default: () => ({
             saveChat: true,
+            saveChatHistory: true,
             saveErrors: true,
             saveHistorySummary: false,
             saveLinks: false,
             saveTasks: false,
+            saveTaskExecution: false,
+            saveMedia: false,
             mediaStorage: 'db'
         })
     },

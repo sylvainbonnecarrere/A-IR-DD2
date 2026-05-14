@@ -15,6 +15,8 @@ import { buildChatMessagesByInstance } from '../utils/chatMessageProjection';
 import { transformAgentInstanceForFrontend } from '../utils/transforms';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
 import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
+import { normalizePersistenceConfigForPersistence, normalizePersistenceConfigForProduct, summarizePersistenceConfigBoundary } from '../types/persistence';
+import { AgentInstanceDeletionPolicyService } from '../services/agentInstanceDeletionPolicy.service';
 
 // Type pour les paramètres de route hérités (via mergeParams)
 interface WorkflowParams {
@@ -33,6 +35,17 @@ const toolSelectionSchema = z.object({
         workspaceId: z.string().nullable().optional()
     }).optional()
 });
+
+function normalizeIncomingPersistenceConfig<T extends { persistenceConfig?: any }>(payload: T): T {
+    if (!payload?.persistenceConfig) {
+        return payload;
+    }
+
+    return {
+        ...payload,
+        persistenceConfig: normalizePersistenceConfigForPersistence(payload.persistenceConfig)
+    };
+}
 
 // Schema validation
 const createAgentInstanceSchema = z.object({
@@ -56,14 +69,18 @@ const createAgentInstanceSchema = z.object({
     // ⭐ FIX QA: Add persistenceConfig to validation schema for media storage
     persistenceConfig: z.object({
         saveChat: z.boolean().optional(),
+        saveChatHistory: z.boolean().optional(),
         saveErrors: z.boolean().optional(),
         saveHistorySummary: z.boolean().optional(),
         saveLinks: z.boolean().optional(),
         saveTasks: z.boolean().optional(),
+        saveTaskExecution: z.boolean().optional(),
         saveMedia: z.boolean().optional(),
-        mediaStorage: z.enum(['db', 'local', 'cloud']).optional(), // ⭐ FIX: Use 'db' not 'database'
-        cloudStorageConfig: z.object({}).passthrough().nullable().optional()
-    }).optional(),
+        allowWorkspaceWrite: z.boolean().optional(),
+        mediaStorage: z.enum(['db', 'local', 'workspace', 'cloud']).optional(),
+        cloudConnectionProfileId: z.string().optional(),
+        retentionDays: z.number().int().positive().optional()
+    }).strict().optional(),
 
     // Canvas properties
     position: z.object({
@@ -83,6 +100,10 @@ const createAgentInstanceSchema = z.object({
 });
 
 const updateAgentInstanceSchema = createAgentInstanceSchema.partial();
+
+const deleteAgentInstanceQuerySchema = z.object({
+    mediaPolicy: z.enum(['delete_media', 'orphan_media']).optional().default('delete_media')
+});
 
 // GET /api/workflows/:workflowId/instances - Liste des instances
 router.get('/', requireAuth, async (req: Request<WorkflowParams>, res: Response) => {
@@ -203,7 +224,7 @@ router.post('/',
             workflow.isDirty = true;
             await workflow.save();
 
-            res.status(201).json(instance);
+            res.status(201).json(transformAgentInstanceForFrontend(instance));
         } catch (error) {
             console.error('[AgentInstances] POST error:', error);
             res.status(500).json({ error: 'Erreur création instance' });
@@ -301,17 +322,21 @@ router.post('/from-prototype', requireAuth,
         const finalLocalLLMProfileId = configuration_json?.localLLMProfileId ?? (prototype as any).localLLMProfileId ?? null;
         
         // 5. PersistenceConfig: merge prototype config avec overrides
-        const prototypePersistenceConfig = prototype.persistenceConfig || {
-            saveChat: true,
-            saveErrors: true,
-            saveHistorySummary: false,
-            saveLinks: false,
-            saveTasks: false,
-            mediaStorage: 'db'
-        };
+        const prototypePersistenceConfig = normalizePersistenceConfigForPersistence(
+            prototype.persistenceConfig?.toObject?.() ?? prototype.persistenceConfig ?? {
+                saveChat: true,
+                saveErrors: true,
+                saveHistorySummary: false,
+                saveLinks: false,
+                saveTasks: false,
+                allowWorkspaceWrite: true,
+                mediaStorage: 'db'
+            }
+        );
         
-        const finalPersistenceConfig = persistenceConfig 
-            ? { ...prototypePersistenceConfig, ...persistenceConfig }
+        const normalizedRequestPersistence = normalizeIncomingPersistenceConfig({ persistenceConfig }).persistenceConfig;
+        const finalPersistenceConfig = normalizedRequestPersistence
+            ? { ...prototypePersistenceConfig, ...normalizedRequestPersistence }
             : prototypePersistenceConfig;
 
         // Log des valeurs finales pour debugging
@@ -475,7 +500,7 @@ router.put('/:id',
                 bodyKeys: Object.keys(req.body),
                 hasConfigurationJson: !!req.body.configuration_json,
                 hasPersistenceConfig: !!req.body.persistenceConfig,
-                persistenceConfig: req.body.persistenceConfig
+                persistenceConfig: summarizePersistenceConfigBoundary(req.body.persistenceConfig)
             });
             
             const instance = await AgentInstance.findOne({ _id: instanceId, userId: user.id });
@@ -584,9 +609,10 @@ router.put('/:id',
             }
             
             // Apply other updates (name, position, etc.) using Object.assign
-            const normalizedOtherUpdates = otherUpdates.webSearchParams !== undefined
-                ? { ...otherUpdates, webSearchParams: parseWebSearchParams(otherUpdates.webSearchParams) }
-                : otherUpdates;
+            const normalizedPayload = normalizeIncomingPersistenceConfig(otherUpdates);
+            const normalizedOtherUpdates = normalizedPayload.webSearchParams !== undefined
+                ? { ...normalizedPayload, webSearchParams: parseWebSearchParams(normalizedPayload.webSearchParams) }
+                : normalizedPayload;
 
             Object.assign(instance, normalizedOtherUpdates);
             await instance.save();
@@ -594,6 +620,7 @@ router.put('/:id',
             // ⭐ CRITICAL: Log saved state for debugging (BREAK #2 fix)
             const historyConfigObj = instance.historyConfig as any || {};
             const persistenceConfigObj = instance.persistenceConfig as any || {};
+            const persistenceSummary = summarizePersistenceConfigBoundary(persistenceConfigObj);
             console.log('[AgentInstances] ✅ PUT endpoint saved:', {
                 instanceId: instance._id?.toString(),
                 name: instance.name,
@@ -604,10 +631,7 @@ router.put('/:id',
                     enabled: historyConfigObj.enabled || false,
                     provider: historyConfigObj.llmProvider || 'unknown'
                 },
-                persistenceConfig: {
-                    saveMedia: persistenceConfigObj.saveMedia || false,
-                    mediaStorage: persistenceConfigObj.mediaStorage || 'db'
-                },
+                persistenceConfig: persistenceSummary,
                 toolsCount: Array.isArray(instance.tools) ? instance.tools.length : 0
             });
 
@@ -618,7 +642,7 @@ router.put('/:id',
                 await workflow.save();
             }
 
-            res.json(instance);
+            res.json(transformAgentInstanceForFrontend(instance));
         } catch (error) {
             console.error('[AgentInstances] PUT error:', error);
             if (error instanceof z.ZodError) {
@@ -780,7 +804,7 @@ router.post(
 );
 
 // DELETE /api/agent-instances/:id - Supprimer instance
-// ⭐ CASCADE DELETE: Supprime aussi les journaux et médias associés
+// ⭐ POLICY DELETE: supprime les médias ou les conserve comme orphelins
 router.delete('/:id',
     requireAuth,
     requireOwnershipAsync(async (req) => {
@@ -799,6 +823,15 @@ router.delete('/:id',
         try {
             const user = req.user as IUser;
             const instanceId = req.params.id;
+            const queryParseResult = deleteAgentInstanceQuerySchema.safeParse(req.query);
+
+            if (!queryParseResult.success) {
+                return res.status(400).json({
+                    error: 'Paramètres invalides',
+                    details: queryParseResult.error.errors,
+                });
+            }
+
             const instance = await AgentInstance.findOne({ _id: instanceId, userId: user.id });
 
             if (!instance) {
@@ -806,13 +839,13 @@ router.delete('/:id',
             }
 
             const workflowId = instance.workflowId;
-            
-            // ⭐ CASCADE DELETE: Supprimer les journaux de l'instance (inclut les médias en base64)
-            const journalDeleteResult = await AgentJournal.deleteMany({ agentInstanceId: instanceId });
-            console.log(`[AgentInstances] CASCADE DELETE: ${journalDeleteResult.deletedCount} journals deleted for instance ${instanceId}`);
-            
-            // Supprimer l'instance elle-même
-            await instance.deleteOne();
+
+            const deletionResult = await new AgentInstanceDeletionPolicyService().deleteInstanceWithPolicy({
+                userId: user.id,
+                workflowId: workflowId.toString(),
+                instanceId,
+                mediaPolicy: queryParseResult.data.mediaPolicy,
+            });
 
             // Marquer workflow comme dirty
             const workflow = await Workflow.findById(workflowId);
@@ -822,13 +855,25 @@ router.delete('/:id',
             }
 
             res.json({ 
-                message: 'Instance et données associées supprimées',
+                message: deletionResult.mediaPolicy === 'orphan_media'
+                    ? 'Instance supprimée, médias conservés comme orphelins'
+                    : 'Instance et données associées supprimées',
+                mediaPolicy: deletionResult.mediaPolicy,
                 cascadeDelete: {
-                    journalsDeleted: journalDeleteResult.deletedCount
+                    journalsDeleted: deletionResult.journalsDeleted,
+                    mediaFilesDeleted: deletionResult.mediaFilesDeleted,
+                    mediaReferencesDeleted: deletionResult.mediaReferencesDeleted,
+                    mediaReferencesOrphaned: deletionResult.mediaReferencesOrphaned,
+                    retainedMediaEntries: deletionResult.retainedMediaEntries,
                 }
             });
         } catch (error) {
             console.error('[AgentInstances] DELETE error:', error);
+
+            if (error instanceof Error && error.message === 'INSTANCE_NOT_FOUND') {
+                return res.status(404).json({ error: 'Instance introuvable' });
+            }
+
             res.status(500).json({ error: 'Erreur suppression instance' });
         }
     }

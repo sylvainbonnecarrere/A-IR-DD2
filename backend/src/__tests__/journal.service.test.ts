@@ -1,14 +1,27 @@
+import fs from 'fs/promises';
+import path from 'path';
 import mongoose from 'mongoose';
 import { User } from '../models/User.model';
 import { Workflow } from '../models/Workflow.model';
 import { AgentInstance } from '../models/AgentInstance.model';
 import { AgentJournal } from '../models/AgentJournal.model';
+import { MediaReference } from '../models/MediaReference.model';
+import { Workspace } from '../models/Workspace.model';
 import { JournalService } from '../services/journal.service';
 
 describe('JournalService payload compatibility', () => {
-    const journalService = new JournalService();
+    const testWorkspaceStorageRoot = path.join(process.cwd(), 'storage-test-journal-workspaces');
+    let journalService: JournalService;
+
+    beforeEach(() => {
+        process.env.WORKSPACE_STORAGE_PATH = testWorkspaceStorageRoot;
+        journalService = new JournalService();
+    });
 
     afterEach(async () => {
+        await fs.rm(testWorkspaceStorageRoot, { recursive: true, force: true }).catch(() => undefined);
+        await Workspace.deleteMany({});
+        await MediaReference.deleteMany({});
         await AgentJournal.deleteMany({});
         await AgentInstance.deleteMany({});
         await Workflow.deleteMany({});
@@ -224,5 +237,171 @@ describe('JournalService payload compatibility', () => {
         }));
         expect((savedEntries[0]?.payload as Record<string, unknown>).data).toBeUndefined();
         expect((savedEntries[0]?.payload as Record<string, unknown>).type).toBeUndefined();
+    });
+
+    it('creates a MediaReference catalog entry for inline database media journal writes', async () => {
+        const user = await User.create({
+            email: `journal-service-media-db-${Date.now()}@test.com`,
+            password: 'hashedpassword12345',
+            username: `journalservicemediadb${Date.now()}`
+        });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Journal Service Media DB Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `exec-media-db-${Date.now()}`,
+            status: 'running',
+            name: 'Media DB Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'db'
+            }
+        });
+
+        const result = await journalService.logMedia({
+            instanceId: instance.id,
+            userId: user.id,
+            workflowId: workflow.id,
+            file: Buffer.from('inline-media-payload'),
+            metadata: {
+                originalName: 'artifact.txt',
+                mimeType: 'text/plain',
+                size: 'inline-media-payload'.length,
+                generatedBy: 'Media DB Agent',
+                prompt: 'build a text artifact'
+            }
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.saved).toBe(true);
+
+        const journalEntry = await AgentJournal.findById(result.entryId).lean();
+        expect(journalEntry).not.toBeNull();
+
+        const mediaReference = await MediaReference.findOne({ journalEntryId: journalEntry?._id }).lean();
+        expect(mediaReference).not.toBeNull();
+        expect(mediaReference).toEqual(expect.objectContaining({
+            storageMode: 'db',
+            primaryStorageMode: 'db',
+            canonicalLocator: `journal://${result.entryId}`,
+            originalName: 'artifact.txt',
+            fileName: 'artifact.txt',
+            mimeType: 'text/plain',
+            generatedBy: 'Media DB Agent',
+            prompt: 'build a text artifact',
+            createdByAgentName: 'Media DB Agent',
+            lastModifiedByAgentName: 'Media DB Agent',
+            isOrphan: false,
+        }));
+    });
+
+    it('creates a workspace-scoped MediaReference catalog entry for local media journal writes', async () => {
+        const user = await User.create({
+            email: `journal-service-media-local-${Date.now()}@test.com`,
+            password: 'hashedpassword12345',
+            username: `journalservicemediaLocal${Date.now()}`
+        });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Journal Service Media Local Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `exec-media-local-${Date.now()}`,
+            status: 'running',
+            name: 'Media Local Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'local'
+            }
+        });
+
+        const result = await journalService.logMedia({
+            instanceId: instance.id,
+            userId: user.id,
+            workflowId: workflow.id,
+            file: Buffer.from('workspace-media-payload'),
+            metadata: {
+                originalName: 'workspace-note.txt',
+                mimeType: 'text/plain',
+                size: 'workspace-media-payload'.length,
+                generatedBy: 'Media Local Agent',
+                prompt: 'build a workspace artifact'
+            }
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.saved).toBe(true);
+
+        const mediaReference = await MediaReference.findOne({ originalName: 'workspace-note.txt' }).lean();
+        expect(mediaReference).not.toBeNull();
+        expect(mediaReference?.storageMode).toBe('local');
+        expect(mediaReference?.primaryStorageMode).toBe('workspace');
+        expect(mediaReference?.localPath).toContain(`output/media/agents/${instance.id}`);
+        expect(mediaReference?.canonicalLocator).toBe(`workspace://${mediaReference?.localPath}`);
+        expect(mediaReference?.createdByAgentName).toBe('Media Local Agent');
+        expect(mediaReference?.lastModifiedByAgentName).toBe('Media Local Agent');
     });
 });

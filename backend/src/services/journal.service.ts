@@ -20,6 +20,7 @@ import mongoose from 'mongoose';
 import { AgentInstance, IAgentInstance } from '../models/AgentInstance.model';
 import { AgentJournal, IAgentJournal } from '../models/AgentJournal.model';
 import { MediaStorageService } from './mediaStorage.service';
+import { MediaWriteOrchestrator } from './mediaWriteOrchestrator.service';
 import {
     JournalEntryType,
     JournalSeverity,
@@ -133,10 +134,11 @@ interface JournalDeduplicationConfig {
 // ============================================
 
 export class JournalService {
-    private mediaStorage: MediaStorageService;
+    private mediaWriteOrchestrator: MediaWriteOrchestrator;
 
-    constructor(mediaStorage?: MediaStorageService) {
-        this.mediaStorage = mediaStorage || new MediaStorageService();
+    constructor(mediaStorage?: MediaStorageService, mediaWriteOrchestrator?: MediaWriteOrchestrator) {
+        const resolvedMediaStorage = mediaStorage || new MediaStorageService();
+        this.mediaWriteOrchestrator = mediaWriteOrchestrator || new MediaWriteOrchestrator(resolvedMediaStorage);
     }
 
     // ============================================
@@ -154,7 +156,7 @@ export class JournalService {
         }
 
         return AgentInstance.findById(instanceId)
-            .select('_id workflowId userId persistenceConfig state status')
+            .select('_id workflowId userId name persistenceConfig state status')
             .lean() as unknown as Promise<IAgentInstance | null>;
     }
 
@@ -491,7 +493,7 @@ export class JournalService {
             }
 
             // Sauvegarder le fichier via MediaStorageService
-            const mediaPayload: MediaPayload = await this.mediaStorage.saveMedia(
+            const mediaPayload: MediaPayload = await this.mediaWriteOrchestrator.storePrimaryMedia(
                 params.file,
                 params.metadata,
                 instance.persistenceConfig,
@@ -514,6 +516,22 @@ export class JournalService {
                 type: 'media',
                 payload: mediaData
             }, options);
+
+            if (result.saved && result.entryId) {
+                try {
+                    await this.mediaWriteOrchestrator.registerJournalMedia({
+                        userId: params.userId,
+                        workflowId: params.workflowId,
+                        agentInstanceId: params.instanceId,
+                        agentName: instance.name,
+                        journalEntryId: result.entryId,
+                        mediaPayload,
+                        metadata: params.metadata,
+                    });
+                } catch (catalogError) {
+                    console.error('[JournalService] Failed to register media catalog entry:', catalogError);
+                }
+            }
 
             // Mettre à jour l'état de l'instance
             if (result.saved) {

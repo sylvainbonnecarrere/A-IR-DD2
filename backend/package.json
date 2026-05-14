@@ -22,6 +22,7 @@
     "runtime:scan": "node scripts/runtime/scan-runtime.cjs --fail-on-severity=high",
     "runtime:maintain": "node scripts/runtime/maintain-runtime.cjs --fail-on-severity=high",
     "migrate:user-functions:eol": "node --env-file=.env --import tsx src/migrations/005_user_functions_eol.ts up",
+    "migrate:media-reference-catalog": "node --env-file=.env --import tsx src/migrations/006_media_reference_catalog_backfill.ts up",
     "seed:tools": "node --env-file=.env --import tsx src/scripts/setupToolsV2.ts --seed-only",
     "setup:tools-v2": "node --env-file=.env --import tsx src/scripts/setupToolsV2.ts"
   },

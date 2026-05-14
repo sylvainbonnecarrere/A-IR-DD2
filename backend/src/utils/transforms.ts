@@ -23,6 +23,8 @@
  *
  * @param instance - Mongoose document or plain object
  */
+import { sanitizePersistenceConfigForInstanceEgress } from '../types/persistence';
+
 export function transformAgentInstanceForFrontend(instance: any) {
     const instanceObj = instance.toObject?.() || instance;
     const {
@@ -60,16 +62,19 @@ export function transformAgentInstanceForFrontend(instance: any) {
         robotId,
         position,
         // ⭐ FIX QA: Include persistenceConfig for media storage options
-        persistenceConfig: persistenceConfig || {
-            saveChat: true,
-            saveErrors: true,
-            saveHistorySummary: false,
-            saveLinks: false,
-            saveTasks: false,
-            saveMedia: false,
-            mediaStorage: 'db'
-            // cloudStorageConfig: intentionally omitted (null would fail Zod validation)
-        },
+        persistenceConfig: persistenceConfig
+            ? sanitizePersistenceConfigForInstanceEgress(persistenceConfig)
+            : {
+                saveChat: true,
+                saveErrors: true,
+                saveHistorySummary: false,
+                saveLinks: false,
+                saveTasks: false,
+                saveMedia: false,
+                allowWorkspaceWrite: false,
+                mediaStorage: 'db'
+                // cloudStorageConfig: intentionally omitted (null would fail Zod validation)
+            },
         // ⭐ CRITICAL: Reconstruct configuration_json for frontend
         configuration_json: {
             role: role || 'assistant',

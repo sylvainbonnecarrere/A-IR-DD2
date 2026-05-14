@@ -19,14 +19,17 @@
 
 import { Router, Request, Response } from 'express';
 import { createReadStream, existsSync, statSync } from 'fs';
-import { stat } from 'fs/promises';
+import { stat, unlink } from 'fs/promises';
 import path from 'path';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { MediaReference, IMediaReference } from '../models/MediaReference.model';
+import { AgentJournal } from '../models/AgentJournal.model';
 import { getMediaStorageService } from '../services/mediaStorage.service';
+import { createWorkspaceManager } from '../services/workspace/WorkspaceManager';
+import { WorkflowMediaExplorerService } from '../services/workflowMediaExplorer.service';
 import { IUser } from '../models/User.model';
 import { 
     CloudStorageConfig, 
@@ -46,6 +49,7 @@ const STORAGE_ROOT = process.env.MEDIA_STORAGE_PATH || path.join(process.cwd(), 
 // Tailles de chunks pour streaming
 const DEFAULT_CHUNK_SIZE = 1024 * 1024; // 1MB
 const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+const workflowMediaExplorerService = new WorkflowMediaExplorerService();
 
 // ============================================
 // UTILITAIRES DE SÉCURITÉ
@@ -90,6 +94,27 @@ function validateMediaPath(relativePath: string, expectedUserId: string): boolea
     return true;
 }
 
+function validateWorkspaceOutputPath(relativePath: string): boolean {
+    const normalized = path.normalize(relativePath).replace(/\\/g, '/');
+
+    if (normalized.includes('..')) {
+        console.warn(`[MediaRoutes] Path-traversal attempt blocked: ${relativePath}`);
+        return false;
+    }
+
+    if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
+        console.warn(`[MediaRoutes] Absolute path blocked: ${relativePath}`);
+        return false;
+    }
+
+    if (!normalized.startsWith('output/')) {
+        console.warn(`[MediaRoutes] Invalid workspace output path: ${relativePath}`);
+        return false;
+    }
+
+    return true;
+}
+
 /**
  * Valide un ObjectId MongoDB
  */
@@ -123,6 +148,14 @@ const listMediaQuerySchema = z.object({
     mimeType: z.string().optional()
 });
 
+const workflowMediaExplorerQuerySchema = z.object({
+    q: z.string().optional(),
+    includeOrphans: z.coerce.boolean().optional().default(false),
+    sortBy: z.enum(['updatedAt', 'createdAt', 'name', 'size']).optional().default('updatedAt'),
+    sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
+    storageMode: z.enum(['db', 'workspace', 'cloud']).optional(),
+});
+
 const testCloudConfigSchema = z.object({
     provider: z.enum(['s3', 'gcs']),
     s3: z.object({
@@ -143,6 +176,46 @@ const testCloudConfigSchema = z.object({
 // ============================================
 // ROUTES
 // ============================================
+
+router.get('/workflows/:workflowId/explorer', requireAuth, async (req: Request, res: Response) => {
+    try {
+        const user = req.user as IUser;
+        const { workflowId } = req.params;
+
+        if (!isValidObjectId(workflowId)) {
+            return res.status(400).json({ error: 'workflowId invalide' });
+        }
+
+        const parseResult = workflowMediaExplorerQuerySchema.safeParse(req.query);
+        if (!parseResult.success) {
+            return res.status(400).json({
+                error: 'Paramètres invalides',
+                details: parseResult.error.errors,
+            });
+        }
+
+        const result = await workflowMediaExplorerService.listWorkflowMedia({
+            ownerUserId: user._id.toString(),
+            workflowId,
+            storageMode: parseResult.data.storageMode,
+            search: parseResult.data.q,
+            includeOrphans: parseResult.data.includeOrphans,
+            sortBy: parseResult.data.sortBy,
+            sortOrder: parseResult.data.sortOrder,
+        });
+
+        return res.json({
+            data: result.items,
+            meta: {
+                total: result.items.length,
+                counts: result.counts,
+            },
+        });
+    } catch (error) {
+        console.error('[MediaRoutes] Erreur read model workflow media:', error);
+        return res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
 
 /**
  * GET /api/media/:mediaId
@@ -330,17 +403,17 @@ router.delete('/:mediaId', requireAuth, async (req: Request, res: Response) => {
         
         switch (mediaRef.storageMode) {
             case 'local':
-                if (mediaRef.localPath) {
-                    // ⚠️ Re-valider le chemin avant suppression
-                    if (validateMediaPath(mediaRef.localPath, userId)) {
-                        fileDeleted = await storageService.deleteLocalMedia(mediaRef.localPath);
-                    }
-                }
+                fileDeleted = await deleteLocalMediaByReference(mediaRef, userId, storageService);
                 break;
                 
             case 'db':
-                // GridFS: TODO implémenter suppression GridFS
-                fileDeleted = true; // Les données sont dans le document, supprimées avec lui
+                fileDeleted = await deleteDatabaseMediaByReference(mediaRef);
+                if (!fileDeleted) {
+                    return res.status(501).json({
+                        error: 'Suppression des médias base de données non supportée pour cette référence',
+                        code: 'DATABASE_DELETE_NOT_IMPLEMENTED'
+                    });
+                }
                 break;
                 
             case 'cloud':
@@ -437,15 +510,13 @@ async function streamLocalMedia(
     mediaRef: IMediaReference,
     userId: string
 ): Promise<Response | void> {
-    // ⚠️ SÉCURITÉ: Valider le chemin
-    if (!mediaRef.localPath || !validateMediaPath(mediaRef.localPath, userId)) {
+    const absolutePath = await resolveLocalMediaAbsolutePath(mediaRef, userId);
+    if (!absolutePath) {
         return res.status(403).json({ 
             error: 'Chemin de fichier invalide',
             code: 'INVALID_PATH'
         });
     }
-    
-    const absolutePath = path.join(STORAGE_ROOT, mediaRef.localPath);
     
     // Vérifier existence
     if (!existsSync(absolutePath)) {
@@ -537,14 +608,73 @@ async function streamDatabaseMedia(
     res: Response,
     mediaRef: IMediaReference
 ): Promise<Response | void> {
-    // TODO: Implémenter récupération GridFS
-    // Pour l'instant, les petits fichiers sont stockés inline via le journal
-    
-    return res.status(501).json({
-        error: 'Récupération GridFS non implémentée',
-        code: 'NOT_IMPLEMENTED',
-        hint: 'Les médias en base sont actuellement inline dans les journaux'
-    });
+    const journalEntryId = resolveJournalEntryId(mediaRef);
+    if (!journalEntryId) {
+        return res.status(501).json({
+            error: 'Récupération GridFS non implémentée',
+            code: 'NOT_IMPLEMENTED',
+            hint: 'Aucune référence journal:// associée au média base'
+        });
+    }
+
+    const journalEntry = await AgentJournal.findOne({
+        _id: journalEntryId,
+        type: 'media'
+    }).select('payload');
+
+    if (!journalEntry) {
+        return res.status(404).json({
+            error: 'Entrée journal media introuvable',
+            code: 'JOURNAL_MEDIA_NOT_FOUND'
+        });
+    }
+
+    const payload = journalEntry.get('payload') as Record<string, unknown> | undefined;
+    const inlineBuffer = normalizeInlineMediaBuffer(payload?.data);
+    if (!payload || payload.storageMode !== 'database' || !inlineBuffer) {
+        return res.status(404).json({
+            error: 'Payload media inline introuvable',
+            code: 'INLINE_MEDIA_MISSING'
+        });
+    }
+
+    res.setHeader('Content-Type', mediaRef.mimeType);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    if (mediaRef.checksum) {
+        res.setHeader('ETag', `"${mediaRef.checksum}"`);
+
+        const ifNoneMatch = req.get('If-None-Match');
+        if (ifNoneMatch === `"${mediaRef.checksum}"`) {
+            return res.status(304).end();
+        }
+    }
+
+    const disposition = req.query.download === 'true' ? 'attachment' : 'inline';
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(mediaRef.originalName)}"`);
+
+    const range = req.headers.range;
+    const fileSize = inlineBuffer.length;
+    if (range && mediaRef.mimeType.startsWith('video/')) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + DEFAULT_CHUNK_SIZE, fileSize - 1);
+
+        if (start >= fileSize || end >= fileSize || start > end) {
+            res.setHeader('Content-Range', `bytes */${fileSize}`);
+            return res.status(416).json({ error: 'Range non satisfiable' });
+        }
+
+        const chunk = inlineBuffer.subarray(start, end + 1);
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+        res.setHeader('Content-Length', chunk.length);
+        return res.end(chunk);
+    }
+
+    res.setHeader('Content-Length', fileSize);
+    return res.end(inlineBuffer);
 }
 
 /**
@@ -567,6 +697,113 @@ async function redirectToCloudMedia(
         provider: mediaRef.cloudProvider,
         key: mediaRef.cloudKey
     });
+}
+
+async function resolveLocalMediaAbsolutePath(mediaRef: IMediaReference, userId: string): Promise<string | null> {
+    if (!mediaRef.localPath) {
+        return null;
+    }
+
+    const normalizedPath = path.normalize(mediaRef.localPath).replace(/\\/g, '/');
+    if (normalizedPath.startsWith('users/')) {
+        if (!validateMediaPath(normalizedPath, userId)) {
+            return null;
+        }
+
+        return path.join(STORAGE_ROOT, normalizedPath);
+    }
+
+    if (!validateWorkspaceOutputPath(normalizedPath)) {
+        return null;
+    }
+
+    const workspace = await createWorkspaceManager().ensureWorkflowWorkspace(userId, mediaRef.workflowId.toString());
+    const relativeToOutputRoot = normalizedPath.slice('output/'.length);
+    return path.join(workspace.runtimeRoots.outputRoot, relativeToOutputRoot);
+}
+
+async function deleteLocalMediaByReference(
+    mediaRef: IMediaReference,
+    userId: string,
+    storageService: ReturnType<typeof getMediaStorageService>,
+): Promise<boolean> {
+    if (!mediaRef.localPath) {
+        return false;
+    }
+
+    const normalizedPath = path.normalize(mediaRef.localPath).replace(/\\/g, '/');
+    if (normalizedPath.startsWith('users/')) {
+        if (!validateMediaPath(normalizedPath, userId)) {
+            return false;
+        }
+
+        return storageService.deleteLocalMedia(normalizedPath);
+    }
+
+    const absolutePath = await resolveLocalMediaAbsolutePath(mediaRef, userId);
+    if (!absolutePath) {
+        return false;
+    }
+
+    try {
+        await unlink(absolutePath);
+        return true;
+    } catch (error) {
+        console.warn(`[MediaRoutes] Échec suppression ${normalizedPath}:`, error);
+        return false;
+    }
+}
+
+function resolveJournalEntryId(mediaRef: IMediaReference): string | null {
+    if (mediaRef.journalEntryId) {
+        return mediaRef.journalEntryId.toString();
+    }
+
+    if (typeof mediaRef.canonicalLocator === 'string' && mediaRef.canonicalLocator.startsWith('journal://')) {
+        return mediaRef.canonicalLocator.slice('journal://'.length) || null;
+    }
+
+    return null;
+}
+
+function normalizeInlineMediaBuffer(value: unknown): Buffer | null {
+    if (Buffer.isBuffer(value)) {
+        return value;
+    }
+
+    if (value instanceof Uint8Array) {
+        return Buffer.from(value);
+    }
+
+    if (typeof value === 'object' && value !== null) {
+        const maybeNodeBuffer = value as { type?: string; data?: number[] };
+        if (maybeNodeBuffer.type === 'Buffer' && Array.isArray(maybeNodeBuffer.data)) {
+            return Buffer.from(maybeNodeBuffer.data);
+        }
+
+        if ('buffer' in (value as Record<string, unknown>)) {
+            const binaryLike = value as { buffer?: ArrayBufferLike };
+            if (binaryLike.buffer) {
+                return Buffer.from(binaryLike.buffer);
+            }
+        }
+    }
+
+    return null;
+}
+
+async function deleteDatabaseMediaByReference(mediaRef: IMediaReference): Promise<boolean> {
+    const journalEntryId = resolveJournalEntryId(mediaRef);
+    if (!journalEntryId) {
+        return false;
+    }
+
+    const result = await AgentJournal.deleteOne({
+        _id: journalEntryId,
+        type: 'media'
+    });
+
+    return result.deletedCount > 0;
 }
 
 // ============================================

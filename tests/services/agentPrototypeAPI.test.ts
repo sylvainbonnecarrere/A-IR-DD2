@@ -33,6 +33,17 @@ describe('agentPrototypeAPI tool reference convergence', () => {
                 workspaceId: 'ws-1',
             },
         }],
+        persistenceConfig: {
+            saveChat: true,
+            saveErrors: true,
+            saveHistorySummary: false,
+            saveLinks: false,
+            saveTasks: false,
+            saveMedia: true,
+            mediaStorage: 'cloud',
+            allowWorkspaceWrite: true,
+            cloudConnectionProfileId: 'cloud-profile-1',
+        },
     };
 
     it('maps API responses with empty legacy aliases back to canonical tool selections and derived functionIds', () => {
@@ -63,6 +74,10 @@ describe('agentPrototypeAPI tool reference convergence', () => {
         expect(payload).toEqual(expect.objectContaining({
             functionIds: ['tool.weather'],
             toolSelections: [expect.objectContaining({ toolId: 'tool.weather' })],
+            persistenceConfig: expect.objectContaining({
+                mediaStorage: 'cloud',
+                cloudConnectionProfileId: 'cloud-profile-1',
+            }),
         }));
     });
 
@@ -79,6 +94,37 @@ describe('agentPrototypeAPI tool reference convergence', () => {
         expect(payload).toEqual(expect.objectContaining({
             functionIds: ['tool.weather'],
             toolSelections: [{ toolId: 'tool.weather' }],
+        }));
+    });
+
+    it('maps persistenceConfig cloud profile references from API responses', () => {
+        expect(mapAPIResponseToAgent({
+            _id: 'agent-1',
+            name: 'Prototype Meteo',
+            role: 'assistant',
+            systemPrompt: 'Be useful',
+            llmProvider: LLMProvider.Gemini,
+            llmModel: 'gemini-2.0-flash',
+            capabilities: [],
+            functionIds: [],
+            toolSelections: [{ toolId: 'tool.weather' }],
+            persistenceConfig: {
+                saveChat: true,
+                saveErrors: true,
+                saveHistorySummary: false,
+                saveLinks: false,
+                saveTasks: false,
+                saveMedia: true,
+                mediaStorage: 'cloud',
+                allowWorkspaceWrite: true,
+                cloudConnectionProfileId: 'cloud-profile-1',
+            },
+            robotId: RobotId.Archi,
+        })).toEqual(expect.objectContaining({
+            persistenceConfig: expect.objectContaining({
+                mediaStorage: 'cloud',
+                cloudConnectionProfileId: 'cloud-profile-1',
+            }),
         }));
     });
 });

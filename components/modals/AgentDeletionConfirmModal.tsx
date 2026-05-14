@@ -1,5 +1,5 @@
-import React from 'react';
-import { Agent, AgentInstance } from '../../types';
+import React, { useEffect, useState } from 'react';
+import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy } from '../../types';
 import { Button } from '../UI';
 import { CloseIcon } from '../Icons';
 import { useDesignStore } from '../../stores/useDesignStore';
@@ -12,7 +12,7 @@ interface AgentDeletionConfirmModalProps {
   agent: Agent | null;
   onConfirm: () => void;
   onCancel: () => void;
-  onDeleteNodes?: (instanceIds: string[]) => void; // Callback to delete nodes by instanceId
+  onDeleteNodes?: (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Callback to delete nodes by instanceId
 }
 
 const AlertIcon2 = (props: React.SVGProps<SVGSVGElement>) => (
@@ -33,6 +33,13 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
   const { getInstancesOfPrototype, deleteAgent } = useDesignStore();
   const { addNotification } = useNotifications();
   const { isAuthenticated, accessToken } = useAuth();
+  const [mediaPolicy, setMediaPolicy] = useState<AgentDeletionMediaPolicy>('delete_media');
+
+  useEffect(() => {
+    if (isOpen) {
+      setMediaPolicy('delete_media');
+    }
+  }, [agent?.id, isOpen]);
 
   if (!isOpen || !agent) return null;
 
@@ -94,19 +101,42 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
       }
     }
 
+    if (onDeleteNodes && instancesToDelete.length > 0) {
+      const deletionResult = await onDeleteNodes(instancesToDelete, mediaPolicy);
+
+      if (deletionResult && !deletionResult.success) {
+        const fallbackResult = deleteAgent(agent.id, { deleteInstances: false });
+
+        if (fallbackResult.success) {
+          addNotification({
+            type: 'warning',
+            title: 'Suppression partielle',
+            message: deletionResult.error || `"${agent.name}" a ete supprime, mais certaines instances ont ete conservees avec leurs medias.`,
+            duration: 6000
+          });
+          onConfirm();
+          return;
+        }
+
+        addNotification({
+          type: 'error',
+          title: 'Suppression refusee',
+          message: deletionResult.error || fallbackResult.error || 'Erreur de suppression des instances',
+          duration: 5000
+        });
+        return;
+      }
+    }
+
     // Supprimer le prototype ET toutes ses instances
     const result = deleteAgent(agent.id, { deleteInstances: true });
     if (result.success) {
-      // Sync with App.tsx workflowNodes if callback provided
-      // Pass instance IDs so App.tsx can filter workflowNodes by instanceId
-      if (onDeleteNodes && instancesToDelete.length > 0) {
-        onDeleteNodes(instancesToDelete);
-      }
-
       addNotification({
         type: 'success',
         title: 'Suppression complète',
-        message: `"${agent.name}" et ses ${affectedInstances.length} instance(s) ont été supprimés du workflow.`,
+        message: mediaPolicy === 'orphan_media'
+          ? `"${agent.name}" et ses ${affectedInstances.length} instance(s) ont ete supprimes. Les medias associes sont conserves comme orphelins.`
+          : `"${agent.name}" et ses ${affectedInstances.length} instance(s) ont ete supprimes du workflow avec leurs medias.`,
         duration: 4000
       });
       onConfirm();
@@ -206,6 +236,38 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
                   </span>
                 </div>
               </Button>
+
+              <div className="bg-gray-900/60 border border-gray-700 rounded-lg p-4 space-y-3">
+                <p className="text-sm font-semibold text-white">Politique media pour les instances supprimees</p>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="agent-media-policy"
+                    aria-label="Supprimer les medias lies"
+                    checked={mediaPolicy === 'delete_media'}
+                    onChange={() => setMediaPolicy('delete_media')}
+                    className="mt-1"
+                  />
+                  <div>
+                    <p className="text-sm text-white">Supprimer les medias lies</p>
+                    <p className="text-xs text-gray-400">Efface les references cataloguees et leurs supports actuellement geres.</p>
+                  </div>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="agent-media-policy"
+                    aria-label="Conserver les medias comme orphelins"
+                    checked={mediaPolicy === 'orphan_media'}
+                    onChange={() => setMediaPolicy('orphan_media')}
+                    className="mt-1"
+                  />
+                  <div>
+                    <p className="text-sm text-white">Conserver les medias comme orphelins</p>
+                    <p className="text-xs text-gray-400">L'instance disparait, mais les medias restent visibles dans BOS Media avec le statut orphelin.</p>
+                  </div>
+                </label>
+              </div>
 
               {/* Option 2: Supprimer prototype + instances */}
               <Button

@@ -14,7 +14,7 @@
  */
 
 import React, { useState } from 'react';
-import { Agent, LLMConfig, PersistenceConfig, defaultPersistenceConfig } from '../../types';
+import { Agent, LLMConfig, PersistenceConfig, defaultPersistenceConfig, normalizePersistenceConfig } from '../../types';
 import { Button } from '../UI';
 import { CloseIcon } from '../Icons';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
@@ -91,9 +91,9 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
   // ⭐ Persistence config: hérite du prototype si disponible
   const [persistenceConfig, setPersistenceConfig] = useState<PersistenceConfig>(() => {
     if (agent?.persistenceConfig) {
-      return { ...agent.persistenceConfig };
+      return normalizePersistenceConfig(agent.persistenceConfig);
     }
-    return { ...defaultPersistenceConfig };
+    return normalizePersistenceConfig(defaultPersistenceConfig);
   });
 
   // Reset state when agent changes
@@ -103,8 +103,8 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
       setActiveTab('general');
       setPersistenceConfig(
         agent.persistenceConfig 
-          ? { ...agent.persistenceConfig }
-          : { ...defaultPersistenceConfig }
+          ? normalizePersistenceConfig(agent.persistenceConfig)
+          : normalizePersistenceConfig(defaultPersistenceConfig)
       );
     }
   }, [agent]);
@@ -124,7 +124,7 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
 
   const handleConfirm = () => {
     const finalName = instanceName.trim() || agent.name;
-    onConfirm(finalName, persistenceConfig);
+    onConfirm(finalName, normalizePersistenceConfig(persistenceConfig));
     setInstanceName('');
     setActiveTab('general');
   };

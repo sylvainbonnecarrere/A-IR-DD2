@@ -159,10 +159,82 @@ export const defaultWebSearchParams: WebSearchParams = {
 };
 
 /**
- * Configuration granulaire de persistance par agent
- * Définit ce qui est sauvegardé pour chaque agent individuellement
+ * Configuration granulaire de persistance par agent.
+ * `workspace` est le vocabulaire produit cible.
+ * `local` reste un alias legacy accepte uniquement aux bords de compatibilite.
  */
-export type MediaStorageType = 'db' | 'local' | 'cloud';
+export type MediaStorageType = 'db' | 'workspace' | 'cloud';
+export type LegacyMediaStorageType = 'local';
+export type AcceptedMediaStorageType = MediaStorageType | LegacyMediaStorageType;
+
+export function normalizeMediaStorageType(
+  value?: AcceptedMediaStorageType | 'database' | null,
+): MediaStorageType {
+  switch (value) {
+    case 'workspace':
+    case 'cloud':
+    case 'db':
+      return value;
+    case 'local':
+      return 'workspace';
+    case 'database':
+    default:
+      return 'db';
+  }
+}
+
+export function toPersistedMediaStorageType(
+  value?: AcceptedMediaStorageType | 'database' | null,
+): 'db' | 'local' | 'cloud' {
+  const normalized = normalizeMediaStorageType(value);
+
+  switch (normalized) {
+    case 'workspace':
+      return 'local';
+    case 'cloud':
+      return 'cloud';
+    case 'db':
+    default:
+      return 'db';
+  }
+}
+
+export function normalizePersistenceConfig(
+  config?: Partial<PersistenceConfig> | null,
+): PersistenceConfig {
+  const saveMedia = config?.saveMedia ?? defaultPersistenceConfig.saveMedia;
+  const mediaStorage = normalizeMediaStorageType(config?.mediaStorage as any);
+  const allowWorkspaceWrite = !saveMedia
+    ? false
+    : mediaStorage === 'workspace'
+      ? true
+      : (config?.allowWorkspaceWrite ?? true);
+
+  return {
+    ...defaultPersistenceConfig,
+    ...(config || {}),
+    saveMedia,
+    mediaStorage,
+    allowWorkspaceWrite,
+  };
+}
+
+export function summarizePersistenceConfig(
+  config?: Partial<PersistenceConfig> | null,
+) {
+  const normalized = normalizePersistenceConfig(config);
+
+  return {
+    saveChat: normalized.saveChat,
+    saveErrors: normalized.saveErrors,
+    saveMedia: normalized.saveMedia,
+    mediaStorage: normalized.mediaStorage,
+    allowWorkspaceWrite: normalized.allowWorkspaceWrite,
+    cloudConnectionProfileId: normalized.cloudConnectionProfileId ?? null,
+    hasCloudStorageConfig: !!normalized.cloudStorageConfig,
+    cloudProvider: normalized.cloudStorageConfig?.provider ?? null,
+  };
+}
 
 /**
  * Types pour le stockage cloud (S3/GCS)
@@ -176,6 +248,8 @@ export interface S3StorageConfig {
   region: string;
   bucketName: string;
   endpoint?: string;             // Pour MinIO / LocalStack
+  forcePathStyle?: boolean;
+  keyPrefix?: string;
 }
 
 /** Configuration Google Cloud Storage */
@@ -183,6 +257,8 @@ export interface GCSStorageConfig {
   projectId: string;
   bucketName: string;
   serviceAccountKey?: string;    // JSON stringifié, chiffré backend
+  location?: string;
+  keyPrefix?: string;
 }
 
 /** Configuration cloud complète (discriminated union) */
@@ -190,6 +266,55 @@ export interface CloudStorageConfig {
   provider: CloudProvider;
   s3?: S3StorageConfig;
   gcs?: GCSStorageConfig;
+}
+
+export type CloudConnectionStatusState = 'configured' | 'invalid' | 'missing_secret' | 'never_tested' | 'disabled';
+
+export interface CloudConnectionProfileStatus {
+  state: CloudConnectionStatusState;
+  lastValidatedAt?: string | null;
+  lastErrorCode?: string | null;
+  lastValidationMessage?: string | null;
+}
+
+export interface CloudConnectionProfileTarget {
+  bucketName: string;
+  region?: string | null;
+  endpoint?: string | null;
+  forcePathStyle?: boolean;
+  keyPrefix?: string | null;
+  projectId?: string | null;
+  location?: string | null;
+}
+
+export interface CloudConnectionProfileSecretSummary {
+  accessKeyIdMasked?: string | null;
+  secretAccessKeyPresent?: boolean;
+  serviceAccountEmailMasked?: string | null;
+  serviceAccountKeyPresent?: boolean;
+}
+
+export interface CloudConnectionProfile {
+  id: string;
+  displayName: string;
+  provider: CloudProvider;
+  enabled: boolean;
+  hasSecretMaterial: boolean;
+  target: CloudConnectionProfileTarget;
+  status: CloudConnectionProfileStatus;
+  secretSummary: CloudConnectionProfileSecretSummary;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CloudConnectionProfileSecretInput {
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  serviceAccountKey?: string;
+}
+
+export interface CloudConnectionProfileDraft extends CloudConnectionProfile {
+  secretInput?: CloudConnectionProfileSecretInput;
 }
 
 /** Régions AWS S3 disponibles */
@@ -214,7 +339,17 @@ export interface PersistenceConfig {
   saveTasks: boolean;             // Défaut: false - Sauvegarder les tâches assignées
   saveMedia: boolean;             // Default: false
   mediaStorage: MediaStorageType; // Défaut: 'db' - Mode de stockage des médias
+  allowWorkspaceWrite: boolean;   // Autorise aussi une publication workspace si demandée
+  cloudConnectionProfileId?: string;
   cloudStorageConfig?: CloudStorageConfig;  // Cloud storage config
+}
+
+export type AgentDeletionMediaPolicy = 'delete_media' | 'orphan_media';
+
+export interface AgentBatchDeleteResult {
+  success: boolean;
+  error?: string;
+  failedInstanceIds?: string[];
 }
 
 export const defaultPersistenceConfig: PersistenceConfig = {
@@ -224,7 +359,8 @@ export const defaultPersistenceConfig: PersistenceConfig = {
   saveLinks: false,
   saveTasks: false,
   saveMedia: false,               // Disabled by default
-  mediaStorage: 'db'
+  mediaStorage: 'db',
+  allowWorkspaceWrite: false,
 };
 
 export interface ToolVersionRef {
