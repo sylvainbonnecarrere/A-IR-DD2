@@ -40,6 +40,7 @@ import {
 import {
     loadAuthenticatedRuntimeBootstrap,
     loadGuestRuntimeBootstrap,
+    type RuntimeBootstrapState,
 } from '../services/runtimeBootstrapService';
 
 import { API_BASE_URL } from '../config/api.config';
@@ -240,8 +241,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setError(null);
     }, []);
 
-    const refreshRuntimeConfigState = useCallback(async (tokenOverride?: string) => {
-        if (!isMounted) return;
+    const refreshRuntimeConfigState = useCallback(async (tokenOverride?: string): Promise<RuntimeBootstrapState | null> => {
+        if (!isMounted) return null;
 
         const effectiveToken = tokenOverride ?? accessToken ?? undefined;
         const shouldUseApi = !!effectiveToken;
@@ -249,18 +250,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (shouldUseApi) {
             const runtimeState = await loadAuthenticatedRuntimeBootstrap(effectiveToken);
 
-            if (!isMounted) return;
+            if (!isMounted) return runtimeState;
 
             setLlmApiKeys(runtimeState.llmApiKeys);
             setRuntimeLLMConfigs(runtimeState.runtimeLLMConfigs);
             setLocalLLMProfiles(runtimeState.localLLMProfiles);
             setSessionStatus('ready');
-            return;
+            return runtimeState;
         }
 
         const runtimeState = await loadGuestRuntimeBootstrap();
 
-        if (!isMounted) return;
+        if (!isMounted) return runtimeState;
 
         setLlmApiKeys(runtimeState.llmApiKeys);
         setRuntimeLLMConfigs(runtimeState.runtimeLLMConfigs);
@@ -269,6 +270,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (sessionStatus !== 'degraded') {
             setSessionStatus('ready');
         }
+        return runtimeState;
     }, [accessToken, isMounted, sessionStatus]);
 
     /**     * ⭐ J4.5 FIX: Fetch LLM API keys when accessToken becomes available

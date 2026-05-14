@@ -43,6 +43,16 @@ const deriveRuntimeCompatibilityFromHealth = (runtimeHealth: RuntimeHealthReport
     summary: runtimeHealth.summary
 });
 
+const DEFAULT_FUNCTION_WORKSPACE_KEY = '__active__';
+
+let pendingFunctionLoadPromise: Promise<void> | null = null;
+let pendingFunctionLoadWorkspaceKey: string | null = null;
+
+const resolveFunctionLoadWorkspaceKey = (
+    workflowId: string | undefined,
+    activeWorkspace: ToolWorkspaceSummary | null,
+): string => workflowId ?? activeWorkspace?.workflowId ?? DEFAULT_FUNCTION_WORKSPACE_KEY;
+
 interface FunctionStore {
     // State
     functions: UserFunction[];
@@ -155,21 +165,48 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
 
     // ─── Charger les fonctions ───────────────────────────────────────────────
     loadFunctions: async (workflowId?: string) => {
-        set({ isLoading: true, error: null });
-        try {
-            const result = await toolRepository.loadPhilFunctions(workflowId);
-            set({
-                functions: result.functions,
-                runtimeCompatibility: result.runtimeCompatibility,
-                activeWorkspace: result.workspace,
-                isLoading: false
-            });
-        } catch (err: any) {
-            set({
-                isLoading: false,
-                error: err.response?.data?.error || 'Erreur lors du chargement des fonctions'
-            });
+        const state = get();
+        const requestedWorkspaceKey = resolveFunctionLoadWorkspaceKey(workflowId, state.activeWorkspace);
+        const alreadyLoadedCurrentWorkspace = state.error === null && !state.isLoading && (
+            (!!workflowId && state.activeWorkspace?.workflowId === workflowId)
+            || (!workflowId && !!state.activeWorkspace)
+        );
+
+        if (alreadyLoadedCurrentWorkspace) {
+            return;
         }
+
+        if (pendingFunctionLoadPromise && pendingFunctionLoadWorkspaceKey === requestedWorkspaceKey) {
+            return pendingFunctionLoadPromise;
+        }
+
+        set({ isLoading: true, error: null });
+
+        const loadPromise = toolRepository.loadPhilFunctions(workflowId)
+            .then((result) => {
+                set({
+                    functions: result.functions,
+                    runtimeCompatibility: result.runtimeCompatibility,
+                    activeWorkspace: result.workspace,
+                    isLoading: false
+                });
+            })
+            .catch((err: any) => {
+                set({
+                    isLoading: false,
+                    error: err.response?.data?.error || 'Erreur lors du chargement des fonctions'
+                });
+            })
+            .finally(() => {
+                if (pendingFunctionLoadPromise === loadPromise) {
+                    pendingFunctionLoadPromise = null;
+                    pendingFunctionLoadWorkspaceKey = null;
+                }
+            });
+
+        pendingFunctionLoadPromise = loadPromise;
+        pendingFunctionLoadWorkspaceKey = requestedWorkspaceKey;
+        return loadPromise;
     },
 
     // ─── Créer une fonction custom ───────────────────────────────────────────
@@ -426,7 +463,10 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
         })),
 
     // ─── Reset complet (sécurité : appelé au logout pour ne pas fuiter les données) ─
-    resetStore: () => set({
+    resetStore: () => {
+        pendingFunctionLoadPromise = null;
+        pendingFunctionLoadWorkspaceKey = null;
+        set({
         functions: [],
         selectedFunctionId: null,
         isLoading: false,
@@ -450,5 +490,6 @@ export const useFunctionStore = create<FunctionStore>((set, get) => ({
         activeWorkspace: null,
         isRuntimeHealthLoading: false,
         runtimeHealthError: null,
-    })
+    });
+    }
 }));

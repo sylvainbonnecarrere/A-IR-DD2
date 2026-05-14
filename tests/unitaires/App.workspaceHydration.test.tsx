@@ -44,6 +44,17 @@ const mockWorkflowStore = {
     resetAll: jest.fn()
 };
 
+const mockFunctionStore = {
+    loadFunctions: jest.fn().mockResolvedValue(undefined),
+    resetStore: jest.fn(),
+};
+
+let documentVisibilityState: DocumentVisibilityState = 'visible';
+Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => documentVisibilityState,
+});
+
 jest.mock('../../contexts/AuthContext', () => ({
     AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useAuth: jest.fn()
@@ -144,8 +155,8 @@ jest.mock('../../stores/useWorkflowStore', () => ({
 }));
 
 jest.mock('../../stores/useFunctionStore', () => ({
-    useFunctionStore: Object.assign(() => ({ loadFunctions: jest.fn() }), {
-        getState: () => ({ loadFunctions: jest.fn().mockResolvedValue(undefined) })
+    useFunctionStore: Object.assign(() => mockFunctionStore, {
+        getState: () => mockFunctionStore
     })
 }));
 
@@ -200,6 +211,7 @@ describe('App workspace hydration orchestration', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockRuntimeStore.nodeMessages = {};
+        documentVisibilityState = 'visible';
         Object.values(mockRuntimeStore).forEach((value) => {
             if (typeof value === 'function' && 'mockClear' in value) {
                 value.mockClear();
@@ -215,6 +227,12 @@ describe('App workspace hydration orchestration', () => {
                 value.mockClear();
             }
         });
+        Object.values(mockFunctionStore).forEach((value) => {
+            if (typeof value === 'function' && 'mockClear' in value) {
+                value.mockClear();
+            }
+        });
+        mockFunctionStore.loadFunctions.mockResolvedValue(undefined);
         (apiClient.get as jest.Mock).mockResolvedValue({ data: workspacePayload });
         (apiClient.post as jest.Mock).mockResolvedValue({ data: { success: true, reloadedData: workspacePayload } });
         sessionStorage.clear();
@@ -319,6 +337,7 @@ describe('App workspace hydration orchestration', () => {
         await act(async () => {
             await new Promise((resolve) => setTimeout(resolve, 650));
         });
+        refreshRuntimeConfigState.mockClear();
 
         mockRuntimeStore.setNodeMessages('node-instance-1', [
             {
@@ -354,6 +373,62 @@ describe('App workspace hydration orchestration', () => {
                 text: '[Erreur LLM] Le modele local a retourne une reponse vide sans appel d\'outil.'
             })
         ]);
+    });
+
+    it('rehydrates runtime config and workspace when the page becomes visible again', async () => {
+        const runtimeState = {
+            llmApiKeys: [],
+            runtimeLLMConfigs: [{ provider: 'gemini' }],
+            localLLMProfiles: [{ id: 'local-1', name: 'LM Studio', provider: 'lmstudio', baseUrl: 'http://localhost:1234' }]
+        } as any;
+        const refreshRuntimeConfigState = jest.fn().mockResolvedValue(runtimeState);
+
+        (apiClient.get as jest.Mock)
+            .mockResolvedValueOnce({ data: workspacePayload })
+            .mockResolvedValueOnce({ data: workspacePayload });
+
+        mockUseAuth.mockImplementation(() => ({
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState,
+            sessionStatus: 'ready',
+            error: null
+        } as any));
+
+        render(<App />);
+
+        await waitFor(() => expect(apiClient.get).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(mockFunctionStore.loadFunctions).toHaveBeenCalledWith('workflow-1'));
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 650));
+        });
+
+        refreshRuntimeConfigState.mockClear();
+        mockFunctionStore.loadFunctions.mockClear();
+        mockRuntimeStore.updateLLMConfigs.mockClear();
+        mockRuntimeStore.updateLocalLLMProfiles.mockClear();
+
+        documentVisibilityState = 'hidden';
+        act(() => {
+            document.dispatchEvent(new Event('visibilitychange'));
+        });
+
+        expect(apiClient.get).toHaveBeenCalledTimes(1);
+
+        documentVisibilityState = 'visible';
+        act(() => {
+            document.dispatchEvent(new Event('visibilitychange'));
+        });
+
+        await waitFor(() => expect(apiClient.get).toHaveBeenCalledTimes(2));
+        await waitFor(() => expect(refreshRuntimeConfigState).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(mockFunctionStore.loadFunctions).toHaveBeenCalledWith('workflow-1'));
+        expect(mockRuntimeStore.updateLLMConfigs).toHaveBeenCalledWith(runtimeState.runtimeLLMConfigs);
+        expect(mockRuntimeStore.updateLocalLLMProfiles).toHaveBeenCalledWith(runtimeState.localLLMProfiles);
     });
 
     it('preserves persisted tool block metadata during workspace hydration', async () => {

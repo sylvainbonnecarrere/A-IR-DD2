@@ -42,7 +42,7 @@ Tu es un **architecte logiciel senior et expert en design patterns**, avec les r
   - **Tests** : Vitest + `@testing-library/react`.
 
 - **Backend** :
-  - **Runtime** : Node.js 24.8.0 + TypeScript 5.2.2.
+  - **Runtime** : Node.js 24.15.0 + TypeScript 5.2.2.
   - **Framework** : Express 4.18.2.
   - **Base de donn├®es** : MongoDB 6.0+ (Mongoose 7.5.0 pour les sch├®mas).
   - **Authentification** : JWT (jsonwebtoken 9.1.0) + bcrypt (hashing des mots de passe).

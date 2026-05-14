@@ -28,6 +28,7 @@ import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useAuth } from '../contexts/AuthContext';
 import { isValidWorkflowConnection } from './workflow/connectionContracts';
+import { registerReactFlowWarningProbe } from '../utils/reactFlowWarningDiagnostics';
 
 interface WorkflowCanvasProps {
   nodes?: WorkflowNode[];
@@ -69,6 +70,7 @@ const EDGE_TYPES = Object.freeze({});
 const REACT_FLOW_STYLE = Object.freeze({ background: 'transparent' });
 const DEFAULT_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 0.7 });
 const PRO_OPTIONS = Object.freeze({ hideAttribution: true });
+let workflowCanvasMountSequence = 0;
 
 // Composant interne avec accès à useReactFlow
 const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCanvasProps) {
@@ -102,6 +104,10 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   } = props;
 
   const { isAuthenticated } = useAuth();
+  const workflowCanvasMountIdRef = useRef(0);
+  if (workflowCanvasMountIdRef.current === 0) {
+    workflowCanvasMountIdRef.current = ++workflowCanvasMountSequence;
+  }
 
   // ⭐ SELF-HEALING: Get real workflow ID from store (falls back to prop)
   const { getCurrentWorkflowId } = useWorkflowStore();
@@ -144,6 +150,34 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   // Hooks React Flow - avec gestion d'erreur pour éviter les crashes
   const [reactFlowNodes, setReactFlowNodes, onNodesChangeInternal] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const reactFlowContractRef = useRef({
+    nodeTypes: NODE_TYPES,
+    edgeTypes: EDGE_TYPES,
+    style: REACT_FLOW_STYLE,
+    defaultViewport: DEFAULT_VIEWPORT,
+    proOptions: PRO_OPTIONS,
+  });
+  const reactFlowWarningSnapshotRef = useRef({
+    mountId: workflowCanvasMountIdRef.current,
+    workflowId: 'uninitialized',
+    renderCount: 0,
+    actualNodeCount: 0,
+    nodeCount: 0,
+    edgeCount: 0,
+    nodeTypesStable: true,
+    edgeTypesStable: true,
+    styleStable: true,
+    defaultViewportStable: true,
+    proOptionsStable: true,
+  });
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production') {
+      return undefined;
+    }
+
+    return registerReactFlowWarningProbe(() => reactFlowWarningSnapshotRef.current);
+  }, []);
 
   // Wrapper sécurisé pour onNodesChange avec logging d'erreurs
   const onNodesChange = useCallback((changes: any) => {
@@ -173,6 +207,20 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     // Fallback: workflowNodes legacy
     return workflowNodes;
   }, [storeNodes, nodes, workflowNodes]);
+
+  reactFlowWarningSnapshotRef.current = {
+    mountId: workflowCanvasMountIdRef.current,
+    workflowId,
+    renderCount: reactFlowWarningSnapshotRef.current.renderCount + 1,
+    actualNodeCount: actualNodes.length,
+    nodeCount: reactFlowNodes.length,
+    edgeCount: edges.length,
+    nodeTypesStable: reactFlowContractRef.current.nodeTypes === NODE_TYPES,
+    edgeTypesStable: reactFlowContractRef.current.edgeTypes === EDGE_TYPES,
+    styleStable: reactFlowContractRef.current.style === REACT_FLOW_STYLE,
+    defaultViewportStable: reactFlowContractRef.current.defaultViewport === DEFAULT_VIEWPORT,
+    proOptionsStable: reactFlowContractRef.current.proOptions === PRO_OPTIONS,
+  };
 
   // Détecter si un panneau média est actif (pour calcul largeur maximized)
   const isMediaPanelActive = isImagePanelOpen || isImageModificationPanelOpen || isVideoPanelOpen || isMapsPanelOpen;
