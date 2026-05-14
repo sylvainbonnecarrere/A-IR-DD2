@@ -6,6 +6,7 @@ import {
     buildRuntimeConfigsFromApiKeys,
     buildRuntimeConfigsFromUiConfigs,
 } from './runtimeConfigRepository';
+import { getErrorMessage, isTransientNetworkError } from '../utils/transientNetworkError';
 import type { LLMConfig, LocalLLMProfile } from '../types';
 import type { LLMApiKey } from '../contexts/types/auth.types';
 
@@ -38,7 +39,8 @@ async function fetchLLMApiKeys(token: string, retryCount = 0): Promise<LLMApiKey
             await new Promise((resolve) => setTimeout(resolve, 500));
             return fetchLLMApiKeys(token, retryCount + 1);
         } else {
-            console.error('[runtimeBootstrapService] Runtime key fetch failed:', err.message);
+            const log = isTransientNetworkError(err) ? console.warn : console.error;
+            log('[runtimeBootstrapService] Runtime key fetch failed:', getErrorMessage(err));
         }
 
         return [];
@@ -54,7 +56,8 @@ async function loadLocalLLMProfiles(token?: string): Promise<LocalLLMProfile[]> 
             token,
         });
     } catch (err) {
-        console.error('[runtimeBootstrapService] Local LLM profile load failed:', err);
+        const log = isTransientNetworkError(err) ? console.warn : console.error;
+        log('[runtimeBootstrapService] Local LLM profile load failed:', getErrorMessage(err));
         return [];
     }
 }
@@ -85,7 +88,8 @@ export async function loadGuestRuntimeBootstrap(): Promise<RuntimeBootstrapState
             localLLMProfiles: guestProfiles,
         };
     } catch (err) {
-        console.error('[runtimeBootstrapService] Guest runtime config load failed:', err);
+        const log = isTransientNetworkError(err) ? console.warn : console.error;
+        log('[runtimeBootstrapService] Guest runtime config load failed:', getErrorMessage(err));
 
         return {
             llmApiKeys: null,

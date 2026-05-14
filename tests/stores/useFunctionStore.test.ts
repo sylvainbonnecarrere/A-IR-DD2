@@ -160,6 +160,61 @@ describe('useFunctionStore hybrid J9 flows', () => {
         expect(state.runtimeCompatibility).toEqual(expect.objectContaining({ mode: 'docker-desktop' }));
     });
 
+    it('deduplicates concurrent loads for the same workflow and reuses the hydrated workspace cache', async () => {
+        let resolveLoad: ((value: unknown) => void) | null = null;
+
+        mockedToolRepository.loadPhilFunctions.mockImplementation(() => new Promise((resolve) => {
+            resolveLoad = resolve;
+        }) as Promise<any>);
+
+        const firstLoad = useFunctionStore.getState().loadFunctions('wf-1');
+        const secondLoad = useFunctionStore.getState().loadFunctions('wf-1');
+
+        expect(mockedToolRepository.loadPhilFunctions).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            resolveLoad?.({
+                functions: [],
+                runtimeCompatibility: {
+                    checkedAt: '2026-03-19T12:00:00.000Z',
+                    mode: 'docker-desktop',
+                    securityLevel: 'dev-only',
+                    executionReady: true,
+                    preferredRunner: 'docker_sandbox',
+                    summary: 'Runtime ready in dev mode.'
+                },
+                workspace: {
+                    id: 'ws-1',
+                    logicalRoot: 'wf-demo',
+                    runtimeRoots: {
+                        sourceRoot: 'source',
+                        manifestsRoot: 'manifests',
+                        buildRoot: 'build',
+                        outputRoot: 'output'
+                    },
+                    manifests: {
+                        packageJson: false,
+                        packageLockJson: false,
+                        requirementsTxt: true,
+                        pyprojectToml: false
+                    },
+                    status: 'active',
+                    workflowId: 'wf-1'
+                }
+            });
+
+            await Promise.all([firstLoad, secondLoad]);
+        });
+
+        mockedToolRepository.loadPhilFunctions.mockClear();
+
+        await act(async () => {
+            await useFunctionStore.getState().loadFunctions('wf-1');
+        });
+
+        expect(mockedToolRepository.loadPhilFunctions).not.toHaveBeenCalled();
+    });
+
     it('updates runtime compatibility from runs and runtime health through the repository', async () => {
         mockedToolRepository.loadFunctionRuns.mockResolvedValue({
             data: {

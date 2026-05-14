@@ -5,6 +5,7 @@
  */
 
 import { LLMConfig, LocalLLMProfile } from '../../types';
+import type { RuntimeBootstrapState } from '../../services/runtimeBootstrapService';
 
 /**
  * User data stored in auth context and localStorage
@@ -92,5 +93,5 @@ export interface AuthContextType {
     refreshAccessToken: () => Promise<void>;
     clearError: () => void;
     refreshLLMApiKeys: () => Promise<void>; // ⭐ J4.6: Refetch keys after config changes
-    refreshRuntimeConfigState: () => Promise<void>;
+    refreshRuntimeConfigState: (tokenOverride?: string) => Promise<RuntimeBootstrapState | null>;
 }

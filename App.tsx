@@ -41,6 +41,12 @@ import apiClient from './utils/apiClient';
 // ⭐ FIX QA: Import useJournalQueue for image persistence
 import { useJournalQueue } from './hooks/useJournalQueue';
 import { getWorkspaceSessionGateState } from './utils/workspaceSessionGate';
+import {
+  createWorkspaceBootstrapIssue,
+  loadAuthenticatedWorkspaceBootstrap,
+  logWorkspaceBootstrapIssue,
+  type WorkspaceSnapshot,
+} from './services/workspaceBootstrapService';
 
 const RESUME_WORKSPACE_REFRESH_THROTTLE_MS = 5000;
 
@@ -61,25 +67,6 @@ interface UpdateConfirmationState {
   agentData: Omit<Agent, 'id'>;
   agentId: string;
   count: number;
-}
-
-interface WorkspaceSnapshot {
-  workflow: {
-    id: string;
-    name: string;
-    description?: string;
-    isActive: boolean;
-    isDefault: boolean;
-    canvasState?: {
-      zoom: number;
-      panX: number;
-      panY: number;
-    };
-  } | null;
-  nodes?: any[];
-  edges?: any[];
-  agentInstances?: any[];
-  agentPrototypes?: any[];
 }
 
 function sanitizeProviderTools(rawTools: unknown): Tool[] {
@@ -418,7 +405,6 @@ export function AppContent() {
       nodes: v2Nodes,
       edges: Array.isArray(workspace.edges) ? workspace.edges : []
     });
-    void useFunctionStore.getState().loadFunctions(snapshotWorkflowId || undefined);
 
     setAgents(hydratedPrototypes);
     setWorkflowNodes(legacyNodes);
@@ -443,7 +429,24 @@ export function AppContent() {
       instances: hydratedInstances.length,
       edges: Array.isArray(workspace.edges) ? workspace.edges.length : 0
     });
+    return snapshotWorkflowId || null;
   }, [hydrateFromServer, hydrateWorkflowFromServer]);
+
+  const hydrateInteractiveWorkspaceState = useCallback(async (
+    workspace: WorkspaceSnapshot,
+    options?: {
+      preserveRuntimeMessages?: boolean;
+      onSnapshotApplied?: () => void;
+    },
+  ) => {
+    const snapshotWorkflowId = applyWorkspaceSnapshot(workspace, {
+      preserveRuntimeMessages: options?.preserveRuntimeMessages,
+    });
+
+    options?.onSnapshotApplied?.();
+    await useFunctionStore.getState().loadFunctions(snapshotWorkflowId || undefined);
+    return snapshotWorkflowId;
+  }, [applyWorkspaceSnapshot]);
 
   const reloadWorkspaceSnapshot = useCallback(async ({
     reason,
@@ -483,18 +486,46 @@ export function AppContent() {
         }
 
         if (showOverlay) {
-          setHydrationProgress(60);
+          setHydrationMessage('Synchronisation de la session runtime...');
+          setHydrationProgress(55);
         }
 
-        const { data: workspace } = await apiClient.get('/api/user/workspace');
+        const { workspace, runtimeState, runtimeIssue } = await loadAuthenticatedWorkspaceBootstrap({
+          loadRuntimeState: () => refreshRuntimeConfigState(),
+        });
+
+        if (runtimeIssue) {
+          logWorkspaceBootstrapIssue('[App]', runtimeIssue, {
+            reason,
+            mode,
+            userId: user.id,
+          });
+        }
+
+        if (runtimeState) {
+          updateLLMConfigs(runtimeState.runtimeLLMConfigs);
+          updateLocalLLMProfiles(runtimeState.localLLMProfiles);
+        }
 
         if (showOverlay) {
-          setHydrationProgress(80);
+          setHydrationMessage('Restauration du canvas...');
+          setHydrationProgress(75);
         }
 
-        applyWorkspaceSnapshot(workspace, {
-          preserveRuntimeMessages: mode === 'resume'
+        await hydrateInteractiveWorkspaceState(workspace, {
+          preserveRuntimeMessages: mode === 'resume',
+          onSnapshotApplied: showOverlay
+            ? () => {
+              setHydrationMessage('Chargement du catalogue d\'outils...');
+              setHydrationProgress(90);
+            }
+            : undefined,
         });
+
+        if (showOverlay) {
+          setHydrationProgress(100);
+        }
+
         hydratedWorkspaceIdentityRef.current = `auth:${user.id}`;
 
         console.log('[App] Workspace reload complete:', {
@@ -503,9 +534,18 @@ export function AppContent() {
           userId: user.id,
         });
       } catch (err) {
-        console.error('[App] Workspace hydration error:', err);
+        const issue = createWorkspaceBootstrapIssue('workspace', err);
+        logWorkspaceBootstrapIssue('[App]', issue, {
+          reason,
+          mode,
+          userId: user?.id,
+        });
         if (showOverlay) {
-          setHydrationMessage(authError || 'Restauration de session impossible. Reconnexion requise.');
+          setHydrationMessage(
+            issue.transient
+              ? 'Backend indisponible. Relancez la session quand le service est revenu.'
+              : authError || 'Restauration de session impossible. Reconnexion requise.'
+          );
         }
       } finally {
         if (showOverlay) {
@@ -522,7 +562,7 @@ export function AppContent() {
 
     workspaceReloadPromiseRef.current = reloadPromise;
     return reloadPromise;
-  }, [applyWorkspaceSnapshot, authError, isAuthenticated, sessionReadyForWorkspaceHydration, user?.id]);
+  }, [authError, hydrateInteractiveWorkspaceState, isAuthenticated, refreshRuntimeConfigState, sessionReadyForWorkspaceHydration, updateLLMConfigs, updateLocalLLMProfiles, user?.id]);
 
   /**
    * ⭐ ÉTAPE 5: Hydration for authenticated users
@@ -569,18 +609,10 @@ export function AppContent() {
 
       lastResumeWorkspaceRefreshAtRef.current = now;
 
-      void (async () => {
-        try {
-          await refreshRuntimeConfigState();
-        } catch (err) {
-          console.warn('[App] Runtime config refresh failed during resume:', err);
-        }
-
-        await reloadWorkspaceSnapshot({
-          reason,
-          mode: 'resume',
-        });
-      })();
+      void reloadWorkspaceSnapshot({
+        reason,
+        mode: 'resume',
+      });
     };
 
     const handleFocus = () => requestResumeWorkspaceRefresh('window-focus');
@@ -603,7 +635,7 @@ export function AppContent() {
       window.removeEventListener('pageshow', handlePageShow);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [refreshRuntimeConfigState, reloadWorkspaceSnapshot, sessionReadyForWorkspaceHydration, user?.id]);
+  }, [reloadWorkspaceSnapshot, sessionReadyForWorkspaceHydration, user?.id]);
 
   /**
    * ⭐ V2 SWITCH WORKFLOW: Fonction unifiée de réhydratation complète
@@ -662,8 +694,9 @@ export function AppContent() {
       }
       // ═══ ÉTAPE 3 : APPLIQUER LE SNAPSHOT (progress 70%) ═══
       setSwitchProgress(70);
-      applyWorkspaceSnapshot(data.reloadedData, {
-        preserveRuntimeMessages: false
+      await hydrateInteractiveWorkspaceState(data.reloadedData, {
+        preserveRuntimeMessages: false,
+        onSnapshotApplied: () => setSwitchProgress(85),
       });
 
       // ═══ ÉTAPE 4 : REFRESH LISTE WORKFLOWS (progress 95%) ═══
@@ -703,7 +736,7 @@ export function AppContent() {
       }, 300);
       isSwitchingRef.current = false;
     }
-  }, [accessToken, applyWorkspaceSnapshot, t, isHydrating]);
+  }, [accessToken, hydrateInteractiveWorkspaceState, t, isHydrating]);
 
   /**
    * ⭐ V2: Listen for workflow:switch custom events from BosWorkflowManagementPage
