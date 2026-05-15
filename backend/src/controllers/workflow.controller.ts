@@ -18,7 +18,7 @@ import { AgentInstance, IAgentInstance } from '../models/AgentInstance.model';
 import { WorkflowNodeV2, IWorkflowNodeV2 } from '../models/WorkflowNodeV2.model';
 import { AgentJournal } from '../models/AgentJournal.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
-import { getMediaStorageService } from '../services/mediaStorage.service';
+import { AgentInstanceDeletionPolicyService } from '../services/agentInstanceDeletionPolicy.service';
 import {
     CreateInstanceRequestBody,
     CreateInstanceResponse,
@@ -90,12 +90,25 @@ const CreateInstanceBodySchema = z.object({
     position: PositionSchema
 });
 
+const DeleteNodeQuerySchema = z.object({
+    mediaPolicy: z.enum(['delete_media', 'orphan_media']).optional().default('delete_media')
+});
+
 // ============================================
 // TYPES
 // ============================================
 
 interface AuthenticatedRequest extends Request {
     user: IUser;
+}
+
+function isTransactionUnsupported(error: unknown): boolean {
+    const errorCode = typeof error === 'object' && error !== null && 'code' in error
+        ? (error as { code?: number }).code
+        : undefined;
+    const message = error instanceof Error ? error.message : '';
+
+    return errorCode === 20 || message.includes('Transaction numbers are only allowed');
 }
 
 // ============================================
@@ -301,9 +314,9 @@ export class WorkflowController {
      * Suppression en cascade transactionnelle :
      * - WorkflowNode
      * - AgentInstance (si type agent)
-     * - AgentJournals liés
+     * - AgentJournals liés selon politique media
      * - WorkflowEdges connectés
-     * - Fichiers média locaux
+     * - Médias supprimés ou orphelinés selon politique
      */
     static async deleteNode(
         req: AuthenticatedRequest,
@@ -314,6 +327,15 @@ export class WorkflowController {
         try {
             const { id: workflowId, nodeId } = req.params;
             const user = req.user;
+            const queryParseResult = DeleteNodeQuerySchema.safeParse(req.query);
+
+            if (!queryParseResult.success) {
+                res.status(400).json({
+                    error: 'Validation error',
+                    details: queryParseResult.error.flatten()
+                });
+                return;
+            }
 
             // Vérifier le workflow
             const workflow = await Workflow.findOne({
@@ -338,69 +360,137 @@ export class WorkflowController {
                 return;
             }
 
-            session.startTransaction();
-
             try {
-                let deletedInstanceId: string | null = null;
-                let journalsDeleted = 0;
-                let mediaDeleted = 0;
+                const deletionPolicyService = new AgentInstanceDeletionPolicyService();
 
-                // Si c'est un nœud agent, supprimer l'instance et les journaux
-                if (node.nodeType === 'agent' && node.instanceId) {
-                    deletedInstanceId = node.instanceId.toString();
+                const executeDelete = async (useSession: boolean) => {
+                    let deletedInstanceId: string | null = null;
+                    let journalsDeleted = 0;
+                    let mediaDeleted = 0;
+                    let mediaReferencesDeleted = 0;
+                    let mediaReferencesOrphaned = 0;
+                    let retainedMediaEntries = 0;
+                    let mediaPolicy: 'delete_media' | 'orphan_media' | null = null;
+                    let audit = null as DeleteAgentInstanceWithPolicyResult['audit'] | null;
 
-                    // Supprimer les fichiers média locaux d'abord
-                    const mediaService = getMediaStorageService();
-                    mediaDeleted = await mediaService.deleteAgentMedia(
-                        user.id,
+                    if (node.nodeType === 'agent' && node.instanceId) {
+                        deletedInstanceId = node.instanceId.toString();
+                        mediaPolicy = queryParseResult.data.mediaPolicy;
+
+                        const deletionResult = await deletionPolicyService.deleteInstanceWithPolicy({
+                            userId: user.id,
+                            workflowId,
+                            instanceId: deletedInstanceId,
+                            mediaPolicy,
+                            deleteInstance: false,
+                            persistAudit: false,
+                            auditOrigin: 'workflow_v2_node_delete_route',
+                            triggeredBy: user.id,
+                        });
+
+                        journalsDeleted = deletionResult.journalsDeleted;
+                        mediaDeleted = deletionResult.mediaFilesDeleted;
+                        mediaReferencesDeleted = deletionResult.mediaReferencesDeleted;
+                        mediaReferencesOrphaned = deletionResult.mediaReferencesOrphaned;
+                        retainedMediaEntries = deletionResult.retainedMediaEntries;
+                        audit = deletionResult.audit;
+
+                        if (useSession) {
+                            await AgentInstance.deleteOne({ _id: node.instanceId }, { session });
+                        } else {
+                            await AgentInstance.deleteOne({ _id: node.instanceId });
+                        }
+                    }
+
+                    const edgeDeleteQuery = {
                         workflowId,
-                        deletedInstanceId
-                    );
+                        $or: [
+                            { sourceNodeId: nodeId },
+                            { targetNodeId: nodeId }
+                        ]
+                    };
 
-                    // Supprimer les journaux
-                    journalsDeleted = await AgentJournal.deleteByInstance(node.instanceId);
+                    const edgesDeleted = useSession
+                        ? await WorkflowEdge.deleteMany(edgeDeleteQuery, { session })
+                        : await WorkflowEdge.deleteMany(edgeDeleteQuery);
 
-                    // ✅ Supprimer l'instance en AgentInstance (pas V2)
-                    await AgentInstance.deleteOne(
-                        { _id: node.instanceId },
-                        { session }
-                    );
+                    if (useSession) {
+                        await WorkflowNodeV2.deleteOne({ _id: nodeId }, { session });
+                    } else {
+                        await WorkflowNodeV2.deleteOne({ _id: nodeId });
+                    }
+
+                    return {
+                        deletedInstanceId,
+                        journalsDeleted,
+                        mediaDeleted,
+                        mediaReferencesDeleted,
+                        mediaReferencesOrphaned,
+                        retainedMediaEntries,
+                        mediaPolicy,
+                        audit,
+                        edgesDeleted: edgesDeleted.deletedCount || 0,
+                    };
+                };
+
+                let deleteResult;
+
+                try {
+                    session.startTransaction();
+                    await Workflow.findById(workflowId).session(session);
+                    deleteResult = await executeDelete(true);
+                    await session.commitTransaction();
+                } catch (transactionError) {
+                    if (session.inTransaction()) {
+                        await session.abortTransaction();
+                    }
+
+                    if (!isTransactionUnsupported(transactionError)) {
+                        throw transactionError;
+                    }
+
+                    deleteResult = await executeDelete(false);
                 }
 
-                // Supprimer les edges connectés à ce nœud
-                const edgesDeleted = await WorkflowEdge.deleteMany({
-                    workflowId,
-                    $or: [
-                        { sourceNodeId: nodeId },
-                        { targetNodeId: nodeId }
-                    ]
-                }, { session });
-
-                // Supprimer le nœud
-                await WorkflowNodeV2.deleteOne({ _id: nodeId }, { session });
-
-                await session.commitTransaction();
+                if (deleteResult.audit) {
+                    const persistedAudit = await deletionPolicyService.persistDeletionAudit(deleteResult.audit);
+                    deleteResult.audit.journalId = persistedAudit.journalId;
+                    deleteResult.audit.persistenceError = persistedAudit.persistenceError;
+                }
 
                 console.log(`[WorkflowController] Nœud supprimé: ${nodeId}`, {
-                    deletedInstanceId,
-                    journalsDeleted,
-                    mediaDeleted,
-                    edgesDeleted: edgesDeleted.deletedCount
+                    deletedInstanceId: deleteResult.deletedInstanceId,
+                    journalsDeleted: deleteResult.journalsDeleted,
+                    mediaDeleted: deleteResult.mediaDeleted,
+                    edgesDeleted: deleteResult.edgesDeleted,
                 });
 
                 res.json({
                     success: true,
                     deletedNodeId: nodeId,
-                    deletedInstanceId,
+                    deletedInstanceId: deleteResult.deletedInstanceId,
+                    mediaPolicy: deleteResult.mediaPolicy,
+                    audit: deleteResult.audit ? {
+                        journalId: deleteResult.audit.journalId || null,
+                        severity: deleteResult.audit.severity,
+                        anomalyCount: deleteResult.audit.anomalyCount,
+                        anomalyCodes: deleteResult.audit.anomalies.map((anomaly) => anomaly.code),
+                        origin: deleteResult.audit.origin,
+                    } : null,
                     deletedCounts: {
-                        journals: journalsDeleted,
-                        edges: edgesDeleted.deletedCount || 0,
-                        mediaFiles: mediaDeleted
+                        journals: deleteResult.journalsDeleted,
+                        edges: deleteResult.edgesDeleted,
+                        mediaFiles: deleteResult.mediaDeleted,
+                        mediaReferencesDeleted: deleteResult.mediaReferencesDeleted,
+                        mediaReferencesOrphaned: deleteResult.mediaReferencesOrphaned,
+                        retainedMediaEntries: deleteResult.retainedMediaEntries,
                     }
                 });
 
             } catch (transactionError) {
-                await session.abortTransaction();
+                if (session.inTransaction()) {
+                    await session.abortTransaction();
+                }
                 throw transactionError;
             }
 

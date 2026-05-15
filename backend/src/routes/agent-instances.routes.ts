@@ -845,6 +845,8 @@ router.delete('/:id',
                 workflowId: workflowId.toString(),
                 instanceId,
                 mediaPolicy: queryParseResult.data.mediaPolicy,
+                auditOrigin: 'agent_instance_delete_route',
+                triggeredBy: user.id,
             });
 
             // Marquer workflow comme dirty
@@ -865,7 +867,14 @@ router.delete('/:id',
                     mediaReferencesDeleted: deletionResult.mediaReferencesDeleted,
                     mediaReferencesOrphaned: deletionResult.mediaReferencesOrphaned,
                     retainedMediaEntries: deletionResult.retainedMediaEntries,
-                }
+                },
+                audit: {
+                    journalId: deletionResult.audit.journalId || null,
+                    severity: deletionResult.audit.severity,
+                    anomalyCount: deletionResult.audit.anomalyCount,
+                    anomalyCodes: deletionResult.audit.anomalies.map((anomaly) => anomaly.code),
+                    origin: deletionResult.audit.origin,
+                },
             });
         } catch (error) {
             console.error('[AgentInstances] DELETE error:', error);

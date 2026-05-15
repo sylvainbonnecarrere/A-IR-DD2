@@ -296,7 +296,8 @@ export interface SystemJournalPayload extends JournalCorrelationIds {
     event: 'instance_created' | 'instance_started' | 'instance_paused' | 
            'instance_resumed' | 'instance_stopped' | 'config_changed' | 
            'persistence_config_updated' | 'status_changed' | 
-           'interaction_started' | 'interaction_ended';
+           'interaction_started' | 'interaction_ended' |
+           'media_deletion_policy_applied';
     details?: Record<string, unknown>;
     triggeredBy?: string;           // userId ou 'system'
 }
