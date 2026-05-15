@@ -64,6 +64,40 @@ type ButtonState = 'idle' | 'saving' | 'success' | 'error';
 // ⭐ MODULE-LEVEL: Set des messages déjà envoyés (persistant entre les re-renders)
 const globalSentMessageIds = new Set<string>();
 
+function resolveInlineMediaExtension(mimeType?: string): string {
+    switch (mimeType?.toLowerCase()) {
+        case 'image/jpeg':
+        case 'image/jpg':
+            return 'jpg';
+        case 'image/png':
+            return 'png';
+        case 'image/gif':
+            return 'gif';
+        case 'image/webp':
+            return 'webp';
+        case 'image/svg+xml':
+            return 'svg';
+        case 'application/pdf':
+            return 'pdf';
+        default:
+            return 'bin';
+    }
+}
+
+function resolveInlineMediaFileName(message: ChatMessage, messageId: string): string | undefined {
+    const explicitFileName = typeof message.filename === 'string' ? message.filename.trim() : '';
+    if (explicitFileName.length > 0) {
+        return explicitFileName;
+    }
+
+    if (!message.image || !message.mimeType) {
+        return undefined;
+    }
+
+    const messageSlug = messageId.trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'inline-chat-media';
+    return `chat-upload-${messageSlug}.${resolveInlineMediaExtension(message.mimeType)}`;
+}
+
 export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     workflowId,
     canvasState,
@@ -175,6 +209,8 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                     globalSentMessageIds.add(msgId);
 
                     try {
+                        const resolvedFileName = resolveInlineMediaFileName(message, msgId);
+
                         // ⭐ TIMEOUT: Requête avec délai maximum
                         const timeoutId = setTimeout(() => {
                             abortControllerRef.current?.abort();
@@ -195,7 +231,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                                         content: message.text || '',
                                         imageBase64: message.image,
                                         mimeType: message.mimeType,
-                                        fileName: message.filename,
+                                        fileName: resolvedFileName,
                                         messageId: msgId
                                     }
                                 }),

@@ -36,6 +36,7 @@ import { HyperspaceReveal } from './components/HyperspaceReveal';
 import { PersistenceService } from './services/persistenceService';
 import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from './services/persistedChatMessages';
 import { normalizeAgentToolReferences } from './services/toolSelectionResolver';
+import { resolveActiveWorkflowId } from './services/workflowIdResolver';
 // ⭐ V2: Import apiClient for workflow switch orchestration
 import apiClient from './utils/apiClient';
 // ⭐ FIX QA: Import useJournalQueue for image persistence
@@ -336,13 +337,32 @@ export function AppContent() {
   const { updateLLMConfigs, updateLocalLLMProfiles, setNavigationHandler, addNodeMessage } = useRuntimeStore();
 
   // Design Store access for integrity validation  
-  const { validateWorkflowIntegrity, cleanupOrphanedInstances, addAgentInstance, deleteNode, deleteAgentInstance, hydrateFromServer, updateInstanceId, addNode, agentInstances, nodes: storeNodes } = useDesignStore();
+  const {
+    validateWorkflowIntegrity,
+    cleanupOrphanedInstances,
+    addAgentInstance,
+    deleteNode,
+    deleteAgentInstance,
+    hydrateFromServer,
+    updateInstanceId,
+    addNode,
+    agentInstances,
+    nodes: storeNodes,
+    workflows: designWorkflows,
+    currentWorkflowId: designCurrentWorkflowId,
+  } = useDesignStore();
   
   // ⭐ SELF-HEALING: Workflow Store for hydrating workflow ID
   const { hydrateWorkflowFromServer, getCurrentWorkflowId } = useWorkflowStore();
   
   // ⭐ FIX QA: Journal queue for persisting generated images
   const { enqueueEntry: enqueueJournalEntry } = useJournalQueue();
+
+  const resolveCurrentWorkflowId = useCallback(() => resolveActiveWorkflowId({
+    designWorkflowId: designCurrentWorkflowId,
+    designWorkflows,
+    legacyWorkflowId: getCurrentWorkflowId(),
+  }), [designCurrentWorkflowId, designWorkflows, getCurrentWorkflowId]);
 
   useEffect(() => {
     isHydratingRef.current = isHydrating;
@@ -837,7 +857,7 @@ export function AppContent() {
 
     // 🆕 Migration: Créer des instances pour les nodes legacy sans instanceId
     let migratedCount = 0;
-    const currentWorkflowId = getCurrentWorkflowId(); // ⭐ Get current workflow ID for migration
+    const currentWorkflowId = resolveCurrentWorkflowId();
     const updatedNodes = workflowNodes.map(node => {
       if (!node.instanceId && node.agent) {
         // Créer une instance pour ce node legacy - pass workflowId
@@ -1027,7 +1047,7 @@ export function AppContent() {
     const instanceName = agent.instanceName || agent.name;
 
     // ⭐ Get workflowId BEFORE creating instance
-    const workflowId = getCurrentWorkflowId();
+    const workflowId = resolveCurrentWorkflowId();
 
     // Add agent instance to DesignStore with custom instance name and workflowId
     const instanceId = addAgentInstance(agent.id, position, instanceName, workflowId || undefined);
@@ -1223,7 +1243,7 @@ export function AppContent() {
       };
       setWorkflowNodes(prev => [...prev, newNode]);
     }
-  }, [workflowNodes, addAgentInstance, isAuthenticated, accessToken, getCurrentWorkflowId, updateInstanceId, addNode, agentInstances]);
+  }, [workflowNodes, addAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId, updateInstanceId, addNode, agentInstances]);
 
   /**
    * ⭐ FIX: Suppression robuste d'un node avec persistance backend
@@ -1265,7 +1285,7 @@ export function AppContent() {
       
       // 6. ⭐ CRITICAL: Persister la suppression au backend
       if (isAuthenticated) {
-        const workflowId = getCurrentWorkflowId();
+        const workflowId = resolveCurrentWorkflowId();
         if (workflowId) {
           try {
             await apiClient.delete(`/api/workflows/${workflowId}/instances/${finalInstanceId}`);
@@ -1276,7 +1296,7 @@ export function AppContent() {
         }
       }
     }
-  }, [workflowNodes, storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, accessToken, getCurrentWorkflowId]);
+  }, [workflowNodes, storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId]);
 
   const handleDeleteNodes = useCallback(async (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy = 'delete_media'): Promise<AgentBatchDeleteResult> => {
     // Batch delete multiple nodes by instanceId (used when deleting prototype with instances)
@@ -1288,7 +1308,7 @@ export function AppContent() {
       let backendDeleted = true;
 
       if (isAuthenticated) {
-        const workflowId = getCurrentWorkflowId();
+        const workflowId = resolveCurrentWorkflowId();
         if (workflowId) {
           try {
             await apiClient.delete(`/api/workflows/${workflowId}/instances/${instanceId}`, {
@@ -1320,7 +1340,7 @@ export function AppContent() {
           error: `${failedInstanceIds.length} instance(s) n'ont pas pu etre supprimees avec la politique media demandee.`,
         }
       : { success: true };
-  }, [deleteNode, deleteAgentInstance, isAuthenticated, accessToken, getCurrentWorkflowId]);
+  }, [deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId]);
 
   const handleUpdateNodePosition = (nodeId: string, position: { x: number; y: number }) => {
     setWorkflowNodes(prev =>
@@ -1362,7 +1382,7 @@ export function AppContent() {
     
     // ⭐ FIX QA: Persist generated image to journal
     const instanceId = nodeId.replace('node-', '');
-    const workflowId = getCurrentWorkflowId();
+    const workflowId = resolveCurrentWorkflowId();
     if (instanceId && workflowId) {
       enqueueJournalEntry(workflowId, instanceId, 'chat', {
         role: 'agent',
@@ -1405,7 +1425,7 @@ export function AppContent() {
     
     // ⭐ FIX QA: Persist modified image to journal
     const instanceId = nodeId.replace('node-', '');
-    const workflowId = getCurrentWorkflowId();
+    const workflowId = resolveCurrentWorkflowId();
     if (instanceId && workflowId) {
       enqueueJournalEntry(workflowId, instanceId, 'chat', {
         role: 'agent',
