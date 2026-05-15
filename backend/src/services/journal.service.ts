@@ -108,6 +108,11 @@ export interface LogMediaParams {
     workflowId: string;
     file: Buffer;
     metadata: FileMetadata;
+    correlationIds?: {
+        messageId?: string;
+        toolCallId?: string;
+        executionId?: string;
+    };
 }
 
 /**
@@ -292,6 +297,86 @@ export class JournalService {
         return null;
     }
 
+    private async mirrorInlineChatMedia(
+        instance: IAgentInstance,
+        payload: ChatJournalPayload,
+        options: JournalOptions,
+    ): Promise<void> {
+        if (!instance.persistenceConfig?.saveMedia) {
+            return;
+        }
+
+        if (!payload.imageBase64 || !payload.mimeType) {
+            return;
+        }
+
+        const inlineMediaBuffer = Buffer.from(payload.imageBase64, 'base64');
+        if (inlineMediaBuffer.length === 0) {
+            return;
+        }
+
+        const derivedMediaMessageId = payload.messageId
+            ? `chat-media::${payload.messageId}`
+            : undefined;
+        const derivedFileName = this.resolveInlineChatMediaFileName(payload);
+
+        await this.logMedia(
+            {
+                instanceId: instance._id.toString(),
+                userId: instance.userId.toString(),
+                workflowId: instance.workflowId.toString(),
+                file: inlineMediaBuffer,
+                metadata: {
+                    originalName: derivedFileName,
+                    mimeType: payload.mimeType,
+                    size: inlineMediaBuffer.length,
+                    prompt: payload.content?.trim() || undefined,
+                },
+                correlationIds: derivedMediaMessageId
+                    ? { messageId: derivedMediaMessageId }
+                    : undefined,
+            },
+            {
+                sessionId: options.sessionId,
+                timestamp: options.timestamp,
+                severity: options.severity,
+            },
+        );
+    }
+
+    private resolveInlineChatMediaFileName(payload: ChatJournalPayload): string {
+        const explicitFileName = typeof payload.fileName === 'string' ? payload.fileName.trim() : '';
+        if (explicitFileName.length > 0) {
+            return explicitFileName;
+        }
+
+        const messageSlug = typeof payload.messageId === 'string' && payload.messageId.trim().length > 0
+            ? payload.messageId.trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
+            : 'inline-chat-media';
+
+        return `chat-upload-${messageSlug}.${this.resolveInlineChatMediaExtension(payload.mimeType)}`;
+    }
+
+    private resolveInlineChatMediaExtension(mimeType?: string): string {
+        switch (mimeType?.toLowerCase()) {
+            case 'image/jpeg':
+            case 'image/jpg':
+                return 'jpg';
+            case 'image/png':
+                return 'png';
+            case 'image/gif':
+                return 'gif';
+            case 'image/webp':
+                return 'webp';
+            case 'image/svg+xml':
+                return 'svg';
+            case 'application/pdf':
+                return 'pdf';
+            default:
+                return 'bin';
+        }
+    }
+
     // ============================================
     // MÉTHODES PUBLIQUES - JOURNALISATION
     // ============================================
@@ -321,6 +406,14 @@ export class JournalService {
                     .lean<{ _id: mongoose.Types.ObjectId } | null>();
 
                 if (existingEntry) {
+                    if (params.type === 'chat') {
+                        try {
+                            await this.mirrorInlineChatMedia(instance, params.payload as ChatJournalPayload, options);
+                        } catch (mirrorError) {
+                            console.error('[JournalService] Failed to backfill inline chat media from duplicate entry:', mirrorError);
+                        }
+                    }
+
                     return {
                         success: true,
                         saved: false,
@@ -344,6 +437,14 @@ export class JournalService {
                 params.payload,
                 options
             );
+
+            if (params.type === 'chat') {
+                try {
+                    await this.mirrorInlineChatMedia(instance, params.payload as ChatJournalPayload, options);
+                } catch (mirrorError) {
+                    console.error('[JournalService] Failed to mirror inline chat media:', mirrorError);
+                }
+            }
 
             return {
                 success: true,
@@ -508,7 +609,8 @@ export class JournalService {
             const mediaData: MediaJournalPayload = {
                 ...mediaPayload,
                 generationPrompt: params.metadata.prompt,
-                generationModel: params.metadata.generatedBy
+                generationModel: params.metadata.generatedBy,
+                ...params.correlationIds,
             };
 
             const result = await this.persistJournalEntry({

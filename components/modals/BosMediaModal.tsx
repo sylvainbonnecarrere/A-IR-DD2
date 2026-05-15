@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useLocalization } from '@/hooks/useLocalization';
+import { CloseIcon } from '@/components/Icons';
 import {
   workflowMediaExplorerService,
   WorkflowMediaExplorerItem,
@@ -389,9 +390,11 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full border border-slate-700 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white"
+              aria-label={t('bos_media_close', 'Fermer')}
+              title={t('bos_media_close', 'Fermer')}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-rose-400/45 bg-rose-500/15 text-rose-100 transition hover:border-rose-300 hover:bg-rose-500/25 hover:text-white"
             >
-              {t('bos_media_close', 'Fermer')}
+              <CloseIcon width={18} height={18} />
             </button>
           </div>
           <div className="mt-5 flex flex-wrap items-center gap-3">

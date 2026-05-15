@@ -131,6 +131,25 @@ describe('BosMediaModal', () => {
     expect(screen.queryByText('Media du workflow')).not.toBeInTheDocument();
   });
 
+  it('renders a red icon-only close button with an accessible close label', async () => {
+    const onClose = jest.fn();
+
+    render(
+      <BosMediaModal
+        isOpen={true}
+        workflowId="wf-1"
+        workflowName="Workflow Alpha"
+        onClose={onClose}
+      />,
+    );
+
+    expect(await screen.findByText('workspace-note.txt')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fermer' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('loads workflow media and filters items by tab', async () => {
     render(
       <BosMediaModal
