@@ -499,6 +499,7 @@ export default {
     // Page Titles & Descriptions
     page_dashboard_title: 'Dashboard - Workflow Map',
     page_dashboard_description: 'Global workflow map and project status overview',
+    bos_media_button: 'Media',
     page_bos_supervision_title: 'Bos Supervision',
     page_bos_supervision_description: 'Supervision tools, debugging and cost monitoring',
     page_prototyping_title: 'Agent Prototyping',
@@ -572,8 +573,8 @@ export default {
     com_bases_donnees_desc: 'Link SQL/NoSQL to workflow',
     com_bdd_vectorielles: 'Vector Databases',
     com_bdd_vectorielles_desc: 'Link Pinecone, Weaviate, Chroma',
-    com_integrations_mcp: 'MCP Integrations',
-    com_integrations_mcp_desc: 'Add Model Context Protocol',
+    com_integrations_mcp: 'Skills and MCP Integrations',
+    com_integrations_mcp_desc: 'Add Skills and Model Context Protocol',
     com_hub_connecteurs: 'Connectors Hub',
     com_hub_connecteurs_desc: 'Browse available integrations',
     

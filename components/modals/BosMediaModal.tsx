@@ -18,6 +18,7 @@ interface BosMediaModalProps {
 
 type SortValue = 'updatedAt:desc' | 'updatedAt:asc' | 'name:asc' | 'size:desc';
 type MediaAction = 'preview' | 'download' | 'delete';
+type OrphanFilterValue = 'exclude' | 'include' | 'only';
 
 interface PreviewState {
   item: WorkflowMediaExplorerItem;
@@ -104,7 +105,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
   const { isAuthenticated, accessToken } = useAuth();
   const [activeTab, setActiveTab] = useState<WorkflowMediaStorageMode>('workspace');
   const [search, setSearch] = useState('');
-  const [includeOrphans, setIncludeOrphans] = useState(false);
+  const [orphanFilter, setOrphanFilter] = useState<OrphanFilterValue>('include');
   const [sortValue, setSortValue] = useState<SortValue>('updatedAt:desc');
   const [items, setItems] = useState<WorkflowMediaExplorerItem[]>([]);
   const [counts, setCounts] = useState<Record<WorkflowMediaStorageMode, number>>(EMPTY_COUNTS);
@@ -121,7 +122,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
 
     setActiveTab('workspace');
     setSearch('');
-    setIncludeOrphans(false);
+    setOrphanFilter('include');
     setSortValue('updatedAt:desc');
     setFeedback(null);
     setPreviewState(null);
@@ -160,7 +161,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
         const response = await workflowMediaExplorerService.getWorkflowMedia(workflowId, {
           token: accessToken,
           q: search,
-          includeOrphans,
+          includeOrphans: orphanFilter !== 'exclude',
           sortBy,
           sortOrder,
         });
@@ -195,7 +196,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [accessToken, includeOrphans, isAuthenticated, isOpen, search, sortValue, t, workflowId]);
+  }, [accessToken, isAuthenticated, isOpen, orphanFilter, search, sortValue, t, workflowId]);
 
   const replacePreview = (nextPreview: PreviewState | null) => {
     setPreviewState((currentPreview) => {
@@ -340,12 +341,32 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     return null;
   }
 
-  const visibleItems = items.filter((item) => item.storageMode === activeTab);
+  const visibleItems = items.filter((item) => {
+    if (item.storageMode !== activeTab) {
+      return false;
+    }
+
+    if (orphanFilter === 'exclude') {
+      return !item.isOrphan;
+    }
+
+    if (orphanFilter === 'only') {
+      return item.isOrphan;
+    }
+
+    return true;
+  });
+  const visibleOrphanCount = visibleItems.filter((item) => item.isOrphan).length;
   const tabs: Array<{ id: WorkflowMediaStorageMode; label: string }> = [
     { id: 'db', label: t('bos_media_tab_db', 'BDD') },
     { id: 'workspace', label: t('bos_media_tab_workspace', 'Workspace') },
     { id: 'cloud', label: t('bos_media_tab_cloud', 'Cloud') },
   ];
+  const orphanFilterSummary = orphanFilter === 'only'
+    ? t('bos_media_orphan_filter_only_summary', 'Vue orphelins uniquement')
+    : orphanFilter === 'include'
+      ? t('bos_media_orphan_filter_include_summary', 'Orphelins inclus')
+      : t('bos_media_orphan_filter_exclude_summary', 'Orphelins masques');
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
@@ -398,15 +419,16 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
               placeholder={t('bos_media_search_placeholder', 'Rechercher un media, un agent ou un type MIME')}
               className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400"
             />
-            <label className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">
-              <input
-                type="checkbox"
-                checked={includeOrphans}
-                onChange={(event) => setIncludeOrphans(event.target.checked)}
-                className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400"
-              />
-              {t('bos_media_include_orphans', 'Inclure les orphelins')}
-            </label>
+            <select
+              value={orphanFilter}
+              aria-label={t('bos_media_orphan_filter_label', 'Filtre orphelins')}
+              onChange={(event) => setOrphanFilter(event.target.value as OrphanFilterValue)}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400"
+            >
+              <option value="exclude">{t('bos_media_orphan_filter_exclude', 'Masquer les orphelins')}</option>
+              <option value="include">{t('bos_media_orphan_filter_include', 'Inclure les orphelins')}</option>
+              <option value="only">{t('bos_media_orphan_filter_only', 'Seulement les orphelins')}</option>
+            </select>
             <select
               value={sortValue}
               onChange={(event) => setSortValue(event.target.value as SortValue)}
@@ -417,6 +439,14 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
               <option value="name:asc">{t('bos_media_sort_name', 'Nom A-Z')}</option>
               <option value="size:desc">{t('bos_media_sort_size', 'Taille decroissante')}</option>
             </select>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-100">
+              {orphanFilterSummary}
+            </span>
+            <span className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-300">
+              {visibleOrphanCount} {t('bos_media_orphan_visible_count', 'orphelin(s) visible(s)')}
+            </span>
           </div>
         </div>
 

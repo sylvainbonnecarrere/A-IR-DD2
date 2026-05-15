@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { RobotId, LLMConfig, Agent, WorkflowNode, AgentInstance, AgentBatchDeleteResult, AgentDeletionMediaPolicy } from '../types';
 import { ArchiPrototypingPage } from './ArchiPrototypingPage';
 import WorkflowCanvas from './WorkflowCanvas';
@@ -9,7 +9,9 @@ import { PhilDataPage } from './PhilDataPage';
 import { PhilFunctionsPage } from './PhilFunctionsPage';
 import { TimEventsPage } from './TimEventsPage';
 import BosWorkflowManagementPage from './BosWorkflowManagementPage';
+import BosMediaModal from './modals/BosMediaModal';
 import { useLocalization } from '../hooks/useLocalization';
+import { useDesignStore } from '../stores/useDesignStore';
 
 interface RobotPageRouterProps {
   currentPath: string;
@@ -60,6 +62,7 @@ const WorkflowPage: React.FC<{
   isImageModificationPanelOpen?: boolean;
   isVideoPanelOpen?: boolean;
   isMapsPanelOpen?: boolean;
+  headerActions?: React.ReactNode;
 }> = ({
   robotName,
   description,
@@ -80,14 +83,22 @@ const WorkflowPage: React.FC<{
   isImagePanelOpen,
   isImageModificationPanelOpen,
   isVideoPanelOpen,
-  isMapsPanelOpen
+  isMapsPanelOpen,
+  headerActions
 }) => {
     return (
       <div className="h-full flex flex-col bg-gray-900 text-gray-100">
         {/* Header */}
-        <div className="p-4 border-b border-gray-700">
-          <h1 className="text-xl font-bold text-white">{robotName}</h1>
-          <p className="text-gray-400 text-sm">{description}</p>
+        <div className="p-4 border-b border-gray-700 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold text-white">{robotName}</h1>
+            <p className="text-gray-400 text-sm">{description}</p>
+          </div>
+          {headerActions ? (
+            <div className="flex items-center gap-3">
+              {headerActions}
+            </div>
+          ) : null}
         </div>
 
         {/* Workflow Canvas avec toutes les props nécessaires */}
@@ -154,6 +165,12 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
   isMapsPanelOpen
 }) => {
   const { t } = useLocalization();
+  const { workflows, currentWorkflowId } = useDesignStore();
+  const [showBosMediaModal, setShowBosMediaModal] = useState(false);
+  const activeWorkflow = useMemo(
+    () => workflows.find((workflow) => workflow._id === currentWorkflowId) ?? workflows[0] ?? null,
+    [currentWorkflowId, workflows],
+  );
 
   // Navigation helper to go to workflow map (Bos Dashboard)
   const handleNavigateToWorkflow = () => {
@@ -184,6 +201,25 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     isMapsPanelOpen
   };
 
+  const bosMediaHeaderAction = (
+    <>
+      <button
+        type="button"
+        onClick={() => setShowBosMediaModal(true)}
+        disabled={!activeWorkflow}
+        className="rounded-lg border border-yellow-400/50 bg-yellow-500 px-4 py-2 text-sm font-semibold text-black transition-colors hover:bg-yellow-400 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+      >
+        {t('bos_media_button', 'Media')}
+      </button>
+      <BosMediaModal
+        isOpen={showBosMediaModal}
+        workflowId={activeWorkflow?._id ?? null}
+        workflowName={activeWorkflow?.name ?? null}
+        onClose={() => setShowBosMediaModal(false)}
+      />
+    </>
+  );
+
   // Route matching logic
   if (currentPath.startsWith('/archi/prototype')) {
     return <ArchiPrototypingPage llmConfigs={llmConfigs} onNavigateToWorkflow={handleNavigateToWorkflow} onAddToWorkflow={onAddToWorkflow} onDeleteNodes={onDeleteNodes} />;
@@ -198,6 +234,7 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
       <WorkflowPage
         robotName={t('page_dashboard_title')}
         description={t('page_dashboard_description')}
+        headerActions={bosMediaHeaderAction}
         {...workflowProps}
       />
     );
@@ -217,6 +254,7 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
       <WorkflowPage
         robotName={t('page_bos_supervision_title')}
         description={t('page_bos_supervision_description')}
+        headerActions={bosMediaHeaderAction}
         {...workflowProps}
       />
     );

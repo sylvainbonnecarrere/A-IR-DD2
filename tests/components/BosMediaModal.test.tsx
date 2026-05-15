@@ -157,7 +157,39 @@ describe('BosMediaModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cloud (1)' }));
     expect(await screen.findByText('cloud-note.txt')).toBeInTheDocument();
-    expect(screen.getByText(/Orphelin/)).toBeInTheDocument();
+    expect(screen.getByText(/manual_detach/)).toBeInTheDocument();
+  });
+
+  it('offers an explicit orphan-only filter in BOS Media', async () => {
+    render(
+      <BosMediaModal
+        isOpen={true}
+        workflowId="wf-1"
+        workflowName="Workflow Alpha"
+        onClose={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('workspace-note.txt')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Filtre orphelins'), {
+      target: { value: 'only' },
+    });
+
+    await waitFor(() => {
+      expect(workflowMediaExplorerService.getWorkflowMedia).toHaveBeenLastCalledWith('wf-1', expect.objectContaining({
+        token: 'token-123',
+        includeOrphans: true,
+      }));
+    });
+
+    expect(await screen.findByText('Vue orphelins uniquement')).toBeInTheDocument();
+    expect(screen.getByText('0 orphelin(s) visible(s)')).toBeInTheDocument();
+    expect(screen.getByText('Aucun media ne correspond a cet onglet pour le moment.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cloud (1)' }));
+    expect(await screen.findByText('cloud-note.txt')).toBeInTheDocument();
+    expect(screen.getByText('1 orphelin(s) visible(s)')).toBeInTheDocument();
   });
 
   it('previews a workspace media item with inline text content', async () => {

@@ -466,6 +466,7 @@ export default {
     // Page Titles & Descriptions
     page_dashboard_title: 'Dashboard - Mapa de flujo',
     page_dashboard_description: 'Mapa global de flujo de trabajo y resumen del estado del proyecto',
+    bos_media_button: 'Media',
     page_bos_supervision_title: 'Supervisión Bos',
     page_bos_supervision_description: 'Herramientas de supervisión, depuración y monitoreo de costos',
     page_prototyping_title: 'Prototipo de Agente',
@@ -538,8 +539,8 @@ export default {
     com_bases_donnees_desc: 'Vincular SQL/NoSQL con flujo de trabajo',
     com_bdd_vectorielles: 'Bases de Datos Vectoriales',
     com_bdd_vectorielles_desc: 'Vincular Pinecone, Weaviate, Chroma',
-    com_integrations_mcp: 'Integraciones MCP',
-    com_integrations_mcp_desc: 'Añadir Model Context Protocol',
+    com_integrations_mcp: 'Integraciones Skills y MCP',
+    com_integrations_mcp_desc: 'Añadir Skills y Model Context Protocol',
     com_hub_connecteurs: 'Centro de Conectores',
     com_hub_connecteurs_desc: 'Explorar integraciones disponibles',
     

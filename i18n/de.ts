@@ -466,6 +466,7 @@ export default {
     // Page Titles & Descriptions
     page_dashboard_title: 'Dashboard - Workflow-Karte',
     page_dashboard_description: 'Globale Workflow-Karte und Projektstatusübersicht',
+    bos_media_button: 'Media',
     page_bos_supervision_title: 'Bos Überwachung',
     page_bos_supervision_description: 'Überwachungstools, Debugging und Kostenüberwachung',
     page_prototyping_title: 'Agent-Prototyping',
@@ -539,8 +540,8 @@ export default {
     com_bases_donnees_desc: 'SQL/NoSQL mit Workflow verknüpfen',
     com_bdd_vectorielles: 'Vektordatenbanken',
     com_bdd_vectorielles_desc: 'Pinecone, Weaviate, Chroma verknüpfen',
-    com_integrations_mcp: 'MCP-Integrationen',
-    com_integrations_mcp_desc: 'Model Context Protocol hinzufügen',
+    com_integrations_mcp: 'Skills- und MCP-Integrationen',
+    com_integrations_mcp_desc: 'Skills und Model Context Protocol hinzufügen',
     com_hub_connecteurs: 'Connector-Hub',
     com_hub_connecteurs_desc: 'Verfügbare Integrationen durchsuchen',
     

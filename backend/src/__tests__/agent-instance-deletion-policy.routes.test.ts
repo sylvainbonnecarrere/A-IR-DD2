@@ -141,10 +141,32 @@ describe('agent instance deletion media policy', () => {
         expect(response.body).toEqual(expect.objectContaining({
             mediaPolicy: 'orphan_media',
         }));
+        expect(response.body.audit).toEqual(expect.objectContaining({
+            severity: 'info',
+            anomalyCount: 0,
+            origin: 'agent_instance_delete_route',
+        }));
         expect(response.body.message).toContain('orphelins');
         expect(await AgentInstance.findById(instance.id)).toBeNull();
         expect(await AgentJournal.findById(mediaJournal.id)).not.toBeNull();
         expect(await AgentJournal.findOne({ agentInstanceId: instance._id, type: 'chat' })).toBeNull();
+
+        const auditJournal = await AgentJournal.findOne({
+            agentInstanceId: instance._id,
+            type: 'system',
+            'payload.event': 'media_deletion_policy_applied',
+        }).lean();
+        expect(auditJournal).toEqual(expect.objectContaining({
+            severity: 'info',
+            payload: expect.objectContaining({
+                event: 'media_deletion_policy_applied',
+                triggeredBy: user.id,
+                details: expect.objectContaining({
+                    mediaPolicy: 'orphan_media',
+                    origin: 'agent_instance_delete_route',
+                }),
+            }),
+        }));
 
         const orphanedMediaReference = await MediaReference.findById(mediaReference.id).lean();
         expect(orphanedMediaReference).toEqual(expect.objectContaining({
@@ -264,9 +286,191 @@ describe('agent instance deletion media policy', () => {
         expect(response.body).toEqual(expect.objectContaining({
             mediaPolicy: 'delete_media',
         }));
+        expect(response.body.audit).toEqual(expect.objectContaining({
+            severity: 'info',
+            anomalyCount: 0,
+            origin: 'agent_instance_delete_route',
+        }));
         expect(await AgentInstance.findById(instance.id)).toBeNull();
         expect(await MediaReference.findOne({ agentInstanceId: instance._id })).toBeNull();
-        expect(await AgentJournal.findOne({ agentInstanceId: instance._id })).toBeNull();
+
+        const remainingJournals = await AgentJournal.find({ agentInstanceId: instance._id }).lean();
+        expect(remainingJournals).toHaveLength(1);
+        expect(remainingJournals[0]).toEqual(expect.objectContaining({
+            type: 'system',
+            severity: 'info',
+            payload: expect.objectContaining({
+                event: 'media_deletion_policy_applied',
+            }),
+        }));
         await expect(fs.access(absolutePath)).rejects.toThrow();
+    });
+
+    it('journals explicit anomalies for missing data and unmanaged external media', async () => {
+        const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+        const user = await User.create({
+            email: `agent-instance-delete-policy-anomalies-${suffix}@test.com`,
+            password: 'hashedpassword12345',
+            username: `agentinstancedeletepolicyanomalies${suffix}`,
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Delete Policy Anomalies Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 },
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `delete-policy-anomalies-${suffix}`,
+            status: 'running',
+            name: 'Deletion Policy Audit Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0,
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'db',
+            },
+        });
+
+        await AgentJournal.create({
+            agentInstanceId: instance._id,
+            workflowId: workflow._id,
+            type: 'media',
+            severity: 'info',
+            payload: {
+                mimeType: 'text/plain',
+                fileName: 'uncatalogued-media.txt',
+                size: 12,
+                storageMode: 'database',
+                data: Buffer.from('uncatalogued', 'utf-8'),
+            },
+            timestamp: new Date(),
+        });
+
+        await MediaReference.create([
+            {
+                userId: user._id,
+                workflowId: workflow._id,
+                agentInstanceId: instance._id,
+                storageMode: 'db',
+                primaryStorageMode: 'db',
+                canonicalLocator: 'journal://66b444444444444444444444',
+                journalEntryId: '66b444444444444444444444',
+                fileName: 'missing-inline.txt',
+                originalName: 'missing-inline.txt',
+                mimeType: 'text/plain',
+                size: 14,
+                createdByAgentInstanceId: instance._id,
+                createdByAgentName: 'Deletion Policy Audit Agent',
+                lastModifiedByAgentInstanceId: instance._id,
+                lastModifiedByAgentName: 'Deletion Policy Audit Agent',
+                isOrphan: false,
+            },
+            {
+                userId: user._id,
+                workflowId: workflow._id,
+                agentInstanceId: instance._id,
+                storageMode: 'local',
+                primaryStorageMode: 'workspace',
+                canonicalLocator: 'workspace://output/media/agents/missing/artifact.txt',
+                localPath: 'output/media/agents/missing/artifact.txt',
+                fileName: 'artifact.txt',
+                originalName: 'artifact.txt',
+                mimeType: 'text/plain',
+                size: 8,
+                createdByAgentInstanceId: instance._id,
+                createdByAgentName: 'Deletion Policy Audit Agent',
+                lastModifiedByAgentInstanceId: instance._id,
+                lastModifiedByAgentName: 'Deletion Policy Audit Agent',
+                isOrphan: false,
+            },
+            {
+                userId: user._id,
+                workflowId: workflow._id,
+                agentInstanceId: instance._id,
+                storageMode: 'cloud',
+                primaryStorageMode: 'cloud',
+                canonicalLocator: 'gcs://external-bucket/external.txt',
+                cloudKey: 'external.txt',
+                cloudProvider: 'gcs',
+                cloudBucket: 'external-bucket',
+                fileName: 'external.txt',
+                originalName: 'external.txt',
+                mimeType: 'text/plain',
+                size: 16,
+                createdByAgentInstanceId: instance._id,
+                createdByAgentName: 'Deletion Policy Audit Agent',
+                lastModifiedByAgentInstanceId: instance._id,
+                lastModifiedByAgentName: 'Deletion Policy Audit Agent',
+                isOrphan: false,
+            },
+        ]);
+
+        const response = await request(app)
+            .delete(`/api/workflows/${workflow.id}/instances/${instance.id}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .set('X-Robot-Id', 'AR_001')
+            .query({ mediaPolicy: 'delete_media' })
+            .expect(200);
+
+        expect(response.body.audit).toEqual(expect.objectContaining({
+            severity: 'warn',
+            origin: 'agent_instance_delete_route',
+        }));
+        expect(response.body.audit.anomalyCodes).toEqual(expect.arrayContaining([
+            'INLINE_MEDIA_JOURNAL_MISSING',
+            'LOCAL_MEDIA_FILE_MISSING',
+            'CLOUD_MEDIA_NOT_PHYSICALLY_DELETED',
+            'UNCATALOGUED_MEDIA_JOURNALS_DELETED',
+        ]));
+
+        const auditJournal = await AgentJournal.findOne({
+            agentInstanceId: instance._id,
+            type: 'system',
+            'payload.event': 'media_deletion_policy_applied',
+        }).lean();
+        expect(auditJournal).toEqual(expect.objectContaining({
+            severity: 'warn',
+            payload: expect.objectContaining({
+                event: 'media_deletion_policy_applied',
+                details: expect.objectContaining({
+                    origin: 'agent_instance_delete_route',
+                    mediaPolicy: 'delete_media',
+                    anomalies: expect.arrayContaining([
+                        expect.objectContaining({ code: 'INLINE_MEDIA_JOURNAL_MISSING' }),
+                        expect.objectContaining({ code: 'LOCAL_MEDIA_FILE_MISSING' }),
+                        expect.objectContaining({ code: 'CLOUD_MEDIA_NOT_PHYSICALLY_DELETED' }),
+                        expect.objectContaining({ code: 'UNCATALOGUED_MEDIA_JOURNALS_DELETED' }),
+                    ]),
+                }),
+            }),
+        }));
     });
 });

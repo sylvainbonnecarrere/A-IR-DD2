@@ -499,6 +499,7 @@ export default {
     // Page Titles & Descriptions
     page_dashboard_title: 'Інформаційна панель - Карта Workflow',
     page_dashboard_description: 'Глобальна карта workflow та огляд статусу проекту',
+    bos_media_button: 'Media',
     page_bos_supervision_title: 'Керування BOS',
     page_bos_supervision_description: 'Інструменти керування, налагодження та моніторинг витрат',
     page_prototyping_title: 'Прототипування агентів',
@@ -572,8 +573,8 @@ export default {
     com_bases_donnees_desc: 'Зв\'язати SQL/NoSQL з workflow',
     com_bdd_vectorielles: 'Векторні бази даних',
     com_bdd_vectorielles_desc: 'Зв\'язати Pinecone, Weaviate, Chroma',
-    com_integrations_mcp: 'MCP інтеграції',
-    com_integrations_mcp_desc: 'Додати Model Context Protocol',
+    com_integrations_mcp: 'Інтеграції Skills і MCP',
+    com_integrations_mcp_desc: 'Додати Skills і Model Context Protocol',
     com_hub_connecteurs: 'Центр конекторів',
     com_hub_connecteurs_desc: 'Переглянути доступні інтеграції',
     

@@ -545,6 +545,7 @@ export default {
     // Page Titles & Descriptions
     page_dashboard_title: 'Dashboard - Carte des Workflows',
     page_dashboard_description: 'Vue d\'ensemble cartographique de tous les workflows et leur statut',
+    bos_media_button: 'Media',
     page_bos_supervision_title: 'Bos Supervision',
     page_bos_supervision_description: 'Outils de supervision, debugging et monitoring des coûts',
     page_prototyping_title: 'Prototypage d\'Agents',
@@ -618,8 +619,8 @@ export default {
     com_bases_donnees_desc: 'Lier SQL/NoSQL au workflow',
     com_bdd_vectorielles: 'BDD Vectorielles',
     com_bdd_vectorielles_desc: 'Lier Pinecone, Weaviate, Chroma',
-    com_integrations_mcp: 'Intégrations MCP',
-    com_integrations_mcp_desc: 'Ajouter Model Context Protocol',
+    com_integrations_mcp: 'Intégrations Skills et MCP',
+    com_integrations_mcp_desc: 'Ajouter Skills et Model Context Protocol',
     com_hub_connecteurs: 'Hub Connecteurs',
     com_hub_connecteurs_desc: 'Parcourir intégrations disponibles',
     
