@@ -252,6 +252,7 @@ export interface ChatJournalPayload extends JournalCorrelationIds {
     }[];
     // ⭐ FIX QA: Support images inline dans les messages chat
     imageBase64?: string;    // Image data en base64
+    fileContent?: string;    // Contenu texte d'un fichier importé
     mimeType?: string;       // ex: image/png, image/jpeg
     fileName?: string;       // Nom original du fichier
 }

@@ -87,6 +87,7 @@ const ChatPayloadSchema = new Schema({
     }],
     // ⭐ FIX QA: Support images inline dans les messages chat
     imageBase64: { type: String },  // Image data en base64 
+    fileContent: { type: String },  // Contenu texte de fichier importé
     mimeType: { type: String },     // ex: image/png, image/jpeg
     fileName: { type: String }      // Nom original du fichier
 }, { _id: false });

@@ -43,12 +43,17 @@ jest.mock('../../stores/useRuntimeStore', () => ({
     useRuntimeStore: jest.fn((selector: (state: typeof runtimeStoreState) => unknown) => selector(runtimeStoreState)),
 }));
 
-const functionStoreState: { functions: UserFunction[] } = {
-    functions: [],
+const functionStoreState = {
+    functions: [] as UserFunction[],
+    isLoading: false,
+    loadFunctions: jest.fn(),
+    runtimeCompatibility: undefined,
 };
 
 jest.mock('../../stores/useFunctionStore', () => ({
-    useFunctionStore: jest.fn((selector: (state: typeof functionStoreState) => unknown) => selector(functionStoreState)),
+    useFunctionStore: jest.fn((selector?: (state: typeof functionStoreState) => unknown) => (
+        selector ? selector(functionStoreState) : functionStoreState
+    )),
 }));
 
 const llmConfigs: LLMConfig[] = [
@@ -97,7 +102,14 @@ const existingAgent: Agent = {
     systemPrompt: 'Use tools when needed.',
     llmProvider: LLMProvider.OpenAI,
     model: 'gpt-4o-mini',
-    capabilities: [LLMCapability.FunctionCalling],
+    capabilities: [LLMCapability.FunctionCalling, LLMCapability.ImageGeneration],
+    tools: [
+        {
+            name: 'provider_web_search',
+            description: 'Searches the web through the provider tool API.',
+            parameters: { type: 'object' },
+        },
+    ],
     functionIds: ['legacy-weather'],
     creator_id: RobotId.Archi,
     created_at: '2026-05-13T09:00:00.000Z',
@@ -131,7 +143,7 @@ describe('AgentFormModal canonical tool selection contract', () => {
         expect(onSave).toHaveBeenCalledWith(
             expect.objectContaining({
                 name: 'Weather Agent',
-                capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
+                capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling, LLMCapability.ImageGeneration],
                 functionIds: ['tool-weather'],
                 toolSelections: [
                     expect.objectContaining({
@@ -145,5 +157,32 @@ describe('AgentFormModal canonical tool selection contract', () => {
             }),
             'agent-1',
         );
+    });
+
+    it('renders only the application functions family in the prototype functions tab', async () => {
+        const onSave = jest.fn();
+
+        render(
+            <AgentFormModal
+                onClose={jest.fn()}
+                onSave={onSave}
+                llmConfigs={llmConfigs}
+                existingAgent={existingAgent}
+                localLLMProfiles={localLLMProfiles}
+            />,
+        );
+
+        await waitFor(() => {
+            expect(screen.getByDisplayValue('Weather Agent')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByText('agentForm_tab_functions'));
+
+        expect(screen.getByText('Fonctions natives/custom application')).toBeInTheDocument();
+        expect(screen.queryByText('Fonctions provider/cloud')).not.toBeInTheDocument();
+        expect(screen.queryByText('Function Calling')).not.toBeInTheDocument();
+        expect(screen.queryByText('Image Generation')).not.toBeInTheDocument();
+        expect(screen.queryByText('provider_web_search')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Nom provider/cloud')).not.toBeInTheDocument();
     });
 });

@@ -11,7 +11,7 @@
  */
 
 import { getBackendUrl } from '../config/api.config';
-import { Agent, normalizePersistenceConfig } from '../types';
+import { Agent, normalizePersistenceConfig, sanitizePersistenceConfigForApi } from '../types';
 import { normalizeAgentToolReferences } from './toolSelectionResolver';
 import { buildGovernanceHeaders } from '../utils/governanceHeaders';
 
@@ -29,17 +29,6 @@ interface APIResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
-}
-
-function sanitizePrototypePersistenceConfig(persistenceConfig?: AgentPrototypePayload['persistenceConfig']) {
-  if (!persistenceConfig) {
-    return undefined;
-  }
-
-  const normalized = normalizePersistenceConfig(persistenceConfig);
-  const { cloudStorageConfig: _cloudStorageConfig, ...sanitized } = normalized;
-
-  return sanitized;
 }
 
 /**
@@ -66,7 +55,7 @@ function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string,
     functionIds,
     toolSelections,
     outputConfig: agentData.outputConfig || undefined,
-    persistenceConfig: sanitizePrototypePersistenceConfig(agentData.persistenceConfig),
+    persistenceConfig: sanitizePersistenceConfigForApi(agentData.persistenceConfig),
     robotId: robotId // Frontend uses 'creator_id', backend expects 'robotId'
   };
   
@@ -197,7 +186,7 @@ export async function updateAgentPrototype(
       payload.toolSelections = normalizedToolReferences.toolSelections;
     }
     if (agentData.outputConfig !== undefined) payload.outputConfig = agentData.outputConfig;
-    if (agentData.persistenceConfig !== undefined) payload.persistenceConfig = sanitizePrototypePersistenceConfig(agentData.persistenceConfig);
+    if (agentData.persistenceConfig !== undefined) payload.persistenceConfig = sanitizePersistenceConfigForApi(agentData.persistenceConfig);
     if (agentData.localLLMProfileId !== undefined) payload.localLLMProfileId = agentData.localLLMProfileId;
     if (robotId) payload.robotId = robotId;
     

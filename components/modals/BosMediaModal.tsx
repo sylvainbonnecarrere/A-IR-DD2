@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useLocalization } from '@/hooks/useLocalization';
 import { CloseIcon } from '@/components/Icons';
@@ -17,9 +17,14 @@ interface BosMediaModalProps {
   onClose: () => void;
 }
 
-type SortValue = 'updatedAt:desc' | 'updatedAt:asc' | 'name:asc' | 'size:desc';
 type MediaAction = 'preview' | 'download' | 'delete';
 type OrphanFilterValue = 'exclude' | 'include' | 'only';
+type SortField = 'name' | 'mimeType' | 'source' | 'size' | 'agent' | 'updatedAt';
+
+interface SortState {
+  field: SortField;
+  order: WorkflowMediaSortOrder;
+}
 
 interface PreviewState {
   item: WorkflowMediaExplorerItem;
@@ -32,6 +37,11 @@ const EMPTY_COUNTS: Record<WorkflowMediaStorageMode, number> = {
   db: 0,
   workspace: 0,
   cloud: 0,
+};
+
+const DEFAULT_SORT_STATE: SortState = {
+  field: 'updatedAt',
+  order: 'desc',
 };
 
 function formatBytes(size: number): string {
@@ -54,6 +64,14 @@ function formatDate(value: string): string {
   }
 
   return date.toLocaleString();
+}
+
+function getAgentLabel(item: WorkflowMediaExplorerItem, fallbackLabel: string): string {
+  return item.lastModifiedByAgentName || item.createdByAgentName || fallbackLabel;
+}
+
+function compareStrings(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { sensitivity: 'base' });
 }
 
 function canRenderPreview(mimeType: string): boolean {
@@ -107,7 +125,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
   const [activeTab, setActiveTab] = useState<WorkflowMediaStorageMode>('workspace');
   const [search, setSearch] = useState('');
   const [orphanFilter, setOrphanFilter] = useState<OrphanFilterValue>('include');
-  const [sortValue, setSortValue] = useState<SortValue>('updatedAt:desc');
+  const [sortState, setSortState] = useState<SortState>(DEFAULT_SORT_STATE);
   const [items, setItems] = useState<WorkflowMediaExplorerItem[]>([]);
   const [counts, setCounts] = useState<Record<WorkflowMediaStorageMode, number>>(EMPTY_COUNTS);
   const [isLoading, setIsLoading] = useState(false);
@@ -124,7 +142,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     setActiveTab('workspace');
     setSearch('');
     setOrphanFilter('include');
-    setSortValue('updatedAt:desc');
+    setSortState(DEFAULT_SORT_STATE);
     setFeedback(null);
     setPreviewState(null);
   }, [isOpen, workflowId]);
@@ -156,7 +174,12 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
       setError(null);
       setFeedback(null);
 
-      const [sortBy, sortOrder] = sortValue.split(':') as [WorkflowMediaSortBy, WorkflowMediaSortOrder];
+      const sortBy: WorkflowMediaSortBy = sortState.field === 'name'
+        ? 'name'
+        : sortState.field === 'size'
+          ? 'size'
+          : 'updatedAt';
+      const sortOrder: WorkflowMediaSortOrder = sortState.order;
 
       try {
         const response = await workflowMediaExplorerService.getWorkflowMedia(workflowId, {
@@ -197,7 +220,21 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [accessToken, isAuthenticated, isOpen, orphanFilter, search, sortValue, t, workflowId]);
+  }, [accessToken, isAuthenticated, isOpen, orphanFilter, search, sortState.field, sortState.order, t, workflowId]);
+
+  const handleSort = (field: SortField) => {
+    setSortState((currentSort) => {
+      if (currentSort.field === field) {
+        return {
+          field,
+          order: currentSort.order === 'asc' ? 'desc' : 'asc',
+        };
+      }
+
+      const defaultOrder: WorkflowMediaSortOrder = field === 'size' || field === 'updatedAt' ? 'desc' : 'asc';
+      return { field, order: defaultOrder };
+    });
+  };
 
   const replacePreview = (nextPreview: PreviewState | null) => {
     setPreviewState((currentPreview) => {
@@ -308,11 +345,11 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     }
 
     if (previewState.mimeType.startsWith('image/')) {
-      return <img src={previewState.objectUrl} alt={previewState.item.originalName} className="max-h-[60vh] w-full rounded-xl object-contain" />;
+      return <img src={previewState.objectUrl} alt={previewState.item.originalName} className="h-auto max-w-full rounded-xl object-contain" />;
     }
 
     if (previewState.mimeType.startsWith('video/')) {
-      return <video src={previewState.objectUrl} controls className="max-h-[60vh] w-full rounded-xl bg-black" />;
+      return <video src={previewState.objectUrl} controls className="h-auto max-h-[70vh] w-full rounded-xl bg-black" />;
     }
 
     if (previewState.mimeType.startsWith('audio/')) {
@@ -320,12 +357,12 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     }
 
     if (previewState.mimeType === 'application/pdf') {
-      return <iframe src={previewState.objectUrl} title={previewState.item.originalName} className="h-[60vh] w-full rounded-xl bg-white" />;
+      return <iframe src={previewState.objectUrl} title={previewState.item.originalName} className="h-[70vh] w-full rounded-xl bg-white" />;
     }
 
     if (previewState.textContent !== null) {
       return (
-        <pre className="max-h-[60vh] overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-4 text-xs text-slate-200">
+        <pre className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-xs text-slate-200">
           {previewState.textContent}
         </pre>
       );
@@ -338,11 +375,12 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     );
   };
 
-  if (!isOpen || !workflowId) {
-    return null;
-  }
+  const visibleItems = useMemo(() => {
+    if (!isOpen || !workflowId) {
+      return [];
+    }
 
-  const visibleItems = items.filter((item) => {
+    return items.filter((item) => {
     if (item.storageMode !== activeTab) {
       return false;
     }
@@ -356,7 +394,45 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     }
 
     return true;
-  });
+    }).sort((left, right) => {
+      const leftAgentLabel = getAgentLabel(left, t('bos_media_unknown_agent', 'Inconnu'));
+      const rightAgentLabel = getAgentLabel(right, t('bos_media_unknown_agent', 'Inconnu'));
+      let comparison = 0;
+
+      switch (sortState.field) {
+        case 'name':
+          comparison = compareStrings(left.originalName || left.displayName, right.originalName || right.displayName);
+          break;
+        case 'mimeType':
+          comparison = compareStrings(left.mimeType, right.mimeType);
+          break;
+        case 'source':
+          comparison = compareStrings(left.canonicalLocator, right.canonicalLocator);
+          break;
+        case 'size':
+          comparison = left.size - right.size;
+          break;
+        case 'agent':
+          comparison = compareStrings(leftAgentLabel, rightAgentLabel);
+          break;
+        case 'updatedAt':
+        default:
+          comparison = new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime();
+          break;
+      }
+
+      if (comparison === 0) {
+        comparison = compareStrings(left.originalName || left.displayName, right.originalName || right.displayName);
+      }
+
+      return sortState.order === 'asc' ? comparison : -comparison;
+    });
+  }, [activeTab, isOpen, items, orphanFilter, sortState.field, sortState.order, t, workflowId]);
+
+  if (!isOpen || !workflowId) {
+    return null;
+  }
+
   const visibleOrphanCount = visibleItems.filter((item) => item.isOrphan).length;
   const tabs: Array<{ id: WorkflowMediaStorageMode; label: string }> = [
     { id: 'db', label: t('bos_media_tab_db', 'BDD') },
@@ -368,6 +444,25 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     : orphanFilter === 'include'
       ? t('bos_media_orphan_filter_include_summary', 'Orphelins inclus')
       : t('bos_media_orphan_filter_exclude_summary', 'Orphelins masques');
+
+  const renderSortIndicator = (field: SortField) => {
+    if (sortState.field !== field) {
+      return <span className="text-slate-600">↕</span>;
+    }
+
+    return <span className="text-cyan-300">{sortState.order === 'asc' ? '↑' : '↓'}</span>;
+  };
+
+  const renderColumnHeader = (field: SortField, label: string, align: 'left' | 'right' = 'left') => (
+    <button
+      type="button"
+      onClick={() => handleSort(field)}
+      className={`inline-flex w-full items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300 transition hover:text-white ${align === 'right' ? 'justify-end' : 'justify-start'}`}
+    >
+      <span>{label}</span>
+      {renderSortIndicator(field)}
+    </button>
+  );
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
@@ -432,16 +527,9 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
               <option value="include">{t('bos_media_orphan_filter_include', 'Inclure les orphelins')}</option>
               <option value="only">{t('bos_media_orphan_filter_only', 'Seulement les orphelins')}</option>
             </select>
-            <select
-              value={sortValue}
-              onChange={(event) => setSortValue(event.target.value as SortValue)}
-              className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400"
-            >
-              <option value="updatedAt:desc">{t('bos_media_sort_recent', 'Plus recent')}</option>
-              <option value="updatedAt:asc">{t('bos_media_sort_oldest', 'Plus ancien')}</option>
-              <option value="name:asc">{t('bos_media_sort_name', 'Nom A-Z')}</option>
-              <option value="size:desc">{t('bos_media_sort_size', 'Taille decroissante')}</option>
-            </select>
+            <div className="flex items-center justify-end rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">
+              {t('bos_media_sort_hint', 'Colonnes triables')}
+            </div>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-100">
@@ -472,74 +560,89 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
               {t('bos_media_empty_state', 'Aucun media ne correspond a cet onglet pour le moment.')}
             </div>
           ) : (
-            <div className="grid gap-4 xl:grid-cols-2">
-              {visibleItems.map((item) => (
-                <article
-                  key={item.mediaId}
-                  className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.22)]"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-50">{item.originalName}</p>
-                      <p className="mt-1 text-xs uppercase tracking-[0.24em] text-slate-500">{item.mimeType}</p>
-                    </div>
-                    <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
-                      {formatBytes(item.size)}
-                    </span>
-                  </div>
-
-                  <div className="mt-4 grid gap-2 text-sm text-slate-300">
-                    <p>
-                      <span className="text-slate-500">{t('bos_media_source_label', 'Source')}</span> {item.canonicalLocator}
-                    </p>
-                    <p>
-                      <span className="text-slate-500">{t('bos_media_agent_label', 'Agent')}</span> {item.lastModifiedByAgentName || item.createdByAgentName || t('bos_media_unknown_agent', 'Inconnu')}
-                    </p>
-                    <p>
-                      <span className="text-slate-500">{t('bos_media_updated_label', 'Mise a jour')}</span> {formatDate(item.updatedAt)}
-                    </p>
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handlePreview(item)}
-                      disabled={activeAction?.itemId === item.mediaId}
-                      className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {activeAction?.itemId === item.mediaId && activeAction.action === 'preview'
-                        ? t('bos_media_action_loading', 'Traitement...')
-                        : t('bos_media_action_preview', canRenderPreview(item.mimeType) ? 'Apercu' : 'Ouvrir')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDownload(item)}
-                      disabled={activeAction?.itemId === item.mediaId}
-                      className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {activeAction?.itemId === item.mediaId && activeAction.action === 'download'
-                        ? t('bos_media_action_loading', 'Traitement...')
-                        : t('bos_media_action_download', 'Telecharger')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(item)}
-                      disabled={activeAction?.itemId === item.mediaId}
-                      className="rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-100 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {activeAction?.itemId === item.mediaId && activeAction.action === 'delete'
-                        ? t('bos_media_action_loading', 'Traitement...')
-                        : t('bos_media_action_delete', 'Supprimer')}
-                    </button>
-                  </div>
-
-                  {item.isOrphan ? (
-                    <div className="mt-4 inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-100">
-                      {t('bos_media_orphan_badge', 'Orphelin')} {item.orphanReason ? `· ${item.orphanReason}` : ''}
-                    </div>
-                  ) : null}
-                </article>
-              ))}
+            <div data-testid="bos-media-table-scroll" className="overflow-auto rounded-2xl border border-slate-800 bg-slate-900/70 shadow-[0_16px_40px_rgba(15,23,42,0.22)]">
+              <table className="min-w-full table-fixed border-collapse text-sm text-slate-200">
+                <thead className="sticky top-0 z-[1] bg-slate-950/95 backdrop-blur">
+                  <tr className="border-b border-slate-800">
+                    <th className="w-[18%] px-4 py-3 text-left">{renderColumnHeader('name', t('bos_media_col_name', 'Nom'))}</th>
+                    <th className="w-[14%] px-4 py-3 text-left">{renderColumnHeader('mimeType', t('bos_media_col_mime', 'Type MIME'))}</th>
+                    <th className="w-[24%] px-4 py-3 text-left">{renderColumnHeader('source', t('bos_media_col_source', 'Source'))}</th>
+                    <th className="w-[10%] px-4 py-3 text-right">{renderColumnHeader('size', t('bos_media_col_size', 'Taille'), 'right')}</th>
+                    <th className="w-[14%] px-4 py-3 text-left">{renderColumnHeader('agent', t('bos_media_col_agent', 'Agent'))}</th>
+                    <th className="w-[12%] px-4 py-3 text-left">{renderColumnHeader('updatedAt', t('bos_media_col_updated', 'Mise a jour'))}</th>
+                    <th className="w-[18%] px-4 py-3 text-left">
+                      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">{t('bos_media_col_actions', 'Actions')}</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleItems.map((item) => {
+                    const agentLabel = getAgentLabel(item, t('bos_media_unknown_agent', 'Inconnu'));
+                    const rowActionLoading = activeAction?.itemId === item.mediaId;
+                    return (
+                      <tr key={item.mediaId} className="border-b border-slate-800/80 align-top last:border-b-0 hover:bg-slate-900/90">
+                        <td className="px-4 py-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold text-slate-50" title={item.originalName}>{item.originalName}</p>
+                            {item.isOrphan ? (
+                              <p className="mt-1 truncate text-xs text-amber-200" title={item.orphanReason || undefined}>
+                                {t('bos_media_orphan_badge', 'Orphelin')}{item.orphanReason ? ` · ${item.orphanReason}` : ''}
+                              </p>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="truncate text-slate-300" title={item.mimeType}>{item.mimeType}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="truncate text-slate-300" title={item.canonicalLocator}>{item.canonicalLocator}</p>
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-300">{formatBytes(item.size)}</td>
+                        <td className="px-4 py-3">
+                          <p className="truncate text-slate-300" title={agentLabel}>{agentLabel}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="text-slate-300">{formatDate(item.updatedAt)}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handlePreview(item)}
+                              disabled={rowActionLoading}
+                              className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {rowActionLoading && activeAction?.action === 'preview'
+                                ? t('bos_media_action_loading', 'Traitement...')
+                                : t('bos_media_action_preview', canRenderPreview(item.mimeType) ? 'Apercu' : 'Ouvrir')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownload(item)}
+                              disabled={rowActionLoading}
+                              className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {rowActionLoading && activeAction?.action === 'download'
+                                ? t('bos_media_action_loading', 'Traitement...')
+                                : t('bos_media_action_download', 'Telecharger')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(item)}
+                              disabled={rowActionLoading}
+                              className="rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-100 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {rowActionLoading && activeAction?.action === 'delete'
+                                ? t('bos_media_action_loading', 'Traitement...')
+                                : t('bos_media_action_delete', 'Supprimer')}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -562,7 +665,11 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
                 {t('bos_media_preview_close', 'Fermer l\'apercu')}
               </button>
             </div>
-            {renderPreviewContent()}
+            <div data-testid="bos-media-preview-scroll" className="max-h-[55vh] overflow-auto rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+              <div className="flex min-h-full items-start justify-center">
+                {renderPreviewContent()}
+              </div>
+            </div>
           </div>
         ) : null}
       </div>

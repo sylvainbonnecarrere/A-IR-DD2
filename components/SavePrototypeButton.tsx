@@ -35,7 +35,7 @@ import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { PersistenceService } from '../services/persistenceService';
 import { useSaveMode } from '../hooks/useSaveMode';
 import { getBackendUrl } from '../config/api.config';
-import { V2WorkflowNode, ChatMessage } from '../types';
+import { V2WorkflowNode, ChatMessage, PendingNodeAttachment } from '../types';
 
 // ⭐ CONSTANTES DE CONFIGURATION - Anti-boucle infinie
 const MAX_ERRORS_BEFORE_ABORT = 3;
@@ -98,6 +98,34 @@ function resolveInlineMediaFileName(message: ChatMessage, messageId: string): st
     return `chat-upload-${messageSlug}.${resolveInlineMediaExtension(message.mimeType)}`;
 }
 
+async function persistPendingDraftAttachment(params: {
+    backendUrl: string;
+    accessToken: string;
+    workflowId: string;
+    agentInstanceId: string;
+    attachment: PendingNodeAttachment;
+    signal: AbortSignal;
+}) {
+    return fetch(
+        `${params.backendUrl}/api/workflows/${params.workflowId}/instances/${params.agentInstanceId}/imported-media`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${params.accessToken}`,
+            },
+            body: JSON.stringify({
+                attachmentId: params.attachment.id,
+                fileName: params.attachment.fileName,
+                mimeType: params.attachment.mimeType,
+                contentBase64: params.attachment.base64Content,
+                origin: params.attachment.origin,
+            }),
+            signal: params.signal,
+        }
+    );
+}
+
 export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     workflowId,
     canvasState,
@@ -108,7 +136,13 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     const [buttonState, setButtonState] = useState<ButtonState>('idle');
     const { isAuthenticated, accessToken } = useAuth();
     const { nodes, edges } = useDesignStore();
-    const { nodeMessages, getNewMessages, setLastSavedAt } = useRuntimeStore();
+    const {
+        nodeMessages,
+        nodePendingAttachments = {},
+        getNewMessages,
+        setLastSavedAt,
+        updateNodePendingAttachment = () => undefined,
+    } = useRuntimeStore();
     const { isManualSave } = useSaveMode();
     
     // ⭐ LOCK: Éviter les appels concurrents (ref stable au niveau composant)
@@ -148,16 +182,26 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
         try {
             // ⭐ SNAPSHOT IMMÉDIAT: Capturer l'état une seule fois
             const nodeMessagesSnapshot = JSON.parse(JSON.stringify(nodeMessages));
+            const nodePendingAttachmentsSnapshot = { ...nodePendingAttachments } as Record<string, PendingNodeAttachment | null>;
             const nodesSnapshot = [...nodes];
+            const nodeIds = new Set([
+                ...Object.keys(nodeMessagesSnapshot),
+                ...Object.keys(nodePendingAttachmentsSnapshot),
+            ]);
 
-            for (const [nodeId, messages] of Object.entries(nodeMessagesSnapshot)) {
+            for (const nodeId of nodeIds) {
                 // ⭐ CIRCUIT BREAKER: Arrêter si trop d'erreurs consécutives
                 if (consecutiveErrors >= MAX_ERRORS_BEFORE_ABORT) {
                     console.error(`[SavePrototypeButton] 🛑 Aborting: ${MAX_ERRORS_BEFORE_ABORT} consecutive errors`);
                     break;
                 }
 
-                if (!messages || (messages as ChatMessage[]).length === 0) continue;
+                const messages = nodeMessagesSnapshot[nodeId] as ChatMessage[] | undefined;
+                const pendingAttachment = nodePendingAttachmentsSnapshot[nodeId];
+
+                if ((!messages || messages.length === 0) && !pendingAttachment) {
+                    continue;
+                }
 
                 // Trouver le node pour les métadonnées
                 const node = nodesSnapshot.find(n => n.id === nodeId) as V2WorkflowNode | undefined;
@@ -170,20 +214,18 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                 }
 
                 // ⭐ DÉDUPLICATION STRICTE: Filtrer via globalSentMessageIds
-                const allMessages = messages as ChatMessage[];
+                const allMessages = (messages || []) as ChatMessage[];
                 const newMessages = allMessages.filter((msg: ChatMessage) => {
                     const msgId = msg.id || `${nodeId}-${msg.timestamp?.toString() || Date.now()}`;
                     return !globalSentMessageIds.has(msgId);
                 });
 
-                if (newMessages.length === 0) {
-                    continue;
-                }
-
                 // ⭐ LIMITE PAR BATCH: Ne pas envoyer trop de messages d'un coup
                 const messagesToSend = newMessages.slice(0, MAX_MESSAGES_PER_BATCH);
-                
-                console.log(`[SavePrototypeButton] 📤 Sending ${messagesToSend.length}/${newMessages.length} messages for instance ${agentInstance.id}`);
+
+                if (messagesToSend.length > 0) {
+                    console.log(`[SavePrototypeButton] 📤 Sending ${messagesToSend.length}/${newMessages.length} messages for instance ${agentInstance.id}`);
+                }
 
                 for (const message of messagesToSend) {
                     // ⭐ Vérifier si l'opération a été annulée
@@ -230,6 +272,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                                         role: message.sender === 'user' ? 'user' : 'agent',
                                         content: message.text || '',
                                         imageBase64: message.image,
+                                        fileContent: message.fileContent,
                                         mimeType: message.mimeType,
                                         fileName: resolvedFileName,
                                         messageId: msgId
@@ -264,6 +307,50 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                     }
                 }
 
+                if (pendingAttachment && !pendingAttachment.draftPersisted) {
+                    try {
+                        const timeoutId = setTimeout(() => {
+                            abortControllerRef.current?.abort();
+                        }, REQUEST_TIMEOUT_MS);
+
+                        const response = await persistPendingDraftAttachment({
+                            backendUrl,
+                            accessToken: accessToken || '',
+                            workflowId: effectiveWorkflowId,
+                            agentInstanceId: agentInstance.id,
+                            attachment: pendingAttachment,
+                            signal,
+                        });
+
+                        clearTimeout(timeoutId);
+
+                        if (response.ok) {
+                            const responseBody = await response.json().catch(() => ({}));
+                            if (responseBody?.success || responseBody?.skipped) {
+                                updateNodePendingAttachment(nodeId, {
+                                    draftPersisted: true,
+                                    persistedAt: new Date(),
+                                });
+                                saved++;
+                                consecutiveErrors = 0;
+                            }
+                        } else {
+                            console.warn(`[SavePrototypeButton] Draft media server error ${response.status} for node ${nodeId}`);
+                            consecutiveErrors++;
+                            totalErrors++;
+                        }
+                    } catch (err) {
+                        console.error(`[SavePrototypeButton] Draft media network error for node ${nodeId}:`, err);
+                        consecutiveErrors++;
+                        totalErrors++;
+
+                        if (err instanceof Error && err.name === 'AbortError') {
+                            console.warn('[SavePrototypeButton] Draft media request aborted');
+                            return { saved, errors: totalErrors, aborted: true };
+                        }
+                    }
+                }
+
                 // ⭐ Marquer le timestamp seulement si on a réussi à sauvegarder quelque chose
                 if (saved > 0) {
                     setLastSavedAt(nodeId, new Date());
@@ -277,7 +364,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
         }
         
         return { saved, errors: totalErrors, aborted: false };
-    }, [nodeMessages, nodes, workflowId, accessToken, setLastSavedAt]);
+    }, [nodeMessages, nodePendingAttachments, nodes, workflowId, accessToken, setLastSavedAt, updateNodePendingAttachment]);
 
     /**
      * Handle save action with strict single-execution guarantee

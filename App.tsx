@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, Tool, normalizePersistenceConfig } from './types';
+import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, Tool, normalizePersistenceConfig, sanitizePersistenceConfigForApi } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
 import { AgentFormModal } from './components/modals/AgentFormModal';
@@ -141,6 +141,12 @@ const buildInstanceConfiguration = (instance: any, prototype?: Agent) => {
   const rawConfiguration = instance.configuration_json;
 
   if (rawConfiguration && typeof rawConfiguration === 'object') {
+    const resolvedProviderTools = rawConfiguration.tools !== undefined
+      ? rawConfiguration.tools
+      : (Array.isArray(instance.tools) && instance.tools.length > 0
+          ? instance.tools
+          : prototype?.tools);
+
     return {
       ...rawConfiguration,
       role: rawConfiguration.role || instance.role || prototype?.role || 'assistant',
@@ -148,7 +154,7 @@ const buildInstanceConfiguration = (instance: any, prototype?: Agent) => {
       llmProvider: rawConfiguration.llmProvider || instance.llmProvider || instance.provider || prototype?.llmProvider || LLMProvider.Gemini,
       systemPrompt: rawConfiguration.systemPrompt || instance.systemPrompt || instance.systemInstruction || prototype?.systemPrompt || '',
       capabilities: Array.isArray(rawConfiguration.capabilities) ? rawConfiguration.capabilities : (Array.isArray(instance.capabilities) ? instance.capabilities : (prototype?.capabilities || [])),
-      tools: sanitizeProviderTools(rawConfiguration.tools),
+      tools: sanitizeProviderTools(resolvedProviderTools),
       toolSelections: Array.isArray(rawConfiguration.toolSelections) ? rawConfiguration.toolSelections : (Array.isArray(instance.toolSelections) ? instance.toolSelections : (prototype?.toolSelections || [])),
       historyConfig: rawConfiguration.historyConfig || instance.historyConfig || prototype?.historyConfig || {},
       outputConfig: rawConfiguration.outputConfig || instance.outputConfig || prototype?.outputConfig || {},
@@ -179,7 +185,9 @@ const mapInstanceToAgentInstance = (instance: any, workflowId?: string, prototyp
   isMinimized: instance.isMinimized || false,
   isMaximized: instance.isMaximized || false,
   workflowId: instance.workflowId || workflowId,
-  persistenceConfig: instance.persistenceConfig,
+  persistenceConfig: instance.persistenceConfig
+    ? normalizePersistenceConfig(sanitizePersistenceConfigForApi(instance.persistenceConfig) ?? instance.persistenceConfig)
+    : undefined,
   configuration_json: buildInstanceConfiguration(instance, prototype)
 });
 
@@ -238,7 +246,7 @@ const mapInstanceToV2Node = (instance: any, workflowId: string | undefined, prot
  * Must be wrapped by AuthProvider to access useAuth()
  */
 export function AppContent() {
-  const { isAuthenticated, accessToken, runtimeLLMConfigs, localLLMProfiles, user, logout, refreshRuntimeConfigState, sessionStatus, error: authError } = useAuth();
+  const { isAuthenticated, accessToken, runtimeLLMConfigs, localLLMProfiles, user, logout, refreshRuntimeConfigState, sessionStatus, isLoading: authLoading, error: authError } = useAuth();
   const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
   const [isAgentModalOpen, setAgentModalOpen] = useState(false);
   const [isLoginModalOpen, setLoginModalOpen] = useState(false);
@@ -271,11 +279,12 @@ export function AppContent() {
   const { t } = useLocalization();
 
   const llmConfigs = runtimeLLMConfigs;
-  const { sessionReadyForWorkspaceHydration } = getWorkspaceSessionGateState({
+  const { sessionReadyForWorkspaceHydration, awaitingStableAuthenticatedSession } = getWorkspaceSessionGateState({
     isAuthenticated,
     accessToken,
     sessionStatus,
-    userId: user?.id ?? null
+    userId: user?.id ?? null,
+    authLoading,
   });
 
   // ⭐ ÉTAPE 5: Hydration state for authenticated users
@@ -1490,9 +1499,9 @@ export function AppContent() {
 
         {/* ⭐ ÉTAPE 5: Hydration Overlay - Blur Racing Style (login only) */}
         <HydrationOverlay 
-          isLoading={isHydrating} 
-          progress={hydrationProgress}
-          message={hydrationMessage}
+          isLoading={isHydrating || awaitingStableAuthenticatedSession}
+          progress={isHydrating ? hydrationProgress : 10}
+          message={isHydrating ? hydrationMessage : 'Stabilisation de la session...'}
         />
 
         <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">

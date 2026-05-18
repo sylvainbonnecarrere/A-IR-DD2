@@ -166,6 +166,7 @@ export const useAgentChat = ({
             llmProvider: agent.llmProvider,
             modelUsed: agent.model,
             ...(userMessage.image ? { imageBase64: userMessage.image } : {}),
+            ...(userMessage.fileContent ? { fileContent: userMessage.fileContent } : {}),
             ...(userMessage.mimeType ? { mimeType: userMessage.mimeType } : {}),
             ...(userMessage.filename ? { fileName: userMessage.filename } : {}),
         });

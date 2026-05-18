@@ -37,6 +37,31 @@ const generateMessageId = (suffix?: string): string => {
     return id;
 };
 
+let pendingAttachmentCounter = 0;
+const generatePendingAttachmentId = (): string => `draft-${Date.now()}-${++pendingAttachmentCounter}`;
+
+const TEXT_LIKE_MIME_TYPES = new Set([
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/x-javascript',
+  'application/x-yaml',
+  'application/yaml',
+]);
+
+function isTextLikeFile(file: File): boolean {
+  const mimeType = file.type?.toLowerCase() || '';
+  if (mimeType.startsWith('text/')) {
+    return true;
+  }
+
+  if (TEXT_LIKE_MIME_TYPES.has(mimeType)) {
+    return true;
+  }
+
+  return /\.(txt|md|csv|json|ya?ml|xml|html?|js|jsx|ts|tsx)$/i.test(file.name);
+}
+
 // Temporary minimize icon
 const MinimizeIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
@@ -300,6 +325,9 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     setNodeExecuting,
     llmConfigs,
     localLLMProfiles,
+    getNodePendingAttachment = () => null,
+    setNodePendingAttachment = () => undefined,
+    clearNodePendingAttachment = () => undefined,
     getNodeInvisibleHistorySummary = () => null,
     setNodeInvisibleHistorySummary = () => undefined,
   } = useRuntimeStore();
@@ -383,10 +411,10 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
   // C1 FIX: Auth token pour les appels sandbox (requireAuth)
   const { accessToken } = useAuth();
+  const pendingAttachment = getNodePendingAttachment(id);
 
   // Local states
   const [userInput, setUserInput] = useState('');
-  const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [isHistorySynthesisActive, setIsHistorySynthesisActive] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -652,7 +680,8 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedInput = userInput.trim();
-    if (!trimmedInput && !attachedFile) return;
+    const activeAttachment = getNodePendingAttachment(id);
+    if (!trimmedInput && !activeAttachment) return;
 
     // Protection null safety pour agent
     if (!agent) {
@@ -671,25 +700,26 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     };
 
     // Handle file attachment
-    if (attachedFile) {
-      userMessage.filename = attachedFile.name;
-      userMessage.mimeType = attachedFile.type;
+    if (activeAttachment) {
+      userMessage.filename = activeAttachment.fileName;
+      userMessage.mimeType = activeAttachment.mimeType;
 
-      if (effectiveAgent.llmProvider === LLMProvider.Mistral) {
-        try {
-          userMessage.fileContent = await fileToText(attachedFile);
-        } catch (err) {
-          userMessage.image = await fileToBase64(attachedFile);
-        }
+      if (effectiveAgent.llmProvider === LLMProvider.Mistral && activeAttachment.textContent) {
+        userMessage.fileContent = activeAttachment.textContent;
       } else {
-        userMessage.image = await fileToBase64(attachedFile);
+        userMessage.image = activeAttachment.base64Content;
       }
     }
 
     addNodeMessage(id, userMessage);
     setUserInput('');
-    setAttachedFile(null);
+    clearNodePendingAttachment(id);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
     pendingLocalToolMessageIdsRef.current = {};
+
+    const shouldPersistInlineAttachment = !activeAttachment?.draftPersisted;
 
     // Persist user message to journal (non-blocking)
     // ⭐ FIX QA: Include image data for persistence if present
@@ -700,7 +730,8 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
       llmProvider: effectiveAgent.llmProvider,
       modelUsed: effectiveAgent.model,
       // ⭐ FIX QA: Persist image data for reload after login
-      ...(userMessage.image && { imageBase64: userMessage.image }),
+      ...(shouldPersistInlineAttachment && userMessage.image && { imageBase64: userMessage.image }),
+      ...(shouldPersistInlineAttachment && userMessage.fileContent && { fileContent: userMessage.fileContent }),
       ...(userMessage.mimeType && { mimeType: userMessage.mimeType }),
       ...(userMessage.filename && { fileName: userMessage.filename })
     });
@@ -1201,10 +1232,37 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setAttachedFile(file);
+    if (!file) {
+      return;
+    }
+
+    try {
+      const base64Content = await fileToBase64(file);
+      let textContent: string | undefined;
+
+      if (isTextLikeFile(file)) {
+        try {
+          textContent = await fileToText(file);
+        } catch (error) {
+          console.warn(`[V2AgentNode ${id}] Failed to read text upload as UTF-8, keeping base64 only`, error);
+        }
+      }
+
+      setNodePendingAttachment(id, {
+        id: generatePendingAttachmentId(),
+        file,
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        base64Content,
+        textContent,
+        origin: 'llm_file_upload',
+        createdAt: new Date(),
+        draftPersisted: false,
+      });
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -1710,12 +1768,12 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           <div className="p-3 border-t border-gray-700 nodrag">
             <form onSubmit={handleSendMessage} className="space-y-2">
               {/* File attachment preview */}
-              {attachedFile && (
+              {pendingAttachment && (
                 <div className="flex items-center justify-between bg-gray-700 p-2 rounded text-xs">
-                  <span>📎 {attachedFile.name}</span>
+                  <span>📎 {pendingAttachment.fileName}</span>
                   <button
                     type="button"
-                    onClick={() => setAttachedFile(null)}
+                    onClick={() => clearNodePendingAttachment(id)}
                     className="text-red-400 hover:text-red-300"
                   >
                     ×
@@ -1905,11 +1963,11 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
                     type="submit"
                     variant="ghost"
                     className={`p-2 h-8 w-8 transition-all duration-200 rounded-md
-                                hover:scale-110 active:scale-95 ${isLoading || (!userInput.trim() && !attachedFile)
+                                hover:scale-110 active:scale-95 ${isLoading || (!userInput.trim() && !pendingAttachment)
                         ? 'text-gray-500 cursor-not-allowed'
                         : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/20 hover:shadow-lg hover:shadow-cyan-500/40 laser-glow'
                       }`}
-                    disabled={isLoading || (!userInput.trim() && !attachedFile)}
+                    disabled={isLoading || (!userInput.trim() && !pendingAttachment)}
                   >
                     <SendIcon width={14} height={14} />
                   </Button>

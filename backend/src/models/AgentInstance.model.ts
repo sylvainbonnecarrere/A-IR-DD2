@@ -253,7 +253,10 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         _id: false
     }],
     // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)
-    legacyTools: [Schema.Types.Mixed],
+    legacyTools: {
+        type: [Schema.Types.Mixed],
+        default: undefined
+    },
     // ⭐ Tools V2: configuration d'héritage des fonctions depuis le prototype
     functionInheritance: {
         inheritFromPrototype: { type: Boolean, default: true },

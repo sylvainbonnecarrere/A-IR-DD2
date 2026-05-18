@@ -105,6 +105,29 @@ const deleteAgentInstanceQuerySchema = z.object({
     mediaPolicy: z.enum(['delete_media', 'orphan_media']).optional().default('delete_media')
 });
 
+const importedMediaDraftSchema = z.object({
+    attachmentId: z.string().min(1).max(160),
+    fileName: z.string().min(1).max(255),
+    mimeType: z.string().min(1).max(255),
+    contentBase64: z.string().min(1),
+    origin: z.string().min(1).max(64).optional(),
+});
+
+function buildDraftImportMessageId(origin: string | undefined, attachmentId: string): string {
+    const originSlug = (origin || 'unknown')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'unknown';
+
+    const attachmentSlug = attachmentId
+        .trim()
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'draft';
+
+    return `draft-import::${originSlug}::${attachmentSlug}`;
+}
+
 // GET /api/workflows/:workflowId/instances - Liste des instances
 router.get('/', requireAuth, async (req: Request<WorkflowParams>, res: Response) => {
     try {
@@ -308,6 +331,9 @@ router.post('/from-prototype', requireAuth,
           : ['Chat'];
         
         const finalTools = Array.isArray(prototype.tools) ? prototype.tools : [];
+        const finalLegacyTools = Array.isArray(configuration_json?.tools)
+            ? configuration_json.tools
+            : (Array.isArray((prototype as any).legacyTools) ? (prototype as any).legacyTools : []);
         const finalToolSelections = Array.isArray((prototype as any).toolSelections) && (prototype as any).toolSelections.length > 0
             ? (prototype as any).toolSelections
             : finalTools.map((toolId: mongoose.Types.ObjectId) => ({ toolId: toolId.toString() }));
@@ -372,6 +398,7 @@ router.post('/from-prototype', requireAuth,
             outputConfig: finalOutputConfig,  // ⭐ PHASE 2: From frontend configuration_json
             webSearchParams: finalWebSearchParams,
             tools: finalTools,
+            legacyTools: finalLegacyTools,
             toolSelections: finalToolSelections,
             robotId: finalRobotId,
             // ⭐ LOCAL LLM: Persist localLLMProfileId for correct endpoint resolution
@@ -543,6 +570,11 @@ router.put('/:id',
                 }
                 if (Array.isArray(configuration_json.toolSelections)) {
                     instance.toolSelections = configuration_json.toolSelections;
+                }
+                if (Array.isArray(configuration_json.tools)) {
+                    instance.legacyTools = configuration_json.tools;
+                } else if (Array.isArray(configuration_json.legacyTools)) {
+                    instance.legacyTools = configuration_json.legacyTools;
                 }
                 // ⭐ ARCHITECTURE NOTE — dual storage:
                 //   instance.tools (ObjectId[]) = stable tool IDs mirrored across legacy/cible
@@ -799,6 +831,75 @@ router.post(
         } catch (error) {
             console.error('[Journal] POST error:', error);
             res.status(500).json({ error: 'Failed to create journal entry' });
+        }
+    }
+);
+
+router.post(
+    '/:agentInstanceId/imported-media',
+    requireAuth,
+    requireOwnershipAsync(async (req) => {
+        const instance = await AgentInstance.findById(req.params.agentInstanceId);
+        return instance?.userId.toString() || null;
+    }),
+    validateRequest(importedMediaDraftSchema),
+    async (req: Request, res: Response) => {
+        try {
+            const { workflowId, agentInstanceId } = req.params as WorkflowParams & { agentInstanceId: string };
+            const { attachmentId, fileName, mimeType, contentBase64, origin } = req.body as z.infer<typeof importedMediaDraftSchema>;
+            const user = req.user as IUser;
+
+            const instance = await AgentInstance.findById(agentInstanceId);
+            if (!instance) {
+                return res.status(404).json({ error: 'Agent instance not found' });
+            }
+
+            if (instance.userId.toString() !== user.id) {
+                return res.status(403).json({ error: 'Unauthorized - user does not own this instance' });
+            }
+
+            if (workflowId && instance.workflowId.toString() !== workflowId) {
+                return res.status(400).json({ error: 'workflowId mismatch for imported media' });
+            }
+
+            const fileBuffer = Buffer.from(contentBase64, 'base64');
+            if (fileBuffer.length === 0) {
+                return res.status(400).json({ error: 'Imported media payload is empty' });
+            }
+
+            const result = await journalService.logMedia({
+                instanceId: agentInstanceId,
+                userId: user.id,
+                workflowId: instance.workflowId.toString(),
+                file: fileBuffer,
+                metadata: {
+                    originalName: fileName,
+                    mimeType,
+                    size: fileBuffer.length,
+                    generatedBy: instance.name,
+                },
+                correlationIds: {
+                    messageId: buildDraftImportMessageId(origin, attachmentId),
+                },
+            });
+
+            if (!result.success) {
+                return res.status(500).json({ error: result.error || 'Failed to import media draft' });
+            }
+
+            if (!result.saved) {
+                return res.status(200).json({
+                    skipped: true,
+                    reason: result.reason,
+                    ...(result.existingEntryId ? { existingJournalId: result.existingEntryId } : {}),
+                });
+            }
+
+            console.log(`[Journal] Imported media draft for instance ${agentInstanceId}`);
+            return res.status(200).json({ success: true, journalId: result.entryId });
+        } catch (error) {
+            console.error('[Journal] Imported media draft POST error:', error);
+            return res.status(500).json({ error: 'Failed to import media draft' });
         }
     }
 );

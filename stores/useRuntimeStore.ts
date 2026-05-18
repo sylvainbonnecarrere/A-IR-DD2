@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ChatMessage, InvisibleHistorySummaryState, LLMConfig, LLMProvider, LocalLLMProfile } from '../types';
+import { ChatMessage, InvisibleHistorySummaryState, LLMConfig, LLMProvider, LocalLLMProfile, PendingNodeAttachment } from '../types';
 
 const isDevelopmentEnvironment = process.env.NODE_ENV !== 'production';
 
@@ -11,6 +11,7 @@ const isDevelopmentEnvironment = process.env.NODE_ENV !== 'production';
 interface RuntimeStore {
   // Chat & Execution State
   nodeMessages: Record<string, ChatMessage[]>; // nodeId -> messages[]
+  nodePendingAttachments: Record<string, PendingNodeAttachment | null>;
   nodeInvisibleHistorySummaries: Record<string, InvisibleHistorySummaryState | null>;
   executingNodes: Set<string>; // nodeIds currently executing
 
@@ -49,6 +50,9 @@ interface RuntimeStore {
   addNodeMessage: (nodeId: string, message: ChatMessage) => void;
   updateNodeMessage: (nodeId: string, messageId: string, updates: Partial<ChatMessage>) => void;
   clearNodeMessages: (nodeId: string) => void;
+  setNodePendingAttachment: (nodeId: string, attachment: PendingNodeAttachment | null) => void;
+  updateNodePendingAttachment: (nodeId: string, updates: Partial<PendingNodeAttachment>) => void;
+  clearNodePendingAttachment: (nodeId: string) => void;
   setNodeInvisibleHistorySummary: (nodeId: string, summaryState: InvisibleHistorySummaryState | null) => void;
   getNodeInvisibleHistorySummary: (nodeId: string) => InvisibleHistorySummaryState | null;
 
@@ -78,6 +82,7 @@ interface RuntimeStore {
 
   // Utility
   getNodeMessages: (nodeId: string) => ChatMessage[];
+  getNodePendingAttachment: (nodeId: string) => PendingNodeAttachment | null;
   isNodeExecuting: (nodeId: string) => boolean;
   getIsNodeMinimized: (nodeId: string) => boolean;
   
@@ -91,6 +96,7 @@ interface RuntimeStore {
 export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   // Initial state
   nodeMessages: {},
+  nodePendingAttachments: {},
   nodeInvisibleHistorySummaries: {},
   executingNodes: new Set(),
   llmConfigs: [],
@@ -131,6 +137,37 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   clearNodeMessages: (nodeId) => set((state) => ({
     nodeMessages: { ...state.nodeMessages, [nodeId]: [] },
     nodeInvisibleHistorySummaries: { ...state.nodeInvisibleHistorySummaries, [nodeId]: null }
+  })),
+
+  setNodePendingAttachment: (nodeId, attachment) => set((state) => ({
+    nodePendingAttachments: {
+      ...state.nodePendingAttachments,
+      [nodeId]: attachment,
+    }
+  })),
+
+  updateNodePendingAttachment: (nodeId, updates) => set((state) => {
+    const currentAttachment = state.nodePendingAttachments[nodeId];
+    if (!currentAttachment) {
+      return state;
+    }
+
+    return {
+      nodePendingAttachments: {
+        ...state.nodePendingAttachments,
+        [nodeId]: {
+          ...currentAttachment,
+          ...updates,
+        }
+      }
+    };
+  }),
+
+  clearNodePendingAttachment: (nodeId) => set((state) => ({
+    nodePendingAttachments: {
+      ...state.nodePendingAttachments,
+      [nodeId]: null,
+    }
   })),
 
   setNodeInvisibleHistorySummary: (nodeId, summaryState) => set((state) => ({
@@ -212,6 +249,11 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     return state.nodeMessages[nodeId] || [];
   },
 
+  getNodePendingAttachment: (nodeId) => {
+    const state = get();
+    return state.nodePendingAttachments[nodeId] || null;
+  },
+
   getNodeInvisibleHistorySummary: (nodeId) => {
     const state = get();
     return state.nodeInvisibleHistorySummaries[nodeId] || null;
@@ -288,6 +330,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
    */
   resetAll: () => set({
     nodeMessages: {},
+    nodePendingAttachments: {},
     nodeInvisibleHistorySummaries: {},
     executingNodes: new Set(),
     minimizedNodeIds: new Set(), // ⭐ RESET: Restore à normal
@@ -316,6 +359,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     const currentProfiles = get().localLLMProfiles;
     set({
       nodeMessages: {},
+      nodePendingAttachments: {},
       nodeInvisibleHistorySummaries: {},
       executingNodes: new Set(),
       minimizedNodeIds: new Set(),
