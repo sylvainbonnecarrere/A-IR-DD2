@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentFormModal } from '../../components/modals/AgentFormModal';
 import { AgentConfigurationModal } from '../../components/modals/AgentConfigurationModal';
 import { LLMCapability, LLMProvider, RobotId, type LLMConfig } from '../../types';
+import { useAuth } from '../../hooks/useAuth';
 import type { UserFunction } from '../../types/function.types';
 
 let runtimeStoreState: Record<string, unknown>;
@@ -11,6 +12,8 @@ let designStoreState: Record<string, unknown>;
 const mockSetConfigModalInstanceId = jest.fn();
 const mockUpdateInstanceConfig = jest.fn();
 const mockUpdateAgentInstance = jest.fn();
+const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
+const originalFetch = global.fetch;
 
 jest.mock('../../hooks/useLocalization', () => ({
     useLocalization: jest.fn(() => ({
@@ -51,11 +54,17 @@ jest.mock('../../stores/useFunctionStore', () => ({
     )),
 }));
 
-jest.mock('../../stores/useDesignStore', () => ({
-    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
+jest.mock('../../stores/useDesignStore', () => {
+    const useDesignStore = jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
         selector ? selector(designStoreState) : designStoreState
-    )),
-}));
+    ));
+
+    Object.assign(useDesignStore, {
+        getState: jest.fn(() => designStoreState),
+    });
+
+    return { useDesignStore };
+});
 
 jest.mock('../../components/FunctionSelector', () => ({
     FunctionSelector: ({
@@ -145,6 +154,12 @@ const availableFunction: UserFunction = {
 describe('Archi tool selection modals', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        global.fetch = originalFetch;
+        mockUseAuth.mockReturnValue({
+            user: null,
+            accessToken: null,
+            isAuthenticated: false,
+        } as ReturnType<typeof useAuth>);
         runtimeStoreState = {
             llmConfigs: [],
             localLLMProfiles: [],
@@ -166,8 +181,14 @@ describe('Archi tool selection modals', () => {
                     model: 'gemini-2.5-flash',
                     llmProvider: LLMProvider.Gemini,
                     systemPrompt: 'Analyse les donnees',
-                    capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
-                    tools: [],
+                    capabilities: [LLMCapability.Chat, LLMCapability.ImageGeneration],
+                    tools: [
+                        {
+                            name: 'provider_web_search',
+                            description: 'Searches the web through the provider tool API.',
+                            parameters: { type: 'object' },
+                        },
+                    ],
                     logs: [],
                     errors: [],
                     tasks: [],
@@ -182,18 +203,29 @@ describe('Archi tool selection modals', () => {
                 model: 'gemini-2.5-flash',
                 llmProvider: LLMProvider.Gemini,
                 systemPrompt: 'Analyse les donnees',
-                capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
-                tools: [],
+                capabilities: [LLMCapability.Chat, LLMCapability.ImageGeneration],
+                tools: [
+                    {
+                        name: 'provider_web_search',
+                        description: 'Searches the web through the provider tool API.',
+                        parameters: { type: 'object' },
+                    },
+                ],
                 functionIds: ['legacy-weather'],
                 toolSelections: [{ toolId: 'tool.weather' }],
             },
         };
 
         designStoreState = {
+            currentRobotId: RobotId.Archi,
             getResolvedInstance: jest.fn(() => resolvedInstance),
             updateInstanceConfig: mockUpdateInstanceConfig,
             updateAgentInstance: mockUpdateAgentInstance,
         };
+    });
+
+    afterAll(() => {
+        global.fetch = originalFetch;
     });
 
     it('saves canonical tool selections from AgentFormModal', () => {
@@ -311,11 +343,10 @@ describe('Archi tool selection modals', () => {
         );
     });
 
-    it('saves canonical override tool selections from AgentConfigurationModal', async () => {
+    it('keeps canonical tool selections aligned with the prototype when the application block stays unchanged', async () => {
         render(<AgentConfigurationModal llmConfigs={llmConfigs} />);
 
         fireEvent.click(screen.getByText('agentConfig_tab_functions'));
-        fireEvent.click(screen.getByLabelText('Hériter les fonctions du prototype'));
         fireEvent.click(screen.getByText('select-canonical-tool'));
         fireEvent.click(screen.getByText('agentConfig_saveButton'));
 
@@ -324,18 +355,9 @@ describe('Archi tool selection modals', () => {
                 'instance-1',
                 expect.objectContaining({
                     functionInheritance: {
-                        inheritFromPrototype: false,
-                        overrideFunctionIds: ['tool.weather'],
-                        overrideToolSelections: [
-                            {
-                                toolId: 'tool.weather',
-                                versionRef: {
-                                    versionTag: 'v3',
-                                    versionNumber: 3,
-                                    workspaceId: 'ws-1',
-                                },
-                            },
-                        ],
+                        inheritFromPrototype: true,
+                        overrideFunctionIds: [],
+                        overrideToolSelections: [],
                     },
                     toolSelections: [
                         {
@@ -350,6 +372,117 @@ describe('Archi tool selection modals', () => {
                 })
             );
             expect(mockSetConfigModalInstanceId).toHaveBeenCalledWith(null);
+        });
+    });
+
+    it('renders explicit application-native and provider-cloud families in AgentConfigurationModal', () => {
+        render(<AgentConfigurationModal llmConfigs={llmConfigs} />);
+
+        fireEvent.click(screen.getByText('agentConfig_tab_functions'));
+
+        expect(screen.getByText('Fonctions natives/custom application')).toBeInTheDocument();
+        expect(screen.getByText('Fonctions provider/cloud')).toBeInTheDocument();
+        expect(screen.queryByLabelText('Hériter les fonctions applicatives du prototype')).not.toBeInTheDocument();
+        expect(screen.getByText('Function Calling')).toBeInTheDocument();
+        expect(screen.getByText('File Analysis')).toBeInTheDocument();
+        expect(screen.getByText('URL Analysis')).toBeInTheDocument();
+        expect(screen.getByText('Web Search')).toBeInTheDocument();
+        expect(screen.getByText('Image Generation')).toBeInTheDocument();
+        expect(screen.getByText('Image Modification')).toBeInTheDocument();
+        expect(screen.getByText('Output Formatting')).toBeInTheDocument();
+        expect(screen.getByText('Video Generation')).toBeInTheDocument();
+        expect(screen.getByText('Maps Grounding')).toBeInTheDocument();
+        expect(screen.queryByText('provider_web_search')).not.toBeInTheDocument();
+        expect(screen.queryByText('Web Search Grounding')).not.toBeInTheDocument();
+        expect(screen.getByRole('checkbox', { name: 'Image Generation' })).toHaveAttribute('aria-checked', 'true');
+        expect(screen.getByRole('checkbox', { name: 'Function Calling' })).toHaveAttribute('aria-checked', 'false');
+        expect(screen.getByRole('checkbox', { name: 'File Analysis' })).toHaveAttribute('aria-checked', 'false');
+        expect(screen.getByRole('checkbox', { name: 'Web Search' })).toHaveAttribute('aria-checked', 'false');
+        expect(screen.getByRole('checkbox', { name: 'Image Modification' })).toHaveAttribute('aria-checked', 'false');
+        expect(screen.getByRole('checkbox', { name: 'Output Formatting' })).toHaveAttribute('aria-checked', 'false');
+    });
+
+    it('allows adding or removing provider functions from the full Gemini 2.5 Flash catalog', async () => {
+        render(<AgentConfigurationModal llmConfigs={llmConfigs} />);
+
+        fireEvent.click(screen.getByText('agentConfig_tab_functions'));
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Image Generation' }));
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Image Modification' }));
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Function Calling' }));
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Output Formatting' }));
+        fireEvent.click(screen.getByText('agentConfig_saveButton'));
+
+        await waitFor(() => {
+            expect(mockUpdateInstanceConfig).toHaveBeenCalledWith(
+                'instance-1',
+                expect.objectContaining({
+                    capabilities: expect.arrayContaining([
+                        LLMCapability.Chat,
+                        LLMCapability.FunctionCalling,
+                        LLMCapability.ImageModification,
+                        LLMCapability.OutputFormatting,
+                    ]),
+                }),
+            );
+        });
+
+        const savedConfig = mockUpdateInstanceConfig.mock.calls.at(-1)?.[1];
+        expect(savedConfig.capabilities).not.toContain(LLMCapability.ImageGeneration);
+    });
+
+    it('falls back to prototype LLM-native functions when the instance does not override capabilities', async () => {
+        designStoreState.getResolvedInstance = jest.fn(() => ({
+            instance: {
+                id: 'instance-db-1',
+                name: 'Agent instance',
+                prototypeId: 'agent-1',
+                position: { x: 10, y: 20 },
+                configuration_json: {
+                    role: 'Analyste',
+                    model: 'gemini-2.5-flash',
+                    llmProvider: LLMProvider.Gemini,
+                    systemPrompt: 'Analyse les donnees',
+                    tools: [
+                        {
+                            name: 'provider_web_search',
+                            description: 'Searches the web through the provider tool API.',
+                            parameters: { type: 'object' },
+                        },
+                    ],
+                    logs: [],
+                    errors: [],
+                    tasks: [],
+                    links: [],
+                },
+                persistenceConfig: undefined,
+            },
+            prototype: {
+                id: 'agent-1',
+                name: 'Prototype meteo',
+                role: 'Analyste',
+                model: 'gemini-2.5-flash',
+                llmProvider: LLMProvider.Gemini,
+                systemPrompt: 'Analyse les donnees',
+                capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling, LLMCapability.WebFetchTool],
+                tools: [
+                    {
+                        name: 'provider_web_search',
+                        description: 'Searches the web through the provider tool API.',
+                        parameters: { type: 'object' },
+                    },
+                ],
+                functionIds: ['legacy-weather'],
+                toolSelections: [{ toolId: 'tool.weather' }],
+            },
+        }));
+
+        render(<AgentConfigurationModal llmConfigs={llmConfigs} />);
+
+        fireEvent.click(screen.getByText('agentConfig_tab_functions'));
+
+        await waitFor(() => {
+            expect(screen.getByText('Web Fetch')).toBeInTheDocument();
+            expect(screen.queryByText('provider_web_search')).not.toBeInTheDocument();
         });
     });
 
@@ -413,5 +546,93 @@ describe('Archi tool selection modals', () => {
             expect(screen.getByLabelText('history_limit_active history_limit_sentence')).toBeChecked();
             expect(screen.getByLabelText('history_limit_active history_limit_message')).toBeChecked();
         });
+    });
+
+    it('sanitizes persistenceConfig before syncing an instance to the backend', async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                configuration_json: {
+                    role: 'Analyste',
+                    model: 'gemini-2.5-flash',
+                    llmProvider: LLMProvider.Gemini,
+                },
+            }),
+        });
+        global.fetch = fetchMock as unknown as typeof fetch;
+        mockUseAuth.mockReturnValue({
+            user: { id: 'user-1' },
+            accessToken: 'token-123',
+            isAuthenticated: true,
+        } as ReturnType<typeof useAuth>);
+
+        designStoreState.getResolvedInstance = jest.fn(() => ({
+            instance: {
+                id: 'instance-db-1',
+                name: 'Agent instance',
+                prototypeId: 'agent-1',
+                position: { x: 10, y: 20 },
+                configuration_json: {
+                    role: 'Analyste',
+                    model: 'gemini-2.5-flash',
+                    llmProvider: LLMProvider.Gemini,
+                    systemPrompt: 'Analyse les donnees',
+                    capabilities: [LLMCapability.Chat],
+                    logs: [],
+                    errors: [],
+                    tasks: [],
+                    links: [],
+                },
+                persistenceConfig: {
+                    saveChat: true,
+                    saveErrors: true,
+                    saveHistorySummary: false,
+                    saveLinks: false,
+                    saveTasks: false,
+                    saveMedia: true,
+                    mediaStorage: 'cloud',
+                    allowWorkspaceWrite: true,
+                    cloudConnectionProfileId: null,
+                    cloudStorageConfig: {
+                        provider: 's3',
+                        bucketName: 'legacy-bucket',
+                    },
+                    retentionDays: null,
+                },
+            },
+            prototype: {
+                id: 'agent-1',
+                name: 'Prototype meteo',
+                role: 'Analyste',
+                model: 'gemini-2.5-flash',
+                llmProvider: LLMProvider.Gemini,
+                systemPrompt: 'Analyse les donnees',
+                capabilities: [LLMCapability.Chat],
+                tools: [],
+                functionIds: ['legacy-weather'],
+                toolSelections: [{ toolId: 'tool.weather' }],
+            },
+        }));
+
+        render(<AgentConfigurationModal llmConfigs={llmConfigs} />);
+
+        fireEvent.change(screen.getByDisplayValue('Agent instance'), {
+            target: { value: 'Agent instance v2' },
+        });
+        fireEvent.click(screen.getByText('agentConfig_saveButton'));
+
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+        const [, options] = fetchMock.mock.calls[0];
+        const payload = JSON.parse(options.body as string);
+
+        expect(payload.persistenceConfig).toEqual(expect.objectContaining({
+            saveMedia: true,
+            mediaStorage: 'cloud',
+            allowWorkspaceWrite: true,
+        }));
+        expect(payload.persistenceConfig.cloudConnectionProfileId).toBeUndefined();
+        expect(payload.persistenceConfig.cloudStorageConfig).toBeUndefined();
+        expect(payload.persistenceConfig.retentionDays).toBeUndefined();
     });
 });

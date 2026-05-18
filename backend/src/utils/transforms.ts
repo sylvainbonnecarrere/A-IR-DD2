@@ -35,6 +35,7 @@ export function transformAgentInstanceForFrontend(instance: any) {
         systemPrompt,
         capabilities,
         tools,
+        legacyTools,
         toolSelections,
         historyConfig,
         outputConfig,
@@ -47,6 +48,7 @@ export function transformAgentInstanceForFrontend(instance: any) {
 
     // ⭐ FIX QA: Extract persistenceConfig from rest to include explicitly
     const { persistenceConfig, ...remaining } = rest;
+    const projectedProviderTools = Array.isArray(legacyTools) ? legacyTools : undefined;
     
     return {
         id: _id?.toString(),
@@ -55,7 +57,7 @@ export function transformAgentInstanceForFrontend(instance: any) {
         llmModel,
         systemPrompt,
         capabilities: capabilities || [],
-        tools: [],
+        tools: projectedProviderTools || [],
         toolSelections: toolSelections || [],
         historyConfig: historyConfig || {},
         outputConfig: outputConfig || {},
@@ -82,7 +84,7 @@ export function transformAgentInstanceForFrontend(instance: any) {
             llmProvider: llmProvider || 'openai',
             systemPrompt: systemPrompt || '',
             capabilities: Array.isArray(capabilities) ? capabilities : [],
-            tools: [],
+            ...(projectedProviderTools !== undefined ? { tools: projectedProviderTools } : {}),
             toolSelections: Array.isArray(toolSelections) ? toolSelections : [],
             historyConfig: historyConfig || {},
             outputConfig: outputConfig || {},

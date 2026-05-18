@@ -131,6 +131,31 @@ describe('BosMediaModal', () => {
     expect(screen.queryByText('Media du workflow')).not.toBeInTheDocument();
   });
 
+  it('opens cleanly after an initial closed render without changing hook order', async () => {
+    const { rerender } = render(
+      <BosMediaModal
+        isOpen={false}
+        workflowId="wf-1"
+        workflowName="Workflow Alpha"
+        onClose={jest.fn()}
+      />,
+    );
+
+    rerender(
+      <BosMediaModal
+        isOpen={true}
+        workflowId="wf-1"
+        workflowName="Workflow Alpha"
+        onClose={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('workspace-note.txt')).toBeInTheDocument();
+    expect(workflowMediaExplorerService.getWorkflowMedia).toHaveBeenCalledWith('wf-1', expect.objectContaining({
+      token: 'token-123',
+    }));
+  });
+
   it('renders a red icon-only close button with an accessible close label', async () => {
     const onClose = jest.fn();
 
@@ -177,6 +202,9 @@ describe('BosMediaModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cloud (1)' }));
     expect(await screen.findByText('cloud-note.txt')).toBeInTheDocument();
     expect(screen.getByText(/manual_detach/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Nom/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Type MIME/ })).toBeInTheDocument();
+    expect(screen.getByTestId('bos-media-table-scroll')).toBeInTheDocument();
   });
 
   it('offers an explicit orphan-only filter in BOS Media', async () => {
@@ -237,6 +265,7 @@ describe('BosMediaModal', () => {
 
     expect(await screen.findByText('Apercu actif')).toBeInTheDocument();
     expect(screen.getByText('preview payload')).toBeInTheDocument();
+    expect(screen.getByTestId('bos-media-preview-scroll')).toBeInTheDocument();
   });
 
   it('downloads a media item through the authenticated media endpoint', async () => {

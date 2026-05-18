@@ -789,8 +789,14 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
                             {cap === LLMCapability.Chat && '💬 Chat'}
                             {cap === LLMCapability.FunctionCalling && '🛠️ Functions'}
                             {cap === LLMCapability.OutputFormatting && '📋 JSON Mode'}
+                            {cap === LLMCapability.URLAnalysis && '🔗 URL Analysis'}
                             {cap === LLMCapability.Embedding && '🧮 Embeddings'}
                             {cap === LLMCapability.ImageGeneration && '🎨 Images'}
+                            {cap === LLMCapability.ImageModification && '🖼️ Image Edit'}
+                            {cap === LLMCapability.WebSearch && '🔎 Web Search'}
+                            {cap === LLMCapability.VideoGeneration && '🎬 Video'}
+                            {cap === LLMCapability.MapsGrounding && '🗺️ Maps'}
+                            {cap === LLMCapability.WebSearchGrounding && '🌐 Web Grounding'}
                             {cap === LLMCapability.OCR && '🔍 OCR'}
                             {cap === LLMCapability.CodeSpecialization && '💻 Code'}
                             {cap === LLMCapability.ExtendedThinking && '💭 Extended Thinking'}
@@ -1013,10 +1019,20 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
             </div>
           )}
           {activeTab === 'fonctions' && (
-            <FunctionSelector
-              selectedToolSelections={selectedToolSelections}
-              onChangeToolSelections={setSelectedToolSelections}
-            />
+            <div className="rounded-lg border border-gray-700 bg-gray-900/50 p-4 h-full">
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-white">Fonctions natives/custom application</h3>
+                <p className="mt-1 text-xs text-gray-400">
+                  Fonctions versionnees issues de Phil et persistees via toolSelections.
+                </p>
+              </div>
+              <div className="max-h-[34rem] overflow-y-auto pr-2">
+                <FunctionSelector
+                  selectedToolSelections={selectedToolSelections}
+                  onChangeToolSelections={setSelectedToolSelections}
+                />
+              </div>
+            </div>
           )}
         </div>
 

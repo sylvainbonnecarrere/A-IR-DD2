@@ -464,6 +464,220 @@ describe('Agent instance journal route centralization', () => {
         }));
     });
 
+    it('catalogs inline text file attachments when chat payload uses fileContent', async () => {
+        const user = await User.create({
+            email: `agent-instance-journal-text-file-${Date.now()}@test.com`,
+            password: 'hashedpassword12345',
+            username: `agentinstancejournaltextfile${Date.now()}`
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Journal Route Text File Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `exec-route-text-file-${Date.now()}`,
+            status: 'running',
+            name: 'Journal Route Text File Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'local'
+            }
+        });
+
+        await request(app)
+            .post(`/api/workflows/${workflow.id}/instances/${instance.id}/journal`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                type: 'chat',
+                payload: {
+                    role: 'user',
+                    content: 'Lis ce fichier texte',
+                    messageId: 'journal-chat-text-file-1',
+                    fileContent: 'Bonjour depuis le fichier texte',
+                    mimeType: 'text/plain',
+                    fileName: 'notes.txt'
+                }
+            })
+            .expect(200);
+
+        const mediaJournal = await AgentJournal.findOne({
+            agentInstanceId: instance._id,
+            type: 'media',
+            'payload.messageId': 'chat-media::journal-chat-text-file-1'
+        }).lean();
+        expect(mediaJournal).not.toBeNull();
+        expect(mediaJournal?.payload).toEqual(expect.objectContaining({
+            mimeType: 'text/plain',
+            storageMode: 'local'
+        }));
+
+        const mediaReference = await MediaReference.findOne({
+            agentInstanceId: instance._id,
+            originalName: 'notes.txt'
+        }).lean();
+        expect(mediaReference).not.toBeNull();
+        expect(mediaReference).toEqual(expect.objectContaining({
+            primaryStorageMode: 'workspace',
+            mimeType: 'text/plain',
+            isOrphan: false,
+        }));
+    });
+
+    it('imports a pending text file draft as workspace media without forcing a chat entry', async () => {
+        const user = await User.create({
+            email: `agent-instance-journal-draft-import-${Date.now()}@test.com`,
+            password: 'hashedpassword12345',
+            username: `agentinstancejournaldraftimport${Date.now()}`
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Journal Route Draft Import Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `exec-route-draft-import-${Date.now()}`,
+            status: 'running',
+            name: 'Journal Route Draft Import Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'local'
+            }
+        });
+
+        const draftPayload = {
+            attachmentId: 'draft-file-1',
+            fileName: 'draft-notes.txt',
+            mimeType: 'text/plain',
+            contentBase64: Buffer.from('Contenu en attente de sauvegarde', 'utf8').toString('base64'),
+            origin: 'llm_file_upload'
+        };
+
+        await request(app)
+            .post(`/api/workflows/${workflow.id}/instances/${instance.id}/imported-media`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send(draftPayload)
+            .expect(200)
+            .expect(({ body }) => {
+                expect(body).toEqual(expect.objectContaining({
+                    success: true,
+                    journalId: expect.any(String)
+                }));
+            });
+
+        const mediaJournal = await AgentJournal.findOne({
+            agentInstanceId: instance._id,
+            type: 'media',
+            'payload.messageId': 'draft-import::llm_file_upload::draft-file-1'
+        }).lean();
+        expect(mediaJournal).not.toBeNull();
+        expect(mediaJournal?.payload).toEqual(expect.objectContaining({
+            mimeType: 'text/plain',
+            storageMode: 'local',
+            fileName: expect.stringMatching(/draft-notes/i),
+            messageId: 'draft-import::llm_file_upload::draft-file-1'
+        }));
+
+        const chatEntry = await AgentJournal.findOne({
+            agentInstanceId: instance._id,
+            type: 'chat'
+        }).lean();
+        expect(chatEntry).toBeNull();
+
+        const mediaReference = await MediaReference.findOne({
+            agentInstanceId: instance._id,
+            originalName: 'draft-notes.txt'
+        }).lean();
+        expect(mediaReference).not.toBeNull();
+        expect(mediaReference).toEqual(expect.objectContaining({
+            primaryStorageMode: 'workspace',
+            mimeType: 'text/plain',
+            createdByAgentName: 'Journal Route Draft Import Agent',
+            isOrphan: false,
+        }));
+
+        await request(app)
+            .post(`/api/workflows/${workflow.id}/instances/${instance.id}/imported-media`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send(draftPayload)
+            .expect(200)
+            .expect(({ body }) => {
+                expect(body).toEqual(expect.objectContaining({
+                    skipped: true,
+                    reason: 'Duplicate messageId - entry already exists',
+                    existingJournalId: expect.any(String)
+                }));
+            });
+
+        expect(await AgentJournal.countDocuments({
+            agentInstanceId: instance._id,
+            type: 'media',
+            'payload.messageId': 'draft-import::llm_file_upload::draft-file-1'
+        })).toBe(1);
+    });
+
     it('backfills workspace media for a duplicate chat save when the legacy chat entry already exists without catalog media', async () => {
         const user = await User.create({
             email: `agent-instance-journal-legacy-media-${Date.now()}@test.com`,

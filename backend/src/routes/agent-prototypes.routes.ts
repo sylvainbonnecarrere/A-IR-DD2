@@ -40,6 +40,7 @@ function buildPrototypeResponse(prototype: any): Record<string, any> {
     const responseObj: Record<string, any> = prototype.toObject();
     responseObj.functionIds = (prototype.tools || []).map((id: any) => id.toString());
     responseObj.toolSelections = prototype.toolSelections || responseObj.functionIds.map((toolId: string) => ({ toolId }));
+    responseObj.tools = Array.isArray(prototype.legacyTools) ? prototype.legacyTools : [];
     const rawPersistenceConfig = prototype.persistenceConfig?.toObject?.() ?? prototype.persistenceConfig;
     responseObj.persistenceConfig = normalizePersistenceConfigForProduct(rawPersistenceConfig);
 

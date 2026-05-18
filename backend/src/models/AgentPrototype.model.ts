@@ -143,7 +143,10 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
     }],
     toolSelections: [ToolSelectionSchema],
     // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)
-    legacyTools: [Schema.Types.Mixed],
+    legacyTools: {
+        type: [Schema.Types.Mixed],
+        default: undefined
+    },
     outputConfig: Schema.Types.Mixed,
     robotId: {
         type: String,

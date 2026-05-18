@@ -22,6 +22,8 @@ describe('Simple Test - POST /from-prototype', () => {
     let token: string;
     let workflow: any;
     let prototype: any;
+    let workflowId: string;
+    let prototypeId: string;
 
     beforeAll(async () => {
         // Create user
@@ -33,13 +35,15 @@ describe('Simple Test - POST /from-prototype', () => {
 
         token = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
 
-        // Create workflow
+    }, 30000);
+
+    beforeEach(async () => {
         workflow = await Workflow.create({
             userId: user.id,
             name: 'Test Workflow'
         });
+        workflowId = workflow.id;
 
-        // Create prototype
         prototype = await AgentPrototype.create({
             userId: user.id,
             name: 'Test Proto',
@@ -49,7 +53,8 @@ describe('Simple Test - POST /from-prototype', () => {
             llmModel: 'gemini-2.0',
             robotId: 'AR_001'
         });
-    }, 30000);
+        prototypeId = prototype.id;
+    });
 
     afterAll(async () => {
         await User.deleteOne({ _id: user._id });
@@ -57,10 +62,10 @@ describe('Simple Test - POST /from-prototype', () => {
 
     it('POST /from-prototype should create instance', async () => {
         const res = await request(app)
-            .post(`/api/workflows/${workflow.id}/instances/from-prototype`)
+            .post(`/api/workflows/${workflowId}/instances/from-prototype`)
             .set('Authorization', `Bearer ${token}`)
             .send({
-                prototypeId: prototype.id,
+                prototypeId,
                 position: { x: 10, y: 20 }
             });
 
@@ -70,5 +75,85 @@ describe('Simple Test - POST /from-prototype', () => {
         expect(res.status).toBe(201);
         expect(res.body.id).toBeDefined();
         expect(res.body.name).toBe('Test Proto');
+    });
+
+    it('POST /from-prototype should preserve a workspace media override on the created instance', async () => {
+        await AgentPrototype.findByIdAndUpdate(prototypeId, {
+            $set: {
+                persistenceConfig: {
+                    saveChat: true,
+                    saveErrors: true,
+                    saveHistorySummary: false,
+                    saveLinks: false,
+                    saveTasks: false,
+                    saveMedia: true,
+                    allowWorkspaceWrite: false,
+                    mediaStorage: 'db',
+                }
+            }
+        });
+
+        const res = await request(app)
+            .post(`/api/workflows/${workflowId}/instances/from-prototype`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({
+                prototypeId,
+                position: { x: 30, y: 40 },
+                persistenceConfig: {
+                    saveMedia: true,
+                    mediaStorage: 'workspace',
+                    allowWorkspaceWrite: true,
+                },
+            });
+
+        expect(res.status).toBe(201);
+        expect(res.body.persistenceConfig).toEqual(expect.objectContaining({
+            saveMedia: true,
+            mediaStorage: 'workspace',
+            allowWorkspaceWrite: true,
+        }));
+    });
+
+    it('updates workspace media persistence after creating an instance from a prototype without media persistence config', async () => {
+        const creationResponse = await request(app)
+            .post(`/api/workflows/${workflowId}/instances/from-prototype`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({
+                prototypeId,
+                position: { x: 50, y: 60 }
+            })
+            .expect(201);
+
+        const updateResponse = await request(app)
+            .put(`/api/agent-instances/${creationResponse.body.id}`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({
+                name: 'Test Proto',
+                configuration_json: {
+                    role: 'Test',
+                    systemPrompt: 'Test prompt',
+                    llmProvider: 'Gemini',
+                    model: 'gemini-2.0',
+                    capabilities: ['Chat'],
+                    position: { x: 50, y: 60 }
+                },
+                persistenceConfig: {
+                    saveChat: true,
+                    saveErrors: true,
+                    saveHistorySummary: false,
+                    saveLinks: false,
+                    saveTasks: false,
+                    saveMedia: true,
+                    allowWorkspaceWrite: true,
+                    mediaStorage: 'workspace'
+                }
+            });
+
+        expect(updateResponse.status).toBe(200);
+        expect(updateResponse.body.persistenceConfig).toEqual(expect.objectContaining({
+            saveMedia: true,
+            mediaStorage: 'workspace',
+            allowWorkspaceWrite: true,
+        }));
     });
 });

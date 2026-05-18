@@ -202,6 +202,14 @@ export function toPersistedMediaStorageType(
 export function normalizePersistenceConfig(
   config?: Partial<PersistenceConfig> | null,
 ): PersistenceConfig {
+  const {
+    cloudConnectionProfileId: rawCloudConnectionProfileId,
+    cloudStorageConfig: rawCloudStorageConfig,
+    ...remainingConfig
+  } = (config || {}) as Partial<PersistenceConfig> & {
+    cloudConnectionProfileId?: string | null;
+    cloudStorageConfig?: CloudStorageConfig | null;
+  };
   const saveMedia = config?.saveMedia ?? defaultPersistenceConfig.saveMedia;
   const mediaStorage = normalizeMediaStorageType(config?.mediaStorage as any);
   const allowWorkspaceWrite = !saveMedia
@@ -209,13 +217,75 @@ export function normalizePersistenceConfig(
     : mediaStorage === 'workspace'
       ? true
       : (config?.allowWorkspaceWrite ?? true);
+  const cloudConnectionProfileId = typeof rawCloudConnectionProfileId === 'string'
+    && rawCloudConnectionProfileId.trim().length > 0
+      ? rawCloudConnectionProfileId
+      : undefined;
+  const cloudStorageConfig = rawCloudStorageConfig
+    && typeof rawCloudStorageConfig === 'object'
+    && typeof rawCloudStorageConfig.provider === 'string'
+      ? rawCloudStorageConfig
+      : undefined;
 
   return {
     ...defaultPersistenceConfig,
-    ...(config || {}),
+    ...remainingConfig,
     saveMedia,
     mediaStorage,
     allowWorkspaceWrite,
+    ...(cloudConnectionProfileId ? { cloudConnectionProfileId } : {}),
+    ...(cloudStorageConfig ? { cloudStorageConfig } : {}),
+  };
+}
+
+export interface PersistenceConfigApiPayload {
+  saveChat?: boolean;
+  saveChatHistory?: boolean;
+  saveErrors?: boolean;
+  saveHistorySummary?: boolean;
+  saveLinks?: boolean;
+  saveTasks?: boolean;
+  saveTaskExecution?: boolean;
+  saveMedia?: boolean;
+  mediaStorage?: MediaStorageType;
+  allowWorkspaceWrite?: boolean;
+  cloudConnectionProfileId?: string;
+  retentionDays?: number;
+}
+
+export function sanitizePersistenceConfigForApi(
+  config?: (Partial<PersistenceConfig> & {
+    saveChatHistory?: boolean | null;
+    saveTaskExecution?: boolean | null;
+    retentionDays?: number | null;
+    cloudConnectionProfileId?: string | null;
+    cloudStorageConfig?: CloudStorageConfig | null;
+  }) | null,
+): PersistenceConfigApiPayload | undefined {
+  if (!config) {
+    return undefined;
+  }
+
+  const normalized = normalizePersistenceConfig(config);
+  const retentionDays = typeof config.retentionDays === 'number'
+    && Number.isInteger(config.retentionDays)
+    && config.retentionDays > 0
+      ? config.retentionDays
+      : undefined;
+
+  return {
+    saveChat: normalized.saveChat,
+    ...(typeof config.saveChatHistory === 'boolean' ? { saveChatHistory: config.saveChatHistory } : {}),
+    saveErrors: normalized.saveErrors,
+    saveHistorySummary: normalized.saveHistorySummary,
+    saveLinks: normalized.saveLinks,
+    saveTasks: normalized.saveTasks,
+    ...(typeof config.saveTaskExecution === 'boolean' ? { saveTaskExecution: config.saveTaskExecution } : {}),
+    saveMedia: normalized.saveMedia,
+    mediaStorage: normalized.mediaStorage,
+    allowWorkspaceWrite: normalized.allowWorkspaceWrite,
+    ...(typeof normalized.cloudConnectionProfileId === 'string' ? { cloudConnectionProfileId: normalized.cloudConnectionProfileId } : {}),
+    ...(retentionDays !== undefined ? { retentionDays } : {}),
   };
 }
 
@@ -603,6 +673,19 @@ export interface ChatMessage {
 
   // 🆕 J9 — Tools V2 function call record (sender === 'tool')
   toolCallRecord?: ToolCallRecord;
+}
+
+export interface PendingNodeAttachment {
+  id: string;
+  file?: File;
+  fileName: string;
+  mimeType: string;
+  base64Content: string;
+  textContent?: string;
+  origin: 'llm_file_upload';
+  createdAt: Date;
+  draftPersisted?: boolean;
+  persistedAt?: Date;
 }
 
 export interface WorkflowNode {

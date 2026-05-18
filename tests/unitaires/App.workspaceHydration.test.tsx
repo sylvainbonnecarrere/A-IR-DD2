@@ -660,6 +660,54 @@ describe('App workspace hydration orchestration', () => {
         }));
     });
 
+    it('normalizes hydrated instance persistenceConfig before storing the workspace snapshot', async () => {
+        const workspaceWithInstancePersistenceConfig = {
+            ...workspacePayload,
+            agentInstances: [
+                {
+                    ...workspacePayload.agentInstances[0],
+                    persistenceConfig: {
+                        saveChat: true,
+                        saveErrors: true,
+                        saveHistorySummary: false,
+                        saveLinks: false,
+                        saveTasks: false,
+                        saveMedia: true,
+                        mediaStorage: 'local',
+                        allowWorkspaceWrite: true,
+                        cloudConnectionProfileId: null,
+                        cloudStorageConfig: {
+                            provider: 's3',
+                            bucketName: 'legacy-bucket',
+                        },
+                        retentionDays: null,
+                    },
+                }
+            ],
+        };
+
+        (apiClient.get as jest.Mock).mockResolvedValue({ data: workspaceWithInstancePersistenceConfig });
+
+        render(<App />);
+
+        await waitFor(() => expect(mockDesignStore.hydrateFromServer).toHaveBeenCalled());
+
+        const hydratedSnapshot = mockDesignStore.hydrateFromServer.mock.calls.at(-1)?.[0] as {
+            agentInstances: any[];
+        };
+
+        expect(hydratedSnapshot.agentInstances[0]).toEqual(expect.objectContaining({
+            persistenceConfig: expect.objectContaining({
+                saveMedia: true,
+                mediaStorage: 'workspace',
+                allowWorkspaceWrite: true,
+            }),
+        }));
+        expect(hydratedSnapshot.agentInstances[0].persistenceConfig.cloudConnectionProfileId).toBeUndefined();
+        expect(hydratedSnapshot.agentInstances[0].persistenceConfig.cloudStorageConfig).toBeUndefined();
+        expect(hydratedSnapshot.agentInstances[0].persistenceConfig.retentionDays).toBeUndefined();
+    });
+
     it('drops legacy tool id arrays from hydrated provider tool payloads after workspace refresh while preserving canonical selections', async () => {
         const workspaceWithLegacyToolIds = {
             ...workspacePayload,

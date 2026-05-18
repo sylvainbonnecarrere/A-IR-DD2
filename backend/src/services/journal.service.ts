@@ -306,11 +306,11 @@ export class JournalService {
             return;
         }
 
-        if (!payload.imageBase64 || !payload.mimeType) {
+        if (!payload.mimeType) {
             return;
         }
 
-        const inlineMediaBuffer = Buffer.from(payload.imageBase64, 'base64');
+        const inlineMediaBuffer = this.resolveInlineChatMediaBuffer(payload);
         if (inlineMediaBuffer.length === 0) {
             return;
         }
@@ -355,6 +355,18 @@ export class JournalService {
             : 'inline-chat-media';
 
         return `chat-upload-${messageSlug}.${this.resolveInlineChatMediaExtension(payload.mimeType)}`;
+    }
+
+    private resolveInlineChatMediaBuffer(payload: ChatJournalPayload): Buffer {
+        if (payload.imageBase64) {
+            return Buffer.from(payload.imageBase64, 'base64');
+        }
+
+        if (payload.fileContent) {
+            return Buffer.from(payload.fileContent, 'utf8');
+        }
+
+        return Buffer.alloc(0);
     }
 
     private resolveInlineChatMediaExtension(mimeType?: string): string {
