@@ -6,6 +6,7 @@ import type { UserToolRunLaunchContext } from '../../models/UserToolRun.model';
 import type { IUserToolRunArtifact } from '../../models/UserToolRun.model';
 import { deriveExecutionMetadataFromLegacyFunction } from '../../utils/userToolLegacyMapper';
 import { BuildService } from '../build.service';
+import { MediaCatalogService } from '../mediaCatalog.service';
 import { RuntimeHealthService } from '../runtimeHealth.service';
 import { UserToolRunService } from '../userToolRun.service';
 import { createWorkspaceManager } from '../workspace/WorkspaceManager';
@@ -37,6 +38,7 @@ export class ExecutionOrchestrator {
 
     private readonly runtimeHealthService = new RuntimeHealthService();
     private readonly buildService = new BuildService();
+    private readonly mediaCatalogService = new MediaCatalogService();
     private readonly userToolRunService = new UserToolRunService();
     private readonly workspaceManager = createWorkspaceManager();
     private readonly sandboxRunnerFactory = createSandboxRunnerFactory();
@@ -155,6 +157,15 @@ export class ExecutionOrchestrator {
                     });
                 }
 
+                await this.catalogOutputArtifacts({
+                    executionId,
+                    userId: request.userId,
+                    workflowId: request.fn.workflowId?.toString(),
+                    agentInstanceId: request.agentInstanceId,
+                    workspace: executionRequest.workspace,
+                    outputArtifacts,
+                });
+
                 console.info('[ExecutionOrchestrator] finished execution', {
                     executionId,
                     success: executionResult.success,
@@ -196,9 +207,45 @@ export class ExecutionOrchestrator {
                         }
                         : {})
                 });
+
+                await this.catalogOutputArtifacts({
+                    executionId,
+                    userId: request.userId,
+                    workflowId: request.fn.workflowId?.toString(),
+                    agentInstanceId: request.agentInstanceId,
+                    workspace: executionRequest.workspace,
+                    outputArtifacts,
+                });
+
                 throw error;
             }
         });
+    }
+
+    private async catalogOutputArtifacts(params: {
+        executionId: string;
+        userId: string;
+        workflowId?: string;
+        agentInstanceId?: string;
+        workspace: WorkspaceProvisioningResult | null;
+        outputArtifacts: IUserToolRunArtifact[];
+    }): Promise<void> {
+        if (!params.workspace || !params.workflowId || !params.agentInstanceId || params.outputArtifacts.length === 0) {
+            return;
+        }
+
+        try {
+            await this.mediaCatalogService.registerRuntimeOutputArtifacts({
+                userId: params.userId,
+                workflowId: params.workflowId,
+                agentInstanceId: params.agentInstanceId,
+                executionId: params.executionId,
+                workspaceOutputRoot: params.workspace.runtimeRoots.outputRoot,
+                artifacts: params.outputArtifacts,
+            });
+        } catch (error) {
+            console.warn('[ExecutionOrchestrator] Runtime artifact catalog projection skipped after error:', error);
+        }
     }
 
     private async buildExecutionRequest(input: ExecutionOrchestratorRequest & {

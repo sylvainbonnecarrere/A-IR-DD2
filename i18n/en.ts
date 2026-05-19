@@ -499,7 +499,7 @@ export default {
     // Page Titles & Descriptions
     page_dashboard_title: 'Dashboard - Workflow Map',
     page_dashboard_description: 'Global workflow map and project status overview',
-    bos_media_button: 'Media',
+    bos_media_button: 'File management',
     page_bos_supervision_title: 'Bos Supervision',
     page_bos_supervision_description: 'Supervision tools, debugging and cost monitoring',
     page_prototyping_title: 'Agent Prototyping',

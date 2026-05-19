@@ -32,10 +32,59 @@ type WorkflowMediaExplorerItem = {
     originalName: string;
     displayName: string;
     storageMode: 'db' | 'workspace' | 'cloud';
+    provenance?: 'user' | 'agent' | 'function' | 'import' | 'runtime_output' | null;
+    sourceExecutionId?: string | null;
     canonicalLocator: string;
     mimeType: string;
     size: number;
+    isOrphan: boolean;
+    orphanReason?: string | null;
 };
+
+type SandboxHealthResponse = {
+    capabilities?: {
+        run?: {
+            python?: boolean;
+        };
+    };
+};
+
+type ToolCreateResponse = {
+    tool?: {
+        id?: string;
+        _id?: string;
+    };
+};
+
+type SandboxRunResponse = {
+    success: boolean;
+    executionId?: string;
+    metadata?: {
+        artifacts?: Array<{
+            path: string;
+            kind: string;
+        }>;
+    };
+};
+
+const RUNTIME_ARTIFACT_TOOL_CODE = [
+    'import json',
+    'import os',
+    'from pathlib import Path',
+    '',
+    'def run(context, args):',
+    '    output_root = os.environ.get("PERSISTENT_WORKSPACE_OUTPUT_ROOT")',
+    '    if not output_root:',
+    '        raise RuntimeError("PERSISTENT_WORKSPACE_OUTPUT_ROOT missing")',
+    '    file_name = args.get("file_name") or f"{context.sessionId}.json"',
+    '    marker = args.get("marker") or "runtime-bos-e2e"',
+    '    artifact_dir = Path(output_root) / "e2e-runtime"',
+    '    artifact_dir.mkdir(parents=True, exist_ok=True)',
+    '    artifact_path = artifact_dir / file_name',
+    '    payload = {"marker": marker, "executionId": context.sessionId, "workflowId": context.workflowId}',
+    '    artifact_path.write_text(json.dumps(payload), encoding="utf-8")',
+    '    return payload',
+].join('\n');
 
 function buildQaEmail(): string {
     const stamp = Date.now();
@@ -167,6 +216,22 @@ async function waitForUserSettingsLoad(page: Page) {
     ));
 }
 
+async function gotoAndWaitForUserSettings(page: Page) {
+    await Promise.all([
+        waitForUserSettingsLoad(page),
+        page.goto('/'),
+    ]);
+}
+
+async function openWorkflowMediaModal(page: Page) {
+    await page.getByRole('button', { name: 'Gestion des fichiers' }).click();
+
+    const modal = page.getByRole('dialog');
+    await expect(modal).toBeVisible();
+    await expect(modal.getByText('Media du workflow')).toBeVisible();
+    return modal;
+}
+
 async function findExplorerItem(
     request: APIRequestContext,
     accessToken: string,
@@ -186,6 +251,49 @@ async function findExplorerItem(
 
     const payload = await response.json() as { data?: WorkflowMediaExplorerItem[] };
     return payload.data?.find((item) => item.originalName === fileName) ?? null;
+}
+
+async function isPythonSandboxExecutionReady(request: APIRequestContext, accessToken: string): Promise<boolean> {
+    const response = await request.get(`${BACKEND_URL}/api/sandbox/health`, {
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!response.ok()) {
+        return false;
+    }
+
+    const payload = await response.json() as SandboxHealthResponse;
+    return payload.capabilities?.run?.python === true;
+}
+
+async function createWorkflowScopedRuntimeTool(request: APIRequestContext, params: {
+    accessToken: string;
+    workflowId: string;
+    toolName: string;
+}): Promise<string> {
+    const response = await request.post(`${BACKEND_URL}/api/tools`, {
+        headers: {
+            Authorization: `Bearer ${params.accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        data: {
+            name: params.toolName,
+            description: 'Runtime smoke test tool that writes a JSON artifact to the workflow output root.',
+            runtime: 'python',
+            workflowId: params.workflowId,
+            codeInline: RUNTIME_ARTIFACT_TOOL_CODE,
+            tags: ['e2e', 'runtime', 'media'],
+            dependencies: [],
+        },
+    });
+    await expectOk(response, 'Create workflow-scoped runtime tool');
+
+    const payload = await response.json() as ToolCreateResponse;
+    const toolId = String(payload.tool?.id ?? payload.tool?._id ?? '');
+    expect(toolId).not.toBe('');
+    return toolId;
 }
 
 test.describe('Authenticated workspace media live', () => {
@@ -219,8 +327,7 @@ test.describe('Authenticated workspace media live', () => {
             window.localStorage.setItem('auth_data_v1', JSON.stringify(authData));
         }, fixture.authData);
 
-        await page.goto('/');
-        await waitForUserSettingsLoad(page);
+        await gotoAndWaitForUserSettings(page);
 
         await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
 
@@ -282,11 +389,7 @@ test.describe('Authenticated workspace media live', () => {
         await expectOk(mediaResponse, 'Fetch persisted media blob');
         expect(await mediaResponse.text()).toBe(fileContent);
 
-        await page.getByRole('button', { name: /^Media/ }).click();
-
-        const modal = page.getByRole('dialog');
-        await expect(modal).toBeVisible();
-        await expect(modal.getByText('Media du workflow')).toBeVisible();
+        const modal = await openWorkflowMediaModal(page);
         await expect(modal.getByText(fileName)).toBeVisible();
 
         const bosHookErrors = hookErrors.filter((message) => (
@@ -328,8 +431,7 @@ test.describe('Authenticated workspace media live', () => {
             window.localStorage.setItem('auth_data_v1', JSON.stringify(authData));
         }, fixture.authData);
 
-        await page.goto('/');
-        await waitForUserSettingsLoad(page);
+        await gotoAndWaitForUserSettings(page);
 
         await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
 
@@ -377,11 +479,7 @@ test.describe('Authenticated workspace media live', () => {
         await expectOk(mediaResponse, 'Fetch persisted db media blob');
         expect(await mediaResponse.text()).toBe(fileContent);
 
-        await page.getByRole('button', { name: /^Media/ }).click();
-
-        const modal = page.getByRole('dialog');
-        await expect(modal).toBeVisible();
-        await expect(modal.getByText('Media du workflow')).toBeVisible();
+        const modal = await openWorkflowMediaModal(page);
         await modal.getByRole('button', { name: /BDD/ }).click();
         await expect(modal.getByText(fileName)).toBeVisible();
 
@@ -425,8 +523,7 @@ test.describe('Authenticated workspace media live', () => {
             window.localStorage.setItem('auth_data_v1', JSON.stringify(authData));
         }, fixture.authData);
 
-        await page.goto('/');
-        await waitForUserSettingsLoad(page);
+        await gotoAndWaitForUserSettings(page);
 
         await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
         const saveButton = page.getByRole('button', { name: 'Save prototype workflow' });
@@ -486,11 +583,7 @@ test.describe('Authenticated workspace media live', () => {
         await expectOk(mediaResponse, 'Fetch manually saved draft media blob');
         expect(await mediaResponse.text()).toBe(fileContent);
 
-        await page.getByRole('button', { name: /^Media/ }).click();
-
-        const modal = page.getByRole('dialog');
-        await expect(modal).toBeVisible();
-        await expect(modal.getByText('Media du workflow')).toBeVisible();
+        const modal = await openWorkflowMediaModal(page);
         await expect(modal.getByText(fileName)).toBeVisible();
 
         const bosHookErrors = hookErrors.filter((message) => (
@@ -499,5 +592,289 @@ test.describe('Authenticated workspace media live', () => {
         ));
 
         expect(bosHookErrors).toEqual([]);
+    });
+
+    test('projects a real runtime artifact into BOS Media after authenticated sandbox execution', async ({ page, request }) => {
+        test.slow();
+
+        const stamp = Date.now();
+        const prototypeName = `Prototype Runtime ${stamp}`;
+        const instanceName = `Instance Runtime ${stamp}`;
+        const fileName = `runtime-artifact-${stamp}.json`;
+        const toolName = `runtime_media_${stamp}`;
+        const hookErrors: string[] = [];
+
+        const fixture = await createAuthenticatedWorkspaceFixture(request, {
+            prototypeName,
+            instanceName,
+            mediaStorage: 'workspace',
+        });
+
+        test.skip(
+            !(await isPythonSandboxExecutionReady(request, fixture.accessToken)),
+            'Python sandbox runtime is not ready in this environment.',
+        );
+
+        const toolId = await createWorkflowScopedRuntimeTool(request, {
+            accessToken: fixture.accessToken,
+            workflowId: fixture.workflowId,
+            toolName,
+        });
+
+        const runResponse = await request.post(`${BACKEND_URL}/api/sandbox/run`, {
+            headers: {
+                Authorization: `Bearer ${fixture.accessToken}`,
+                'Content-Type': 'application/json',
+            },
+            data: {
+                functionId: toolId,
+                agentInstanceId: fixture.instanceId,
+                testArgs: {
+                    file_name: fileName,
+                    marker: `runtime-bos-${stamp}`,
+                },
+            },
+        });
+        await expectOk(runResponse, 'Run workflow-scoped runtime tool');
+
+        const runPayload = await runResponse.json() as SandboxRunResponse;
+        expect(runPayload.success).toBe(true);
+        expect(runPayload.executionId).toBeTruthy();
+        expect(runPayload.metadata?.artifacts).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: `output/e2e-runtime/${fileName}`,
+            }),
+        ]));
+
+        await expect.poll(async () => {
+            const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
+            if (!item) {
+                return null;
+            }
+
+            return `${item.provenance ?? 'null'}:${item.sourceExecutionId ?? 'null'}`;
+        }, {
+            timeout: 20_000,
+            message: 'Expected the runtime artifact to be projected into BOS Media.',
+        }).toBe(`runtime_output:${runPayload.executionId}`);
+
+        const explorerItem = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
+        expect(explorerItem).not.toBeNull();
+        expect(explorerItem?.canonicalLocator).toContain(`workspace://output/e2e-runtime/${fileName}`);
+
+        page.on('pageerror', (error) => {
+            hookErrors.push(error.message);
+        });
+
+        page.on('console', (message) => {
+            if (message.type() === 'error') {
+                hookErrors.push(message.text());
+            }
+        });
+
+        await page.addInitScript((authData: StoredAuthData) => {
+            window.localStorage.setItem('auth_data_v1', JSON.stringify(authData));
+        }, fixture.authData);
+
+        await gotoAndWaitForUserSettings(page);
+
+        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
+        const modal = await openWorkflowMediaModal(page);
+        await expect(modal.getByText(fileName, { exact: true }).first()).toBeVisible();
+        await expect(modal.getByText('Artefact runtime')).toBeVisible();
+        await expect(modal.getByText(new RegExp(runPayload.executionId ?? ''))).toBeVisible();
+
+        const bosHookErrors = hookErrors.filter((message) => (
+            /change in the order of Hooks called by BosMediaModal/i.test(message)
+            || /Rendered more hooks than during the previous render/i.test(message)
+        ));
+
+        expect(bosHookErrors).toEqual([]);
+    });
+
+    test('keeps media visible as orphaned after deleting the instance with orphan_media', async ({ page, request }) => {
+        test.slow();
+
+        const stamp = Date.now();
+        const prototypeName = `Prototype Orphan ${stamp}`;
+        const instanceName = `Instance Orphan ${stamp}`;
+        const fileName = `orphan-proof-${stamp}.txt`;
+        const fileContent = `orphan e2e payload ${stamp}`;
+
+        const fixture = await createAuthenticatedWorkspaceFixture(request, {
+            prototypeName,
+            instanceName,
+            mediaStorage: 'workspace',
+        });
+
+        await page.addInitScript((authData: StoredAuthData) => {
+            window.localStorage.setItem('auth_data_v1', JSON.stringify(authData));
+        }, fixture.authData);
+
+        await gotoAndWaitForUserSettings(page);
+
+        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
+
+        const textarea = page.locator('textarea').first();
+        const fileInput = page.locator('input[type="file"]').first();
+
+        await textarea.fill('Conserve ce fichier pour verifier l orphelinisation.');
+        await fileInput.setInputFiles({
+            name: fileName,
+            mimeType: 'text/plain',
+            buffer: Buffer.from(fileContent, 'utf-8'),
+        });
+
+        const journalResponsePromise = page.waitForResponse((response) => (
+            response.url().includes(`/api/workflows/${fixture.workflowId}/instances/${fixture.instanceId}/journal`)
+            && response.request().method() === 'POST'
+        ));
+
+        await textarea.focus();
+        await textarea.press('Enter');
+
+        const journalResponse = await journalResponsePromise;
+        expect(journalResponse.ok()).toBeTruthy();
+
+        await expect.poll(async () => {
+            const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
+            return item?.mediaId ?? null;
+        }, {
+            timeout: 20_000,
+            message: 'Expected the uploaded text file to be indexed before orphan deletion.',
+        }).not.toBeNull();
+
+        const explorerItemBeforeDelete = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
+        expect(explorerItemBeforeDelete).not.toBeNull();
+
+        const deleteResponse = await request.delete(`${BACKEND_URL}/api/workflows/${fixture.workflowId}/instances/${fixture.instanceId}?mediaPolicy=orphan_media`, {
+            headers: {
+                Authorization: `Bearer ${fixture.accessToken}`,
+            },
+        });
+        expect(deleteResponse.ok(), `Delete instance with orphan_media failed with HTTP ${deleteResponse.status()}`).toBeTruthy();
+
+        const deletePayload = await deleteResponse.json() as {
+            mediaPolicy: string;
+            cascadeDelete?: {
+                mediaReferencesOrphaned?: number;
+            };
+        };
+
+        expect(deletePayload.mediaPolicy).toBe('orphan_media');
+        expect(deletePayload.cascadeDelete?.mediaReferencesOrphaned).toBeGreaterThanOrEqual(1);
+
+        await expect.poll(async () => {
+            const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
+            if (!item) {
+                return null;
+            }
+
+            return item.isOrphan ? item.orphanReason ?? 'orphan-without-reason' : null;
+        }, {
+            timeout: 20_000,
+            message: 'Expected the media to remain visible as orphaned after instance deletion.',
+        }).toBe('agent_deleted');
+
+        const explorerItemAfterDelete = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
+        expect(explorerItemAfterDelete).not.toBeNull();
+        expect(explorerItemAfterDelete?.isOrphan).toBe(true);
+        expect(explorerItemAfterDelete?.orphanReason).toBe('agent_deleted');
+
+        const mediaResponse = await request.get(`${BACKEND_URL}/api/media/${explorerItemBeforeDelete!.mediaId}`, {
+            headers: {
+                Authorization: `Bearer ${fixture.accessToken}`,
+            },
+        });
+        expect(mediaResponse.ok(), `Fetch orphaned media failed with HTTP ${mediaResponse.status()}`).toBeTruthy();
+        expect(await mediaResponse.text()).toBe(fileContent);
+    });
+
+    test('physically removes media after deleting the instance with delete_media', async ({ page, request }) => {
+        test.slow();
+
+        const stamp = Date.now();
+        const prototypeName = `Prototype Delete ${stamp}`;
+        const instanceName = `Instance Delete ${stamp}`;
+        const fileName = `delete-proof-${stamp}.txt`;
+        const fileContent = `delete e2e payload ${stamp}`;
+
+        const fixture = await createAuthenticatedWorkspaceFixture(request, {
+            prototypeName,
+            instanceName,
+            mediaStorage: 'workspace',
+        });
+
+        await page.addInitScript((authData: StoredAuthData) => {
+            window.localStorage.setItem('auth_data_v1', JSON.stringify(authData));
+        }, fixture.authData);
+
+        await gotoAndWaitForUserSettings(page);
+
+        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
+
+        const textarea = page.locator('textarea').first();
+        const fileInput = page.locator('input[type="file"]').first();
+
+        await textarea.fill('Conserve ce fichier pour verifier la suppression physique.');
+        await fileInput.setInputFiles({
+            name: fileName,
+            mimeType: 'text/plain',
+            buffer: Buffer.from(fileContent, 'utf-8'),
+        });
+
+        const journalResponsePromise = page.waitForResponse((response) => (
+            response.url().includes(`/api/workflows/${fixture.workflowId}/instances/${fixture.instanceId}/journal`)
+            && response.request().method() === 'POST'
+        ));
+
+        await textarea.focus();
+        await textarea.press('Enter');
+
+        const journalResponse = await journalResponsePromise;
+        expect(journalResponse.ok()).toBeTruthy();
+
+        await expect.poll(async () => {
+            const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
+            return item?.mediaId ?? null;
+        }, {
+            timeout: 20_000,
+            message: 'Expected the uploaded text file to be indexed before delete_media.',
+        }).not.toBeNull();
+
+        const explorerItemBeforeDelete = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
+        expect(explorerItemBeforeDelete).not.toBeNull();
+
+        const deleteResponse = await request.delete(`${BACKEND_URL}/api/workflows/${fixture.workflowId}/instances/${fixture.instanceId}?mediaPolicy=delete_media`, {
+            headers: {
+                Authorization: `Bearer ${fixture.accessToken}`,
+            },
+        });
+        expect(deleteResponse.ok(), `Delete instance with delete_media failed with HTTP ${deleteResponse.status()}`).toBeTruthy();
+
+        const deletePayload = await deleteResponse.json() as {
+            mediaPolicy: string;
+            cascadeDelete?: {
+                mediaReferencesDeleted?: number;
+            };
+        };
+
+        expect(deletePayload.mediaPolicy).toBe('delete_media');
+        expect(deletePayload.cascadeDelete?.mediaReferencesDeleted).toBeGreaterThanOrEqual(1);
+
+        await expect.poll(async () => {
+            const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
+            return item ?? null;
+        }, {
+            timeout: 20_000,
+            message: 'Expected the media to disappear from the explorer after delete_media.',
+        }).toBeNull();
+
+        const mediaResponse = await request.get(`${BACKEND_URL}/api/media/${explorerItemBeforeDelete!.mediaId}`, {
+            headers: {
+                Authorization: `Bearer ${fixture.accessToken}`,
+            },
+        });
+        expect(mediaResponse.status()).toBe(404);
     });
 });

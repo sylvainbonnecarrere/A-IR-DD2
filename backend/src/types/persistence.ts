@@ -26,6 +26,13 @@ export type MediaStorageMode = 'database' | 'local' | 'cloud';
 export type ProductMediaStorageType = 'db' | 'workspace' | 'cloud';
 export type PersistedMediaStorageType = 'db' | 'local' | 'cloud';
 
+export interface LegacyCloudStorageConfig {
+    provider?: 'aws' | 'gcs';
+    bucket?: string;
+    region?: string;
+    endpoint?: string;
+}
+
 export function normalizePersistedMediaStorage(
     value?: ProductMediaStorageType | PersistedMediaStorageType | MediaStorageMode | null
 ): ProductMediaStorageType {
@@ -76,16 +83,39 @@ export interface PersistenceConfig {
     // Stratégie de stockage des médias
     mediaStorage?: ProductMediaStorageType | PersistedMediaStorageType; // Défaut: 'db' (inline), local/workspace, cloud (S3/GCS)
     cloudConnectionProfileId?: string; // Référence vers un profil cloud sécurisé
+    cloudStorageConfig?: LegacyCloudStorageConfig | null; // Legacy compatibility only; never expose to frontend
 
     // Options avancées
     saveHistorySummary: boolean;    // Activer la compression automatique du contexte
     retentionDays?: number;         // Durée de conservation en jours (null = illimité)
 }
 
+export type PersistedPersistenceConfig = Omit<PersistenceConfig, 'mediaStorage'> & {
+    mediaStorage?: PersistedMediaStorageType;
+};
+
+type PersistenceConfigDocumentLike = {
+    toObject?: () => unknown;
+};
+
+export function extractPersistenceConfigValue(
+    config?: Partial<PersistenceConfig> | PersistenceConfigDocumentLike | null,
+): Partial<PersistenceConfig> | null {
+    if (!config) {
+        return null;
+    }
+
+    if (typeof (config as PersistenceConfigDocumentLike).toObject === 'function') {
+        return (config as PersistenceConfigDocumentLike).toObject?.() as Partial<PersistenceConfig>;
+    }
+
+    return config as Partial<PersistenceConfig>;
+}
+
 /**
  * Configuration de persistance par défaut
  */
-export const DEFAULT_PERSISTENCE_CONFIG: PersistenceConfig = {
+export const DEFAULT_PERSISTENCE_CONFIG: PersistedPersistenceConfig = {
     saveChat: true,
     saveChatHistory: true,
     saveErrors: true,
@@ -117,11 +147,11 @@ export function resolveAllowWorkspaceWrite(
 
 export function normalizePersistenceConfigForPersistence(
     config?: Partial<PersistenceConfig> | null,
-): PersistenceConfig {
+): PersistedPersistenceConfig {
     const merged = {
         ...DEFAULT_PERSISTENCE_CONFIG,
         ...(config || {}),
-    };
+    } as PersistenceConfig;
 
     const saveMedia = merged.saveMedia ?? DEFAULT_PERSISTENCE_CONFIG.saveMedia ?? false;
     const mediaStorage = denormalizeMediaStorageForPersistence(merged.mediaStorage);

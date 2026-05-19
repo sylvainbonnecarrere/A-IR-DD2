@@ -121,6 +121,48 @@ describe('J4.4 ÉTAPE 2 - Store Reset (Wipe)', () => {
         expect(result.current.executingNodes.size).toBe(0);
         expect(result.current.isImagePanelOpen).toBe(false);
     });
+
+    it('should migrate runtime node state when a temp instance ID becomes a backend ID', () => {
+        const { result } = renderHook(() => useRuntimeStore());
+        const savedAt = new Date('2026-05-18T12:00:00.000Z');
+
+        act(() => {
+            result.current.setNodeMessages('node-temp-instance', [{
+                id: 'msg-1',
+                sender: 'agent',
+                text: 'Generated image',
+                image: 'ZmFrZS1pbWFnZQ==',
+                mimeType: 'image/png',
+                timestamp: new Date('2026-05-18T11:59:00.000Z')
+            }]);
+            result.current.setNodePendingAttachment('node-temp-instance', {
+                fileName: 'draft-image.png',
+                mimeType: 'image/png',
+                base64Content: 'ZmFrZS1pbWFnZQ=='
+            } as any);
+            result.current.setNodeExecuting('node-temp-instance', true);
+            result.current.setFullscreenChatNodeId('node-temp-instance');
+            result.current.setConfigModalInstanceId('temp-instance');
+            result.current.setLastSavedAt('node-temp-instance', savedAt);
+            result.current.renameNodeRuntimeState('node-temp-instance', 'node-real-instance');
+        });
+
+        expect(result.current.getNodeMessages('node-real-instance')).toEqual([
+            expect.objectContaining({
+                id: 'msg-1',
+                text: 'Generated image',
+                mimeType: 'image/png'
+            })
+        ]);
+        expect(result.current.nodeMessages['node-temp-instance']).toBeUndefined();
+        expect(result.current.getNodePendingAttachment('node-real-instance')).toEqual(expect.objectContaining({
+            fileName: 'draft-image.png'
+        }));
+        expect(result.current.isNodeExecuting('node-real-instance')).toBe(true);
+        expect(result.current.fullscreenChatNodeId).toBe('node-real-instance');
+        expect(result.current.configModalInstanceId).toBe('real-instance');
+        expect(result.current.lastSavedAt['node-real-instance']).toEqual(savedAt);
+    });
 });
 
 /**

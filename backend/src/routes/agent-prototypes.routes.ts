@@ -8,7 +8,7 @@ import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
 import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
-import { normalizePersistenceConfigForPersistence, normalizePersistenceConfigForProduct } from '../types/persistence';
+import { extractPersistenceConfigValue, normalizePersistenceConfigForPersistence, normalizePersistenceConfigForProduct } from '../types/persistence';
 
 const router = Router();
 
@@ -41,7 +41,7 @@ function buildPrototypeResponse(prototype: any): Record<string, any> {
     responseObj.functionIds = (prototype.tools || []).map((id: any) => id.toString());
     responseObj.toolSelections = prototype.toolSelections || responseObj.functionIds.map((toolId: string) => ({ toolId }));
     responseObj.tools = Array.isArray(prototype.legacyTools) ? prototype.legacyTools : [];
-    const rawPersistenceConfig = prototype.persistenceConfig?.toObject?.() ?? prototype.persistenceConfig;
+    const rawPersistenceConfig = extractPersistenceConfigValue(prototype.persistenceConfig);
     responseObj.persistenceConfig = normalizePersistenceConfigForProduct(rawPersistenceConfig);
 
     return responseObj;

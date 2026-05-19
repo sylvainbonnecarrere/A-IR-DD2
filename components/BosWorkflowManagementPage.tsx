@@ -233,7 +233,7 @@ const BosWorkflowManagementPage: React.FC = () => {
             disabled={!activeWorkflow}
             className="px-4 py-2 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 font-medium transition-colors disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
           >
-            {t('bos_media_button', 'Media BOS')}
+            {t('bos_media_button', 'Gestion des fichiers')}
           </button>
           <button
             onClick={() => setShowCreateDialog(true)}

@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import { CANONICAL_ROBOT_IDS } from '../types';
+import type { PersistedPersistenceConfig } from '../types/persistence';
 
 // ============================================
 // PERSISTENCE CONFIG (copie de AgentPrototype)
@@ -9,26 +10,7 @@ import { CANONICAL_ROBOT_IDS } from '../types';
  * ⭐ PERSISTENCE CONFIG: Configuration granulaire par agent instance
  * Hérité du prototype avec possibilité d'override à l'instanciation
  */
-export interface IPersistenceConfig {
-    saveChat: boolean;             // Défaut: true - Sauvegarder les messages de chat
-    saveChatHistory?: boolean;     // ⭐ Alias pour saveChat (compatibilité)
-    saveErrors: boolean;           // Défaut: true - Sauvegarder les erreurs rencontrées
-    saveTasks: boolean;            // Défaut: false - Sauvegarder les tâches assignées
-    saveTaskExecution?: boolean;   // ⭐ Alias pour saveTasks (compatibilité)
-    saveLinks: boolean;            // Défaut: false - Sauvegarder les liens entre agents
-    saveMedia?: boolean;           // ⭐ Activer sauvegarde des fichiers médias
-    allowWorkspaceWrite?: boolean; // ⭐ Autorise aussi une publication workspace si demandée
-    saveHistorySummary: boolean;   // Défaut: false - Générer et stocker un résumé périodique
-    mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
-    cloudConnectionProfileId?: string;
-    cloudStorageConfig?: {         // ⭐ FIX QA: Config cloud S3/GCS
-        provider?: 'aws' | 'gcs';
-        bucket?: string;
-        region?: string;
-        endpoint?: string;
-    } | null;
-    retentionDays?: number;        // Durée de conservation en jours
-}
+export type IPersistenceConfig = PersistedPersistenceConfig;
 
 export interface IToolSelectionVersionRef {
     versionTag?: string;

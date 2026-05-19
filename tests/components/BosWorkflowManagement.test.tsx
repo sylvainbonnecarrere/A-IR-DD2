@@ -155,7 +155,7 @@ describe('BosWorkflowManagementPage', () => {
 
     render(<BosWorkflowManagementPage />);
 
-    fireEvent.click(screen.getByText('Media BOS'));
+    fireEvent.click(screen.getByText('Gestion des fichiers'));
 
     expect(await screen.findByTestId('bos-media-modal')).toHaveTextContent('wf-1:Test Workflow');
   });

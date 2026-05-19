@@ -7,7 +7,9 @@ import { AgentInstance } from '../models/AgentInstance.model';
 import { AgentJournal } from '../models/AgentJournal.model';
 import { MediaReference } from '../models/MediaReference.model';
 import { Workspace } from '../models/Workspace.model';
+import { CloudConnectionProfile } from '../models/CloudConnectionProfile.model';
 import { JournalService } from '../services/journal.service';
+import { S3StorageStrategy } from '../services/s3Storage.service';
 
 describe('JournalService payload compatibility', () => {
     const testWorkspaceStorageRoot = path.join(process.cwd(), 'storage-test-journal-workspaces');
@@ -19,6 +21,7 @@ describe('JournalService payload compatibility', () => {
     });
 
     afterEach(async () => {
+        jest.restoreAllMocks();
         await fs.rm(testWorkspaceStorageRoot, { recursive: true, force: true }).catch(() => undefined);
         await Workspace.deleteMany({});
         await MediaReference.deleteMany({});
@@ -403,5 +406,119 @@ describe('JournalService payload compatibility', () => {
         expect(mediaReference?.canonicalLocator).toBe(`workspace://${mediaReference?.localPath}`);
         expect(mediaReference?.createdByAgentName).toBe('Media Local Agent');
         expect(mediaReference?.lastModifiedByAgentName).toBe('Media Local Agent');
+    });
+
+    it('creates a cloud MediaReference catalog entry for media journal writes using a secured cloud profile', async () => {
+        const user = await User.create({
+            email: `journal-service-media-cloud-${Date.now()}@test.com`,
+            password: 'hashedpassword12345',
+            username: `journalservicemediaCloud${Date.now()}`
+        });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Journal Service Media Cloud Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `exec-media-cloud-${Date.now()}`,
+            status: 'running',
+            name: 'Media Cloud Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'cloud',
+                cloudConnectionProfileId: 'cloud-profile-1'
+            }
+        });
+
+        jest.spyOn(CloudConnectionProfile, 'findOne').mockImplementation(() => Promise.resolve({
+            enabled: true,
+            statusState: 'configured',
+            toDecryptedCloudStorageConfig: () => ({
+                provider: 's3' as const,
+                s3: {
+                    accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+                    secretAccessKey: 'super-secret-key',
+                    bucketName: 'journal-cloud-bucket',
+                    region: 'eu-west-3',
+                    keyPrefix: 'tenant/'
+                }
+            })
+        }) as any);
+        jest.spyOn(S3StorageStrategy.prototype, 'initialize').mockResolvedValue(undefined);
+        jest.spyOn(S3StorageStrategy.prototype, 'upload').mockImplementation(async (key) => ({
+            success: true,
+            key: `tenant/${key}`,
+            etag: 'etag-journal-cloud-1'
+        }));
+
+        const result = await journalService.logMedia({
+            instanceId: instance.id,
+            userId: user.id,
+            workflowId: workflow.id,
+            file: Buffer.from('cloud-media-payload'),
+            metadata: {
+                originalName: 'cloud-artifact.txt',
+                mimeType: 'text/plain',
+                size: 'cloud-media-payload'.length,
+                generatedBy: 'Media Cloud Agent',
+                prompt: 'build a cloud artifact'
+            }
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.saved).toBe(true);
+
+        const journalEntry = await AgentJournal.findById(result.entryId).lean();
+        expect(journalEntry).not.toBeNull();
+        expect((journalEntry?.payload as Record<string, unknown>).storageMode).toBe('cloud');
+
+        const mediaReference = await MediaReference.findOne({ journalEntryId: journalEntry?._id }).lean();
+        expect(mediaReference).not.toBeNull();
+        expect(mediaReference).toEqual(expect.objectContaining({
+            storageMode: 'cloud',
+            primaryStorageMode: 'cloud',
+            originalName: 'cloud-artifact.txt',
+            mimeType: 'text/plain',
+            generatedBy: 'Media Cloud Agent',
+            prompt: 'build a cloud artifact',
+            createdByAgentName: 'Media Cloud Agent',
+            lastModifiedByAgentName: 'Media Cloud Agent',
+            cloudConnectionProfileId: 'cloud-profile-1',
+            cloudProvider: 's3',
+            cloudBucket: 'journal-cloud-bucket',
+            cloudKey: expect.stringMatching(/^tenant\/users\/.+\/workflows\/.+\/agents\/.+\/\d{4}-\d{2}\/cloud-artifact-\d+-[a-f0-9]{8}\.txt$/),
+            canonicalLocator: expect.stringMatching(/^s3:\/\/journal-cloud-bucket\/tenant\/users\/.+\/workflows\/.+\/agents\/.+\/\d{4}-\d{2}\/cloud-artifact-\d+-[a-f0-9]{8}\.txt$/),
+            isOrphan: false,
+        }));
     });
 });

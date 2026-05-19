@@ -3,6 +3,65 @@ import { ChatMessage, InvisibleHistorySummaryState, LLMConfig, LLMProvider, Loca
 
 const isDevelopmentEnvironment = process.env.NODE_ENV !== 'production';
 
+const mergeNodeMessages = (sourceMessages: ChatMessage[] = [], targetMessages: ChatMessage[] = []): ChatMessage[] => {
+  if (sourceMessages.length === 0) {
+    return targetMessages;
+  }
+
+  if (targetMessages.length === 0) {
+    return sourceMessages;
+  }
+
+  const merged = [...targetMessages];
+  const seen = new Set(targetMessages.map((message) => `${message.id}:${message.sender}`));
+
+  for (const message of sourceMessages) {
+    const messageKey = `${message.id}:${message.sender}`;
+    if (!seen.has(messageKey)) {
+      seen.add(messageKey);
+      merged.push(message);
+    }
+  }
+
+  return merged.sort((left, right) => {
+    const leftTime = left.timestamp instanceof Date ? left.timestamp.getTime() : new Date(left.timestamp).getTime();
+    const rightTime = right.timestamp instanceof Date ? right.timestamp.getTime() : new Date(right.timestamp).getTime();
+    return leftTime - rightTime;
+  });
+};
+
+const renameRecordKey = <T,>(
+  record: Record<string, T>,
+  fromKey: string,
+  toKey: string,
+  merge?: (sourceValue: T, targetValue: T | undefined) => T,
+): Record<string, T> => {
+  if (fromKey === toKey || !Object.prototype.hasOwnProperty.call(record, fromKey)) {
+    return record;
+  }
+
+  const nextRecord = { ...record };
+  const sourceValue = nextRecord[fromKey];
+  delete nextRecord[fromKey];
+
+  nextRecord[toKey] = merge
+    ? merge(sourceValue, nextRecord[toKey])
+    : sourceValue;
+
+  return nextRecord;
+};
+
+const renameNodeInSet = (values: Set<string>, fromNodeId: string, toNodeId: string): Set<string> => {
+  if (fromNodeId === toNodeId || !values.has(fromNodeId)) {
+    return values;
+  }
+
+  const renamedValues = new Set(values);
+  renamedValues.delete(fromNodeId);
+  renamedValues.add(toNodeId);
+  return renamedValues;
+};
+
 /**
  * Runtime Domain Store - Gère l'exécution et les états temps réel
  * Responsabilité : Messages de chat, exécution des agents,
@@ -79,6 +138,7 @@ interface RuntimeStore {
   setLastSavedAt: (nodeId: string, timestamp: Date) => void;
   clearLastSavedAt: (nodeId: string) => void;
   getNewMessages: (nodeId: string) => ChatMessage[]; // Returns only messages after lastSavedAt
+  renameNodeRuntimeState: (fromNodeId: string, toNodeId: string) => void;
 
   // Utility
   getNodeMessages: (nodeId: string) => ChatMessage[];
@@ -323,6 +383,39 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     }
     return newMessages;
   },
+
+  renameNodeRuntimeState: (fromNodeId, toNodeId) => set((state) => {
+    if (!fromNodeId || !toNodeId || fromNodeId === toNodeId) {
+      return state;
+    }
+
+    const fromInstanceId = fromNodeId.replace(/^node-/, '');
+    const toInstanceId = toNodeId.replace(/^node-/, '');
+
+    return {
+      nodeMessages: renameRecordKey(state.nodeMessages, fromNodeId, toNodeId, (sourceMessages, targetMessages) => mergeNodeMessages(sourceMessages, targetMessages || [])),
+      nodePendingAttachments: renameRecordKey(state.nodePendingAttachments, fromNodeId, toNodeId, (sourceAttachment, targetAttachment) => targetAttachment ?? sourceAttachment),
+      nodeInvisibleHistorySummaries: renameRecordKey(state.nodeInvisibleHistorySummaries, fromNodeId, toNodeId, (sourceSummary, targetSummary) => targetSummary ?? sourceSummary),
+      executingNodes: renameNodeInSet(state.executingNodes, fromNodeId, toNodeId),
+      minimizedNodeIds: renameNodeInSet(state.minimizedNodeIds, fromNodeId, toNodeId),
+      lastSavedAt: renameRecordKey(state.lastSavedAt, fromNodeId, toNodeId, (sourceTimestamp, targetTimestamp) => {
+        if (!targetTimestamp) {
+          return sourceTimestamp;
+        }
+
+        return sourceTimestamp > targetTimestamp ? sourceTimestamp : targetTimestamp;
+      }),
+      currentImageNodeId: state.currentImageNodeId === fromNodeId ? toNodeId : state.currentImageNodeId,
+      editingImageInfo: state.editingImageInfo?.nodeId === fromNodeId
+        ? { ...state.editingImageInfo, nodeId: toNodeId }
+        : state.editingImageInfo,
+      fullscreenChatNodeId: state.fullscreenChatNodeId === fromNodeId ? toNodeId : state.fullscreenChatNodeId,
+      fullscreenChatAgentInstance: state.fullscreenChatAgentInstance?.id === fromInstanceId
+        ? { ...state.fullscreenChatAgentInstance, id: toInstanceId }
+        : state.fullscreenChatAgentInstance,
+      configModalInstanceId: state.configModalInstanceId === fromInstanceId ? toInstanceId : state.configModalInstanceId,
+    };
+  }),
 
   /**
    * ⭐ ÉTAPE 2.2: Reset complet du store runtime pour wipe à la connexion

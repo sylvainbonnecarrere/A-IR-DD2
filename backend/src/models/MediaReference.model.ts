@@ -23,6 +23,7 @@ export type MediaStorageMode = 'db' | 'local' | 'cloud';
 export type ProductMediaStorageMode = 'db' | 'workspace' | 'cloud';
 export type CloudProvider = 's3' | 'gcs';
 export type MediaOrphanReason = 'agent_deleted' | 'workflow_deleted' | 'source_missing' | 'manual_detach' | 'unknown';
+export type MediaProvenance = 'user' | 'agent' | 'function' | 'import' | 'runtime_output';
 
 function derivePrimaryStorageMode(storageMode: MediaStorageMode): ProductMediaStorageMode {
     switch (storageMode) {
@@ -92,6 +93,7 @@ export interface IMediaReference extends Document {
     cloudKey?: string;              // Mode 'cloud': clé S3/GCS
     cloudProvider?: CloudProvider;  // Mode 'cloud': provider utilisé
     cloudBucket?: string;           // Mode 'cloud': nom du bucket
+    cloudConnectionProfileId?: string;
     
     // Métadonnées fichier
     fileName: string;               // Nom unique généré
@@ -104,6 +106,8 @@ export interface IMediaReference extends Document {
     generatedBy?: string;           // ID/nom de l'agent générateur
     prompt?: string;                // Prompt utilisé pour la génération
     modelUsed?: string;             // Modèle LLM utilisé
+    provenance?: MediaProvenance;
+    sourceExecutionId?: string;
 
     // Métadonnées DDD additives
     createdByAgentInstanceId?: Types.ObjectId;
@@ -137,6 +141,7 @@ export interface IMediaReferenceCreate {
     cloudKey?: string;
     cloudProvider?: CloudProvider;
     cloudBucket?: string;
+    cloudConnectionProfileId?: string;
     
     fileName: string;
     originalName: string;
@@ -147,6 +152,8 @@ export interface IMediaReferenceCreate {
     generatedBy?: string;
     prompt?: string;
     modelUsed?: string;
+    provenance?: MediaProvenance;
+    sourceExecutionId?: string;
     createdByAgentInstanceId?: Types.ObjectId | string;
     createdByAgentName?: string;
     lastModifiedByAgentInstanceId?: Types.ObjectId | string;
@@ -228,6 +235,11 @@ const MediaReferenceSchema = new Schema<IMediaReference>({
         type: String,
         required: false
     },
+    cloudConnectionProfileId: {
+        type: String,
+        required: false,
+        trim: true,
+    },
     
     // Métadonnées fichier
     fileName: { 
@@ -264,6 +276,17 @@ const MediaReferenceSchema = new Schema<IMediaReference>({
     modelUsed: {
         type: String,
         required: false
+    },
+    provenance: {
+        type: String,
+        enum: ['user', 'agent', 'function', 'import', 'runtime_output'],
+        required: false,
+        index: true,
+    },
+    sourceExecutionId: {
+        type: String,
+        required: false,
+        trim: true,
     },
 
     createdByAgentInstanceId: {
