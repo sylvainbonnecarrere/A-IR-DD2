@@ -37,6 +37,7 @@ import { PersistenceService } from './services/persistenceService';
 import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from './services/persistedChatMessages';
 import { normalizeAgentToolReferences } from './services/toolSelectionResolver';
 import { resolveActiveWorkflowId } from './services/workflowIdResolver';
+import { remapAgentInstanceReference, remapEditingImageInfo, remapPanelNodeId } from './utils/mediaPanelRuntimeSync';
 // ⭐ V2: Import apiClient for workflow switch orchestration
 import apiClient from './utils/apiClient';
 // ⭐ FIX QA: Import useJournalQueue for image persistence
@@ -1138,7 +1139,18 @@ export function AppContent() {
           
           // ✅ CRITICAL: Update instance ID AND content in Zustand store
           if (result.backendId !== instanceId) {
+            const fromNodeId = `node-${instanceId}`;
+            const toNodeId = `node-${result.backendId}`;
+
             updateInstanceId(instanceId, result.backendId);
+            useRuntimeStore.getState().renameNodeRuntimeState(fromNodeId, toNodeId);
+
+            setCurrentImageNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
+            setCurrentImageAgentInstance((agentInstance) => remapAgentInstanceReference(agentInstance, instanceId, result.backendId, workflowId));
+            setCurrentVideoNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
+            setCurrentVideoAgentInstance((agentInstance) => remapAgentInstanceReference(agentInstance, instanceId, result.backendId, workflowId));
+            setCurrentMapsNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
+            setEditingImageInfo((imageInfo) => remapEditingImageInfo(imageInfo, fromNodeId, toNodeId, instanceId, result.backendId, workflowId));
           }
           // ✅ Ensuite mettre à jour la configuration complète
           // Use getState() for stable reference (avoid dependency on updateAgentInstance)

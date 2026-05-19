@@ -15,7 +15,7 @@ import { buildChatMessagesByInstance } from '../utils/chatMessageProjection';
 import { transformAgentInstanceForFrontend } from '../utils/transforms';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
 import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
-import { normalizePersistenceConfigForPersistence, normalizePersistenceConfigForProduct, summarizePersistenceConfigBoundary } from '../types/persistence';
+import { extractPersistenceConfigValue, normalizePersistenceConfigForPersistence, normalizePersistenceConfigForProduct, summarizePersistenceConfigBoundary } from '../types/persistence';
 import { AgentInstanceDeletionPolicyService } from '../services/agentInstanceDeletionPolicy.service';
 
 // Type pour les paramètres de route hérités (via mergeParams)
@@ -349,7 +349,7 @@ router.post('/from-prototype', requireAuth,
         
         // 5. PersistenceConfig: merge prototype config avec overrides
         const prototypePersistenceConfig = normalizePersistenceConfigForPersistence(
-            prototype.persistenceConfig?.toObject?.() ?? prototype.persistenceConfig ?? {
+            extractPersistenceConfigValue(prototype.persistenceConfig) ?? {
                 saveChat: true,
                 saveErrors: true,
                 saveHistorySummary: false,
@@ -845,7 +845,13 @@ router.post(
     validateRequest(importedMediaDraftSchema),
     async (req: Request, res: Response) => {
         try {
-            const { workflowId, agentInstanceId } = req.params as WorkflowParams & { agentInstanceId: string };
+            const workflowId = typeof req.params.workflowId === 'string' ? req.params.workflowId : undefined;
+            const agentInstanceId = typeof req.params.agentInstanceId === 'string' ? req.params.agentInstanceId : null;
+
+            if (!agentInstanceId) {
+                return res.status(400).json({ error: 'Missing agentInstanceId route parameter' });
+            }
+
             const { attachmentId, fileName, mimeType, contentBase64, origin } = req.body as z.infer<typeof importedMediaDraftSchema>;
             const user = req.user as IUser;
 

@@ -5,6 +5,7 @@ import { CloseIcon } from '@/components/Icons';
 import {
   workflowMediaExplorerService,
   WorkflowMediaExplorerItem,
+  WorkflowMediaProvenance,
   WorkflowMediaSortBy,
   WorkflowMediaSortOrder,
   WorkflowMediaStorageMode,
@@ -70,6 +71,24 @@ function getAgentLabel(item: WorkflowMediaExplorerItem, fallbackLabel: string): 
   return item.lastModifiedByAgentName || item.createdByAgentName || fallbackLabel;
 }
 
+function getSourceSortValue(item: WorkflowMediaExplorerItem): string {
+  return [item.provenance ?? '', item.sourceExecutionId ?? '', item.canonicalLocator]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function getSourceLabel(item: WorkflowMediaExplorerItem, t: ReturnType<typeof useLocalization>['t']): string | null {
+  const provenanceLabelMap: Record<WorkflowMediaProvenance, string> = {
+    user: t('bos_media_source_user', 'Ajout utilisateur'),
+    agent: t('bos_media_source_agent', 'Media agent'),
+    function: t('bos_media_source_function', 'Sortie de fonction'),
+    import: t('bos_media_source_import', 'Import'),
+    runtime_output: t('bos_media_source_runtime_output', 'Artefact runtime'),
+  };
+
+  return item.provenance ? provenanceLabelMap[item.provenance] : null;
+}
+
 function compareStrings(left: string, right: string): number {
   return left.localeCompare(right, undefined, { sensitivity: 'base' });
 }
@@ -124,6 +143,8 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
   const { isAuthenticated, accessToken } = useAuth();
   const [activeTab, setActiveTab] = useState<WorkflowMediaStorageMode>('workspace');
   const [search, setSearch] = useState('');
+  const [mimeFilter, setMimeFilter] = useState('');
+  const [agentFilter, setAgentFilter] = useState('');
   const [orphanFilter, setOrphanFilter] = useState<OrphanFilterValue>('include');
   const [sortState, setSortState] = useState<SortState>(DEFAULT_SORT_STATE);
   const [items, setItems] = useState<WorkflowMediaExplorerItem[]>([]);
@@ -141,6 +162,8 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
 
     setActiveTab('workspace');
     setSearch('');
+    setMimeFilter('');
+    setAgentFilter('');
     setOrphanFilter('include');
     setSortState(DEFAULT_SORT_STATE);
     setFeedback(null);
@@ -185,6 +208,8 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
         const response = await workflowMediaExplorerService.getWorkflowMedia(workflowId, {
           token: accessToken,
           q: search,
+          mimeType: mimeFilter,
+          agentName: agentFilter,
           includeOrphans: orphanFilter !== 'exclude',
           sortBy,
           sortOrder,
@@ -220,7 +245,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [accessToken, isAuthenticated, isOpen, orphanFilter, search, sortState.field, sortState.order, t, workflowId]);
+  }, [accessToken, agentFilter, isAuthenticated, isOpen, mimeFilter, orphanFilter, search, sortState.field, sortState.order, t, workflowId]);
 
   const handleSort = (field: SortField) => {
     setSortState((currentSort) => {
@@ -322,7 +347,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     setFeedback(null);
 
     try {
-      await workflowMediaExplorerService.deleteMedia(item.mediaId, { token: accessToken });
+      const response = await workflowMediaExplorerService.deleteMedia(item.mediaId, { token: accessToken });
       setItems((currentItems) => currentItems.filter((candidate) => candidate.mediaId !== item.mediaId));
       setCounts((currentCounts) => ({
         ...currentCounts,
@@ -331,7 +356,9 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
       if (previewState?.item.mediaId === item.mediaId) {
         replacePreview(null);
       }
-      setFeedback(t('bos_media_delete_success', 'Media supprimé du catalogue et de son stockage primaire.'));
+      const successMessage = t('bos_media_delete_success', 'Media supprimé du catalogue et de son stockage primaire.');
+      const warningMessage = response.warnings?.[0]?.message?.trim();
+      setFeedback(warningMessage ? `${successMessage} ${warningMessage}` : successMessage);
     } catch (err) {
       setFeedback(err instanceof Error ? err.message : t('bos_media_delete_error', 'Suppression impossible.'));
     } finally {
@@ -407,7 +434,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
           comparison = compareStrings(left.mimeType, right.mimeType);
           break;
         case 'source':
-          comparison = compareStrings(left.canonicalLocator, right.canonicalLocator);
+          comparison = compareStrings(getSourceSortValue(left), getSourceSortValue(right));
           break;
         case 'size':
           comparison = left.size - right.size;
@@ -509,12 +536,28 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
         </div>
 
         <div className="border-b border-slate-800 bg-slate-900/60 px-6 py-4">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_auto]">
             <input
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t('bos_media_search_placeholder', 'Rechercher un media, un agent ou un type MIME')}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400"
+            />
+            <input
+              type="search"
+              value={mimeFilter}
+              aria-label={t('bos_media_mime_filter_label', 'Filtre type MIME')}
+              onChange={(event) => setMimeFilter(event.target.value)}
+              placeholder={t('bos_media_mime_filter_placeholder', 'Filtrer par type MIME')}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400"
+            />
+            <input
+              type="search"
+              value={agentFilter}
+              aria-label={t('bos_media_agent_filter_label', 'Filtre agent')}
+              onChange={(event) => setAgentFilter(event.target.value)}
+              placeholder={t('bos_media_agent_filter_placeholder', 'Filtrer par agent')}
               className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400"
             />
             <select
@@ -527,7 +570,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
               <option value="include">{t('bos_media_orphan_filter_include', 'Inclure les orphelins')}</option>
               <option value="only">{t('bos_media_orphan_filter_only', 'Seulement les orphelins')}</option>
             </select>
-            <div className="flex items-center justify-end rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">
+            <div className="mt-3 flex items-center justify-end rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300 xl:mt-0">
               {t('bos_media_sort_hint', 'Colonnes triables')}
             </div>
           </div>
@@ -578,6 +621,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
                 <tbody>
                   {visibleItems.map((item) => {
                     const agentLabel = getAgentLabel(item, t('bos_media_unknown_agent', 'Inconnu'));
+                    const sourceLabel = getSourceLabel(item, t);
                     const rowActionLoading = activeAction?.itemId === item.mediaId;
                     return (
                       <tr key={item.mediaId} className="border-b border-slate-800/80 align-top last:border-b-0 hover:bg-slate-900/90">
@@ -595,7 +639,17 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
                           <p className="truncate text-slate-300" title={item.mimeType}>{item.mimeType}</p>
                         </td>
                         <td className="px-4 py-3">
-                          <p className="truncate text-slate-300" title={item.canonicalLocator}>{item.canonicalLocator}</p>
+                          <div className="min-w-0 space-y-1">
+                            {sourceLabel ? (
+                              <p className="truncate text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200" title={sourceLabel}>{sourceLabel}</p>
+                            ) : null}
+                            {item.sourceExecutionId ? (
+                              <p className="truncate text-xs text-slate-400" title={item.sourceExecutionId}>
+                                {t('bos_media_source_execution', 'Execution')} : {item.sourceExecutionId}
+                              </p>
+                            ) : null}
+                            <p className="truncate text-slate-300" title={item.canonicalLocator}>{item.canonicalLocator}</p>
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-right text-slate-300">{formatBytes(item.size)}</td>
                         <td className="px-4 py-3">

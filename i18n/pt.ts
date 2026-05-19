@@ -466,7 +466,7 @@ export default {
     // Page Titles & Descriptions
     page_dashboard_title: 'Dashboard - Mapa de fluxo',
     page_dashboard_description: 'Mapa global de fluxo de trabalho e visão geral do status do projeto',
-    bos_media_button: 'Media',
+    bos_media_button: 'Gestão de arquivos',
     page_bos_supervision_title: 'Supervisão Bos',
     page_bos_supervision_description: 'Ferramentas de supervisão, depuração e monitoramento de custos',
     page_prototyping_title: 'Prototipagem de Agentes',

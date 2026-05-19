@@ -209,7 +209,7 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
         disabled={!activeWorkflow}
         className="rounded-lg border border-yellow-400/50 bg-yellow-500 px-4 py-2 text-sm font-semibold text-black transition-colors hover:bg-yellow-400 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
       >
-        {t('bos_media_button', 'Media')}
+        {t('bos_media_button', 'Gestion des fichiers')}
       </button>
       <BosMediaModal
         isOpen={showBosMediaModal}

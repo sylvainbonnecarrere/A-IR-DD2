@@ -499,7 +499,7 @@ export default {
     // Page Titles & Descriptions
     page_dashboard_title: 'Інформаційна панель - Карта Workflow',
     page_dashboard_description: 'Глобальна карта workflow та огляд статусу проекту',
-    bos_media_button: 'Media',
+    bos_media_button: 'Керування файлами',
     page_bos_supervision_title: 'Керування BOS',
     page_bos_supervision_description: 'Інструменти керування, налагодження та моніторинг витрат',
     page_prototyping_title: 'Прототипування агентів',

@@ -159,6 +159,7 @@ describe('Sandbox routes', () => {
             .set('Authorization', `Bearer ${fixture.accessToken}`)
             .send({
                 functionId: fixture.fn.id,
+                agentInstanceId: '66c111111111111111111111',
                 testArgs: { value: 'route-ok' }
             })
             .expect(200);
@@ -174,8 +175,9 @@ describe('Sandbox routes', () => {
         }));
         expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({
             userId: fixture.user.id,
+            agentInstanceId: '66c111111111111111111111',
             args: { value: 'route-ok' },
-            launchContext: 'editor_test',
+            launchContext: 'workflow_run',
             fn: expect.objectContaining({
                 _id: expect.anything(),
                 name: fixture.fn.name,

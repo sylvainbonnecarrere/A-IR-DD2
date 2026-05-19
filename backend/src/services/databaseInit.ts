@@ -18,6 +18,7 @@
  */
 
 import mongoose from 'mongoose';
+import { backfillMediaReferenceCatalogFields } from '../migrations/006_media_reference_catalog_backfill';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
 import { NativePythonProvisioningService } from './nativePythonProvisioning.service';
 import { mapLegacyFunctionToUserToolFields, type LegacyFunctionLike } from '../utils/userToolLegacyMapper';
@@ -522,6 +523,8 @@ export async function initializeDatabase(): Promise<void> {
       }
     }
 
+    await runMediaReferenceCatalogBackfill(db);
+
     // ─── Toujours seeder les fonctions natives (idempotent) ───────────────
     await seedNativeFunctions(db);
     await seedSharedExampleFunctions(db);
@@ -535,6 +538,23 @@ export async function initializeDatabase(): Promise<void> {
     if (process.env.NODE_ENV === 'production') {
       throw error; // In production, fail fast
     }
+  }
+}
+
+export async function runMediaReferenceCatalogBackfill(db: any): Promise<void> {
+  try {
+    const summary = await backfillMediaReferenceCatalogFields(db);
+
+    if (!summary.collectionFound) {
+      console.debug('  • media_references absent, backfill catalogue media ignoré');
+      return;
+    }
+
+    console.info(
+      `🧩 Media catalog backfill: scanned=${summary.scanned} updated=${summary.updated} compatible=${summary.alreadyCompatible} blocked=${summary.blocked}`
+    );
+  } catch (error) {
+    console.warn('⚠️  media catalog backfill warning:', error instanceof Error ? error.message : String(error));
   }
 }
 

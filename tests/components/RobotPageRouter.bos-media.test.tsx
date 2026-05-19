@@ -46,10 +46,10 @@ describe('RobotPageRouter BOS media button', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Media' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gestion des fichiers' })).toBeInTheDocument();
     expect(screen.getByTestId('workflow-canvas')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Media' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Gestion des fichiers' }));
 
     expect(screen.getByTestId('bos-media-modal')).toHaveTextContent('wf-1:Workflow Alpha');
   });

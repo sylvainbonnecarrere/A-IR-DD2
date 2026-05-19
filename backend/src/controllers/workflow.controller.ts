@@ -19,6 +19,7 @@ import { WorkflowNodeV2, IWorkflowNodeV2 } from '../models/WorkflowNodeV2.model'
 import { AgentJournal } from '../models/AgentJournal.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
 import { AgentInstanceDeletionPolicyService } from '../services/agentInstanceDeletionPolicy.service';
+import type { DeleteAgentInstancePolicyAudit } from '../services/agentInstanceDeletionPolicy.service';
 import {
     CreateInstanceRequestBody,
     CreateInstanceResponse,
@@ -371,7 +372,7 @@ export class WorkflowController {
                     let mediaReferencesOrphaned = 0;
                     let retainedMediaEntries = 0;
                     let mediaPolicy: 'delete_media' | 'orphan_media' | null = null;
-                    let audit = null as DeleteAgentInstanceWithPolicyResult['audit'] | null;
+                    let audit: DeleteAgentInstancePolicyAudit | null = null;
 
                     if (node.nodeType === 'agent' && node.instanceId) {
                         deletedInstanceId = node.instanceId.toString();
@@ -433,7 +434,7 @@ export class WorkflowController {
                     };
                 };
 
-                let deleteResult;
+                let deleteResult: Awaited<ReturnType<typeof executeDelete>>;
 
                 try {
                     session.startTransaction();

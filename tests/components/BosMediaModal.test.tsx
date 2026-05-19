@@ -24,6 +24,8 @@ const mediaFixtures = [
     mediaId: 'media-db',
     workflowId: 'wf-1',
     storageMode: 'db',
+    provenance: null,
+    sourceExecutionId: null,
     canonicalLocator: 'journal://123',
     displayName: 'database-note.txt',
     originalName: 'database-note.txt',
@@ -42,6 +44,8 @@ const mediaFixtures = [
     mediaId: 'media-workspace',
     workflowId: 'wf-1',
     storageMode: 'workspace',
+    provenance: 'runtime_output',
+    sourceExecutionId: 'utr-bos-runtime-1',
     canonicalLocator: 'workspace://output/media/agents/agent-1/2026-05/workspace-note.txt',
     displayName: 'workspace-note.txt',
     originalName: 'workspace-note.txt',
@@ -60,6 +64,8 @@ const mediaFixtures = [
     mediaId: 'media-cloud',
     workflowId: 'wf-1',
     storageMode: 'cloud',
+    provenance: null,
+    sourceExecutionId: null,
     canonicalLocator: 's3://bucket/cloud-note.txt',
     displayName: 'cloud-note.txt',
     originalName: 'cloud-note.txt',
@@ -207,6 +213,21 @@ describe('BosMediaModal', () => {
     expect(screen.getByTestId('bos-media-table-scroll')).toBeInTheDocument();
   });
 
+  it('renders runtime provenance metadata for BOS explorer items', async () => {
+    render(
+      <BosMediaModal
+        isOpen={true}
+        workflowId="wf-1"
+        workflowName="Workflow Alpha"
+        onClose={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('workspace-note.txt')).toBeInTheDocument();
+    expect(screen.getByText('Artefact runtime')).toBeInTheDocument();
+    expect(screen.getByText(/utr-bos-runtime-1/)).toBeInTheDocument();
+  });
+
   it('offers an explicit orphan-only filter in BOS Media', async () => {
     render(
       <BosMediaModal
@@ -237,6 +258,34 @@ describe('BosMediaModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cloud (1)' }));
     expect(await screen.findByText('cloud-note.txt')).toBeInTheDocument();
     expect(screen.getByText('1 orphelin(s) visible(s)')).toBeInTheDocument();
+  });
+
+  it('passes explicit mime and agent filters to the workflow explorer service', async () => {
+    render(
+      <BosMediaModal
+        isOpen={true}
+        workflowId="wf-1"
+        workflowName="Workflow Alpha"
+        onClose={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('workspace-note.txt')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Filtre type MIME'), {
+      target: { value: 'json' },
+    });
+    fireEvent.change(screen.getByLabelText('Filtre agent'), {
+      target: { value: 'Runtime Agent' },
+    });
+
+    await waitFor(() => {
+      expect(workflowMediaExplorerService.getWorkflowMedia).toHaveBeenLastCalledWith('wf-1', expect.objectContaining({
+        token: 'token-123',
+        mimeType: 'json',
+        agentName: 'Runtime Agent',
+      }));
+    });
   });
 
   it('previews a workspace media item with inline text content', async () => {
@@ -305,6 +354,13 @@ describe('BosMediaModal', () => {
       success: true,
       message: 'Média supprimé',
       fileDeleted: true,
+      warnings: [
+        {
+          code: 'RUNTIME_OUTPUT_RUN_REFERENCES_RETAINED',
+          message: 'L historique runtime conserve encore une reference legacy vers cet artefact supprime pour l execution utr-bos-runtime-1.',
+          executionId: 'utr-bos-runtime-1',
+        },
+      ],
     });
 
     render(
@@ -329,7 +385,8 @@ describe('BosMediaModal', () => {
     await waitFor(() => {
       expect(screen.queryByText('workspace-note.txt')).not.toBeInTheDocument();
     });
-    expect(screen.getByText('Media supprimé du catalogue et de son stockage primaire.')).toBeInTheDocument();
+    expect(screen.getByText(/Media supprimé du catalogue et de son stockage primaire\./)).toBeInTheDocument();
+    expect(screen.getByText(/utr-bos-runtime-1/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Workspace (0)' })).toBeInTheDocument();
   });
 });

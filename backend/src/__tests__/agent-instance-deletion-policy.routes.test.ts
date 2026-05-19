@@ -6,10 +6,12 @@ import request from 'supertest';
 import '../middleware/auth.middleware';
 import { AgentInstance } from '../models/AgentInstance.model';
 import { AgentJournal } from '../models/AgentJournal.model';
+import { CloudConnectionProfile } from '../models/CloudConnectionProfile.model';
 import { MediaReference } from '../models/MediaReference.model';
 import { User } from '../models/User.model';
 import { Workflow } from '../models/Workflow.model';
 import agentInstancesRoutes from '../routes/agent-instances.routes';
+import { S3StorageStrategy } from '../services/s3Storage.service';
 import { generateAccessToken } from '../utils/jwt';
 
 const app = express();
@@ -25,7 +27,9 @@ describe('agent instance deletion media policy', () => {
     });
 
     afterEach(async () => {
+        jest.restoreAllMocks();
         await fs.rm(testWorkspaceStorageRoot, { recursive: true, force: true }).catch(() => undefined);
+        await CloudConnectionProfile.deleteMany({});
         await MediaReference.deleteMany({});
         await AgentJournal.deleteMany({});
         await AgentInstance.deleteMany({});
@@ -304,6 +308,124 @@ describe('agent instance deletion media policy', () => {
             }),
         }));
         await expect(fs.access(absolutePath)).rejects.toThrow();
+    });
+
+    it('physically deletes cloud media when delete_media resolves the profile from the live instance config', async () => {
+        const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+        const user = await User.create({
+            email: `agent-instance-delete-policy-cloud-${suffix}@test.com`,
+            password: 'hashedpassword12345',
+            username: `agentinstancedeletepolicycloud${suffix}`,
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Delete Policy Cloud Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 },
+        });
+
+        const profile = new CloudConnectionProfile({
+            userId: user._id,
+            displayName: `agent-instance-delete-policy-cloud-profile-${suffix}`,
+            provider: 's3',
+            enabled: true,
+            target: {
+                bucketName: 'instance-delete-bucket',
+                region: 'eu-west-3',
+                keyPrefix: 'tenant/',
+            },
+            statusState: 'missing_secret',
+        });
+        profile.setSecretMaterial({
+            provider: 's3',
+            s3: {
+                accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+                secretAccessKey: 'super-secret-key',
+                bucketName: 'instance-delete-bucket',
+                region: 'eu-west-3',
+                keyPrefix: 'tenant/',
+            },
+        });
+        await profile.save();
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `delete-policy-cloud-${suffix}`,
+            status: 'running',
+            name: 'Deletion Policy Cloud Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0,
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'cloud',
+                cloudConnectionProfileId: profile.id,
+            },
+        });
+
+        await MediaReference.create({
+            userId: user._id,
+            workflowId: workflow._id,
+            agentInstanceId: instance._id,
+            storageMode: 'cloud',
+            primaryStorageMode: 'cloud',
+            canonicalLocator: 's3://instance-delete-bucket/tenant/instances/cloud-artifact.txt',
+            cloudKey: 'tenant/instances/cloud-artifact.txt',
+            cloudProvider: 's3',
+            cloudBucket: 'instance-delete-bucket',
+            fileName: 'cloud-artifact.txt',
+            originalName: 'cloud-artifact.txt',
+            mimeType: 'text/plain',
+            size: 21,
+            createdByAgentInstanceId: instance._id,
+            createdByAgentName: 'Deletion Policy Cloud Agent',
+            lastModifiedByAgentInstanceId: instance._id,
+            lastModifiedByAgentName: 'Deletion Policy Cloud Agent',
+            isOrphan: false,
+        });
+
+        jest.spyOn(S3StorageStrategy.prototype, 'initialize').mockResolvedValue(undefined);
+        const deleteSpy = jest.spyOn(S3StorageStrategy.prototype, 'delete').mockResolvedValue(true);
+
+        const response = await request(app)
+            .delete(`/api/workflows/${workflow.id}/instances/${instance.id}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .set('X-Robot-Id', 'AR_001')
+            .query({ mediaPolicy: 'delete_media' })
+            .expect(200);
+
+        expect(response.body.audit).toEqual(expect.objectContaining({
+            severity: 'info',
+            anomalyCount: 0,
+            origin: 'agent_instance_delete_route',
+        }));
+        expect(deleteSpy).toHaveBeenCalledWith('tenant/instances/cloud-artifact.txt');
+        expect(await MediaReference.findOne({ agentInstanceId: instance._id })).toBeNull();
     });
 
     it('journals explicit anomalies for missing data and unmanaged external media', async () => {

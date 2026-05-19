@@ -42,6 +42,10 @@ const runFunctionSchema = z.object({
         .string()
         .regex(/^[a-f\d]{24}$/i, 'functionId doit être un ObjectId MongoDB valide')
         .optional(),
+    agentInstanceId: z
+        .string()
+        .regex(/^[a-f\d]{24}$/i, 'agentInstanceId doit être un ObjectId MongoDB valide')
+        .optional(),
     toolSelection: toolSelectionSchema.optional(),
     testArgs: z
         .record(z.unknown())
@@ -82,11 +86,12 @@ router.get('/health', requireAuth, async (_req, res) => {
 router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req, res) => {
     try {
         const user = req.user as IUser;
-        const { functionId, toolSelection, testArgs, privateContext } = req.body;
+        const { functionId, agentInstanceId, toolSelection, testArgs, privateContext } = req.body;
 
         console.info('[SandboxRoute] POST /run start', {
             userId: user.id,
             functionId: functionId ?? null,
+            agentInstanceId: agentInstanceId ?? null,
             toolId: toolSelection?.toolId ?? null,
             versionTag: toolSelection?.versionRef?.versionTag ?? null,
             argKeys: Object.keys(testArgs ?? {}),
@@ -97,6 +102,7 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
             user.id,
             testArgs,
             toolSelection,
+            agentInstanceId,
             privateContext,
             req.headers.authorization,
         );
@@ -104,6 +110,7 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
         console.info('[SandboxRoute] POST /run done', {
             userId: user.id,
             functionId: functionId ?? null,
+            agentInstanceId: agentInstanceId ?? null,
             toolId: toolSelection?.toolId ?? null,
             executionId: result.executionId ?? null,
             success: result.success,

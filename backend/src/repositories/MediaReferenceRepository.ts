@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import {
     IMediaReference,
     IMediaReferenceCreate,
+    MediaProvenance,
     MediaReference,
     MediaStorageMode as CatalogMediaStorageMode,
 } from '../models/MediaReference.model';
@@ -65,6 +66,20 @@ export interface CreateMediaReferenceFromJournalParams {
     mediaPayload: MediaPayload;
 }
 
+export interface UpsertRuntimeArtifactParams {
+    userId: string;
+    workflowId: string;
+    agentInstanceId: string;
+    executionId: string;
+    localPath: string;
+    fileName: string;
+    originalName: string;
+    mimeType: string;
+    size: number;
+    checksum?: string;
+    agentName?: string;
+}
+
 export class MediaReferenceRepository {
     async createFromJournalMedia(params: CreateMediaReferenceFromJournalParams): Promise<IMediaReference> {
         const storageMode = this.mapStorageMode(params.mediaPayload.storageMode);
@@ -74,6 +89,10 @@ export class MediaReferenceRepository {
             ? cloudMetadata.cloudProvider
             : undefined;
         const cloudBucket = typeof cloudMetadata?.cloudBucket === 'string' ? cloudMetadata.cloudBucket : undefined;
+        const cloudConnectionProfileId = typeof cloudMetadata?.cloudConnectionProfileId === 'string'
+            && cloudMetadata.cloudConnectionProfileId.trim().length > 0
+            ? cloudMetadata.cloudConnectionProfileId.trim()
+            : undefined;
 
         const document: IMediaReferenceCreate = {
             userId: new Types.ObjectId(params.userId),
@@ -113,9 +132,87 @@ export class MediaReferenceRepository {
             document.cloudKey = cloudKey;
             document.cloudProvider = cloudProvider;
             document.cloudBucket = cloudBucket;
+            document.cloudConnectionProfileId = cloudConnectionProfileId;
         }
 
         return MediaReference.create(document);
+    }
+
+    async upsertRuntimeArtifact(params: UpsertRuntimeArtifactParams): Promise<IMediaReference> {
+        const userId = new Types.ObjectId(params.userId);
+        const workflowId = new Types.ObjectId(params.workflowId);
+        const agentInstanceId = new Types.ObjectId(params.agentInstanceId);
+        const canonicalLocator = buildCanonicalLocator({
+            storageMode: 'local',
+            journalEntryId: params.executionId,
+            localPath: params.localPath,
+        });
+
+        const $set: Record<string, unknown> = {
+            agentInstanceId,
+            storageMode: 'local',
+            primaryStorageMode: 'workspace',
+            canonicalLocator,
+            localPath: params.localPath,
+            fileName: params.fileName,
+            originalName: params.originalName,
+            mimeType: params.mimeType,
+            size: params.size,
+            provenance: 'runtime_output' satisfies MediaProvenance,
+            sourceExecutionId: params.executionId,
+            lastModifiedByAgentInstanceId: agentInstanceId,
+            isOrphan: false,
+        };
+
+        if (params.agentName) {
+            $set.lastModifiedByAgentName = params.agentName;
+        }
+
+        const $setOnInsert: Record<string, unknown> = {
+            userId,
+            workflowId,
+            createdByAgentInstanceId: agentInstanceId,
+        };
+
+        if (params.agentName) {
+            $setOnInsert.createdByAgentName = params.agentName;
+        }
+
+        const $unset: Record<string, unknown> = {
+            orphanedAt: 1,
+            orphanReason: 1,
+        };
+
+        if (params.checksum) {
+            $set.checksum = params.checksum;
+        } else {
+            $unset.checksum = 1;
+        }
+
+        const mediaReference = await MediaReference.findOneAndUpdate(
+            {
+                userId,
+                workflowId,
+                canonicalLocator,
+            },
+            {
+                $set,
+                $setOnInsert,
+                $unset,
+            },
+            {
+                upsert: true,
+                new: true,
+                runValidators: true,
+                setDefaultsOnInsert: true,
+            },
+        );
+
+        if (!mediaReference) {
+            throw new Error(`Failed to upsert runtime artifact catalog entry for ${canonicalLocator}`);
+        }
+
+        return mediaReference;
     }
 
     private mapStorageMode(storageMode: MediaPayload['storageMode']): CatalogMediaStorageMode {

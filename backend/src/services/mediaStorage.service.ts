@@ -24,6 +24,17 @@ import {
     ALLOWED_MIME_TYPES,
     MediaStorageMode
 } from '../types/persistence';
+import { CloudConnectionProfile } from '../models/CloudConnectionProfile.model';
+import {
+    CloudStorageConfig,
+    CloudStorageError,
+    CloudStorageErrorCodes,
+    ICloudStorageStrategy,
+    generateCloudKey,
+    validateCloudConfig,
+} from '../types/cloudStorage';
+import { S3StorageStrategy } from './s3Storage.service';
+import { GCSStorageStrategy } from './gcsStorage.service';
 
 // ============================================
 // LOGGING CONDITIONNEL
@@ -88,8 +99,12 @@ export class MediaStorageService {
     }
 
     private resolveStorageMode(config: PersistenceConfig & { mediaStorageMode?: 'database' | 'local' | 'cloud' }): 'db' | 'local' | 'cloud' {
-        if (config.mediaStorage) {
+        if (config.mediaStorage === 'db' || config.mediaStorage === 'local' || config.mediaStorage === 'cloud') {
             return config.mediaStorage;
+        }
+
+        if (config.mediaStorage === 'workspace') {
+            return 'local';
         }
 
         switch (config.mediaStorageMode) {
@@ -148,7 +163,7 @@ export class MediaStorageService {
                 return this.saveToLocal(file, metadata, context, checksum);
             
             case 'cloud':
-                return this.saveToCloud(file, metadata, context, checksum);
+                return this.saveToCloud(file, metadata, config, context, checksum);
             
             default:
                 throw new MediaStorageError(
@@ -281,36 +296,135 @@ export class MediaStorageService {
      * TODO: Implémenter lors du Jalon Cloud
      */
     private async saveToCloud(
-        _file: Buffer,
+        file: Buffer,
         metadata: FileMetadata,
-        _context: {
+        config: PersistenceConfig & { mediaStorageMode?: 'database' | 'local' | 'cloud' },
+        context: {
             userId: string;
             workflowId: string;
             agentInstanceId: string;
         },
         checksum?: string
     ): Promise<MediaPayload> {
-        // Placeholder pour implémentation future
-        throw new MediaStorageError(
-            'Le stockage cloud n\'est pas encore implémenté',
-            'NOT_IMPLEMENTED',
-            {
-                recommendation: 'Utiliser le mode "local" en attendant',
-                plannedVersion: '2.0'
-            }
+        const profileId = typeof config.cloudConnectionProfileId === 'string'
+            ? config.cloudConnectionProfileId.trim()
+            : '';
+
+        if (!profileId) {
+            throw new MediaStorageError(
+                'Aucun profil cloud configure pour cette sauvegarde media.',
+                'CLOUD_NOT_CONFIGURED',
+                {
+                    recommendation: 'Renseigner cloudConnectionProfileId dans la persistenceConfig.',
+                },
+            );
+        }
+
+        const profile = await CloudConnectionProfile.findOne({
+            _id: profileId,
+            userId: context.userId,
+        });
+
+        if (!profile) {
+            throw new MediaStorageError(
+                'Profil cloud introuvable pour cet utilisateur.',
+                'CLOUD_PROFILE_NOT_FOUND',
+                {
+                    cloudConnectionProfileId: profileId,
+                },
+            );
+        }
+
+        if (!profile.enabled) {
+            throw new MediaStorageError(
+                'Le profil cloud selectionne est desactive.',
+                'CLOUD_PROFILE_DISABLED',
+                {
+                    cloudConnectionProfileId: profileId,
+                    statusState: profile.statusState,
+                },
+            );
+        }
+
+        const cloudConfig = profile.toDecryptedCloudStorageConfig();
+        if (!cloudConfig) {
+            throw new MediaStorageError(
+                'Le profil cloud ne contient pas de secret exploitable.',
+                'CLOUD_NOT_CONFIGURED',
+                {
+                    cloudConnectionProfileId: profileId,
+                    statusState: profile.statusState,
+                },
+            );
+        }
+
+        const validation = validateCloudConfig(cloudConfig);
+        if (!validation.valid) {
+            throw new MediaStorageError(
+                'Configuration cloud invalide.',
+                CloudStorageErrorCodes.INVALID_CONFIG,
+                {
+                    cloudConnectionProfileId: profileId,
+                    errors: validation.errors,
+                },
+            );
+        }
+
+        const strategy = this.buildCloudStrategy(cloudConfig);
+        try {
+            await strategy.initialize(cloudConfig);
+        } catch (error) {
+            throw this.toMediaStorageError(error, 'Initialisation du stockage cloud impossible.', {
+                cloudConnectionProfileId: profileId,
+                provider: cloudConfig.provider,
+            });
+        }
+
+        const uniqueFileName = this.generateUniqueFileName(metadata.originalName);
+        const uploadKey = generateCloudKey({
+            userId: context.userId,
+            workflowId: context.workflowId,
+            agentInstanceId: context.agentInstanceId,
+            fileName: uniqueFileName,
+        });
+
+        const uploadResult = await strategy.upload(
+            uploadKey,
+            file,
+            metadata.mimeType,
+            this.buildCloudUploadMetadata(metadata, checksum, context),
         );
 
-        // Future implémentation:
-        // 1. Upload vers S3/GCS avec SDK approprié
-        // 2. Retourner l'URL publique ou présignée
-        // return {
-        //     mimeType: metadata.mimeType,
-        //     fileName: metadata.originalName,
-        //     size: file.length,
-        //     storageMode: 'cloud',
-        //     url: 'https://storage.example.com/...',
-        //     checksum
-        // };
+        if (!uploadResult.success || !uploadResult.key) {
+            throw new MediaStorageError(
+                `Echec de l'upload cloud: ${uploadResult.error || 'Unknown error'}`,
+                uploadResult.errorCode || CloudStorageErrorCodes.UPLOAD_FAILED,
+                {
+                    cloudConnectionProfileId: profileId,
+                    provider: cloudConfig.provider,
+                    uploadKey,
+                },
+            );
+        }
+
+        return {
+            mimeType: metadata.mimeType,
+            fileName: uniqueFileName,
+            size: file.length,
+            storageMode: 'cloud',
+            checksum,
+            url: uploadResult.url,
+            metadata: {
+                generatedBy: metadata.generatedBy,
+                prompt: metadata.prompt,
+                storedAt: new Date().toISOString(),
+                cloudConnectionProfileId: profileId,
+                cloudKey: uploadResult.key,
+                cloudProvider: cloudConfig.provider,
+                cloudBucket: this.resolveCloudBucketName(cloudConfig),
+                etag: uploadResult.etag,
+            }
+        };
     }
 
     // ============================================
@@ -533,6 +647,83 @@ export class MediaStorageService {
                 }
             );
         }
+    }
+
+    private buildCloudStrategy(config: CloudStorageConfig): ICloudStorageStrategy {
+        switch (config.provider) {
+            case 's3':
+                return new S3StorageStrategy();
+            case 'gcs':
+                return new GCSStorageStrategy();
+            default:
+                throw new MediaStorageError(
+                    `Provider cloud non supporte: ${(config as { provider?: string }).provider || 'unknown'}`,
+                    CloudStorageErrorCodes.PROVIDER_NOT_SUPPORTED,
+                );
+        }
+    }
+
+    private buildCloudUploadMetadata(
+        metadata: FileMetadata,
+        checksum: string | undefined,
+        context: {
+            userId: string;
+            workflowId: string;
+            agentInstanceId: string;
+        },
+    ): Record<string, string> {
+        const uploadMetadata: Record<string, string> = {
+            originalName: metadata.originalName,
+            workflowId: context.workflowId,
+            agentInstanceId: context.agentInstanceId,
+            userId: context.userId,
+        };
+
+        if (metadata.generatedBy) {
+            uploadMetadata.generatedBy = metadata.generatedBy;
+        }
+
+        if (metadata.prompt) {
+            uploadMetadata.prompt = metadata.prompt;
+        }
+
+        if (checksum) {
+            uploadMetadata.checksum = checksum;
+        }
+
+        return uploadMetadata;
+    }
+
+    private resolveCloudBucketName(config: CloudStorageConfig): string | undefined {
+        if (config.provider === 's3') {
+            return config.s3?.bucketName;
+        }
+
+        return config.gcs?.bucketName;
+    }
+
+    private toMediaStorageError(
+        error: unknown,
+        fallbackMessage: string,
+        details?: Record<string, unknown>,
+    ): MediaStorageError {
+        if (error instanceof MediaStorageError) {
+            return error;
+        }
+
+        if (error instanceof CloudStorageError) {
+            return new MediaStorageError(error.message, error.code, {
+                ...(details || {}),
+                provider: error.provider,
+                ...error.details,
+            });
+        }
+
+        return new MediaStorageError(
+            error instanceof Error ? error.message : fallbackMessage,
+            'CLOUD_STORAGE_ERROR',
+            details,
+        );
     }
 
     /**

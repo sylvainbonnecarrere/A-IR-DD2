@@ -4,7 +4,9 @@ import mongoose from 'mongoose';
 import { AgentInstance } from '../models/AgentInstance.model';
 import { AgentJournal } from '../models/AgentJournal.model';
 import { IMediaReference, MediaReference } from '../models/MediaReference.model';
+import { UserToolRun } from '../models/UserToolRun.model';
 import { getMediaStorageService } from './mediaStorage.service';
+import { resolveCloudAccessForMediaReference } from './cloudMediaAccess.service';
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
 import type { JournalSeverity } from '../types/persistence';
 
@@ -26,6 +28,7 @@ export type MediaDeletionAuditAnomalyCode =
     | 'LOCAL_MEDIA_PATH_UNRESOLVED'
     | 'INLINE_MEDIA_JOURNAL_MISSING'
     | 'CLOUD_MEDIA_NOT_PHYSICALLY_DELETED'
+    | 'RUNTIME_OUTPUT_RUN_REFERENCES_RETAINED'
     | 'UNCATALOGUED_MEDIA_JOURNALS_DELETED'
     | 'UNCATALOGUED_MEDIA_JOURNALS_RETAINED'
     | 'LEGACY_WORKSPACE_FILES_DELETED_OUTSIDE_CATALOG';
@@ -64,7 +67,7 @@ export interface DeleteAgentInstanceWithPolicyResult {
     audit: DeleteAgentInstancePolicyAudit;
 }
 
-type LocalMediaDeleteOutcome = 'deleted' | 'missing' | 'unresolved';
+type MediaDeleteOutcome = 'deleted' | 'missing' | 'unresolved';
 
 const DEFAULT_LEGACY_MEDIA_STORAGE_ROOT = process.env.MEDIA_STORAGE_PATH || path.join(process.cwd(), 'storage');
 
@@ -146,14 +149,6 @@ export class AgentInstanceDeletionPolicyService {
                     mediaReference.canonicalLocator,
                 );
             }
-
-            if (mediaReference.storageMode === 'cloud' && params.mediaPolicy === 'delete_media') {
-                anomalyCollector.add(
-                    'CLOUD_MEDIA_NOT_PHYSICALLY_DELETED',
-                    'Un media cloud externe a ete dereference mais pas supprime physiquement par l application.',
-                    mediaReference.canonicalLocator,
-                );
-            }
         }
 
         for (const mediaJournal of mediaJournals) {
@@ -166,6 +161,38 @@ export class AgentInstanceDeletionPolicyService {
                         ? 'Des journaux media sans reference catalogue ont ete supprimes avec l instance.'
                         : 'Des journaux media sans reference catalogue sont conserves mais resteront invisibles dans BOS Media.',
                     mediaJournal.payload?.fileName,
+                );
+            }
+        }
+
+        if (params.mediaPolicy === 'delete_media') {
+            const runtimeArtifacts = mediaReferences.filter((mediaReference) => (
+                mediaReference.provenance === 'runtime_output'
+                && typeof mediaReference.sourceExecutionId === 'string'
+                && mediaReference.sourceExecutionId.trim().length > 0
+            ));
+
+            const executionIds = Array.from(new Set(runtimeArtifacts.map((mediaReference) => mediaReference.sourceExecutionId!.trim())));
+            const retainedRuntimeRuns = executionIds.length > 0
+                ? await UserToolRun.find({
+                    ownerUserId: new mongoose.Types.ObjectId(params.userId),
+                    executionId: { $in: executionIds },
+                })
+                    .select('executionId')
+                    .lean<Array<{ executionId: string }>>()
+                : [];
+            const retainedExecutionIds = new Set(retainedRuntimeRuns.map((run) => run.executionId));
+
+            for (const runtimeArtifact of runtimeArtifacts) {
+                const executionId = runtimeArtifact.sourceExecutionId?.trim();
+                if (!executionId || !retainedExecutionIds.has(executionId)) {
+                    continue;
+                }
+
+                anomalyCollector.add(
+                    'RUNTIME_OUTPUT_RUN_REFERENCES_RETAINED',
+                    'Un artefact runtime catalogue a ete supprime physiquement alors que l historique user_tool_runs conserve encore une reference legacy vers cette execution.',
+                    runtimeArtifact.canonicalLocator,
                 );
             }
         }
@@ -192,6 +219,12 @@ export class AgentInstanceDeletionPolicyService {
                     anomalyCollector.add(
                         'LOCAL_MEDIA_PATH_UNRESOLVED',
                         'Le chemin du media local ou workspace n a pas pu etre resolu pour suppression physique.',
+                        mediaReference.canonicalLocator,
+                    );
+                } else if (deleteOutcome === 'unresolved' && mediaReference.storageMode === 'cloud') {
+                    anomalyCollector.add(
+                        'CLOUD_MEDIA_NOT_PHYSICALLY_DELETED',
+                        'Un media cloud externe a ete dereference mais pas supprime physiquement par l application.',
                         mediaReference.canonicalLocator,
                     );
                 }
@@ -326,7 +359,11 @@ export class AgentInstanceDeletionPolicyService {
         }
     }
 
-    private async deletePhysicalMedia(mediaReference: IMediaReference, userId: string): Promise<LocalMediaDeleteOutcome | null> {
+    private async deletePhysicalMedia(mediaReference: IMediaReference, userId: string): Promise<MediaDeleteOutcome | null> {
+        if (mediaReference.storageMode === 'cloud') {
+            return this.deleteCloudMedia(mediaReference, userId);
+        }
+
         if (mediaReference.storageMode !== 'local') {
             return null;
         }
@@ -334,7 +371,7 @@ export class AgentInstanceDeletionPolicyService {
         return this.deleteLocalMedia(mediaReference, userId);
     }
 
-    private async deleteLocalMedia(mediaReference: IMediaReference, userId: string): Promise<LocalMediaDeleteOutcome> {
+    private async deleteLocalMedia(mediaReference: IMediaReference, userId: string): Promise<MediaDeleteOutcome> {
         if (!mediaReference.localPath) {
             return 'unresolved';
         }
@@ -367,6 +404,21 @@ export class AgentInstanceDeletionPolicyService {
             await unlink(absolutePath);
             return 'deleted';
         } catch {
+            return 'unresolved';
+        }
+    }
+
+    private async deleteCloudMedia(mediaReference: IMediaReference, userId: string): Promise<MediaDeleteOutcome> {
+        if (!mediaReference.cloudKey) {
+            return 'unresolved';
+        }
+
+        try {
+            const { strategy } = await resolveCloudAccessForMediaReference(mediaReference, userId);
+            const deleted = await strategy.delete(mediaReference.cloudKey);
+            return deleted ? 'deleted' : 'unresolved';
+        } catch (error) {
+            console.warn('[AgentInstanceDeletionPolicyService] cloud media delete failed:', error);
             return 'unresolved';
         }
     }

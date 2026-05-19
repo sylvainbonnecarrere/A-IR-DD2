@@ -466,7 +466,7 @@ export default {
     // Page Titles & Descriptions
     page_dashboard_title: 'Dashboard - Workflow-Karte',
     page_dashboard_description: 'Globale Workflow-Karte und Projektstatusübersicht',
-    bos_media_button: 'Media',
+    bos_media_button: 'Dateiverwaltung',
     page_bos_supervision_title: 'Bos Überwachung',
     page_bos_supervision_description: 'Überwachungstools, Debugging und Kostenüberwachung',
     page_prototyping_title: 'Agent-Prototyping',

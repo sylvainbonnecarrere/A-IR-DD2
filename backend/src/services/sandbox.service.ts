@@ -65,6 +65,7 @@ export class SandboxService {
         userId: string,
         testArgs: Record<string, unknown> = {},
         toolSelection?: SandboxToolSelection,
+        agentInstanceId?: string,
         privateContext?: Record<string, unknown>,
         authHeader?: string
     ): Promise<SandboxResult> {
@@ -131,8 +132,9 @@ export class SandboxService {
             fn,
             userId,
             args: testArgs,
+            agentInstanceId,
             privateContext,
-            launchContext: 'editor_test'
+            launchContext: agentInstanceId ? 'workflow_run' : 'editor_test'
         });
 
         const errorDetails = getSandboxErrorDetailsFromExecutionResult(executionResult);

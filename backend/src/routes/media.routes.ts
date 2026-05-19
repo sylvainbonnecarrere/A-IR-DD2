@@ -27,9 +27,13 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { MediaReference, IMediaReference } from '../models/MediaReference.model';
 import { AgentJournal } from '../models/AgentJournal.model';
+import { UserToolRun } from '../models/UserToolRun.model';
 import { getMediaStorageService } from '../services/mediaStorage.service';
+import { S3StorageStrategy } from '../services/s3Storage.service';
+import { GCSStorageStrategy } from '../services/gcsStorage.service';
 import { createWorkspaceManager } from '../services/workspace/WorkspaceManager';
 import { WorkflowMediaExplorerService } from '../services/workflowMediaExplorer.service';
+import { resolveCloudAccessForMediaReference } from '../services/cloudMediaAccess.service';
 import { IUser } from '../models/User.model';
 import { 
     CloudStorageConfig, 
@@ -50,6 +54,20 @@ const STORAGE_ROOT = process.env.MEDIA_STORAGE_PATH || path.join(process.cwd(), 
 const DEFAULT_CHUNK_SIZE = 1024 * 1024; // 1MB
 const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
 const workflowMediaExplorerService = new WorkflowMediaExplorerService();
+
+interface DeleteMediaWarning {
+    code: 'RUNTIME_OUTPUT_RUN_REFERENCES_RETAINED';
+    message: string;
+    executionId: string;
+}
+
+function asPayloadRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    return value as Record<string, unknown>;
+}
 
 // ============================================
 // UTILITAIRES DE SÉCURITÉ
@@ -136,6 +154,63 @@ function secureLog(action: string, details: Record<string, unknown>) {
     console.log(`[MediaRoutes] ${action}:`, safeDetails);
 }
 
+async function resolveLegacyDeleteWarnings(mediaRef: IMediaReference): Promise<DeleteMediaWarning[]> {
+    if (mediaRef.provenance !== 'runtime_output' || !mediaRef.sourceExecutionId) {
+        return [];
+    }
+
+    try {
+        const runReference = await UserToolRun.findOne({
+            ownerUserId: mediaRef.userId,
+            executionId: mediaRef.sourceExecutionId,
+            ...(mediaRef.localPath ? { 'outputs.artifacts.path': mediaRef.localPath } : {}),
+        })
+            .select({ _id: 1 })
+            .lean();
+
+        if (!runReference) {
+            return [];
+        }
+
+        return [{
+            code: 'RUNTIME_OUTPUT_RUN_REFERENCES_RETAINED',
+            message: `L'historique runtime conserve encore une reference legacy vers cet artefact supprime pour l'execution ${mediaRef.sourceExecutionId}.`,
+            executionId: mediaRef.sourceExecutionId,
+        }];
+    } catch (error) {
+        console.warn('[MediaRoutes] Legacy runtime warning lookup failed:', error);
+        return [];
+    }
+}
+
+function buildCloudStrategy(config: CloudStorageConfig) {
+    switch (config.provider) {
+        case 's3':
+            return new S3StorageStrategy();
+        case 'gcs':
+            return new GCSStorageStrategy();
+        default:
+            throw new Error('Provider cloud non supporté');
+    }
+}
+
+function resolveCloudErrorStatus(error: CloudStorageError): number {
+    switch (error.code) {
+        case CloudStorageErrorCodes.SIGNED_URL_FAILED:
+        case CloudStorageErrorCodes.DELETE_FAILED:
+        case CloudStorageErrorCodes.CONNECTION_FAILED:
+            return 502;
+        case CloudStorageErrorCodes.INVALID_CONFIG:
+        case CloudStorageErrorCodes.NOT_INITIALIZED:
+        case CloudStorageErrorCodes.INVALID_CREDENTIALS:
+        case CloudStorageErrorCodes.ACCESS_DENIED:
+        case CloudStorageErrorCodes.BUCKET_NOT_FOUND:
+        case CloudStorageErrorCodes.PROVIDER_NOT_SUPPORTED:
+        default:
+            return 409;
+    }
+}
+
 // ============================================
 // SCHEMAS VALIDATION
 // ============================================
@@ -150,6 +225,8 @@ const listMediaQuerySchema = z.object({
 
 const workflowMediaExplorerQuerySchema = z.object({
     q: z.string().optional(),
+    mimeType: z.string().optional(),
+    agentName: z.string().optional(),
     includeOrphans: z.coerce.boolean().optional().default(false),
     sortBy: z.enum(['updatedAt', 'createdAt', 'name', 'size']).optional().default('updatedAt'),
     sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
@@ -199,6 +276,8 @@ router.get('/workflows/:workflowId/explorer', requireAuth, async (req: Request, 
             workflowId,
             storageMode: parseResult.data.storageMode,
             search: parseResult.data.q,
+            mimeType: parseResult.data.mimeType,
+            agentName: parseResult.data.agentName,
             includeOrphans: parseResult.data.includeOrphans,
             sortBy: parseResult.data.sortBy,
             sortOrder: parseResult.data.sortOrder,
@@ -286,6 +365,14 @@ router.get('/:mediaId', requireAuth, async (req: Request, res: Response) => {
         }
         
     } catch (error) {
+        if (error instanceof CloudStorageError) {
+            return res.status(resolveCloudErrorStatus(error)).json({
+                error: error.message,
+                code: error.code,
+                provider: error.provider,
+            });
+        }
+
         console.error('[MediaRoutes] Erreur récupération média:', error);
         return res.status(500).json({ 
             error: 'Erreur serveur',
@@ -396,6 +483,8 @@ router.delete('/:mediaId', requireAuth, async (req: Request, res: Response) => {
         if (mediaRef.userId.toString() !== userId) {
             return res.status(403).json({ error: 'Accès non autorisé' });
         }
+
+        const warnings = await resolveLegacyDeleteWarnings(mediaRef);
         
         // Supprimer le fichier physique selon le mode
         const storageService = getMediaStorageService();
@@ -417,24 +506,36 @@ router.delete('/:mediaId', requireAuth, async (req: Request, res: Response) => {
                 break;
                 
             case 'cloud':
-                // TODO: supprimer via cloud strategy
-                // fileDeleted = await cloudStrategy.delete(mediaRef.cloudKey);
-                fileDeleted = true;
+                fileDeleted = await deleteCloudMediaByReference(mediaRef, userId);
                 break;
         }
         
         // Supprimer la référence MongoDB
         await MediaReference.findByIdAndDelete(mediaId);
         
-        secureLog('DELETE_SUCCESS', { mediaId, storageMode: mediaRef.storageMode, fileDeleted });
+        secureLog('DELETE_SUCCESS', {
+            mediaId,
+            storageMode: mediaRef.storageMode,
+            fileDeleted,
+            warningCodes: warnings.map((warning) => warning.code),
+        });
         
         return res.json({
             success: true,
             message: 'Média supprimé',
-            fileDeleted
+            fileDeleted,
+            warnings,
         });
         
     } catch (error) {
+        if (error instanceof CloudStorageError) {
+            return res.status(resolveCloudErrorStatus(error)).json({
+                error: error.message,
+                code: error.code,
+                provider: error.provider,
+            });
+        }
+
         console.error('[MediaRoutes] Erreur suppression média:', error);
         return res.status(500).json({ error: 'Erreur serveur' });
     }
@@ -448,8 +549,6 @@ router.delete('/:mediaId', requireAuth, async (req: Request, res: Response) => {
  */
 router.post('/test-cloud', requireAuth, async (req: Request, res: Response) => {
     try {
-        const user = req.user as IUser;
-        
         // Validation du body
         const parseResult = testCloudConfigSchema.safeParse(req.body);
         if (!parseResult.success) {
@@ -469,18 +568,12 @@ router.post('/test-cloud', requireAuth, async (req: Request, res: Response) => {
                 details: validation.errors
             });
         }
-        
-        // TODO: Instancier la strategy appropriée et tester
-        // const strategy = CloudStorageFactory.getStrategy(config);
-        // const result = await strategy.testConnection();
-        
-        // Pour l'instant, simuler une réponse
-        return res.json({
-            success: true,
-            message: 'Configuration valide (test non implémenté)',
-            provider: config.provider,
-            bucket: config.provider === 's3' ? config.s3?.bucketName : config.gcs?.bucketName
-        });
+
+        const strategy = buildCloudStrategy(config);
+        await strategy.initialize(config);
+        const result = await strategy.testConnection();
+
+        return res.json(result);
         
     } catch (error) {
         console.error('[MediaRoutes] Erreur test cloud:', error);
@@ -629,7 +722,7 @@ async function streamDatabaseMedia(
         });
     }
 
-    const payload = journalEntry.get('payload') as Record<string, unknown> | undefined;
+    const payload = asPayloadRecord(journalEntry.get('payload'));
     const inlineBuffer = normalizeInlineMediaBuffer(payload?.data);
     if (!payload || payload.storageMode !== 'database' || !inlineBuffer) {
         return res.status(404).json({
@@ -686,17 +779,22 @@ async function redirectToCloudMedia(
     mediaRef: IMediaReference,
     userId: string
 ): Promise<Response | void> {
-    // TODO: Implémenter génération URL signée
-    // const strategy = CloudStorageFactory.getStrategy(mediaRef.cloudProvider);
-    // const signedUrl = await strategy.getSignedUrl(mediaRef.cloudKey, { action: 'read' });
-    // return res.redirect(302, signedUrl);
-    
-    return res.status(501).json({
-        error: 'Stockage cloud non implémenté',
-        code: 'NOT_IMPLEMENTED',
-        provider: mediaRef.cloudProvider,
-        key: mediaRef.cloudKey
+    if (!mediaRef.cloudKey) {
+        throw new CloudStorageError(
+            'Le media cloud ne reference aucune cle de stockage.',
+            CloudStorageErrorCodes.INVALID_CONFIG,
+            mediaRef.cloudProvider,
+        );
+    }
+
+    const { strategy } = await resolveCloudAccessForMediaReference(mediaRef, userId);
+    const disposition = req.query.download === 'true' ? 'attachment' : 'inline';
+    const signedUrl = await strategy.getSignedUrl(mediaRef.cloudKey, {
+        action: 'read',
+        responseContentDisposition: `${disposition}; filename="${encodeURIComponent(mediaRef.originalName)}"`,
     });
+
+    return res.redirect(302, signedUrl);
 }
 
 async function resolveLocalMediaAbsolutePath(mediaRef: IMediaReference, userId: string): Promise<string | null> {
@@ -752,6 +850,36 @@ async function deleteLocalMediaByReference(
         console.warn(`[MediaRoutes] Échec suppression ${normalizedPath}:`, error);
         return false;
     }
+}
+
+async function deleteCloudMediaByReference(
+    mediaRef: IMediaReference,
+    userId: string,
+): Promise<boolean> {
+    if (!mediaRef.cloudKey) {
+        throw new CloudStorageError(
+            'Le media cloud ne reference aucune cle de stockage.',
+            CloudStorageErrorCodes.INVALID_CONFIG,
+            mediaRef.cloudProvider,
+        );
+    }
+
+    const { strategy } = await resolveCloudAccessForMediaReference(mediaRef, userId);
+    const deleted = await strategy.delete(mediaRef.cloudKey);
+
+    if (!deleted) {
+        throw new CloudStorageError(
+            'La suppression physique du media cloud a echoue.',
+            CloudStorageErrorCodes.DELETE_FAILED,
+            mediaRef.cloudProvider,
+            {
+                cloudKey: mediaRef.cloudKey,
+                mediaId: mediaRef._id.toString(),
+            },
+        );
+    }
+
+    return true;
 }
 
 function resolveJournalEntryId(mediaRef: IMediaReference): string | null {

@@ -545,7 +545,7 @@ export default {
     // Page Titles & Descriptions
     page_dashboard_title: 'Dashboard - Carte des Workflows',
     page_dashboard_description: 'Vue d\'ensemble cartographique de tous les workflows et leur statut',
-    bos_media_button: 'Media',
+    bos_media_button: 'Gestion des fichiers',
     page_bos_supervision_title: 'Bos Supervision',
     page_bos_supervision_description: 'Outils de supervision, debugging et monitoring des coûts',
     page_prototyping_title: 'Prototypage d\'Agents',

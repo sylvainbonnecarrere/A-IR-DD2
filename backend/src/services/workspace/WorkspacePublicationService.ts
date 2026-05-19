@@ -16,6 +16,12 @@ export interface WorkspacePublicationContext {
     agentInstanceId: string;
 }
 
+type AllowedMimeType = typeof ALLOWED_MIME_TYPES[number];
+
+function isAllowedMimeType(mimeType: string): mimeType is AllowedMimeType {
+    return (ALLOWED_MIME_TYPES as readonly string[]).includes(mimeType);
+}
+
 export class WorkspacePublicationService {
     constructor(
         private readonly workspaceManager: WorkspaceManager = createWorkspaceManager(),
@@ -86,7 +92,7 @@ export class WorkspacePublicationService {
     }
 
     private validateMimeType(mimeType: string): void {
-        if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
+        if (!isAllowedMimeType(mimeType)) {
             throw new MediaStorageError(
                 `Type MIME non autorisé: ${mimeType}`,
                 'INVALID_MIME_TYPE',

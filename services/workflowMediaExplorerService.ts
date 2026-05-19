@@ -3,11 +3,14 @@ import { API_BASE_URL } from '../config/api.config';
 export type WorkflowMediaStorageMode = 'db' | 'workspace' | 'cloud';
 export type WorkflowMediaSortBy = 'updatedAt' | 'createdAt' | 'name' | 'size';
 export type WorkflowMediaSortOrder = 'asc' | 'desc';
+export type WorkflowMediaProvenance = 'user' | 'agent' | 'function' | 'import' | 'runtime_output';
 
 export interface WorkflowMediaExplorerItem {
   mediaId: string;
   workflowId: string;
   storageMode: WorkflowMediaStorageMode;
+  provenance: WorkflowMediaProvenance | null;
+  sourceExecutionId: string | null;
   canonicalLocator: string;
   displayName: string;
   originalName: string;
@@ -35,11 +38,18 @@ export interface DeleteWorkflowMediaResponse {
   success: boolean;
   message: string;
   fileDeleted: boolean;
+  warnings?: Array<{
+    code: 'RUNTIME_OUTPUT_RUN_REFERENCES_RETAINED';
+    message: string;
+    executionId: string;
+  }>;
 }
 
 interface WorkflowMediaExplorerOptions {
   token: string;
   q?: string;
+  mimeType?: string;
+  agentName?: string;
   includeOrphans?: boolean;
   sortBy?: WorkflowMediaSortBy;
   sortOrder?: WorkflowMediaSortOrder;
@@ -55,6 +65,14 @@ export const workflowMediaExplorerService = {
 
     if (options.q?.trim()) {
       searchParams.set('q', options.q.trim());
+    }
+
+    if (options.mimeType?.trim()) {
+      searchParams.set('mimeType', options.mimeType.trim());
+    }
+
+    if (options.agentName?.trim()) {
+      searchParams.set('agentName', options.agentName.trim());
     }
 
     if (options.includeOrphans) {
