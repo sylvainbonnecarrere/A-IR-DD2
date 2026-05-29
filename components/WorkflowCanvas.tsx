@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, memo } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -23,37 +23,32 @@ import { AgentFormModal } from './modals/AgentFormModal';
 import { SavePrototypeButton } from './SavePrototypeButton';
 import { AutoSaveIndicator } from './AutoSaveIndicator';
 import { useAutoSave } from '../hooks/useAutoSave';
-import { Agent, WorkflowNode, LLMConfig, AgentInstance } from '../types';
+import { Agent, AgentDraft, WorkflowNode, LLMConfig, AgentInstance, NodePositionUpdateOptions, RobotId, V2WorkflowNode } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useAuth } from '../contexts/AuthContext';
 import { isValidWorkflowConnection } from './workflow/connectionContracts';
 import { registerReactFlowWarningProbe } from '../utils/reactFlowWarningDiagnostics';
+import { findCollisionFreeWorkflowNodePosition } from '../utils/workflowNodePlacement';
 
 interface WorkflowCanvasProps {
   nodes?: WorkflowNode[];
   llmConfigs?: LLMConfig[];
+  onCanvasReady?: () => void;
   onDeleteNode?: (nodeId: string) => void;
   onUpdateNodeMessages?: (nodeId: string, messages: any[]) => void;
-  onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }) => void;
+  onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
-  onToggleNodeMaximize?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   agents?: Agent[];
-  workflowNodes?: WorkflowNode[];
   onAddToWorkflow?: (agent: Agent) => void;
   onUpdateWorkflowNode?: (nodeId: string, updates: Partial<WorkflowNode>) => void;
   onRemoveFromWorkflow?: (nodeId: string) => void;
   onNavigate?: (robotId: any, path: string) => void; // Pour navigation vers prototypage
-  // Détection des panneaux actifs pour calcul largeur maximized
-  isImagePanelOpen?: boolean;
-  isImageModificationPanelOpen?: boolean;
-  isVideoPanelOpen?: boolean;
-  isMapsPanelOpen?: boolean;
   // ⭐ ÉTAPE 2: Persistence props
   workflowId?: string;
   workflowName?: string;
@@ -71,32 +66,33 @@ const REACT_FLOW_STYLE = Object.freeze({ background: 'transparent' });
 const DEFAULT_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 0.7 });
 const PRO_OPTIONS = Object.freeze({ hideAttribution: true });
 let workflowCanvasMountSequence = 0;
+type CanvasWorkflowNode = WorkflowNode | V2WorkflowNode;
+type ReactFlowNodeWithMeasuredSize = Node & { measured?: { height?: number; width?: number } };
+
+function isV2WorkflowNode(node: CanvasWorkflowNode): node is V2WorkflowNode {
+  return 'data' in node;
+}
 
 // Composant interne avec accès à useReactFlow
 const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCanvasProps) {
   const {
     nodes = [],
     llmConfigs = [],
+    onCanvasReady,
     onDeleteNode,
     onUpdateNodeMessages,
     onUpdateNodePosition,
     onToggleNodeMinimize,
-    onToggleNodeMaximize,
     onOpenImagePanel,
     onOpenImageModificationPanel,
     onOpenVideoPanel,
     onOpenMapsPanel,
     onOpenFullscreen,
     agents = [],
-    workflowNodes = [],
     onAddToWorkflow,
     onUpdateWorkflowNode,
     onRemoveFromWorkflow,
     onNavigate,
-    isImagePanelOpen = false,
-    isImageModificationPanelOpen = false,
-    isVideoPanelOpen = false,
-    isMapsPanelOpen = false,
     // ⭐ ÉTAPE 2: Persistence props
     workflowId: workflowIdProp,
     workflowName,
@@ -105,6 +101,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
   const { isAuthenticated } = useAuth();
   const workflowCanvasMountIdRef = useRef(0);
+  const canvasReadySignatureRef = useRef<string | null>(null);
   if (workflowCanvasMountIdRef.current === 0) {
     workflowCanvasMountIdRef.current = ++workflowCanvasMountSequence;
   }
@@ -142,7 +139,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       onOpenImageModificationPanel: onOpenImageModificationPanel || (() => { }),
       onOpenFullscreen: onOpenFullscreen || (() => { })
     },
-    actualNodes: [] as WorkflowNode[],
+    actualNodes: [] as CanvasWorkflowNode[],
     agents: [] as Agent[],
     reactFlowNodes: [] as Node[]
   });
@@ -189,24 +186,21 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     }
   }, [onNodesChangeInternal]);
 
-  // ⭐ FIX SOLID: Utiliser la source unique de vérité pour les nodes
-  // Priorité: storeNodes (source officielle) > nodes props > fallback
-  // REVERT: Revenir à storeNodes comme priorité 1 pour éviter perte des journaux et recentrage
+  // ⭐ FIX SOLID: Utiliser la source unique de vérité pour les nodes.
+  // Le chemin actif du runtime lit désormais le store, avec `nodes` comme compatibilité explicite.
   const { nodes: storeNodes } = useDesignStore();
   
   // Calculer actualNodes de manière stable
-  const actualNodes = useMemo(() => {
-    // ⭐ PRIORITÉ 1: storeNodes (source officielle - garantit persistance des journaux)
+  const actualNodes = useMemo<CanvasWorkflowNode[]>(() => {
     if (storeNodes && storeNodes.length > 0) {
       return storeNodes;
     }
-    // Priorité 2: nodes passés en props
     if (nodes && nodes.length > 0) {
       return nodes;
     }
-    // Fallback: workflowNodes legacy
-    return workflowNodes;
-  }, [storeNodes, nodes, workflowNodes]);
+
+    return [];
+  }, [storeNodes, nodes]);
 
   reactFlowWarningSnapshotRef.current = {
     mountId: workflowCanvasMountIdRef.current,
@@ -222,8 +216,84 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     proOptionsStable: reactFlowContractRef.current.proOptions === PRO_OPTIONS,
   };
 
-  // Détecter si un panneau média est actif (pour calcul largeur maximized)
-  const isMediaPanelActive = isImagePanelOpen || isImageModificationPanelOpen || isVideoPanelOpen || isMapsPanelOpen;
+  stableRefs.current.actualNodes = actualNodes;
+  stableRefs.current.reactFlowNodes = reactFlowNodes;
+
+  const resolveDroppedNodePosition = useCallback((
+    nodeId: string,
+    desiredPosition: { x: number; y: number },
+    draggedNodeSize?: { width?: number; height?: number },
+  ) => {
+    const designState = useDesignStore.getState();
+    const movedNode = designState.nodes.find((candidate) => candidate.id === nodeId);
+    const instanceId = movedNode?.data?.agentInstance?.id;
+    const nodeWorkflowId = movedNode?.data?.workflowId
+      || movedNode?.data?.agentInstance?.workflowId
+      || workflowId;
+    const liveNodes: ReactFlowNodeWithMeasuredSize[] = typeof (reactFlowInstance as typeof reactFlowInstance & { getNodes?: () => ReactFlowNodeWithMeasuredSize[] }).getNodes === 'function'
+      ? (reactFlowInstance as typeof reactFlowInstance & { getNodes: () => ReactFlowNodeWithMeasuredSize[] }).getNodes()
+      : stableRefs.current.reactFlowNodes as ReactFlowNodeWithMeasuredSize[];
+    const getNodeWidth = (candidate?: ReactFlowNodeWithMeasuredSize) => candidate?.measured?.width ?? candidate?.width;
+    const getNodeHeight = (candidate?: ReactFlowNodeWithMeasuredSize) => candidate?.measured?.height ?? candidate?.height;
+    const movedLiveNode = liveNodes.find((candidate) => candidate.id === nodeId);
+    const occupiedNodeRects = liveNodes.flatMap((candidate) => {
+      if (!Number.isFinite(candidate.position?.x) || !Number.isFinite(candidate.position?.y)) {
+        return [];
+      }
+
+      return [{
+        nodeId: candidate.id,
+        instanceId: candidate.data?.agentInstance?.id,
+        position: candidate.position,
+        workflowId: candidate.data?.workflowId ?? candidate.data?.agentInstance?.workflowId ?? nodeWorkflowId ?? null,
+        width: getNodeWidth(candidate),
+        height: getNodeHeight(candidate),
+      }];
+    });
+
+    return findCollisionFreeWorkflowNodePosition({
+      nodeId,
+      instanceId,
+      currentPosition: movedNode?.position,
+      desiredPosition,
+      workflowId: nodeWorkflowId,
+      nodes: designState.nodes,
+      agentInstances: designState.agentInstances,
+      occupiedNodeRects,
+      subjectSize: {
+        width: draggedNodeSize?.width ?? getNodeWidth(movedLiveNode),
+        height: draggedNodeSize?.height ?? getNodeHeight(movedLiveNode),
+      },
+    });
+  }, [reactFlowInstance, workflowId]);
+
+  const onNodeDragStop = useCallback((_: unknown, node: ReactFlowNodeWithMeasuredSize) => {
+    try {
+      const resolvedPosition = resolveDroppedNodePosition(node.id, node.position, {
+        width: node.measured?.width ?? node.width,
+        height: node.measured?.height ?? node.height,
+      });
+
+      setReactFlowNodes((currentNodes) => currentNodes.map((currentNode) => {
+        if (currentNode.id !== node.id) {
+          return currentNode;
+        }
+
+        if (currentNode.position.x === resolvedPosition.x && currentNode.position.y === resolvedPosition.y) {
+          return currentNode;
+        }
+
+        return {
+          ...currentNode,
+          position: resolvedPosition,
+        };
+      }));
+
+      stableRefs.current.callbacks.onUpdateNodePosition(node.id, resolvedPosition, { persist: true });
+    } catch (error) {
+      console.error('[WorkflowCanvas] Error in onNodeDragStop:', error);
+    }
+  }, [resolveDroppedNodePosition, setReactFlowNodes]);
 
   // ⭐ PLAN_DE_PERSISTENCE: Hook de sauvegarde automatique
   const autoSave = useAutoSave({
@@ -242,8 +312,63 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     onDeleteNode: onDeleteNode || (() => { }),
     onUpdateNodeMessages: onUpdateNodeMessages || (() => { }),
     onUpdateNodePosition: onUpdateNodePosition || (() => { }),
-    onToggleNodeMinimize: onToggleNodeMinimize || (() => { }),
-    onToggleNodeMaximize: onToggleNodeMaximize || (() => { }),
+    // Wrapper: when toggle minimize/restore, re-measure DOM node size and re-evaluate collisions.
+    // Important: moves caused by restore are applied locally (no persist) to avoid accidental DB writes for UI-only actions.
+    onToggleNodeMinimize: (nodeId: string) => {
+      try {
+        // Call upstream handler (App) to toggle runtime state
+        (onToggleNodeMinimize || (() => {}))(nodeId);
+
+        // Wait for DOM/CSS transition to complete so measurements reflect new size
+        setTimeout(() => {
+          try {
+            // Query rendered node DOM element provided by React Flow
+            const nodeEl = document.querySelector(`[data-id=\"${nodeId}\"]`) as HTMLElement | null;
+            const measuredWidth = nodeEl?.offsetWidth ?? undefined;
+            const measuredHeight = nodeEl?.offsetHeight ?? undefined;
+
+            // If we could measure new dimensions, update the reactFlowNodes measured field
+            if (typeof measuredWidth === 'number' || typeof measuredHeight === 'number') {
+              setReactFlowNodes((current) => current.map((n) => {
+                if (n.id !== nodeId) return n;
+                return {
+                  ...n,
+                  measured: {
+                    width: measuredWidth ?? n.measured?.width ?? n.width,
+                    height: measuredHeight ?? n.measured?.height ?? n.height,
+                  },
+                };
+              }));
+
+              // Re-evaluate collisions for this node and apply a local (non-persistent) correction if needed
+              const designState = useDesignStore.getState();
+              const movedNode = designState.nodes.find((candidate) => candidate.id === nodeId);
+              if (movedNode && Number.isFinite(movedNode.position?.x) && Number.isFinite(movedNode.position?.y)) {
+                const desiredPosition = movedNode.position;
+                const resolved = resolveDroppedNodePosition(nodeId, desiredPosition, {
+                  width: measuredWidth,
+                  height: measuredHeight,
+                });
+
+                if (resolved && (resolved.x !== desiredPosition.x || resolved.y !== desiredPosition.y)) {
+                  // Update visual position locally only (no persist)
+                  setReactFlowNodes((current) => current.map((n) => n.id === nodeId ? { ...n, position: resolved } : n));
+                  // Notify parent without persist flag so stores/UI update but DB is not written
+                  (onUpdateNodePosition || (() => {}))(nodeId, resolved);
+                }
+              }
+            }
+          } catch (err) {
+            // swallow measurement errors
+            // eslint-disable-next-line no-console
+            console.warn('[WorkflowCanvas] failed to re-measure node after toggle minimize:', err);
+          }
+        }, 120); // small delay for CSS transitions
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[WorkflowCanvas] onToggleNodeMinimize wrapper error:', err);
+      }
+    },
     onOpenImagePanel: onOpenImagePanel || (() => { }),
     onOpenImageModificationPanel: onOpenImageModificationPanel || (() => { }),
     onOpenFullscreen: onOpenFullscreen || (() => { })
@@ -256,7 +381,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   const { agentInstances, getResolvedInstance } = useDesignStore();
 
   // SOLUTION ANTI-BOUCLE: useEffect unique et stable pour éviter les conflits
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (actualNodes && actualNodes.length > 0) {
       const newReactFlowNodes: Node[] = actualNodes.map((wfNode, index) => {
         // ⭐ SUPPORT BOTH NODE TYPES: V2WorkflowNode (from store) and WorkflowNode (legacy)
@@ -270,17 +395,20 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         let nodeWorkflowId = workflowId;
         
         // Check if it's a V2WorkflowNode (has data property)
-        if ('data' in wfNode && wfNode.data) {
-          // V2WorkflowNode from store - use data directly
-          agentInstance = wfNode.data.agentInstance || null;
-          agent = wfNode.data.agent || null;
-          robotId = wfNode.data.robotId || 'unknown';
+        if (isV2WorkflowNode(wfNode)) {
           position = wfNode.position || position;
-          nodeWorkflowId = wfNode.data.workflowId || workflowId;
-          
-          // ⭐ FIX: Si agentInstance existe mais n'a pas de workflowId, l'ajouter
-          if (agentInstance && !agentInstance.workflowId) {
-            agentInstance = { ...agentInstance, workflowId: nodeWorkflowId };
+
+          if (wfNode.data) {
+            // V2WorkflowNode from store - use data directly
+            agentInstance = wfNode.data.agentInstance || null;
+            agent = wfNode.data.agent || null;
+            robotId = wfNode.data.robotId || 'unknown';
+            nodeWorkflowId = wfNode.data.workflowId || workflowId;
+
+            // ⭐ FIX: Si agentInstance existe mais n'a pas de workflowId, l'ajouter
+            if (agentInstance && !agentInstance.workflowId) {
+              agentInstance = { ...agentInstance, workflowId: nodeWorkflowId };
+            }
           }
         } else {
           // WorkflowNode (legacy) - has instanceId, need to resolve from store
@@ -312,8 +440,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           position,
           data: {
             robotId,
-            label: agentInstance?.name || (wfNode.agent?.name || 'Agent'),
-            agent: agent || wfNode.agent, // ⭐ FIX: Utiliser agent résolu ou celui du legacy node
+            label: agentInstance?.name || agent?.name || 'Agent',
+            agent, // ⭐ FIX: Utiliser agent résolu ou celui du legacy node
             agentInstance, // Instance mise à jour depuis le store (peut être null)
             workflowId: nodeWorkflowId, // ⭐ FIX: Utiliser le workflowId du node
             // ⭐ REMOVED: isMinimized, isMaximized - now managed by useRuntimeStore (transient UI state)
@@ -400,6 +528,31 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     setInternalState(prev => ({ ...prev, minimapReady: true }));
   }, []);
 
+  useEffect(() => {
+    if (!onCanvasReady) {
+      return undefined;
+    }
+
+    const visualNodesAreReady = actualNodes.length === reactFlowNodes.length
+      && reactFlowNodes.every((node) => Boolean(node.data?.label));
+
+    if (!visualNodesAreReady) {
+      return undefined;
+    }
+
+    const signature = `${workflowId}:${actualNodes.map((node) => node.id).join('|')}:${reactFlowNodes.length}`;
+    if (canvasReadySignatureRef.current === signature) {
+      return undefined;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      canvasReadySignatureRef.current = signature;
+      onCanvasReady();
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [actualNodes, onCanvasReady, reactFlowNodes, workflowId]);
+
   // Handlers stables avec useCallback
   const onConnect = useCallback((connection: Connection) => {
     if (!isValidWorkflowConnection(connection)) {
@@ -439,7 +592,12 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       const currentAgents = stableRefs.current.agents;
       const workflowNode = currentActualNodes.find(wf => wf && wf.id === selectedAgentForEdit);
       if (workflowNode) {
-        const agent = Array.isArray(currentAgents) ? currentAgents.find(a => a && a.id === workflowNode.agentId) : null;
+        const prototypeId = 'data' in workflowNode
+          ? workflowNode.data.agent?.id ?? workflowNode.data.agentInstance?.prototypeId
+          : workflowNode.agent?.id;
+        const agent = prototypeId && Array.isArray(currentAgents)
+          ? currentAgents.find(a => a && a.id === prototypeId)
+          : null;
         if (agent) {
           setInternalState(prev => ({
             ...prev,
@@ -466,38 +624,18 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       navigationHandler: onNavigate,
       onDeleteNode,
       onToggleNodeMinimize,
-      onToggleNodeMaximize,
       onUpdateNodePosition,
       onOpenImagePanel,
       onOpenImageModificationPanel,
       onOpenVideoPanel,
       onOpenMapsPanel,
       onOpenFullscreen,
-    }), [handleEditPrototype, onNavigate, onDeleteNode, onToggleNodeMinimize, onToggleNodeMaximize, onUpdateNodePosition, onOpenImagePanel, onOpenImageModificationPanel, onOpenVideoPanel, onOpenMapsPanel, onOpenFullscreen]);
+    }), [handleEditPrototype, onNavigate, onDeleteNode, onToggleNodeMinimize, onUpdateNodePosition, onOpenImagePanel, onOpenImageModificationPanel, onOpenVideoPanel, onOpenMapsPanel, onOpenFullscreen]);
 
-  // Calcul dynamique de la largeur maximale pour le mode maximized
-  // Si un panneau média est actif, largeur = viewport - panneau (environ 600px)
-  // Sinon, largeur = 100% du workflow canvas
-  const maximizedWidth = isMediaPanelActive ? 'calc(100vw - 650px)' : 'calc(100vw - 100px)';
-  const maximizedHeight = 'calc(100vh - 150px)';
   const effectiveWorkflowId = workflowId === 'default-workflow' && isAuthenticated ? undefined : workflowId;
 
   return (
     <WorkflowCanvasProvider value={contextValue}>
-      {/* Style dynamique pour la classe workflow-maximized */}
-      <style>{`
-        .workflow-maximized {
-          width: ${maximizedWidth} !important;
-          height: ${maximizedHeight} !important;
-          max-width: none !important;
-          z-index: 999 !important;
-          position: relative !important;
-        }
-        
-        .workflow-maximized .flex-1 {
-          max-height: calc(${maximizedHeight} - 100px) !important;
-        }
-      `}</style>
       <div className="h-full w-full relative overflow-hidden">
         {/* Background optimisé avec thème jour/nuit */}
         <OptimizedWorkflowBackground />
@@ -506,6 +644,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           nodes={reactFlowNodes}
           edges={edges}
           onNodesChange={onNodesChange}
+          onNodeDragStop={onNodeDragStop}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           isValidConnection={isValidWorkflowConnection}
@@ -545,8 +684,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           {internalState.minimapReady && (
             <MiniMap
               key="minimap-unique"
-              width={200}
-              height={140}
               position="bottom-right"
               nodeStrokeColor={(node) => {
                 // ⭐ REMOVED: isMinimized check - now managed by useRuntimeStore
@@ -585,6 +722,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               maskColor={theme.timeOfDay === 'morning' ? 'rgba(5, 46, 22, 0.6)' : 'rgba(0, 20, 40, 0.6)'}
               className="workflow-minimap-fixed"
               style={{
+                width: 200,
+                height: 140,
                 background: theme.backgroundGradient,
                 border: `2px solid ${theme.particleColors[0]}`,
                 borderRadius: '12px',
@@ -675,7 +814,9 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         <PrototypeEditConfirmationModal
           isOpen={internalState.showPrototypeConfirm}
           agentName={internalState.selectedAgentForEdit ?
-            reactFlowNodes.find(n => n.id === internalState.selectedAgentForEdit)?.data?.workflowNode?.name || 'Agent'
+            reactFlowNodes.find(n => n.id === internalState.selectedAgentForEdit)?.data?.agentInstance?.name ||
+            reactFlowNodes.find(n => n.id === internalState.selectedAgentForEdit)?.data?.agent?.name ||
+            'Agent'
             : 'Agent'
           }
           onConfirm={handleConfirmPrototypeEdit}
@@ -686,11 +827,15 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         {internalState.showAgentForm && (
           <AgentFormModal
             onClose={() => setInternalState(prev => ({ ...prev, showAgentForm: false }))}
-            onSave={(agentData) => {
+            onSave={(agentData: AgentDraft) => {
               // Générer un ID pour l'agent si pas fourni
+              const now = new Date().toISOString();
               const agentWithId: Agent = {
                 ...agentData,
-                id: `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+                id: `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                creator_id: RobotId.Archi,
+                created_at: now,
+                updated_at: now,
               };
               if (onAddToWorkflow) onAddToWorkflow(agentWithId);
               setInternalState(prev => ({ ...prev, showAgentForm: false }));

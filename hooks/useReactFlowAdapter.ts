@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges, Connection } from 'reactflow';
-import { WorkflowNode, ChatMessage } from '../types';
+import { WorkflowNode, ChatMessage, NodePositionUpdateOptions } from '../types';
 
 interface UseReactFlowAdapterProps {
   nodes: WorkflowNode[];
-  onUpdateNodePosition: (nodeId: string, position: { x: number; y: number }) => void;
+  onUpdateNodePosition: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onDeleteNode: (nodeId: string) => void;
 }
 
@@ -48,7 +48,7 @@ export const useReactFlowAdapter = ({
         case 'position':
           if (change.position && change.dragging === false) {
             // Mettre à jour la position uniquement quand le drag est terminé
-            onUpdateNodePosition(change.id, change.position);
+            onUpdateNodePosition(change.id, change.position, { persist: true });
           }
           break;
         case 'remove':

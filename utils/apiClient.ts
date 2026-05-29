@@ -18,6 +18,7 @@
 import axios, {
     AxiosInstance,
     AxiosError,
+    AxiosHeaders,
     InternalAxiosRequestConfig,
     AxiosResponse,
 } from 'axios';
@@ -92,7 +93,9 @@ axiosInstance.interceptors.response.use(
 
                 try {
                     const newAccessToken = await refreshStoredSessionAccessToken();
-                    originalRequest.headers = originalRequest.headers ?? {};
+                    originalRequest.headers = originalRequest.headers instanceof AxiosHeaders
+                        ? originalRequest.headers
+                        : new AxiosHeaders(originalRequest.headers);
                     originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
                     return axiosInstance(originalRequest);
                 } catch (refreshError) {

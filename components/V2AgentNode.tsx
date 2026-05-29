@@ -17,7 +17,7 @@ import { runAgentLoop } from '../services/llm/AgentLoop';
 import { ToolCallBlock } from './workflow/ToolCallBlock';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
-import { isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
+import { getEffectiveCredential, isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
 import { useLocalization } from '../hooks/useLocalization';
 import { useAgentJournalPersistence } from '../hooks/useAgentJournalPersistence';
 import { useAuth } from '../hooks/useAuth';
@@ -227,6 +227,19 @@ function buildToolCallMessage(record: ToolCallRecord): ChatMessage {
     isError: record.status === 'error',
     toolCallRecord: record,
   };
+}
+
+function needsBosRunHydration(messages: ChatMessage[]): boolean {
+  return messages.some((message) => {
+    const toolCallRecord = message.toolCallRecord;
+    if (message.sender !== 'tool' || !toolCallRecord?.executionId || !(toolCallRecord.toolId || toolCallRecord.functionId)) {
+      return false;
+    }
+
+    return !toolCallRecord.persistedRunStatus
+      && !toolCallRecord.persistedRunUpdatedAt
+      && (toolCallRecord.artifacts?.length ?? 0) === 0;
+  });
 }
 
 function buildPendingToolCallMessage(messageId: string, toolName: string, args: Record<string, unknown> | string, timestamp: Date): ChatMessage {
@@ -454,7 +467,16 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     let cancelled = false;
     const fingerprint = buildBosHydrationFingerprint(messages);
 
-    if (!fingerprint || bosHydrationFingerprintRef.current === fingerprint) {
+    if (!fingerprint) {
+      return;
+    }
+
+    if (!needsBosRunHydration(messages)) {
+      bosHydrationFingerprintRef.current = fingerprint;
+      return;
+    }
+
+    if (bosHydrationFingerprintRef.current === fingerprint) {
       return;
     }
 
@@ -665,7 +687,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
         credential,
         agent.model,
         userInput,
-        agent.systemInstruction
+        agent.systemPrompt
       );
 
       setWebSearchResults(result);
@@ -699,17 +721,17 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
       timestamp: new Date(),
     };
 
-    // Handle file attachment
-    if (activeAttachment) {
-      userMessage.filename = activeAttachment.fileName;
-      userMessage.mimeType = activeAttachment.mimeType;
+      // Handle file attachment
+      if (activeAttachment) {
+        userMessage.filename = activeAttachment.fileName;
+        userMessage.mimeType = activeAttachment.mimeType;
 
-      if (effectiveAgent.llmProvider === LLMProvider.Mistral && activeAttachment.textContent) {
-        userMessage.fileContent = activeAttachment.textContent;
-      } else {
-        userMessage.image = activeAttachment.base64Content;
+        if (effectiveAgent.llmProvider === LLMProvider.Mistral && activeAttachment.textContent) {
+          userMessage.fileContent = activeAttachment.textContent;
+        } else {
+          userMessage.image = activeAttachment.base64Content;
+        }
       }
-    }
 
     addNodeMessage(id, userMessage);
     setUserInput('');
@@ -1110,98 +1132,110 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           toolCalls,
         });
 
-        // If agent has Chat capability, continue generation with tool results
-        if (effectiveAgent?.capabilities?.includes(LLMCapability.Chat)) {
-          setLoadingMessage(t('analyzing_results'));
+        // A native provider that emitted a tool call must always receive the tool result back,
+        // even if the prototype forgot to keep Chat explicitly enabled in capabilities.
+        setLoadingMessage(t('analyzing_results'));
 
-          // Get updated message history including tool results
-          const updatedMessages = getNodeMessages(id);
+        // Get updated message history including tool results.
+        const updatedMessages = getNodeMessages(id);
 
-          // Filter out UI-only tool and tool_result messages for the follow-up call and create a synthetic user message
-          // that contains the tool results as context.
-          const messagesWithoutToolResults = updatedMessages.filter(m => m.sender !== 'tool_result' && m.sender !== 'tool');
+        // Filter out UI-only tool and tool_result messages for the follow-up call and create a synthetic user message
+        // that contains the tool results as context.
+        const messagesWithoutToolResults = updatedMessages.filter(m => m.sender !== 'tool_result' && m.sender !== 'tool');
 
-          // Collect tool results for context
-          const toolResults = updatedMessages.filter(m => m.sender === 'tool_result');
+        // Collect tool results for context.
+        const toolResults = updatedMessages.filter(m => m.sender === 'tool_result');
 
-          if (toolResults.length > 0) {
-            // Create a synthetic message that provides tool results as context
-            const toolResultsSummary = toolResults.map(tr =>
-              `${t('tool_result_from')} ${tr.toolName}: ${tr.text}`
-            ).join('\n\n'); const contextMessage: ChatMessage = {
-              id: generateMessageId('tool-context'),
-              sender: 'user',
-              text: `${t('tool_results_context')}:\n\n${toolResultsSummary}\n\n${t('analyze_results_request')}`,
+        if (toolResults.length > 0) {
+          const toolResultsSummary = toolResults.map(tr =>
+            `${t('tool_result_from')} ${tr.toolName}: ${tr.text}`
+          ).join('\n\n');
+          const contextMessage: ChatMessage = {
+            id: generateMessageId('tool-context'),
+            sender: 'user',
+            text: `${t('tool_results_context')}:\n\n${toolResultsSummary}\n\n${t('analyze_results_request')}`,
+            timestamp: new Date()
+          };
+
+          messagesWithoutToolResults.push(contextMessage);
+        }
+
+        // Generate a follow-up response using the tool results as context.
+        // ⭐ FIX: Use `credential` (resolved from localLLMProfileId) — NOT agentConfig.apiKey.
+        // agentConfig is a singleton find(provider===X) which returns the FIRST matching config,
+        // causing endpoint cross-contamination when 2+ local LLM agents share the same provider type.
+        // `credential` was already resolved above via resolveLocalEndpoint() for this specific agent.
+        const followUpStream = llmService.generateContentStream(
+          effectiveAgent.llmProvider,
+          credential,
+          effectiveAgent.model,
+          effectiveAgent.systemPrompt,
+          messagesWithoutToolResults,
+          providerTools,
+          effectiveAgent.outputConfig,
+          credential // endpoint for LMStudio — same agent-specific credential
+        );
+
+        let followUpResponse = '';
+        let followUpMessageId = generateMessageId('followup');
+        let followUpErrored = false;
+
+        for await (const chunk of followUpStream) {
+          if (chunk.error) {
+            followUpErrored = true;
+            const errorMessage: ChatMessage = {
+              id: followUpMessageId,
+              sender: 'agent',
+              text: chunk.error,
+              isError: true,
               timestamp: new Date()
             };
-
-            messagesWithoutToolResults.push(contextMessage);
+            addNodeMessage(id, errorMessage);
+            break;
           }
 
-          // Generate a follow-up response using the tool results as context
-          // ⭐ FIX: Use `credential` (resolved from localLLMProfileId) — NOT agentConfig.apiKey
-          // agentConfig is a singleton find(provider===X) which returns the FIRST matching config,
-          // causing endpoint cross-contamination when 2+ local LLM agents share the same provider type.
-          // `credential` was already resolved above via resolveLocalEndpoint() for this specific agent.
-          const followUpStream = llmService.generateContentStream(
-            effectiveAgent.llmProvider,
-            credential,
-            effectiveAgent.model,
-            effectiveAgent.systemPrompt,
-            messagesWithoutToolResults,
-            providerTools,
-            effectiveAgent.outputConfig,
-            credential // endpoint for LMStudio — same agent-specific credential
-          );
+          if (chunk.response && 'text' in chunk.response && chunk.response.text) {
+            followUpResponse += chunk.response.text;
 
-          let followUpResponse = '';
-          let followUpMessageId = generateMessageId('followup');
+            const existingFollowUpMessages = getNodeMessages(id);
+            const existingFollowUpMessage = existingFollowUpMessages.find(m => m.id === followUpMessageId);
 
-          for await (const chunk of followUpStream) {
-            if (chunk.error) {
-              const errorMessage: ChatMessage = {
+            if (existingFollowUpMessage) {
+              setNodeMessages(id, existingFollowUpMessages.map(m =>
+                m.id === followUpMessageId ? { ...m, text: followUpResponse } : m
+              ));
+            } else {
+              const newFollowUpMessage: ChatMessage = {
                 id: followUpMessageId,
                 sender: 'agent',
-                text: chunk.error,
-                isError: true,
+                text: followUpResponse,
                 timestamp: new Date()
               };
-              addNodeMessage(id, errorMessage);
-              break;
-            }
-
-            if (chunk.response && 'text' in chunk.response && chunk.response.text) {
-              followUpResponse += chunk.response.text;
-
-              const existingFollowUpMessages = getNodeMessages(id);
-              const existingFollowUpMessage = existingFollowUpMessages.find(m => m.id === followUpMessageId);
-
-              if (existingFollowUpMessage) {
-                setNodeMessages(id, existingFollowUpMessages.map(m =>
-                  m.id === followUpMessageId ? { ...m, text: followUpResponse } : m
-                ));
-              } else {
-                const newFollowUpMessage: ChatMessage = {
-                  id: followUpMessageId,
-                  sender: 'agent',
-                  text: followUpResponse,
-                  timestamp: new Date()
-                };
-                addNodeMessage(id, newFollowUpMessage);
-              }
+              addNodeMessage(id, newFollowUpMessage);
             }
           }
+        }
 
-          // ⭐ Phase 3: Persister la réponse follow-up
-          if (followUpResponse.trim()) {
-            persistJournalEntry('chat', {
-              messageId: followUpMessageId,
-              role: 'agent',
-              content: followUpResponse,
-              llmProvider: effectiveAgent.llmProvider,
-              modelUsed: effectiveAgent.model
-            });
-          }
+        if (!followUpErrored && !followUpResponse.trim()) {
+          const emptyFollowUpMessage: ChatMessage = {
+            id: followUpMessageId,
+            sender: 'agent',
+            text: 'Erreur: aucune reponse finale du modele apres execution de l\'outil.',
+            isError: true,
+            timestamp: new Date()
+          };
+          addNodeMessage(id, emptyFollowUpMessage);
+        }
+
+        // ⭐ Phase 3: Persister la réponse follow-up
+        if (followUpResponse.trim()) {
+          persistJournalEntry('chat', {
+            messageId: followUpMessageId,
+            role: 'agent',
+            content: followUpResponse,
+            llmProvider: effectiveAgent.llmProvider,
+            modelUsed: effectiveAgent.model
+          });
         }
       }
       } // end else (standard streaming path)
@@ -1698,6 +1732,8 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
                        hover:bg-red-500/20 hover:shadow-lg hover:shadow-red-500/40
                        transition-all duration-200 rounded-md
                        hover:scale-110 active:scale-95"
+            aria-label={t('confirm_delete')}
+            title={t('confirm_delete')}
             onClick={(e) => {
               e.stopPropagation();
               handleDelete();

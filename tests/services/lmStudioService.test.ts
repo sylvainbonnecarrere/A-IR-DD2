@@ -33,7 +33,7 @@ describe('lmStudioService local runtime transport', () => {
                     controller.close();
                 },
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         const chunks = [] as Array<{ response?: { text?: string }; isComplete?: boolean }>;
         for await (const chunk of generateContentStream(
@@ -75,7 +75,7 @@ describe('lmStudioService local runtime transport', () => {
             json: async () => ({
                 choices: [{ message: { content: 'Salut' } }],
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         const result = await generateContent(
             'http://localhost:1234',
@@ -104,7 +104,7 @@ describe('lmStudioService local runtime transport', () => {
             json: async () => ({
                 choices: [{ message: { content: 'Salut' } }],
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         const history: ChatMessage[] = [
             {
@@ -162,7 +162,7 @@ describe('lmStudioService local runtime transport', () => {
                 error: 'Endpoint forbidden',
                 details: 'Only localhost, loopback, Docker host, or private-network endpoints are allowed for local LLM access.',
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         await expect(generateContent(
             'http://8.8.8.8:1234',
@@ -183,7 +183,7 @@ describe('lmStudioService local runtime transport', () => {
             json: async () => ({
                 choices: [{ message: { content: 'Salut' } }],
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         await generateContent(
             'http://localhost:1337',
@@ -216,7 +216,7 @@ describe('lmStudioService local runtime transport', () => {
                     controller.close();
                 },
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         const iterator = generateContentStream(
             'http://localhost:11434',

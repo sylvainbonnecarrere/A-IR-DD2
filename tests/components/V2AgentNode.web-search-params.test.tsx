@@ -202,11 +202,13 @@ describe('V2AgentNode web search params entrypoint', () => {
     const view = render(
       <V2AgentNode
         id="node-1"
+        type="customAgent"
         selected={false}
         xPos={0}
         yPos={0}
         dragging={false}
         zIndex={1}
+        isConnectable={true}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] as any }}
       />
     );
@@ -258,11 +260,13 @@ describe('V2AgentNode web search params entrypoint', () => {
     const view = render(
       <V2AgentNode
         id="node-1"
+        type="customAgent"
         selected={false}
         xPos={0}
         yPos={0}
         dragging={false}
         zIndex={1}
+        isConnectable={true}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] as any }}
       />
     );
@@ -274,11 +278,13 @@ describe('V2AgentNode web search params entrypoint', () => {
     view.rerender(
       <V2AgentNode
         id="node-1"
+        type="customAgent"
         selected={false}
         xPos={0}
         yPos={0}
         dragging={false}
         zIndex={1}
+        isConnectable={true}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] as any }}
       />
     );
@@ -307,11 +313,13 @@ describe('V2AgentNode web search params entrypoint', () => {
     const view = render(
       <V2AgentNode
         id="node-1"
+        type="customAgent"
         selected={false}
         xPos={0}
         yPos={0}
         dragging={false}
         zIndex={1}
+        isConnectable={true}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent: staleNodeAgent, agentInstance: inheritedInstance }}
       />
     );
@@ -323,11 +331,13 @@ describe('V2AgentNode web search params entrypoint', () => {
     view.rerender(
       <V2AgentNode
         id="node-1"
+        type="customAgent"
         selected
         xPos={0}
         yPos={0}
         dragging={false}
         zIndex={1}
+        isConnectable={true}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent: staleNodeAgent, agentInstance: inheritedInstance }}
       />
     );

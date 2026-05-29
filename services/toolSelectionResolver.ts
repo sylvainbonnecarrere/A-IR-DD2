@@ -151,10 +151,11 @@ export function normalizeAgentToolReferences(
 export function resolveAgentSelectedToolIds(agent: Agent, agentInstance: AgentInstance | undefined): string[] {
     const instanceConfig = agentInstance?.configuration_json;
     const inheritance = instanceConfig?.functionInheritance;
+    const legacyInstanceToolSelections = (agentInstance as unknown as { toolSelections?: ToolSelection[] } | undefined)?.toolSelections;
 
     const instanceSelectionIds = inheritance?.inheritFromPrototype === false
         ? deriveSelectedToolIds(inheritance.overrideToolSelections, inheritance.overrideFunctionIds)
-        : deriveSelectedToolIds(instanceConfig?.toolSelections || agentInstance?.toolSelections, undefined);
+        : deriveSelectedToolIds(instanceConfig?.toolSelections || legacyInstanceToolSelections, undefined);
 
     const prototypeSelectionIds = deriveSelectedToolIds(agent.toolSelections, agent.functionIds);
     const fallbackToolIds = normalizeToolIdList((instanceConfig as Record<string, unknown> | undefined)?.tools as unknown[] | undefined)

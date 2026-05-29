@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, LLMConfig, RobotId, PersistenceConfig } from '../types';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, AgentDraft, LLMConfig, RobotId, PersistenceConfig } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useAuth } from '../contexts/AuthContext';
@@ -16,7 +16,7 @@ import { AgentTemplate, createAgentFromTemplate, createAgentFromTemplateObject }
 import { GovernanceTestModal } from './modals/GovernanceTestModal';
 import { TodoModal } from './modals/TodoModal';
 import { savePrototypeAsTemplateHybrid, loadAllTemplatesHybrid } from '../services/templateService';
-import { createAgentPrototype, updateAgentPrototype, fetchAgentPrototypes, mapAPIResponseToAgent } from '../services/agentPrototypeAPI';
+import { createAgentPrototype, updateAgentPrototype, fetchAgentPrototypes, fetchAgentPrototypeImpact, mergeAgentPrototypeImpacts, type AgentPrototypeImpact } from '../services/agentPrototypeAPI';
 
 interface ArchiPrototypingPageProps {
   llmConfigs: LLMConfig[];
@@ -75,7 +75,9 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
   // Prototype Impact Confirmation
   const [impactConfirmOpen, setImpactConfirmOpen] = useState(false);
-  const [pendingUpdate, setPendingUpdate] = useState<{ agentId: string; agentData: Omit<Agent, 'id'> } | null>(null);
+  const [pendingUpdate, setPendingUpdate] = useState<{ agentId: string; agentData: AgentDraft } | null>(null);
+  const [pendingImpact, setPendingImpact] = useState<AgentPrototypeImpact | null>(null);
+  const [deletionImpact, setDeletionImpact] = useState<AgentPrototypeImpact | null>(null);
 
   // Governance Test Modal
   const [governanceTestOpen, setGovernanceTestOpen] = useState(false);
@@ -102,10 +104,9 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       }
     };
 
+    const container = scrollContainerRef.current;
     checkScroll();
     window.addEventListener('resize', checkScroll);
-
-    const container = scrollContainerRef.current;
     container?.addEventListener('scroll', checkScroll);
 
     return () => {
@@ -127,11 +128,8 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       const result = await fetchAgentPrototypes(accessToken, currentWorkflowId || undefined);
       
       if (isMounted && result.success && result.data) {
-        // Convertir format backend → frontend
-        const mappedAgents = result.data.map(mapAPIResponseToAgent);
-        
         // Remplacer les agents locaux par les agents persistés
-        setAgents(mappedAgents);
+        setAgents(result.data);
       }
     };
 
@@ -139,6 +137,37 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
     return () => { isMounted = false; }; // ⭐ Cleanup on unmount
   }, [isAuthenticated, accessToken, currentWorkflowId]);
+
+  const buildLocalPrototypeImpact = useCallback((prototypeId: string): AgentPrototypeImpact => {
+    const impact = getPrototypeImpact(prototypeId);
+
+    return {
+      instanceCount: impact.instanceCount,
+      nodeCount: impact.nodeCount,
+      instances: impact.instances.map((instance) => ({
+        id: instance.id,
+        name: instance.name,
+        position: instance.position,
+      })),
+      nodeIds: impact.nodes.map((node) => node.id),
+    };
+  }, [getPrototypeImpact]);
+
+  const resolvePrototypeImpact = useCallback(async (prototypeId: string): Promise<AgentPrototypeImpact> => {
+    const fallbackImpact = buildLocalPrototypeImpact(prototypeId);
+
+    if (!isAuthenticated || !accessToken) {
+      return fallbackImpact;
+    }
+
+    const apiResult = await fetchAgentPrototypeImpact(prototypeId, accessToken, currentWorkflowId || undefined);
+    if (apiResult.success && apiResult.data) {
+      return mergeAgentPrototypeImpacts(apiResult.data, fallbackImpact);
+    }
+
+    console.warn('[ArchiPrototypingPage] prototype impact fallback to local store:', apiResult.error);
+    return fallbackImpact;
+  }, [accessToken, buildLocalPrototypeImpact, currentWorkflowId, isAuthenticated]);
 
   const handleCreateAgent = () => {
     setEditingAgent(null);
@@ -219,14 +248,15 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
     setAgentToAdd(null);
   };
 
-  const handleSaveAgent = async (agentData: Omit<Agent, 'id' | 'creator_id' | 'created_at' | 'updated_at'>, agentId?: string) => {
+  const handleSaveAgent = async (agentData: AgentDraft, agentId?: string) => {
     if (agentId && agentId !== 'temp') { // Exclure l'ID temporaire des templates
       // Check impact before updating existing agent
-      const impact = getPrototypeImpact(agentId);
+      const impact = await resolvePrototypeImpact(agentId);
 
       if (impact.instanceCount > 0) {
         // There are instances affected, show confirmation
         setPendingUpdate({ agentId, agentData });
+        setPendingImpact(impact);
         setImpactConfirmOpen(true);
         return;
       } else {
@@ -235,7 +265,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       }
     } else {
       // Create new with governance (includes templates with id: 'temp')
-      let createdBackendPrototype: any = null;
+      let createdBackendPrototype: Agent | null = null;
       if (isAuthenticated && accessToken) {
         const apiResult = await createAgentPrototype(agentData, accessToken, currentRobotId, currentWorkflowId || undefined);
         if (!apiResult.success || !apiResult.data) {
@@ -255,7 +285,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       
       if (result.success && result.agentId) {
         if (createdBackendPrototype) {
-          const backendObjectId = createdBackendPrototype._id || createdBackendPrototype.id;
+          const backendObjectId = createdBackendPrototype.id;
           if (backendObjectId && backendObjectId !== result.agentId) {
             updateAgentId(result.agentId, backendObjectId);
           }
@@ -281,7 +311,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
     setEditingAgent(null);
   };
 
-  const proceedWithUpdate = async (agentId: string, agentData: Omit<Agent, 'id' | 'creator_id' | 'created_at' | 'updated_at'>) => {
+  const proceedWithUpdate = async (agentId: string, agentData: AgentDraft) => {
     if (isAuthenticated && accessToken) {
       const apiResult = await updateAgentPrototype(agentId, agentData, accessToken, currentRobotId);
       if (!apiResult.success) {
@@ -318,6 +348,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
     if (pendingUpdate) {
       await proceedWithUpdate(pendingUpdate.agentId, pendingUpdate.agentData);
       setPendingUpdate(null);
+      setPendingImpact(null);
       setImpactConfirmOpen(false);
       setAgentModalOpen(false);
       setEditingAgent(null);
@@ -326,13 +357,16 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
   const handleCancelImpactUpdate = () => {
     setPendingUpdate(null);
+    setPendingImpact(null);
     setImpactConfirmOpen(false);
   };
 
   // PHASE 2A: Enhanced deletion with confirmation
-  const handleDeleteAgent = (agentId: string) => {
+  const handleDeleteAgent = async (agentId: string) => {
     const agent = agents.find(a => a.id === agentId);
     if (agent) {
+      const impact = await resolvePrototypeImpact(agentId);
+      setDeletionImpact(impact);
       setAgentToDelete(agent);
       setDeletionConfirmOpen(true);
     }
@@ -343,11 +377,13 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
     // Cette fonction sert juste à fermer la modale après l'action
     setDeletionConfirmOpen(false);
     setAgentToDelete(null);
+    setDeletionImpact(null);
   };
 
   const cancelDeletion = () => {
     setDeletionConfirmOpen(false);
     setAgentToDelete(null);
+    setDeletionImpact(null);
   };
 
   const cancelWorkflowValidation = () => {
@@ -655,6 +691,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       <AgentDeletionConfirmModal
         isOpen={deletionConfirmOpen}
         agent={agentToDelete}
+        impact={deletionImpact}
         onConfirm={confirmDeletion}
         onCancel={cancelDeletion}
         onDeleteNodes={onDeleteNodes}
@@ -682,7 +719,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       <PrototypeImpactModal
         isOpen={impactConfirmOpen}
         prototype={pendingUpdate ? agents.find(a => a.id === pendingUpdate.agentId) : null}
-        impact={pendingUpdate ? getPrototypeImpact(pendingUpdate.agentId) : null}
+        impact={pendingImpact}
         onConfirm={handleConfirmImpactUpdate}
         onCancel={handleCancelImpactUpdate}
       />

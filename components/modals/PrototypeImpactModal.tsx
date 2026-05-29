@@ -1,17 +1,13 @@
 import React from 'react';
 import { Button } from '../UI';
 import { CloseIcon, ErrorIcon as WarningIcon } from '../Icons';
-import { Agent, AgentInstance, V2WorkflowNode } from '../../types';
+import { Agent } from '../../types';
+import type { AgentPrototypeImpact } from '../../services/agentPrototypeAPI';
 
 interface PrototypeImpactModalProps {
   isOpen: boolean;
   prototype: Agent | null;
-  impact: {
-    instanceCount: number;
-    nodeCount: number;
-    instances: AgentInstance[];
-    nodes: V2WorkflowNode[];
-  } | null;
+  impact: AgentPrototypeImpact | null;
   onConfirm: () => void;
   onCancel: () => void;
 }

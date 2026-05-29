@@ -389,6 +389,45 @@ export class JournalService {
         }
     }
 
+    private buildJournalMediaFileMetadata(payload: MediaJournalPayload): FileMetadata {
+        const payloadMetadata = payload.metadata as Record<string, unknown> | undefined;
+        const originalName = typeof payloadMetadata?.originalName === 'string' && payloadMetadata.originalName.trim().length > 0
+            ? payloadMetadata.originalName.trim()
+            : payload.fileName;
+
+        return {
+            originalName,
+            mimeType: payload.mimeType,
+            size: payload.size,
+            generatedBy: typeof payloadMetadata?.generatedBy === 'string'
+                ? payloadMetadata.generatedBy
+                : typeof payload.generationModel === 'string'
+                    ? payload.generationModel
+                    : undefined,
+            prompt: typeof payloadMetadata?.prompt === 'string'
+                ? payloadMetadata.prompt
+                : typeof payload.generationPrompt === 'string'
+                    ? payload.generationPrompt
+                    : undefined,
+        };
+    }
+
+    private async ensureMediaCatalogEntry(
+        instance: IAgentInstance,
+        journalEntryId: string,
+        payload: MediaJournalPayload,
+    ): Promise<void> {
+        await this.mediaWriteOrchestrator.registerJournalMedia({
+            userId: instance.userId.toString(),
+            workflowId: instance.workflowId.toString(),
+            agentInstanceId: instance._id.toString(),
+            agentName: instance.name,
+            journalEntryId,
+            mediaPayload: payload,
+            metadata: this.buildJournalMediaFileMetadata(payload),
+        });
+    }
+
     // ============================================
     // MÉTHODES PUBLIQUES - JOURNALISATION
     // ============================================
@@ -426,6 +465,18 @@ export class JournalService {
                         }
                     }
 
+                    if (params.type === 'media') {
+                        try {
+                            await this.ensureMediaCatalogEntry(
+                                instance,
+                                existingEntry._id.toString(),
+                                params.payload as MediaJournalPayload,
+                            );
+                        } catch (catalogError) {
+                            console.error('[JournalService] Failed to backfill media catalog from duplicate entry:', catalogError);
+                        }
+                    }
+
                     return {
                         success: true,
                         saved: false,
@@ -455,6 +506,18 @@ export class JournalService {
                     await this.mirrorInlineChatMedia(instance, params.payload as ChatJournalPayload, options);
                 } catch (mirrorError) {
                     console.error('[JournalService] Failed to mirror inline chat media:', mirrorError);
+                }
+            }
+
+            if (params.type === 'media') {
+                try {
+                    await this.ensureMediaCatalogEntry(
+                        instance,
+                        entry._id.toString(),
+                        params.payload as MediaJournalPayload,
+                    );
+                } catch (catalogError) {
+                    console.error('[JournalService] Failed to register media catalog entry:', catalogError);
                 }
             }
 
@@ -622,6 +685,12 @@ export class JournalService {
                 ...mediaPayload,
                 generationPrompt: params.metadata.prompt,
                 generationModel: params.metadata.generatedBy,
+                metadata: {
+                    ...(mediaPayload.metadata || {}),
+                    originalName: params.metadata.originalName,
+                    ...(params.metadata.generatedBy ? { generatedBy: params.metadata.generatedBy } : {}),
+                    ...(params.metadata.prompt ? { prompt: params.metadata.prompt } : {}),
+                },
                 ...params.correlationIds,
             };
 
@@ -630,22 +699,6 @@ export class JournalService {
                 type: 'media',
                 payload: mediaData
             }, options);
-
-            if (result.saved && result.entryId) {
-                try {
-                    await this.mediaWriteOrchestrator.registerJournalMedia({
-                        userId: params.userId,
-                        workflowId: params.workflowId,
-                        agentInstanceId: params.instanceId,
-                        agentName: instance.name,
-                        journalEntryId: result.entryId,
-                        mediaPayload,
-                        metadata: params.metadata,
-                    });
-                } catch (catalogError) {
-                    console.error('[JournalService] Failed to register media catalog entry:', catalogError);
-                }
-            }
 
             // Mettre à jour l'état de l'instance
             if (result.saved) {

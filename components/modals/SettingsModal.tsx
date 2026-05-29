@@ -404,12 +404,13 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
         const savedConfigs = await Promise.all(savePromises);
         
         // STEP 3: Build final configs with server responses merged in
-        finalConfigs = currentLLMConfigs.map(config => {
+        finalConfigs = currentLLMConfigs.map((config): LLMConfigWithHasKey => {
           const savedResponse = savedConfigs.find(sc => sc.provider === config.provider);
           if (savedResponse) {
             return {
               ...config,
-              ...savedResponse,
+              enabled: savedResponse.enabled,
+              capabilities: savedResponse.capabilities as LLMConfigWithHasKey['capabilities'],
               localEndpoint: savedResponse.localEndpoint || '',
               apiKey: savedResponse.apiKey || '',
               hasApiKey: savedResponse.hasApiKey,

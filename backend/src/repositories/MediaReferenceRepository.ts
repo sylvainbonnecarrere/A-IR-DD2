@@ -1,52 +1,16 @@
-import { Types } from 'mongoose';
+import { ClientSession, Types } from 'mongoose';
 import {
+    buildMediaReferenceCanonicalLocator,
+    deriveMediaReferencePrimaryStorageMode,
     IMediaReference,
     IMediaReferenceCreate,
+    MediaReferenceJournalContractComparable,
     MediaProvenance,
     MediaReference,
     MediaStorageMode as CatalogMediaStorageMode,
+    resolveMediaReferenceCatalogSeedFromJournalMedia,
 } from '../models/MediaReference.model';
 import { MediaPayload } from '../types/persistence';
-
-function derivePrimaryStorageMode(storageMode: CatalogMediaStorageMode): 'db' | 'workspace' | 'cloud' {
-    switch (storageMode) {
-        case 'local':
-            return 'workspace';
-        case 'cloud':
-            return 'cloud';
-        case 'db':
-        default:
-            return 'db';
-    }
-}
-
-function buildCanonicalLocator(params: {
-    storageMode: CatalogMediaStorageMode;
-    journalEntryId: string;
-    localPath?: string;
-    cloudKey?: string;
-    cloudProvider?: 's3' | 'gcs';
-    cloudBucket?: string;
-}): string {
-    switch (params.storageMode) {
-        case 'local':
-            if (!params.localPath) {
-                throw new Error('localPath requis pour construire un locator workspace');
-            }
-            return `workspace://${params.localPath}`;
-        case 'cloud':
-            if (!params.cloudKey) {
-                throw new Error('cloudKey requis pour construire un locator cloud');
-            }
-            if (params.cloudProvider && params.cloudBucket) {
-                return `${params.cloudProvider}://${params.cloudBucket}/${params.cloudKey}`;
-            }
-            return `cloud://${params.cloudKey}`;
-        case 'db':
-        default:
-            return `journal://${params.journalEntryId}`;
-    }
-}
 
 export interface CreateMediaReferenceFromJournalParams {
     userId: string;
@@ -64,6 +28,7 @@ export interface CreateMediaReferenceFromJournalParams {
     createdByAgentName?: string;
     lastModifiedByAgentName?: string;
     mediaPayload: MediaPayload;
+    session?: ClientSession;
 }
 
 export interface UpsertRuntimeArtifactParams {
@@ -78,37 +43,65 @@ export interface UpsertRuntimeArtifactParams {
     size: number;
     checksum?: string;
     agentName?: string;
+    session?: ClientSession;
+}
+
+export interface FindJournalReferencesParams {
+    userId: Types.ObjectId;
+    workflowId: Types.ObjectId;
+    journalEntryIds: Types.ObjectId[];
+    session?: ClientSession;
+}
+
+export interface JournalMediaReferenceShape extends MediaReferenceJournalContractComparable {
+    journalEntryId?: Types.ObjectId;
 }
 
 export class MediaReferenceRepository {
+    async findJournalReferences(params: FindJournalReferencesParams): Promise<JournalMediaReferenceShape[]> {
+        if (params.journalEntryIds.length === 0) {
+            return [];
+        }
+
+        const query = MediaReference.find({
+            userId: params.userId,
+            workflowId: params.workflowId,
+            journalEntryId: {
+                $in: params.journalEntryIds,
+            },
+        })
+            .select('journalEntryId storageMode primaryStorageMode canonicalLocator localPath cloudConnectionProfileId cloudKey cloudProvider cloudBucket')
+            .lean<JournalMediaReferenceShape[]>();
+
+        if (params.session) {
+            query.session(params.session);
+        }
+
+        return query;
+    }
+
     async createFromJournalMedia(params: CreateMediaReferenceFromJournalParams): Promise<IMediaReference> {
-        const storageMode = this.mapStorageMode(params.mediaPayload.storageMode);
-        const cloudMetadata = params.mediaPayload.metadata as Record<string, unknown> | undefined;
-        const cloudKey = typeof cloudMetadata?.cloudKey === 'string' ? cloudMetadata.cloudKey : undefined;
-        const cloudProvider = this.isCloudProvider(cloudMetadata?.cloudProvider)
-            ? cloudMetadata.cloudProvider
-            : undefined;
-        const cloudBucket = typeof cloudMetadata?.cloudBucket === 'string' ? cloudMetadata.cloudBucket : undefined;
-        const cloudConnectionProfileId = typeof cloudMetadata?.cloudConnectionProfileId === 'string'
-            && cloudMetadata.cloudConnectionProfileId.trim().length > 0
-            ? cloudMetadata.cloudConnectionProfileId.trim()
-            : undefined;
+        const userId = new Types.ObjectId(params.userId);
+        const workflowId = new Types.ObjectId(params.workflowId);
+        const agentInstanceId = new Types.ObjectId(params.agentInstanceId);
+        const journalEntryId = new Types.ObjectId(params.journalEntryId);
+        const catalogSeed = resolveMediaReferenceCatalogSeedFromJournalMedia({
+            journalEntryId,
+            mediaPayload: params.mediaPayload,
+        });
+
+        if (!catalogSeed) {
+            throw new Error(`Unable to derive canonicalLocator for journal media ${params.journalEntryId}`);
+        }
 
         const document: IMediaReferenceCreate = {
-            userId: new Types.ObjectId(params.userId),
-            workflowId: new Types.ObjectId(params.workflowId),
-            agentInstanceId: new Types.ObjectId(params.agentInstanceId),
-            journalEntryId: new Types.ObjectId(params.journalEntryId),
-            storageMode,
-            primaryStorageMode: derivePrimaryStorageMode(storageMode),
-            canonicalLocator: buildCanonicalLocator({
-                storageMode,
-                journalEntryId: params.journalEntryId,
-                localPath: params.mediaPayload.path,
-                cloudKey,
-                cloudProvider,
-                cloudBucket,
-            }),
+            userId,
+            workflowId,
+            agentInstanceId,
+            journalEntryId,
+            storageMode: catalogSeed.storageMode,
+            primaryStorageMode: catalogSeed.primaryStorageMode,
+            canonicalLocator: catalogSeed.canonicalLocator,
             fileName: params.fileName,
             originalName: params.originalName,
             mimeType: params.mimeType,
@@ -124,34 +117,59 @@ export class MediaReferenceRepository {
             isOrphan: false,
         };
 
-        if (storageMode === 'local') {
-            document.localPath = params.mediaPayload.path;
+        if (catalogSeed.storageMode === 'local') {
+            document.localPath = catalogSeed.localPath;
         }
 
-        if (storageMode === 'cloud') {
-            document.cloudKey = cloudKey;
-            document.cloudProvider = cloudProvider;
-            document.cloudBucket = cloudBucket;
-            document.cloudConnectionProfileId = cloudConnectionProfileId;
+        if (catalogSeed.storageMode === 'cloud') {
+            document.cloudKey = catalogSeed.cloudKey;
+            document.cloudProvider = catalogSeed.cloudProvider;
+            document.cloudBucket = catalogSeed.cloudBucket;
+            document.cloudConnectionProfileId = catalogSeed.cloudConnectionProfileId;
         }
 
-        return MediaReference.create(document);
+        const mediaReference = await MediaReference.findOneAndUpdate(
+            {
+                userId,
+                workflowId,
+                journalEntryId,
+            },
+            {
+                $set: document,
+            },
+            {
+                upsert: true,
+                new: true,
+                runValidators: true,
+                setDefaultsOnInsert: true,
+                ...(params.session ? { session: params.session } : {}),
+            },
+        );
+
+        if (!mediaReference) {
+            throw new Error(`Failed to upsert journal media catalog entry for ${params.journalEntryId}`);
+        }
+
+        return mediaReference;
     }
 
     async upsertRuntimeArtifact(params: UpsertRuntimeArtifactParams): Promise<IMediaReference> {
         const userId = new Types.ObjectId(params.userId);
         const workflowId = new Types.ObjectId(params.workflowId);
         const agentInstanceId = new Types.ObjectId(params.agentInstanceId);
-        const canonicalLocator = buildCanonicalLocator({
+        const canonicalLocator = buildMediaReferenceCanonicalLocator({
             storageMode: 'local',
-            journalEntryId: params.executionId,
             localPath: params.localPath,
         });
+
+        if (!canonicalLocator) {
+            throw new Error(`Unable to derive canonicalLocator for runtime artifact ${params.localPath}`);
+        }
 
         const $set: Record<string, unknown> = {
             agentInstanceId,
             storageMode: 'local',
-            primaryStorageMode: 'workspace',
+            primaryStorageMode: deriveMediaReferencePrimaryStorageMode('local'),
             canonicalLocator,
             localPath: params.localPath,
             fileName: params.fileName,
@@ -205,6 +223,7 @@ export class MediaReferenceRepository {
                 new: true,
                 runValidators: true,
                 setDefaultsOnInsert: true,
+                ...(params.session ? { session: params.session } : {}),
             },
         );
 
@@ -213,21 +232,5 @@ export class MediaReferenceRepository {
         }
 
         return mediaReference;
-    }
-
-    private mapStorageMode(storageMode: MediaPayload['storageMode']): CatalogMediaStorageMode {
-        switch (storageMode) {
-            case 'local':
-                return 'local';
-            case 'cloud':
-                return 'cloud';
-            case 'database':
-            default:
-                return 'db';
-        }
-    }
-
-    private isCloudProvider(value: unknown): value is 's3' | 'gcs' {
-        return value === 's3' || value === 'gcs';
     }
 }

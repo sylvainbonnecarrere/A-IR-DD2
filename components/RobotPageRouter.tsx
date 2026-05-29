@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { RobotId, LLMConfig, Agent, WorkflowNode, AgentInstance, AgentBatchDeleteResult, AgentDeletionMediaPolicy } from '../types';
+import { RobotId, LLMConfig, Agent, AgentInstance, AgentBatchDeleteResult, AgentDeletionMediaPolicy, NodePositionUpdateOptions } from '../types';
 import { ArchiPrototypingPage } from './ArchiPrototypingPage';
 import WorkflowCanvas from './WorkflowCanvas';
 import { ComConnectionsPage } from './ComConnectionsPage';
@@ -17,26 +17,20 @@ interface RobotPageRouterProps {
   currentPath: string;
   llmConfigs: LLMConfig[];
   onNavigate?: (robotId: RobotId, path: string) => void;
+  onWorkflowCanvasReady?: () => void;
   // Props pour WorkflowCanvas
   agents?: Agent[];
-  workflowNodes?: WorkflowNode[];
   onDeleteNode?: (nodeId: string) => void;
   onDeleteNodes?: (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Batch delete nodes by instanceId
   onUpdateNodeMessages?: (nodeId: string, messages: any[]) => void;
-  onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }) => void;
+  onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
-  onToggleNodeMaximize?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   onAddToWorkflow?: (agent: Agent) => void;
-  // Détection panneaux actifs
-  isImagePanelOpen?: boolean;
-  isImageModificationPanelOpen?: boolean;
-  isVideoPanelOpen?: boolean;
-  isMapsPanelOpen?: boolean;
 }
 
 // Page with workflow canvas for operational robots
@@ -45,45 +39,35 @@ const WorkflowPage: React.FC<{
   description: string;
   // Props WorkflowCanvas
   agents?: Agent[];
-  workflowNodes?: WorkflowNode[];
   llmConfigs: LLMConfig[];
+  onWorkflowCanvasReady?: () => void;
   onDeleteNode?: (nodeId: string) => void;
   onUpdateNodeMessages?: (nodeId: string, messages: any[]) => void;
-  onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }) => void;
+  onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
-  onToggleNodeMaximize?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   onAddToWorkflow?: (agent: Agent) => void;
-  isImagePanelOpen?: boolean;
-  isImageModificationPanelOpen?: boolean;
-  isVideoPanelOpen?: boolean;
-  isMapsPanelOpen?: boolean;
   headerActions?: React.ReactNode;
 }> = ({
   robotName,
   description,
   agents,
-  workflowNodes,
   llmConfigs,
+  onWorkflowCanvasReady,
   onDeleteNode,
   onUpdateNodeMessages,
   onUpdateNodePosition,
   onToggleNodeMinimize,
-  onToggleNodeMaximize,
   onOpenImagePanel,
   onOpenImageModificationPanel,
   onOpenVideoPanel,
   onOpenMapsPanel,
   onOpenFullscreen,
   onAddToWorkflow,
-  isImagePanelOpen,
-  isImageModificationPanelOpen,
-  isVideoPanelOpen,
-  isMapsPanelOpen,
   headerActions
 }) => {
     return (
@@ -104,24 +88,19 @@ const WorkflowPage: React.FC<{
         {/* Workflow Canvas avec toutes les props nécessaires */}
         <div className="flex-1">
           <WorkflowCanvas
-            nodes={workflowNodes}
             agents={agents}
             llmConfigs={llmConfigs}
+            onCanvasReady={onWorkflowCanvasReady}
             onDeleteNode={onDeleteNode}
             onUpdateNodeMessages={onUpdateNodeMessages}
             onUpdateNodePosition={onUpdateNodePosition}
             onToggleNodeMinimize={onToggleNodeMinimize}
-            onToggleNodeMaximize={onToggleNodeMaximize}
             onOpenImagePanel={onOpenImagePanel}
             onOpenImageModificationPanel={onOpenImageModificationPanel}
             onOpenVideoPanel={onOpenVideoPanel}
             onOpenMapsPanel={onOpenMapsPanel}
             onOpenFullscreen={onOpenFullscreen}
             onAddToWorkflow={onAddToWorkflow}
-            isImagePanelOpen={isImagePanelOpen}
-            isImageModificationPanelOpen={isImageModificationPanelOpen}
-            isVideoPanelOpen={isVideoPanelOpen}
-            isMapsPanelOpen={isMapsPanelOpen}
           />
         </div>
       </div>
@@ -145,24 +124,19 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
   currentPath,
   llmConfigs,
   onNavigate,
+  onWorkflowCanvasReady,
   agents,
-  workflowNodes,
   onDeleteNode,
   onDeleteNodes,
   onUpdateNodeMessages,
   onUpdateNodePosition,
   onToggleNodeMinimize,
-  onToggleNodeMaximize,
   onOpenImagePanel,
   onOpenImageModificationPanel,
   onOpenVideoPanel,
   onOpenMapsPanel,
   onOpenFullscreen,
   onAddToWorkflow,
-  isImagePanelOpen,
-  isImageModificationPanelOpen,
-  isVideoPanelOpen,
-  isMapsPanelOpen
 }) => {
   const { t } = useLocalization();
   const { workflows, currentWorkflowId } = useDesignStore();
@@ -175,30 +149,25 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
   // Navigation helper to go to workflow map (Bos Dashboard)
   const handleNavigateToWorkflow = () => {
     if (onNavigate) {
-      onNavigate('bos', '/bos/dashboard');
+      onNavigate(RobotId.Bos, '/bos/dashboard');
     }
   };
 
   // Props communes pour les WorkflowPage
   const workflowProps = {
     agents,
-    workflowNodes,
     llmConfigs,
+    onWorkflowCanvasReady,
     onDeleteNode,
     onUpdateNodeMessages,
     onUpdateNodePosition,
     onToggleNodeMinimize,
-    onToggleNodeMaximize,
     onOpenImagePanel,
     onOpenImageModificationPanel,
     onOpenVideoPanel,
     onOpenMapsPanel,
     onOpenFullscreen,
     onAddToWorkflow,
-    isImagePanelOpen,
-    isImageModificationPanelOpen,
-    isVideoPanelOpen,
-    isMapsPanelOpen
   };
 
   const bosMediaHeaderAction = (

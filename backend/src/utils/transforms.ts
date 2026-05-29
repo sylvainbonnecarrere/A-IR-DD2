@@ -43,6 +43,7 @@ export function transformAgentInstanceForFrontend(instance: any) {
         localLLMProfileId,
         robotId,
         position,
+        content: _legacyContent,
         ...rest
     } = instanceObj;
 

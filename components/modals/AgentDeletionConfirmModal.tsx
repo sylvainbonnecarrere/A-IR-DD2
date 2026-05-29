@@ -5,11 +5,12 @@ import { CloseIcon } from '../Icons';
 import { useDesignStore } from '../../stores/useDesignStore';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useAuth } from '../../hooks/useAuth';
-import { deleteAgentPrototype } from '../../services/agentPrototypeAPI';
+import { deleteAgentPrototype, type AgentPrototypeImpact } from '../../services/agentPrototypeAPI';
 
 interface AgentDeletionConfirmModalProps {
   isOpen: boolean;
   agent: Agent | null;
+  impact: AgentPrototypeImpact | null;
   onConfirm: () => void;
   onCancel: () => void;
   onDeleteNodes?: (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Callback to delete nodes by instanceId
@@ -26,11 +27,12 @@ const AlertIcon2 = (props: React.SVGProps<SVGSVGElement>) => (
 export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps> = ({
   isOpen,
   agent,
+  impact,
   onConfirm,
   onCancel,
   onDeleteNodes
 }) => {
-  const { getInstancesOfPrototype, deleteAgent } = useDesignStore();
+  const { deleteAgent } = useDesignStore();
   const { addNotification } = useNotifications();
   const { isAuthenticated, accessToken } = useAuth();
   const [mediaPolicy, setMediaPolicy] = useState<AgentDeletionMediaPolicy>('delete_media');
@@ -42,10 +44,11 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
   }, [agent?.id, isOpen]);
 
   if (!isOpen || !agent) return null;
+  if (!isOpen || !agent || !impact) return null;
 
   // Analyse d'impact
-  const affectedInstances = getInstancesOfPrototype(agent.id);
-  const hasActiveInstances = affectedInstances.length > 0;
+  const affectedInstances = impact.instances;
+  const hasActiveInstances = impact.instanceCount > 0;
 
   const handleDeletePrototypeOnly = async () => {
     if (isAuthenticated && accessToken) {
@@ -69,7 +72,7 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
         type: 'success',
         title: 'Prototype supprimé',
         message: hasActiveInstances
-          ? `"${agent.name}" supprimé. ${affectedInstances.length} instance(s) orpheline(s) restent dans le workflow.`
+          ? `"${agent.name}" supprimé. ${impact.instanceCount} instance(s) orpheline(s) restent dans le workflow.`
           : `"${agent.name}" supprimé avec succès.`,
         duration: 4000
       });
@@ -135,8 +138,8 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
         type: 'success',
         title: 'Suppression complète',
         message: mediaPolicy === 'orphan_media'
-          ? `"${agent.name}" et ses ${affectedInstances.length} instance(s) ont ete supprimes. Les medias associes sont conserves comme orphelins.`
-          : `"${agent.name}" et ses ${affectedInstances.length} instance(s) ont ete supprimes du workflow avec leurs medias.`,
+          ? `"${agent.name}" et ses ${impact.instanceCount} instance(s) ont ete supprimes. Les medias associes sont conserves comme orphelins.`
+          : `"${agent.name}" et ses ${impact.instanceCount} instance(s) ont ete supprimes du workflow avec leurs medias.`,
         duration: 4000
       });
       onConfirm();
@@ -172,7 +175,7 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
           {/* Agent info */}
           <div className="bg-gray-700 p-3 rounded-lg">
             <p className="text-white font-semibold">{agent.name}</p>
-            <p className="text-gray-300 text-sm">{agent.description || 'Aucune description'}</p>
+            <p className="text-gray-300 text-sm">{agent.role || agent.systemPrompt || 'Aucune description'}</p>
           </div>
 
           {/* Impact analysis */}
@@ -183,7 +186,7 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
                 <span className="text-orange-400 font-semibold">Impact détecté</span>
               </div>
               <p className="text-orange-300 text-sm mb-2">
-                Ce prototype a <strong>{affectedInstances.length} instance(s)</strong> active(s) dans le workflow :
+                Ce prototype a <strong>{impact.instanceCount} instance(s)</strong> active(s) dans le workflow :
               </p>
               <ul className="text-orange-200 text-sm space-y-1 ml-4 max-h-32 overflow-y-auto">
                 {affectedInstances.map((instance) => (
@@ -232,7 +235,7 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
                 <div className="flex flex-col items-start">
                   <span className="font-semibold">Supprimer uniquement le prototype</span>
                   <span className="text-xs text-gray-400 mt-0.5">
-                    Les {affectedInstances.length} instance(s) du workflow resteront actives (orphelines)
+                    Les {impact.instanceCount} instance(s) du workflow resteront actives (orphelines)
                   </span>
                 </div>
               </Button>
@@ -278,7 +281,7 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
                 <div className="flex flex-col items-start">
                   <span className="font-semibold">Supprimer le prototype ET ses instances</span>
                   <span className="text-xs text-red-200 mt-0.5">
-                    ⚠️ {affectedInstances.length + 1} élément(s) supprimé(s) (prototype + {affectedInstances.length} instance(s))
+                    ⚠️ {impact.instanceCount + 1} élément(s) supprimé(s) (prototype + {impact.instanceCount} instance(s))
                   </span>
                 </div>
               </Button>

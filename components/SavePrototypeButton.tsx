@@ -247,9 +247,6 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                         continue;
                     }
 
-                    // ⭐ MARQUER IMMÉDIATEMENT comme en cours (avant l'envoi)
-                    globalSentMessageIds.add(msgId);
-
                     try {
                         const resolvedFileName = resolveInlineMediaFileName(message, msgId);
 
@@ -285,20 +282,25 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                         clearTimeout(timeoutId);
 
                         if (response.ok) {
+                            // Marquer comme envoyé uniquement APRÈS succès
+                            globalSentMessageIds.add(msgId);
                             saved++;
                             consecutiveErrors = 0; // ⭐ Reset du circuit breaker
                         } else {
-                            // ⭐ En cas d'erreur serveur, ne pas retirer du Set (éviter retry infini)
+                            // En cas d'erreur serveur, permettre retry futur -> ne pas ajouter au Set
                             console.warn(`[SavePrototypeButton] Server error ${response.status} for message ${msgId}`);
                             consecutiveErrors++;
                             totalErrors++;
+                            // Defensive: ensure it's not marked as sent
+                            if (globalSentMessageIds.has(msgId)) globalSentMessageIds.delete(msgId);
                         }
                     } catch (err) {
-                        // ⭐ En cas d'erreur réseau, NE PAS retirer du Set pour éviter les retry infinis
+                        // ⭐ En cas d'erreur réseau, autoriser retry futur en supprimant le marqueur
                         console.error(`[SavePrototypeButton] Network error for message ${msgId}:`, err);
                         consecutiveErrors++;
                         totalErrors++;
-                        
+                        if (globalSentMessageIds.has(msgId)) globalSentMessageIds.delete(msgId);
+
                         // ⭐ Si c'est une erreur d'abort, arrêter proprement
                         if (err instanceof Error && err.name === 'AbortError') {
                             console.warn('[SavePrototypeButton] Request aborted');

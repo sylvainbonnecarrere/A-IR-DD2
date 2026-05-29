@@ -271,7 +271,7 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
         );
         setState(s => ({
           ...s,
-          nodes: s.nodes.map(n => n._id === nodeId ? updated : n)
+          nodes: s.nodes.map(n => n.id === nodeId ? updated : n)
         }));
       } catch (err: any) {
         setState(s => ({
@@ -294,7 +294,7 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
         await WorkflowNodeService.deleteNode(nodeId, persistenceOptions);
         setState(s => ({
           ...s,
-          nodes: s.nodes.filter(n => n._id !== nodeId)
+          nodes: s.nodes.filter(n => n.id !== nodeId)
         }));
       } catch (err: any) {
         setState(s => ({
@@ -344,7 +344,7 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
         await WorkflowEdgeService.deleteEdge(edgeId, persistenceOptions);
         setState(s => ({
           ...s,
-          edges: s.edges.filter(e => e._id !== edgeId)
+          edges: s.edges.filter(e => e.id !== edgeId)
         }));
       } catch (err: any) {
         setState(s => ({

@@ -21,6 +21,7 @@ import { useFunctionStore } from '../../stores/useFunctionStore';
 import { deriveSelectedToolIds, normalizeToolSelections } from '../../services/toolSelectionResolver';
 import { HISTORY_LIMIT_KEYS } from '../../services/historySynthesisPolicy';
 import { getDisplayableNativeFunctions } from '../../utils/llmNativeFunctionCatalog';
+import { buildCanonicalAgentInstanceConfiguration, createDefaultAgentInstanceConfiguration, type CanonicalAgentInstanceConfiguration } from '../../services/agentContractAdapters';
 
 type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence' | 'links' | 'tasks' | 'logs' | 'errors';
 
@@ -80,20 +81,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
     const resolved = configModalInstanceId ? getResolvedInstance(configModalInstanceId) : null;
 
     // Configuration initiale (utilisée uniquement pour l'initialisation du useState)
-    const config = {
-        role: '',
-        model: '',
-        llmProvider: LLMProvider.OpenAI,
-        systemPrompt: '',
-        tools: [],
-        position: { x: 0, y: 0 },
-        links: [],
-        tasks: [],
-        logs: [],
-        errors: []
-    };
-
-    const [editedConfig, setEditedConfig] = useState(config);
+    const [editedConfig, setEditedConfig] = useState<CanonicalAgentInstanceConfiguration>(createDefaultAgentInstanceConfiguration());
     
     const [editedPersistenceConfig, setEditedPersistenceConfig] = useState<PersistenceConfig>(normalizePersistenceConfig(defaultPersistenceConfig));
 
@@ -134,12 +122,16 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             ? (localLLMProfiles.find(p => p.id === resolvedLocalLLMProfileId)?.detectedModel || '')
             : rawModel;
 
-        const currentConfig = {
+        const hydratedConfig = buildCanonicalAgentInstanceConfiguration(currentResolved.instance, prototypeConfig);
+
+        const currentConfig: CanonicalAgentInstanceConfiguration = {
+            ...createDefaultAgentInstanceConfiguration(),
+            ...hydratedConfig,
             role: instanceConfig?.role || prototypeConfig.role || '',
             model: resolvedModel,
             llmProvider: resolvedLLMProvider,
             systemPrompt: instanceConfig?.systemPrompt || prototypeConfig.systemPrompt || '',
-            tools: JSON.parse(JSON.stringify(instanceConfig?.tools !== undefined ? instanceConfig.tools : (prototypeConfig.tools || []))),
+            tools: JSON.parse(JSON.stringify(hydratedConfig.tools)),
             outputConfig: instanceConfig?.outputConfig
                 ? JSON.parse(JSON.stringify(instanceConfig.outputConfig))
                 : (prototypeConfig.outputConfig ? JSON.parse(JSON.stringify(prototypeConfig.outputConfig)) : undefined),
@@ -151,6 +143,8 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             historyConfig: historyConfigValue,
             localLLMProfileId: resolvedLocalLLMProfileId,
             position: currentResolved.instance.position,
+            functionInheritance: instanceConfig?.functionInheritance,
+            toolSelections: hydratedConfig.toolSelections,
             links: instanceConfig?.links || [],
             tasks: instanceConfig?.tasks || [],
             logs: instanceConfig?.logs || [],

@@ -80,8 +80,8 @@ jest.mock('../../stores/useDesignStore', () => {
 });
 
 jest.mock('../../stores/useFunctionStore', () => ({
-    useFunctionStore: jest.fn((selector?: (state: { functions: unknown[] }) => unknown) => (
-        selector ? selector({ functions: [] }) : { functions: [] }
+    useFunctionStore: jest.fn((selector?: (state: { functions: unknown[]; loadFunctions: () => Promise<void> }) => unknown) => (
+        selector ? selector({ functions: [], loadFunctions: jest.fn(async () => undefined) }) : { functions: [], loadFunctions: jest.fn(async () => undefined) }
     )),
 }));
 
@@ -164,6 +164,7 @@ describe('V2AgentNode Bos hydration', () => {
                 id: 'msg-tool-1',
                 sender: 'tool',
                 text: 'Tool call pending hydration',
+                timestamp: new Date('2026-03-23T10:00:00.000Z'),
                 toolCallRecord: persistedToolCall,
             },
         ];
@@ -236,6 +237,51 @@ describe('V2AgentNode Bos hydration', () => {
                     }),
                 ])
             );
+        });
+    });
+
+    it('skips post-mount BOS hydration when persisted projection data is already present', async () => {
+        const hydratedMessages: ChatMessage[] = [
+            {
+                id: 'msg-tool-1',
+                sender: 'tool',
+                text: 'Already projected',
+                timestamp: new Date('2026-03-23T10:00:00.000Z'),
+                toolCallRecord: {
+                    ...persistedToolCall,
+                    persistedRunStatus: 'completed',
+                    persistedRunUpdatedAt: '2026-03-23T10:00:05.000Z',
+                    artifacts: [{ path: 'output/report.json', kind: 'json' }],
+                },
+            },
+        ];
+
+        runtimeStoreState = {
+            ...runtimeStoreState,
+            getNodeMessages: jest.fn(() => hydratedMessages),
+        };
+        mockBuildBosHydrationFingerprint.mockReturnValue('fingerprint:hydrated');
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'bos',
+                    label: 'Bos',
+                    agent: baseAgent,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        await waitFor(() => {
+            expect(mockHydrateToolMessagesFromPersistedRuns).not.toHaveBeenCalled();
         });
     });
 });

@@ -15,6 +15,15 @@ jest.mock('../../services/agentPrototypeAPI', () => ({
 describe('AgentDeletionConfirmModal', () => {
   const mockDeleteAgent = jest.fn();
   const mockAddNotification = jest.fn();
+  const baseImpact = {
+    instanceCount: 2,
+    nodeCount: 2,
+    instances: [
+      { id: 'instance-1', name: 'Instance One', position: { x: 10, y: 20 } },
+      { id: 'instance-2', name: 'Instance Two', position: { x: 30, y: 40 } },
+    ],
+    nodeIds: ['node-1', 'node-2'],
+  };
   const baseAgent = {
     id: 'agent-1',
     name: 'Agent Alpha',
@@ -25,10 +34,6 @@ describe('AgentDeletionConfirmModal', () => {
     jest.clearAllMocks();
 
     (useDesignStore as unknown as jest.Mock).mockReturnValue({
-      getInstancesOfPrototype: jest.fn(() => [
-        { id: 'instance-1', name: 'Instance One' },
-        { id: 'instance-2', name: 'Instance Two' },
-      ]),
       deleteAgent: mockDeleteAgent.mockReturnValue({ success: true }),
     });
 
@@ -50,6 +55,7 @@ describe('AgentDeletionConfirmModal', () => {
       <AgentDeletionConfirmModal
         isOpen={true}
         agent={baseAgent}
+        impact={baseImpact}
         onConfirm={onConfirm}
         onCancel={jest.fn()}
         onDeleteNodes={onDeleteNodes}
@@ -81,6 +87,7 @@ describe('AgentDeletionConfirmModal', () => {
       <AgentDeletionConfirmModal
         isOpen={true}
         agent={baseAgent}
+        impact={baseImpact}
         onConfirm={onConfirm}
         onCancel={jest.fn()}
         onDeleteNodes={onDeleteNodes}

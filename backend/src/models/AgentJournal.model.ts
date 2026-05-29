@@ -310,7 +310,7 @@ interface IAgentJournalModel extends Model<IAgentJournal> {
         }
     ): Promise<{ data: IAgentJournal[]; total: number; pages: number }>;
     
-    deleteByInstance(agentInstanceId: string | mongoose.Types.ObjectId): Promise<number>;
+    deleteByInstance(agentInstanceId: string | mongoose.Types.ObjectId, session?: mongoose.ClientSession): Promise<number>;
     deleteByWorkflow(workflowId: string | mongoose.Types.ObjectId): Promise<number>;
     
     createChatEntry(
@@ -385,9 +385,15 @@ AgentJournalSchema.statics.findByInstance = async function(
  * Supprimer tous les journaux d'une instance
  */
 AgentJournalSchema.statics.deleteByInstance = async function(
-    agentInstanceId: string | mongoose.Types.ObjectId
+    agentInstanceId: string | mongoose.Types.ObjectId,
+    session?: mongoose.ClientSession,
 ): Promise<number> {
-    const result = await this.deleteMany({ agentInstanceId });
+    const query = this.deleteMany({ agentInstanceId });
+    if (session) {
+        query.session(session);
+    }
+
+    const result = await query;
     return result.deletedCount || 0;
 };
 

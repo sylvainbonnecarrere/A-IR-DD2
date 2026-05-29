@@ -383,6 +383,7 @@ export class WorkflowController {
                             workflowId,
                             instanceId: deletedInstanceId,
                             mediaPolicy,
+                            session: useSession ? session : undefined,
                             deleteInstance: false,
                             persistAudit: false,
                             auditOrigin: 'workflow_v2_node_delete_route',

@@ -21,7 +21,7 @@ describe('databaseInit media catalog backfill bootstrap', () => {
             updated: 2,
             alreadyCompatible: 2,
             blocked: 0,
-            indexesEnsured: 7,
+            indexesEnsured: 9,
         });
 
         const db = { name: 'fake-db' };

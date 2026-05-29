@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Agent, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, HistoryLimitKey, Tool, OutputConfig, OutputFormat, RobotId, LocalLLMProfile, ToolSelection } from '../../types';
+import { Agent, AgentDraft, LLMConfig, LLMProvider, LLMCapability, HistoryConfig, HistoryLimitKey, Tool, OutputConfig, OutputFormat, RobotId, LocalLLMProfile, ToolSelection } from '../../types';
 import { Button, Modal, ToggleSwitch } from '../UI';
 import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels } from '../../llmModels';
 import { useLocalization } from '../../hooks/useLocalization';
@@ -18,7 +18,7 @@ import { createDefaultHistoryConfig } from '../../utils/historyConfigDefaults';
 
 interface AgentFormModalProps {
   onClose: () => void;
-  onSave: (agent: Omit<Agent, 'id'>, agentId?: string) => void;
+  onSave: (agent: AgentDraft, agentId?: string) => void;
   llmConfigs: LLMConfig[];
   existingAgent: Agent | null;
   localLLMProfiles?: LocalLLMProfile[];
@@ -505,9 +505,6 @@ export const AgentFormModal = ({ onClose, onSave, llmConfigs: propLlmConfigs, ex
       toolSelections,
       outputConfig,
       localLLMProfileId: isLMStudio(llmProvider) ? (localLLMProfileId || undefined) : undefined,
-      creator_id: existingAgent?.creator_id || RobotId.Archi,
-      created_at: existingAgent?.created_at || new Date().toISOString(),
-      updated_at: new Date().toISOString()
     }, existingAgent?.id);
   };
 

@@ -10,13 +10,15 @@ const mockAddNodeMessage = jest.fn();
 const mockSetNodeExecuting = jest.fn();
 const mockEnqueueEntry = jest.fn();
 const mockLoadFunctions = jest.fn();
-const llmServiceMocks = jest.requireMock('../../services/llmService') as { generateContent: jest.Mock };
+const mockExecuteAgentToolCall = jest.fn();
+const llmServiceMocks = jest.requireMock('../../services/llmService') as { generateContent: jest.Mock; generateContentStream: jest.Mock };
 const textUtilsMocks = jest.requireMock('../../utils/textUtils') as { countChars: jest.Mock; countTokens: jest.Mock; countWords: jest.Mock; countSentences: jest.Mock; countMessages: jest.Mock };
 const runtimeConfigResolverMocks = jest.requireMock('../../services/runtimeConfigResolver') as { resolveHistoryRuntimeConfig: jest.Mock };
 
 let runtimeStoreState: Record<string, unknown>;
 let designStoreState: Record<string, unknown>;
 let functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> };
+let workflowCanvasContextState: Record<string, unknown>;
 
 const agentInstance = {
     id: 'instance-1',
@@ -109,17 +111,7 @@ jest.mock('../../stores/useFunctionStore', () => ({
 }));
 
 jest.mock('../../contexts/WorkflowCanvasContext', () => ({
-    useWorkflowCanvasContext: jest.fn(() => ({
-        navigationHandler: null,
-        onDeleteNode: jest.fn(),
-        onToggleNodeMinimize: jest.fn(),
-        onUpdateNodePosition: jest.fn(),
-        onOpenImagePanel: jest.fn(),
-        onOpenImageModificationPanel: jest.fn(),
-        onOpenVideoPanel: jest.fn(),
-        onOpenMapsPanel: jest.fn(),
-        onOpenFullscreen: jest.fn(),
-    })),
+    useWorkflowCanvasContext: jest.fn(() => workflowCanvasContextState),
 }));
 
 jest.mock('../../services/llmService', () => ({
@@ -133,6 +125,17 @@ jest.mock('../../services/adapters/AdapterFactory', () => ({
 
 jest.mock('../../services/llm/AgentLoop', () => ({
     runAgentLoop: (...args: unknown[]) => mockRunAgentLoop(...args),
+}));
+
+jest.mock('../../services/agentToolExecution', () => ({
+    executeAgentToolCall: (...args: unknown[]) => mockExecuteAgentToolCall(...args),
+    parseToolCallArguments: (value: unknown) => {
+        if (typeof value === 'string') {
+            return JSON.parse(value);
+        }
+
+        return value;
+    },
 }));
 
 jest.mock('../../utils/fileUtils', () => ({
@@ -267,6 +270,18 @@ describe('V2AgentNode AgentLoop integration', () => {
             selectAgent: jest.fn(),
         };
 
+        workflowCanvasContextState = {
+            navigationHandler: null,
+            onDeleteNode: jest.fn(),
+            onToggleNodeMinimize: jest.fn(),
+            onUpdateNodePosition: jest.fn(),
+            onOpenImagePanel: jest.fn(),
+            onOpenImageModificationPanel: jest.fn(),
+            onOpenVideoPanel: jest.fn(),
+            onOpenMapsPanel: jest.fn(),
+            onOpenFullscreen: jest.fn(),
+        };
+
         functionStoreState = {
             functions: [
                 createFunction(),
@@ -313,6 +328,65 @@ describe('V2AgentNode AgentLoop integration', () => {
 
     afterEach(() => {
         jest.restoreAllMocks();
+    });
+
+    it('toggles minimize without requesting any position update', () => {
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'archi',
+                    label: 'Archi',
+                    agent: baseAgent,
+                    workflowId: 'wf-1',
+                    agentInstance,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        fireEvent.click(screen.getByTitle('minimize'));
+
+        expect(workflowCanvasContextState.onToggleNodeMinimize).toHaveBeenCalledWith('node-1');
+        expect(workflowCanvasContextState.onUpdateNodePosition).not.toHaveBeenCalled();
+    });
+
+    it('toggles restore without requesting any position update', () => {
+        runtimeStoreState = {
+            ...runtimeStoreState,
+            getIsNodeMinimized: jest.fn(() => true),
+        };
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'archi',
+                    label: 'Archi',
+                    agent: baseAgent,
+                    workflowId: 'wf-1',
+                    agentInstance,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        fireEvent.click(screen.getByTitle('restore_size'));
+
+        expect(workflowCanvasContextState.onToggleNodeMinimize).toHaveBeenCalledWith('node-1');
+        expect(workflowCanvasContextState.onUpdateNodePosition).not.toHaveBeenCalled();
     });
 
     it('passes only the agent-selected enabled functions to AgentLoop and projects tool log plus final response into runtime messages', async () => {
@@ -408,6 +482,95 @@ describe('V2AgentNode AgentLoop integration', () => {
                 content: 'Check Paris weather',
             })
         );
+    });
+
+    it('continues the native provider flow after a tool result even when Chat is not explicitly enabled', async () => {
+        const nodeMessages: Record<string, any[]> = {};
+
+        runtimeStoreState = {
+            ...runtimeStoreState,
+            getNodeMessages: jest.fn((nodeId: string) => nodeMessages[nodeId] ?? []),
+            addNodeMessage: jest.fn((nodeId: string, message: any) => {
+                nodeMessages[nodeId] = [...(nodeMessages[nodeId] ?? []), message];
+            }),
+            setNodeMessages: jest.fn((nodeId: string, messages: any[]) => {
+                nodeMessages[nodeId] = messages;
+            }),
+        };
+
+        const nativeToolAgent: Agent = {
+            ...baseAgent,
+            capabilities: [LLMCapability.FunctionCalling],
+        };
+
+        mockCreateAdapter.mockReturnValue(null);
+        mockExecuteAgentToolCall.mockResolvedValue({
+            executedArguments: { city: 'Paris' },
+            result: { summary: 'Paris weather: sun' },
+            executionId: 'exec-native-1',
+            runner: 'docker_sandbox',
+            exitCode: 0,
+            failureKind: undefined,
+            artifacts: undefined,
+        });
+        llmServiceMocks.generateContentStream
+            .mockImplementationOnce(async function* () {
+                yield {
+                    response: {
+                        toolCalls: [{ id: 'tool-call-1', name: 'Weather Tool', arguments: JSON.stringify({ city: 'Paris' }) }],
+                    },
+                };
+            })
+            .mockImplementationOnce(async function* () {
+                yield {
+                    response: {
+                        text: 'Paris is sunny',
+                    },
+                };
+            });
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'archi',
+                    label: 'Archi',
+                    agent: nativeToolAgent,
+                    workflowId: 'wf-1',
+                    agentInstance,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        fireEvent.change(screen.getByPlaceholderText('type_message_placeholder'), {
+            target: { value: 'Check Paris weather' },
+        });
+        fireEvent.submit(screen.getByPlaceholderText('type_message_placeholder').closest('form')!);
+
+        await waitFor(() => {
+            expect(mockExecuteAgentToolCall).toHaveBeenCalledTimes(1);
+            expect(llmServiceMocks.generateContentStream).toHaveBeenCalledTimes(2);
+        });
+
+        expect(llmServiceMocks.generateContentStream.mock.calls[1][4]).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                sender: 'user',
+                text: expect.stringContaining('tool_results_context'),
+            }),
+        ]));
+        expect(nodeMessages['node-1']).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                sender: 'agent',
+                text: 'Paris is sunny',
+            }),
+        ]));
     });
 
     it('reloads the function catalog on demand when the initial local tool scope is empty', async () => {

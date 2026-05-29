@@ -31,6 +31,49 @@ interface APIResponse<T = any> {
   error?: string;
 }
 
+export interface AgentPrototypeImpactInstance {
+  id: string;
+  name: string;
+  position: { x: number; y: number };
+}
+
+export interface AgentPrototypeImpact {
+  instanceCount: number;
+  nodeCount: number;
+  instances: AgentPrototypeImpactInstance[];
+  nodeIds: string[];
+}
+
+export function mergeAgentPrototypeImpacts(
+  ...impacts: Array<AgentPrototypeImpact | null | undefined>
+): AgentPrototypeImpact {
+  const instancesById = new Map<string, AgentPrototypeImpactInstance>();
+  const nodeIds = new Set<string>();
+
+  impacts.forEach((impact) => {
+    if (!impact) {
+      return;
+    }
+
+    impact.instances.forEach((instance) => {
+      if (!instancesById.has(instance.id)) {
+        instancesById.set(instance.id, instance);
+      }
+    });
+
+    impact.nodeIds.forEach((nodeId) => {
+      nodeIds.add(nodeId);
+    });
+  });
+
+  return {
+    instanceCount: instancesById.size,
+    nodeCount: nodeIds.size,
+    instances: Array.from(instancesById.values()),
+    nodeIds: Array.from(nodeIds.values()),
+  };
+}
+
 /**
  * Convertit le format Agent frontend vers le format API backend
  * Frontend: model, creator_id, capabilities (enum array)
@@ -110,6 +153,14 @@ export function mapAPIResponseToAgent(apiData: any): Agent {
   };
 }
 
+function mapAPIResponseListToAgents(apiData: unknown): Agent[] {
+  if (!Array.isArray(apiData)) {
+    return [];
+  }
+
+  return apiData.map((entry) => mapAPIResponseToAgent(entry));
+}
+
 /**
  * Créer un prototype dans MongoDB
  * @param agentData - Données du prototype (sans id)
@@ -122,7 +173,7 @@ export async function createAgentPrototype(
   accessToken: string,
   robotId: string,
   workflowId?: string
-): Promise<APIResponse<any>> {
+): Promise<APIResponse<Agent>> {
   try {
     const payload = mapAgentToAPIPayload(agentData, robotId, workflowId);
     
@@ -143,7 +194,7 @@ export async function createAgentPrototype(
       };
     }
 
-    const data = await response.json();
+    const data = mapAPIResponseToAgent(await response.json());
     return { success: true, data };
   } catch (err) {
     console.error('[agentPrototypeAPI] Create error:', err);
@@ -167,7 +218,7 @@ export async function updateAgentPrototype(
   agentData: Partial<AgentPrototypePayload>,
   accessToken: string,
   robotId: string
-): Promise<APIResponse<any>> {
+): Promise<APIResponse<Agent>> {
   try {
     // Map only provided fields
     const payload: Record<string, any> = {};
@@ -207,7 +258,7 @@ export async function updateAgentPrototype(
       };
     }
 
-    const data = await response.json();
+    const data = mapAPIResponseToAgent(await response.json());
     return { success: true, data };
   } catch (err) {
     console.error('[agentPrototypeAPI] Update error:', err);
@@ -253,6 +304,38 @@ export async function deleteAgentPrototype(
   }
 }
 
+export async function fetchAgentPrototypeImpact(
+  prototypeId: string,
+  accessToken: string,
+  workflowId?: string,
+): Promise<APIResponse<AgentPrototypeImpact>> {
+  try {
+    const query = workflowId ? `?workflowId=${encodeURIComponent(workflowId)}` : '';
+    const response = await fetch(`${API_BASE}/${prototypeId}/impact${query}`, {
+      method: 'GET',
+      headers: buildGovernanceHeaders(accessToken),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('[agentPrototypeAPI] Fetch impact failed:', response.status, errorData);
+      return {
+        success: false,
+        error: errorData.error || `HTTP ${response.status}`,
+      };
+    }
+
+    const data = await response.json();
+    return { success: true, data };
+  } catch (err) {
+    console.error('[agentPrototypeAPI] Fetch impact error:', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Network error',
+    };
+  }
+}
+
 /**
  * R\u00e9cup\u00e9rer les prototypes de l'utilisateur connect\u00e9 (filtr\u00e9s par workflow)
  * @param accessToken - JWT token
@@ -262,7 +345,7 @@ export async function deleteAgentPrototype(
 export async function fetchAgentPrototypes(
   accessToken: string,
   workflowId?: string
-): Promise<APIResponse<any[]>> {
+): Promise<APIResponse<Agent[]>> {
   try {
     // ⭐ SECURITY: URL-encode to prevent injection
     const url = workflowId ? `${API_BASE}?workflowId=${encodeURIComponent(workflowId)}` : API_BASE;
@@ -280,7 +363,7 @@ export async function fetchAgentPrototypes(
       };
     }
 
-    const data = await response.json();
+    const data = mapAPIResponseListToAgents(await response.json());
     return { success: true, data };
   } catch (err) {
     console.error('[agentPrototypeAPI] Fetch error:', err);

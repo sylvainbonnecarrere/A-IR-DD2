@@ -2,7 +2,7 @@ import React from 'react';
 import { render } from '@testing-library/react';
 import { LLMProvider, RobotId } from '../../types';
 
-const mockUseAgentJournalPersistence = jest.fn(() => ({
+const mockUseAgentJournalPersistence = jest.fn((_args?: unknown) => ({
     persistJournalEntry: jest.fn(),
     persistToolInvocation: jest.fn(),
     resetToolInvocationDedup: jest.fn(),

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import type { ToolTransitionRecord } from '../../types/function.types';
 
 const workflowId = '64f000000000000000000001';
 const tsLegacyFunctionId = '64f000000000000000000101';
@@ -130,10 +131,16 @@ const workspacePayload = {
     }
 };
 
-function createToolRecord(overrides: Record<string, unknown>) {
-    const legacyFunctionId = typeof overrides.legacyFunctionId === 'string'
-        ? overrides.legacyFunctionId
-        : tsLegacyFunctionId;
+type ToolRecordOverrides = Pick<
+    ToolTransitionRecord,
+    'id' | 'legacyFunctionId' | 'name' | 'description' | 'runtime' | 'origin' | 'inputSchema' | 'outputSchema' | 'tags' | 'dependencies' | 'isReadonly' | 'isEnabled'
+> & Partial<Omit<
+    ToolTransitionRecord,
+    'id' | 'legacyFunctionId' | 'name' | 'description' | 'runtime' | 'origin' | 'inputSchema' | 'outputSchema' | 'tags' | 'dependencies' | 'isReadonly' | 'isEnabled'
+>>;
+
+function createToolRecord(overrides: ToolRecordOverrides): ToolTransitionRecord {
+    const legacyFunctionId = overrides.legacyFunctionId;
 
     return {
         scopeType: 'user',
@@ -183,7 +190,7 @@ function createToolRecord(overrides: Record<string, unknown>) {
     };
 }
 
-function createInitialTools() {
+function createInitialTools(): ToolTransitionRecord[] {
     return [
         createToolRecord({
             id: tsToolId,
@@ -332,7 +339,7 @@ function createInitialTools() {
             ],
             readinessStatus: {
                 requirement: 'platform_provision',
-                state: 'waiting_for_provision',
+                state: 'waiting_for_provisioning',
                 prepared: false,
                 runnable: false,
                 dependencyReadiness: 'missing',
@@ -398,13 +405,13 @@ function createInitialTools() {
     ];
 }
 
-function cloneCurrentVersion(tool: any) {
+function cloneCurrentVersion(tool: ToolTransitionRecord) {
     return {
         ...tool.currentVersion,
     };
 }
 
-function createBuildReport(tool: any) {
+function createBuildReport(tool: ToolTransitionRecord) {
     const extension = tool.runtime === 'python' ? 'py' : 'js';
     const artifactPath = tool.runtime === 'python'
         ? `build/tools/${tool.name}/${tool.name}.py`
@@ -431,7 +438,7 @@ function createBuildReport(tool: any) {
     };
 }
 
-function markToolBuilt(tool: any) {
+function markToolBuilt(tool: ToolTransitionRecord) {
     tool.currentVersion = {
         ...cloneCurrentVersion(tool),
         buildStatus: 'built'
@@ -451,7 +458,7 @@ function markToolBuilt(tool: any) {
     }
 }
 
-function markToolProvisioned(tool: any) {
+function markToolProvisioned(tool: ToolTransitionRecord) {
     tool.currentVersion = {
         ...cloneCurrentVersion(tool),
         buildStatus: 'built'
@@ -653,29 +660,39 @@ async function installApiMocks(page: Page): Promise<MockApiState> {
         if (path === '/api/tools' && method === 'POST') {
             const payload = request.postDataJSON() as Record<string, unknown>;
             const runtime = payload.runtime === 'python' || payload.language === 'python' ? 'python' : 'typescript';
+            const toolName = typeof payload.name === 'string' ? payload.name : 'workflow_tool_ts';
+            const toolDescription = typeof payload.description === 'string'
+                ? payload.description
+                : 'Fonction workflow custom de test';
+            const toolTags = Array.isArray(payload.tags)
+                ? payload.tags.filter((tag): tag is string => typeof tag === 'string')
+                : ['qa', 'created'];
+            const dependencyList = Array.isArray(payload.dependencies)
+                ? payload.dependencies.filter((dependency): dependency is string => typeof dependency === 'string')
+                : [];
             const createdTool = createToolRecord({
                 id: createdTsToolId,
                 legacyFunctionId: createdTsLegacyFunctionId,
-                name: payload.name,
-                displayName: payload.name,
-                description: payload.description,
+                name: toolName,
+                displayName: toolName,
+                description: toolDescription,
                 runtime,
                 origin: 'custom',
-                workflowId: payload.workflowId ?? workflowId,
+                workflowId: typeof payload.workflowId === 'string' ? payload.workflowId : workflowId,
                 workspaceId: workspaceSummary.id,
                 inputSchema: (payload.inputSchema as Record<string, unknown> | undefined) ?? { type: 'object' },
                 outputSchema: (payload.outputSchema as Record<string, unknown> | undefined) ?? { type: 'object' },
-                tags: Array.isArray(payload.tags) ? payload.tags : ['qa', 'created'],
+                tags: toolTags,
                 dependencies: runtime === 'python'
-                    ? { npm: [], python: Array.isArray(payload.dependencies) ? payload.dependencies as string[] : [] }
-                    : { npm: Array.isArray(payload.dependencies) ? payload.dependencies as string[] : [], python: [] },
+                    ? { npm: [], python: dependencyList }
+                    : { npm: dependencyList, python: [] },
                 isReadonly: false,
                 isEnabled: true,
                 currentVersion: {
                     versionTag: 'v1',
                     contentHash: 'created-ts-content-hash',
                     sourceMode: 'inline',
-                    sourcePath: `tools/${String(payload.name)}.${runtime === 'python' ? 'py' : 'ts'}`,
+                    sourcePath: `tools/${toolName}.${runtime === 'python' ? 'py' : 'ts'}`,
                     sourceInline: typeof payload.codeInline === 'string' ? payload.codeInline : null,
                     entrypoint: null,
                     createdAt: now,
@@ -688,7 +705,7 @@ async function installApiMocks(page: Page): Promise<MockApiState> {
                         versionTag: 'v1',
                         contentHash: 'created-ts-content-hash',
                         sourceMode: 'inline',
-                        sourcePath: `tools/${String(payload.name)}.${runtime === 'python' ? 'py' : 'ts'}`,
+                        sourcePath: `tools/${toolName}.${runtime === 'python' ? 'py' : 'ts'}`,
                         sourceInline: typeof payload.codeInline === 'string' ? payload.codeInline : null,
                         entrypoint: null,
                         createdAt: now,
@@ -809,7 +826,7 @@ async function installApiMocks(page: Page): Promise<MockApiState> {
             }
 
             const payload = request.postDataJSON() as Record<string, unknown>;
-            const updatedTool = {
+            const updatedTool: ToolTransitionRecord = {
                 ...matchingTool,
                 description: typeof payload.description === 'string' ? payload.description : matchingTool.description,
                 inputSchema: (payload.inputSchema as Record<string, unknown> | undefined) ?? matchingTool.inputSchema,
@@ -829,7 +846,7 @@ async function installApiMocks(page: Page): Promise<MockApiState> {
                 readinessStatus: typeof payload.codeInline === 'string' && matchingTool.readinessStatus?.requirement === 'author_build'
                     ? {
                         ...matchingTool.readinessStatus,
-                        state: 'waiting_for_build',
+                        state: 'waiting_for_build' as const,
                         prepared: false,
                         runnable: true,
                         summary: 'Le code a change et attend un nouveau build auteur avant validation QA approfondie.',

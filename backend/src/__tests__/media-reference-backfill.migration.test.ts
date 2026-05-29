@@ -3,7 +3,7 @@ import { backfillMediaReferenceCatalogFields } from '../migrations/006_media_ref
 
 class FakeCollection {
     private readonly docs = new Map<string, any>();
-    private readonly indexes: Array<Record<string, number>> = [];
+    private readonly indexes: Array<{ keys: Record<string, number>; options: Record<string, any> }> = [];
 
     constructor(initialDocs: any[] = []) {
         initialDocs.forEach((doc) => {
@@ -11,9 +11,11 @@ class FakeCollection {
         });
     }
 
-    find() {
+    find(filter: Record<string, any> = {}) {
         return {
-            toArray: async () => Array.from(this.docs.values()).map((doc) => this.clone(doc)),
+            toArray: async () => Array.from(this.docs.values())
+                .filter((doc) => this.matches(doc, filter))
+                .map((doc) => this.clone(doc)),
         };
     }
 
@@ -36,8 +38,11 @@ class FakeCollection {
         return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
     }
 
-    async createIndex(index: Record<string, number>) {
-        this.indexes.push(this.clone(index));
+    async createIndex(index: Record<string, number>, options: Record<string, any> = {}) {
+        this.indexes.push({
+            keys: this.clone(index),
+            options: this.clone(options),
+        });
         return `idx_${this.indexes.length}`;
     }
 
@@ -45,12 +50,21 @@ class FakeCollection {
         return Array.from(this.docs.values()).map((doc) => this.clone(doc));
     }
 
-    indexSnapshot(): Array<Record<string, number>> {
+    indexSnapshot(): Array<{ keys: Record<string, number>; options: Record<string, any> }> {
         return this.indexes.map((index) => this.clone(index));
     }
 
     private matches(doc: Record<string, any>, filter: Record<string, unknown>): boolean {
-        return Object.entries(filter).every(([key, value]) => this.toComparable(doc[key]) === this.toComparable(value));
+        return Object.entries(filter).every(([key, value]) => {
+            const docValue = doc[key];
+
+            if (value && typeof value === 'object' && !Array.isArray(value) && '$in' in (value as Record<string, unknown>)) {
+                const candidates = ((value as Record<string, unknown>).$in as unknown[]) || [];
+                return candidates.some((candidate) => this.toComparable(candidate) === this.toComparable(docValue));
+            }
+
+            return this.toComparable(docValue) === this.toComparable(value);
+        });
     }
 
     private toComparable(value: unknown): unknown {
@@ -100,9 +114,10 @@ class FakeDb {
 }
 
 describe('media_references catalog backfill migration', () => {
-    it('backfills additive catalog fields for legacy db and workspace documents and ensures indexes', async () => {
+    it('backfills additive catalog fields for legacy db, workspace, and cloud documents and ensures indexes', async () => {
         const agentInstanceId = new mongoose.Types.ObjectId();
         const journalEntryId = new mongoose.Types.ObjectId();
+        const cloudJournalEntryId = new mongoose.Types.ObjectId();
         const workflowId = new mongoose.Types.ObjectId();
         const userId = new mongoose.Types.ObjectId();
 
@@ -126,6 +141,8 @@ describe('media_references catalog backfill migration', () => {
             workflowId,
             agentInstanceId,
             storageMode: 'local',
+            primaryStorageMode: 'db',
+            canonicalLocator: 'journal://stale-workspace-locator',
             localPath: 'users/u1/workflows/w1/agents/a1/2026-05/workspace-note.txt',
             fileName: 'workspace-note.txt',
             originalName: 'workspace-note.txt',
@@ -156,19 +173,49 @@ describe('media_references catalog backfill migration', () => {
             isOrphan: false,
         };
 
-        const mediaCollection = new FakeCollection([dbMedia, workspaceMedia, alreadyCompatible]);
-        const db = new FakeDb({ media_references: mediaCollection });
+        const cloudMedia = {
+            _id: new mongoose.Types.ObjectId(),
+            userId,
+            workflowId,
+            agentInstanceId,
+            journalEntryId: cloudJournalEntryId,
+            storageMode: 'cloud',
+            canonicalLocator: 's3://media-bucket/tenant/cloud-artifact.txt',
+            cloudKey: 'tenant/cloud-artifact.txt',
+            cloudProvider: 's3',
+            cloudBucket: 'media-bucket',
+            fileName: 'cloud-artifact.txt',
+            originalName: 'cloud-artifact.txt',
+            mimeType: 'text/plain',
+            size: 18,
+            generatedBy: 'Legacy Cloud Agent',
+        };
+
+        const agentJournalCollection = new FakeCollection([
+            {
+                _id: cloudJournalEntryId,
+                type: 'media',
+                payload: {
+                    metadata: {
+                        cloudConnectionProfileId: 'cloud-profile-legacy-1',
+                    },
+                },
+            },
+        ]);
+
+        const mediaCollection = new FakeCollection([dbMedia, workspaceMedia, alreadyCompatible, cloudMedia]);
+        const db = new FakeDb({ media_references: mediaCollection, agent_journals: agentJournalCollection });
 
         const summary = await backfillMediaReferenceCatalogFields(db as any);
         const snapshot = mediaCollection.snapshot();
 
         expect(summary).toEqual({
             collectionFound: true,
-            scanned: 3,
-            updated: 2,
+            scanned: 4,
+            updated: 3,
             alreadyCompatible: 1,
             blocked: 0,
-            indexesEnsured: 7,
+            indexesEnsured: 9,
         });
 
         const migratedDbMedia = snapshot.find((doc) => doc.fileName === 'artifact.txt');
@@ -195,7 +242,35 @@ describe('media_references catalog backfill migration', () => {
         expect(migratedWorkspaceMedia?.orphanedAt).toBeUndefined();
         expect(migratedWorkspaceMedia?.orphanReason).toBeUndefined();
 
-        expect(mediaCollection.indexSnapshot()).toHaveLength(7);
+        const migratedCloudMedia = snapshot.find((doc) => doc.fileName === 'cloud-artifact.txt');
+        expect(migratedCloudMedia).toEqual(expect.objectContaining({
+            primaryStorageMode: 'cloud',
+            canonicalLocator: 's3://media-bucket/tenant/cloud-artifact.txt',
+            cloudConnectionProfileId: 'cloud-profile-legacy-1',
+            createdByAgentInstanceId: agentInstanceId.toString(),
+            lastModifiedByAgentInstanceId: agentInstanceId.toString(),
+            createdByAgentName: 'Legacy Cloud Agent',
+            lastModifiedByAgentName: 'Legacy Cloud Agent',
+            isOrphan: false,
+        }));
+
+        expect(mediaCollection.indexSnapshot()).toHaveLength(9);
+        expect(mediaCollection.indexSnapshot()).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                keys: { userId: 1, workflowId: 1, canonicalLocator: 1 },
+                options: expect.objectContaining({
+                    unique: true,
+                    name: 'uq_media_reference_user_workflow_locator',
+                }),
+            }),
+            expect.objectContaining({
+                keys: { userId: 1, workflowId: 1, journalEntryId: 1 },
+                options: expect.objectContaining({
+                    unique: true,
+                    name: 'uq_media_reference_user_workflow_journal',
+                }),
+            }),
+        ]));
     });
 
     it('marks documents as blocked when no canonical locator can be derived', async () => {
@@ -220,7 +295,7 @@ describe('media_references catalog backfill migration', () => {
             updated: 0,
             alreadyCompatible: 0,
             blocked: 1,
-            indexesEnsured: 7,
+            indexesEnsured: 9,
         });
         expect(mediaCollection.snapshot()[0]?.canonicalLocator).toBeUndefined();
     });

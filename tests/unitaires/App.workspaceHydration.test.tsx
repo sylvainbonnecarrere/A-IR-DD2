@@ -4,14 +4,23 @@ import App from '../../App';
 import { selectResolvedAgentExecutionSelectionContext } from '../../stores/useDesignStore';
 import apiClient from '../../utils/apiClient';
 import { useAuth } from '../../contexts/AuthContext';
+import { PersistenceService } from '../../services/persistenceService';
 import type { UserFunction } from '../../types/function.types';
 
 const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
+const mockHydrateToolMessagesFromPersistedRuns = jest.fn(async (messages: any[]) => messages);
+let autoSignalWorkflowCanvasReady = true;
 
 const mockRuntimeStore = {
+    llmConfigs: [] as any[],
+    localLLMProfiles: [] as any[],
     nodeMessages: {} as Record<string, any[]>,
-    updateLLMConfigs: jest.fn(),
-    updateLocalLLMProfiles: jest.fn(),
+    updateLLMConfigs: jest.fn((configs: any[]) => {
+        mockRuntimeStore.llmConfigs = configs;
+    }),
+    updateLocalLLMProfiles: jest.fn((profiles: any[]) => {
+        mockRuntimeStore.localLLMProfiles = profiles;
+    }),
     setNavigationHandler: jest.fn(),
     addNodeMessage: jest.fn(),
     setNodeMessages: jest.fn((nodeId: string, messages: any[]) => {
@@ -23,6 +32,7 @@ const mockRuntimeStore = {
 };
 
 const mockDesignStore = {
+    agents: [] as any[],
     validateWorkflowIntegrity: jest.fn(() => ({ fixedCount: 0 })),
     cleanupOrphanedInstances: jest.fn(() => 0),
     addAgentInstance: jest.fn(),
@@ -31,9 +41,14 @@ const mockDesignStore = {
     hydrateFromServer: jest.fn(),
     setCurrentWorkflowId: jest.fn(),
     updateInstanceId: jest.fn(),
+    updateAgentInstance: jest.fn(),
     addNode: jest.fn(),
+    updateNode: jest.fn(),
     agentInstances: [],
     nodes: [],
+    workflows: [] as any[],
+    currentWorkflowId: 'workflow-1',
+    currentRobotId: 'BO_002',
     resetAll: jest.fn(),
     loadUserWorkflows: jest.fn().mockResolvedValue(undefined)
 };
@@ -68,12 +83,42 @@ jest.mock('../../utils/apiClient', () => ({
     }
 }));
 
+jest.mock('../../services/bosRunProjectionService', () => ({
+    hydrateToolMessagesFromPersistedRuns: (messages: any[]) => mockHydrateToolMessagesFromPersistedRuns(messages),
+    buildBosHydrationFingerprint: jest.fn(() => ''),
+}));
+
 jest.mock('../../components/NavigationLayout', () => ({
     NavigationLayout: ({ agents }: { agents: Array<unknown> }) => <div data-testid="agents-count">{agents.length}</div>
 }));
 
 jest.mock('../../components/RobotPageRouter', () => ({
-    RobotPageRouter: () => <div data-testid="robot-page-router" />
+    RobotPageRouter: ({ onDeleteNode, llmConfigs, onWorkflowCanvasReady, onUpdateNodePosition }: { onDeleteNode?: (nodeId: string) => Promise<void> | void; llmConfigs?: Array<unknown>; onWorkflowCanvasReady?: () => void; onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: { persist?: boolean }) => void }) => {
+        React.useEffect(() => {
+            if (autoSignalWorkflowCanvasReady) {
+                onWorkflowCanvasReady?.();
+            }
+        });
+
+        return (
+            <div data-testid="robot-page-router">
+                <div data-testid="router-node-count">{mockDesignStore.nodes.length}</div>
+                <div data-testid="router-llm-config-count">{llmConfigs?.length ?? 0}</div>
+                <button type="button" data-testid="delete-node-button" onClick={() => onDeleteNode?.('node-instance-1')}>
+                    delete node
+                </button>
+                <button type="button" data-testid="move-node-button" onClick={() => onUpdateNodePosition?.('node-instance-1', { x: 111, y: 222 }, { persist: true })}>
+                    move node
+                </button>
+                <button type="button" data-testid="sync-node-button" onClick={() => onUpdateNodePosition?.('node-instance-1', { x: 333, y: 444 })}>
+                    sync node
+                </button>
+                <button type="button" data-testid="canvas-ready-button" onClick={() => onWorkflowCanvasReady?.()}>
+                    canvas ready
+                </button>
+            </div>
+        );
+    }
 }));
 
 jest.mock('../../components/Header', () => ({
@@ -81,7 +126,9 @@ jest.mock('../../components/Header', () => ({
 }));
 
 jest.mock('../../components/HydrationOverlay', () => ({
-    HydrationOverlay: () => null
+    HydrationOverlay: ({ isLoading }: { isLoading: boolean }) => (
+        <div data-testid="hydration-overlay">{isLoading ? 'loading' : 'idle'}</div>
+    )
 }));
 
 jest.mock('../../components/WorkflowSwitchOverlay', () => ({
@@ -102,7 +149,13 @@ jest.mock('../../components/modals/LoginModal', () => ({ LoginModal: () => null 
 jest.mock('../../components/modals/RegisterModal', () => ({ RegisterModal: () => null }));
 jest.mock('../../components/modals/ConfirmationModal', () => ({ ConfirmationModal: () => null }));
 jest.mock('../../components/modals/FullscreenChatModal', () => ({ FullscreenChatModal: () => null }));
-jest.mock('../../components/modals/AgentConfigurationModal', () => ({ AgentConfigurationModal: () => null }));
+jest.mock('../../components/modals/AgentConfigurationModal', () => ({
+    AgentConfigurationModal: ({ llmConfigs, localLLMProfiles }: { llmConfigs?: Array<unknown>; localLLMProfiles?: Array<unknown> }) => (
+        <div data-testid="agent-config-modal-state">
+            {`${llmConfigs?.length ?? 0}:${localLLMProfiles?.length ?? 0}`}
+        </div>
+    )
+}));
 jest.mock('../../components/panels/ImageGenerationPanel', () => ({ ImageGenerationPanel: () => null }));
 jest.mock('../../components/panels/ImageModificationPanel', () => ({ ImageModificationPanel: () => null }));
 jest.mock('../../components/panels/VideoGenerationConfigPanel', () => ({ VideoGenerationConfigPanel: () => null }));
@@ -122,6 +175,19 @@ jest.mock('../../hooks/useLocalization', () => ({
 
 jest.mock('../../hooks/useJournalQueue', () => ({
     useJournalQueue: () => ({ enqueueEntry: jest.fn() })
+}));
+
+jest.mock('../../services/persistenceService', () => ({
+    PersistenceService: {
+        saveAgentInstance: jest.fn().mockResolvedValue({ success: true }),
+        createAgentInstance: jest.fn(),
+        saveWorkflow: jest.fn(),
+        saveCanvasState: jest.fn(),
+        addAgentInstanceContent: jest.fn(),
+        createChatContent: jest.fn(),
+        createErrorContent: jest.fn(),
+        createImageContent: jest.fn(),
+    }
 }));
 
 jest.mock('../../utils/SettingsStorage', () => ({
@@ -210,33 +276,99 @@ describe('App workspace hydration orchestration', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        autoSignalWorkflowCanvasReady = true;
+        mockHydrateToolMessagesFromPersistedRuns.mockReset().mockImplementation(async (messages: any[]) => messages);
+        mockRuntimeStore.llmConfigs = [];
+        mockRuntimeStore.localLLMProfiles = [];
         mockRuntimeStore.nodeMessages = {};
+        mockDesignStore.agents = [];
+        mockDesignStore.agentInstances = [];
+        mockDesignStore.nodes = [];
+        mockDesignStore.workflows = [];
+        mockDesignStore.currentWorkflowId = 'workflow-1';
         documentVisibilityState = 'visible';
-        Object.values(mockRuntimeStore).forEach((value) => {
-            if (typeof value === 'function' && 'mockClear' in value) {
-                value.mockClear();
+        const clearMock = (value: unknown) => {
+            if (typeof value === 'function' && typeof (value as { mockClear?: unknown }).mockClear === 'function') {
+                (value as jest.Mock).mockClear();
             }
+        };
+        Object.values(mockRuntimeStore).forEach((value) => {
+            clearMock(value);
         });
         Object.values(mockDesignStore).forEach((value) => {
-            if (typeof value === 'function' && 'mockClear' in value) {
-                value.mockClear();
-            }
+            clearMock(value);
         });
         Object.values(mockWorkflowStore).forEach((value) => {
-            if (typeof value === 'function' && 'mockClear' in value) {
-                value.mockClear();
-            }
+            clearMock(value);
         });
         Object.values(mockFunctionStore).forEach((value) => {
-            if (typeof value === 'function' && 'mockClear' in value) {
-                value.mockClear();
-            }
+            clearMock(value);
+        });
+        mockDesignStore.hydrateFromServer.mockImplementation((data: { agents?: any[]; agentInstances?: any[]; nodes?: any[] }) => {
+            mockDesignStore.agents = data.agents || [];
+            mockDesignStore.agentInstances = data.agentInstances || [];
+            mockDesignStore.nodes = data.nodes || [];
+        });
+        mockDesignStore.deleteNode.mockImplementation((nodeId: string) => {
+            mockDesignStore.nodes = mockDesignStore.nodes.filter((node: any) => node.id !== nodeId);
+        });
+        mockDesignStore.deleteAgentInstance.mockImplementation((instanceId: string) => {
+            mockDesignStore.agentInstances = mockDesignStore.agentInstances.filter((instance: any) => instance.id !== instanceId);
+        });
+        mockDesignStore.updateNode.mockImplementation((nodeId: string, updates: { position?: { x: number; y: number } }) => {
+            mockDesignStore.nodes = mockDesignStore.nodes.map((node: any) => node.id === nodeId ? { ...node, ...updates } : node);
+        });
+        mockDesignStore.updateAgentInstance.mockImplementation((instanceId: string, updates: { position?: { x: number; y: number } }) => {
+            mockDesignStore.agentInstances = mockDesignStore.agentInstances.map((instance: any) => instance.id === instanceId ? { ...instance, ...updates } : instance);
         });
         mockFunctionStore.loadFunctions.mockResolvedValue(undefined);
         (apiClient.get as jest.Mock).mockResolvedValue({ data: workspacePayload });
         (apiClient.post as jest.Mock).mockResolvedValue({ data: { success: true, reloadedData: workspacePayload } });
+        (apiClient as any).delete = jest.fn().mockResolvedValue({ data: { success: true } });
         sessionStorage.clear();
         localStorage.clear();
+    });
+
+    it('persists drag-stop positions only for explicit user move intents', async () => {
+        mockUseAuth.mockReturnValue({
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState: jest.fn(),
+            sessionStatus: 'ready',
+            isLoading: false,
+            error: null,
+        } as any);
+
+        render(<App />);
+
+        await waitFor(() => expect(mockDesignStore.hydrateFromServer).toHaveBeenCalled());
+        await waitFor(() => expect(screen.getByTestId('router-node-count')).toHaveTextContent('1'));
+
+        act(() => {
+            screen.getByTestId('move-node-button').click();
+        });
+
+        await waitFor(() => expect(PersistenceService.saveAgentInstance).toHaveBeenCalledWith({
+            id: 'instance-1',
+            position: { x: 111, y: 222 },
+        }, {
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+        }));
+
+        act(() => {
+            screen.getByTestId('sync-node-button').click();
+        });
+
+        expect(PersistenceService.saveAgentInstance).toHaveBeenCalledTimes(1);
+        expect(mockDesignStore.updateNode).toHaveBeenNthCalledWith(1, 'node-instance-1', { position: { x: 111, y: 222 } });
+        expect(mockDesignStore.updateNode).toHaveBeenNthCalledWith(2, 'node-instance-1', { position: { x: 333, y: 444 } });
+        expect(mockDesignStore.updateAgentInstance).toHaveBeenNthCalledWith(1, 'instance-1', { position: { x: 111, y: 222 } });
+        expect(mockDesignStore.updateAgentInstance).toHaveBeenNthCalledWith(2, 'instance-1', { position: { x: 333, y: 444 } });
     });
 
     it('calls /api/user/workspace only after the session becomes ready', async () => {
@@ -302,8 +434,13 @@ describe('App workspace hydration orchestration', () => {
         expect(apiClient.get).toHaveBeenCalledTimes(1);
     });
 
-    it('preserves in-flight runtime chat messages during a resume workspace refresh', async () => {
-        const refreshRuntimeConfigState = jest.fn().mockResolvedValue(undefined);
+    it('preserves in-flight runtime chat messages during a silent resume workspace refresh', async () => {
+        const runtimeState = {
+            llmApiKeys: [],
+            runtimeLLMConfigs: [{ provider: 'gemini' }],
+            localLLMProfiles: [{ id: 'local-1', name: 'LM Studio', provider: 'lmstudio', baseUrl: 'http://localhost:1234' }]
+        } as any;
+        const refreshRuntimeConfigState = jest.fn().mockResolvedValue(runtimeState);
 
         const payloadWithoutPersistedChat = {
             ...workspacePayload,
@@ -355,10 +492,16 @@ describe('App workspace hydration orchestration', () => {
             }
         ]);
 
-        window.dispatchEvent(new Event('focus'));
+        act(() => {
+            window.dispatchEvent(new Event('focus'));
+        });
 
         await waitFor(() => expect(apiClient.get).toHaveBeenCalledTimes(2));
         expect(refreshRuntimeConfigState).toHaveBeenCalledTimes(1);
+        expect(mockRuntimeStore.updateLLMConfigs).toHaveBeenCalledWith(runtimeState.runtimeLLMConfigs);
+        expect(mockRuntimeStore.updateLocalLLMProfiles).toHaveBeenCalledWith(runtimeState.localLLMProfiles);
+        expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle');
+        expect(sessionStorage.getItem('_arc_hydrating')).toBeNull();
 
         expect(mockRuntimeStore.nodeMessages['node-instance-1']).toEqual([
             expect.objectContaining({
@@ -375,7 +518,7 @@ describe('App workspace hydration orchestration', () => {
         ]);
     });
 
-    it('rehydrates runtime config and workspace when the page becomes visible again', async () => {
+    it('silently refreshes runtime authority and workspace when the page becomes visible again', async () => {
         const runtimeState = {
             llmApiKeys: [],
             runtimeLLMConfigs: [{ provider: 'gemini' }],
@@ -425,10 +568,146 @@ describe('App workspace hydration orchestration', () => {
         });
 
         await waitFor(() => expect(apiClient.get).toHaveBeenCalledTimes(2));
-        await waitFor(() => expect(refreshRuntimeConfigState).toHaveBeenCalledTimes(1));
         await waitFor(() => expect(mockFunctionStore.loadFunctions).toHaveBeenCalledWith('workflow-1'));
+        expect(refreshRuntimeConfigState).toHaveBeenCalledTimes(1);
         expect(mockRuntimeStore.updateLLMConfigs).toHaveBeenCalledWith(runtimeState.runtimeLLMConfigs);
         expect(mockRuntimeStore.updateLocalLLMProfiles).toHaveBeenCalledWith(runtimeState.localLLMProfiles);
+        expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle');
+        expect(sessionStorage.getItem('_arc_hydrating')).toBeNull();
+    });
+
+    it('keeps store-backed runtime config surfaces visible while auth config refresh is still pending', async () => {
+        mockRuntimeStore.llmConfigs = [{ provider: 'gemini' }];
+        mockRuntimeStore.localLLMProfiles = [{ id: 'local-1', name: 'LM Studio', provider: 'lmstudio', baseUrl: 'http://localhost:1234' }];
+
+        mockUseAuth.mockImplementation(() => ({
+            isAuthenticated: true,
+            accessToken: 'token-restoring',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState: jest.fn(),
+            sessionStatus: 'restoring-session',
+            error: null
+        } as any));
+
+        render(<App />);
+
+        expect(screen.getByTestId('router-llm-config-count')).toHaveTextContent('1');
+        expect(screen.getByTestId('agent-config-modal-state')).toHaveTextContent('1:1');
+        expect(mockRuntimeStore.updateLLMConfigs).not.toHaveBeenCalledWith([]);
+        expect(mockRuntimeStore.updateLocalLLMProfiles).not.toHaveBeenCalledWith([]);
+    });
+
+    it('keeps the loader idle while a resume refresh settles in the background', async () => {
+        const runtimeState = {
+            llmApiKeys: [],
+            runtimeLLMConfigs: [{ provider: 'gemini' }],
+            localLLMProfiles: []
+        } as any;
+        const refreshRuntimeConfigState = jest.fn().mockResolvedValue(runtimeState);
+
+        (apiClient.get as jest.Mock)
+            .mockResolvedValueOnce({ data: workspacePayload })
+            .mockResolvedValueOnce({ data: workspacePayload });
+
+        mockUseAuth.mockImplementation(() => ({
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState,
+            sessionStatus: 'ready',
+            error: null
+        } as any));
+
+        render(<App />);
+
+        await waitFor(() => expect(apiClient.get).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(mockFunctionStore.loadFunctions).toHaveBeenCalledWith('workflow-1'));
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 650));
+        });
+        await waitFor(() => expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle'));
+
+        let resolveDeferredLoad: (() => void) | null = null;
+        mockFunctionStore.loadFunctions.mockImplementation(
+            () => new Promise<void>((resolve) => {
+                resolveDeferredLoad = resolve;
+            })
+        );
+
+        const originalRequestAnimationFrame = window.requestAnimationFrame;
+        window.requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
+            callback(performance.now());
+            return 1;
+        });
+
+        try {
+            documentVisibilityState = 'hidden';
+            act(() => {
+                document.dispatchEvent(new Event('visibilitychange'));
+            });
+
+            documentVisibilityState = 'visible';
+            act(() => {
+                document.dispatchEvent(new Event('visibilitychange'));
+            });
+
+            await waitFor(() => expect(apiClient.get).toHaveBeenCalledTimes(2));
+            expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle');
+            expect(sessionStorage.getItem('_arc_hydrating')).toBeNull();
+
+            resolveDeferredLoad?.();
+            await act(async () => {
+                await Promise.resolve();
+            });
+
+            await waitFor(() => expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle'));
+            expect(sessionStorage.getItem('_arc_hydrating')).toBeNull();
+        } finally {
+            window.requestAnimationFrame = originalRequestAnimationFrame;
+        }
+    });
+
+    it('keeps the auth hydration overlay active until workflows are loaded', async () => {
+        const refreshRuntimeConfigState = jest.fn().mockResolvedValue({
+            llmApiKeys: [],
+            runtimeLLMConfigs: [{ provider: 'gemini' }],
+            localLLMProfiles: []
+        } as any);
+
+        let resolveWorkflowLoad: (() => void) | null = null;
+        mockDesignStore.loadUserWorkflows.mockImplementationOnce(() => new Promise<void>((resolve) => {
+            resolveWorkflowLoad = resolve;
+        }));
+
+        mockUseAuth.mockImplementation(() => ({
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState,
+            sessionStatus: 'ready',
+            error: null
+        } as any));
+
+        render(<App />);
+
+        await waitFor(() => expect(apiClient.get).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(mockFunctionStore.loadFunctions).toHaveBeenCalledWith('workflow-1'));
+        await waitFor(() => expect(mockDesignStore.loadUserWorkflows).toHaveBeenCalledTimes(1));
+        expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('loading');
+
+        resolveWorkflowLoad?.();
+
+        await waitFor(() => expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle'));
+        expect(sessionStorage.getItem('_arc_hydrating')).toBeNull();
     });
 
     it('preserves persisted tool block metadata during workspace hydration', async () => {
@@ -481,10 +760,24 @@ describe('App workspace hydration orchestration', () => {
         } as any));
 
         (apiClient.get as jest.Mock).mockResolvedValue({ data: workspaceWithPersistedToolMessages });
+        mockHydrateToolMessagesFromPersistedRuns.mockImplementationOnce(async (messages: any[]) => messages.map((message) => (
+            message.sender === 'tool'
+                ? {
+                    ...message,
+                    toolCallRecord: {
+                        ...message.toolCallRecord,
+                        persistedRunStatus: 'completed',
+                        persistedRunUpdatedAt: '2026-04-29T09:00:02.000Z',
+                        artifacts: [{ path: 'output/report.json', kind: 'json' }],
+                    },
+                }
+                : message
+        )));
 
         render(<App />);
 
         await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/api/user/workspace'));
+        await waitFor(() => expect(mockHydrateToolMessagesFromPersistedRuns).toHaveBeenCalledTimes(1));
         await waitFor(() => expect(mockRuntimeStore.nodeMessages['node-instance-1']).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
@@ -494,7 +787,9 @@ describe('App workspace hydration orchestration', () => {
                         id: 'call-1',
                         toolId: 'tool.weather',
                         functionId: 'legacy-weather',
-                        executionId: 'exec-1'
+                        executionId: 'exec-1',
+                        persistedRunStatus: 'completed',
+                        artifacts: [{ path: 'output/report.json', kind: 'json' }],
                     })
                 }),
                 expect.objectContaining({
@@ -505,6 +800,124 @@ describe('App workspace hydration orchestration', () => {
                 })
             ])
         ));
+    });
+
+    it('keeps the auth hydration overlay active until persisted tool projections are ready', async () => {
+        const workspaceWithPersistedToolMessages = {
+            ...workspacePayload,
+            agentInstances: [
+                {
+                    ...workspacePayload.agentInstances[0],
+                    chatMessages: [
+                        {
+                            id: 'persisted-tool-msg',
+                            sender: 'tool',
+                            text: 'Weather Tool({"city":"Paris"}) [exec-1]',
+                            timestamp: '2026-04-29T09:00:00.000Z',
+                            toolCallRecord: {
+                                id: 'call-1',
+                                toolId: 'tool.weather',
+                                functionId: 'legacy-weather',
+                                functionName: 'Weather Tool',
+                                arguments: { city: 'Paris' },
+                                result: { temperature: 21 },
+                                status: 'success',
+                                executionId: 'exec-1',
+                                timestamp: '2026-04-29T09:00:00.000Z'
+                            }
+                        }
+                    ]
+                }
+            ]
+        };
+
+        let resolveProjection: ((messages: any[]) => void) | null = null;
+        mockHydrateToolMessagesFromPersistedRuns.mockImplementationOnce((messages: any[]) => new Promise((resolve) => {
+            resolveProjection = resolve;
+        }));
+
+        mockUseAuth.mockImplementation(() => ({
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState: jest.fn(),
+            sessionStatus: 'ready',
+            error: null
+        } as any));
+
+        (apiClient.get as jest.Mock).mockResolvedValue({ data: workspaceWithPersistedToolMessages });
+
+        render(<App />);
+
+        await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/api/user/workspace'));
+        expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('loading');
+
+        resolveProjection?.([
+            {
+                id: 'persisted-tool-msg',
+                sender: 'tool',
+                text: 'Weather Tool({"city":"Paris"}) [exec-1]',
+                timestamp: new Date('2026-04-29T09:00:00.000Z'),
+                toolCallRecord: {
+                    id: 'call-1',
+                    toolId: 'tool.weather',
+                    functionId: 'legacy-weather',
+                    functionName: 'Weather Tool',
+                    arguments: { city: 'Paris' },
+                    result: { temperature: 21 },
+                    status: 'success',
+                    executionId: 'exec-1',
+                    persistedRunStatus: 'completed',
+                    persistedRunUpdatedAt: '2026-04-29T09:00:02.000Z',
+                    artifacts: [{ path: 'output/report.json', kind: 'json' }],
+                    timestamp: new Date('2026-04-29T09:00:00.000Z'),
+                }
+            }
+        ] as any);
+
+        await waitFor(() => expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle'));
+        expect(mockRuntimeStore.nodeMessages['node-instance-1']).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    toolCallRecord: expect.objectContaining({
+                        persistedRunStatus: 'completed',
+                        artifacts: [{ path: 'output/report.json', kind: 'json' }],
+                    }),
+                }),
+            ])
+        );
+    });
+
+    it('keeps the auth hydration overlay active until the workflow canvas reports visual readiness', async () => {
+        autoSignalWorkflowCanvasReady = false;
+
+        mockUseAuth.mockImplementation(() => ({
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState: jest.fn(),
+            sessionStatus: 'ready',
+            error: null
+        } as any));
+
+        (apiClient.get as jest.Mock).mockResolvedValue({ data: workspacePayload });
+
+        render(<App />);
+
+        await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/api/user/workspace'));
+        await waitFor(() => expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('loading'));
+
+        act(() => {
+            screen.getByTestId('canvas-ready-button').click();
+        });
+
+        await waitFor(() => expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle'));
     });
 
     it('hydrates canonical tool selections that the runtime selector can resolve after snapshot reload', async () => {
@@ -706,6 +1119,89 @@ describe('App workspace hydration orchestration', () => {
         expect(hydratedSnapshot.agentInstances[0].persistenceConfig.cloudConnectionProfileId).toBeUndefined();
         expect(hydratedSnapshot.agentInstances[0].persistenceConfig.cloudStorageConfig).toBeUndefined();
         expect(hydratedSnapshot.agentInstances[0].persistenceConfig.retentionDays).toBeUndefined();
+    });
+
+    it('deletes a hydrated store node without relying on a local legacy mirror', async () => {
+        mockUseAuth.mockImplementation(() => ({
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState: jest.fn(),
+            sessionStatus: 'ready',
+            error: null
+        } as any));
+
+        render(<App />);
+
+        await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/api/user/workspace'));
+        await waitFor(() => expect(screen.getByTestId('router-node-count')).toHaveTextContent('1'));
+
+        await act(async () => {
+            screen.getByTestId('delete-node-button').click();
+        });
+
+        expect(mockDesignStore.deleteNode).toHaveBeenCalledWith('node-instance-1');
+        expect(mockDesignStore.deleteAgentInstance).toHaveBeenCalledWith('instance-1');
+        expect((apiClient as any).delete).toHaveBeenCalledWith('/api/workflows/workflow-1/instances/instance-1');
+        expect(mockDesignStore.nodes).toHaveLength(0);
+    });
+
+    it('switches workflow from the server snapshot and clears stale nodes without a local fallback mirror', async () => {
+        const switchedWorkspacePayload = {
+            workflow: {
+                id: 'workflow-2',
+                name: 'Workflow vide',
+                isActive: true,
+                isDefault: false,
+                canvasState: { zoom: 0.8, panX: 10, panY: 20 }
+            },
+            agentPrototypes: [],
+            agentInstances: [],
+            nodes: [],
+            edges: []
+        };
+
+        mockUseAuth.mockImplementation(() => ({
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState: jest.fn(),
+            sessionStatus: 'ready',
+            error: null
+        } as any));
+
+        (apiClient.post as jest.Mock).mockResolvedValueOnce({
+            data: {
+                success: true,
+                reloadedData: switchedWorkspacePayload,
+            }
+        });
+
+        render(<App />);
+
+        await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/api/user/workspace'));
+        await waitFor(() => expect(screen.getByTestId('router-node-count')).toHaveTextContent('1'));
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 650));
+        });
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('workflow:switch', {
+                detail: { workflowId: 'workflow-2', workflowName: 'Workflow vide' }
+            }));
+        });
+
+        await waitFor(() => expect(apiClient.post).toHaveBeenCalledWith('/api/workflows/workflow-2/select'));
+        await waitFor(() => expect(screen.getByTestId('router-node-count')).toHaveTextContent('0'));
+        expect(mockRuntimeStore.resetForWorkflowSwitch).toHaveBeenCalled();
+        expect(mockFunctionStore.loadFunctions).toHaveBeenCalledWith('workflow-2');
+        expect(mockDesignStore.loadUserWorkflows).toHaveBeenCalled();
     });
 
     it('drops legacy tool id arrays from hydrated provider tool payloads after workspace refresh while preserving canonical selections', async () => {

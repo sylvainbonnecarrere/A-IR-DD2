@@ -10,6 +10,7 @@ import { User } from '../models/User.model';
 import { Workflow } from '../models/Workflow.model';
 import { AgentPrototype } from '../models/AgentPrototype.model';
 import { AgentInstance } from '../models/AgentInstance.model';
+import { AgentJournal } from '../models/AgentJournal.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
 import workflowsRoutes from '../routes/workflows.routes';
 import agentPrototypesRoutes from '../routes/agent-prototypes.routes';
@@ -192,16 +193,27 @@ describe('Workflow CRUD Flow - Cycle de vie complet', () => {
             expect(response.body).toEqual(expect.objectContaining({
                 success: true,
                 contentCount: 1,
+                authority: 'agent_journals',
             }));
 
+            const persistedJournal = await AgentJournal.findOne({
+                agentInstanceId: activeInstanceId,
+                type: 'chat',
+            }).lean();
             const persistedInstance = await AgentInstance.findById(activeInstanceId).lean();
-            expect(persistedInstance?.content).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    type: 'chat',
+
+            expect(persistedJournal).toEqual(expect.objectContaining({
+                type: 'chat',
+                payload: expect.objectContaining({
                     role: 'tool_result',
-                    message: 'La fonction web search est en cours d\'implémentation',
+                    content: 'La fonction web search est en cours d\'implémentation',
                 }),
-            ]));
+            }));
+            expect(persistedInstance?.content || []).toHaveLength(0);
+            expect(persistedInstance?.metrics).toEqual(expect.objectContaining({
+                callCount: 1,
+                totalTokens: 0,
+            }));
         });
 
         // TODO: Étape 4 - Blocage: deuxième POST /from-prototype retourne 404 au lieu de 201
