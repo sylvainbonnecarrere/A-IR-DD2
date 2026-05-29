@@ -32,6 +32,7 @@ interface FindCollisionFreeWorkflowNodePositionParams {
     nodes: V2WorkflowNode[];
     occupiedNodeRects?: WorkflowNodeCollisionRect[];
     subjectSize?: Size;
+    gestureVector?: Position;
     workflowId: string | null | undefined;
 }
 
@@ -169,7 +170,13 @@ const collectCollidingEntries = (
     subjectSize?: Size,
 ): WorkflowNodeCollisionRect[] => occupiedPositions.filter((entry) => rectanglesOverlapWithSize(desiredPosition, entry, subjectSize));
 
-const resolvePreferredAxis = (currentPosition: Position, desiredPosition: Position): CollisionAxis => {
+const resolvePreferredAxis = (currentPosition: Position, desiredPosition: Position, gestureVector?: Position): CollisionAxis => {
+    if (gestureVector && (Number.isFinite(gestureVector.x) || Number.isFinite(gestureVector.y))) {
+        const gx = gestureVector.x ?? 0;
+        const gy = gestureVector.y ?? 0;
+        return Math.abs(gx) >= Math.abs(gy) ? 'x' : 'y';
+    }
+
     const deltaX = desiredPosition.x - currentPosition.x;
     const deltaY = desiredPosition.y - currentPosition.y;
 
@@ -181,13 +188,15 @@ const resolveDirectionalCandidate = ({
     currentPosition,
     desiredPosition,
     subjectSize,
+    gestureVector,
 }: {
     collidingEntries: WorkflowNodeCollisionRect[];
     currentPosition: Position;
     desiredPosition: Position;
     subjectSize?: Size;
+    gestureVector?: Position;
 }): Position | null => {
-    const preferredAxis = resolvePreferredAxis(currentPosition, desiredPosition);
+    const preferredAxis = resolvePreferredAxis(currentPosition, desiredPosition, gestureVector);
     const deltaX = desiredPosition.x - currentPosition.x;
     const deltaY = desiredPosition.y - currentPosition.y;
     const subjectWidth = resolveCollisionAxisSize(subjectSize?.width, WORKFLOW_NODE_COLLISION_BOX.width);
@@ -231,11 +240,13 @@ const resolveDirectionalCollision = ({
     desiredPosition,
     occupiedPositions,
     subjectSize,
+    gestureVector,
 }: {
     currentPosition?: Position;
     desiredPosition: Position;
     occupiedPositions: WorkflowNodeCollisionRect[];
     subjectSize?: Size;
+    gestureVector?: Position;
 }): Position | null => {
     if (!hasFiniteCoordinates(currentPosition)) {
         return null;
@@ -255,6 +266,7 @@ const resolveDirectionalCollision = ({
             currentPosition,
             desiredPosition: candidate,
             subjectSize,
+            gestureVector,
         });
 
         if (!nextCandidate || isSamePosition(nextCandidate, candidate)) {
@@ -362,6 +374,7 @@ export const findCollisionFreeWorkflowNodePosition = ({
     nodes,
     occupiedNodeRects,
     subjectSize,
+    gestureVector,
     workflowId,
 }: FindCollisionFreeWorkflowNodePositionParams): Position => {
     const currentWorkflowId = normalizeWorkflowId(workflowId);
@@ -384,6 +397,7 @@ export const findCollisionFreeWorkflowNodePosition = ({
         desiredPosition,
         occupiedPositions,
         subjectSize,
+        gestureVector,
     });
 
     if (directionallyResolvedPosition) {

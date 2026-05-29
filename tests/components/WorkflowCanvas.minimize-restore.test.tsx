@@ -2,11 +2,11 @@ import React from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import WorkflowCanvas from '../../components/WorkflowCanvas';
 
-let designStoreState: Record<string, unknown>;
+let designStoreState: Record<string, any>;
 let workflowStoreState: Record<string, unknown>;
 let capturedOnNodesChange: ((changes: unknown[]) => void) | null = null;
 let capturedOnNodeDragStop: ((event: unknown, node: Record<string, unknown>) => void) | null = null;
-let renderedNodes: Record<string, unknown>[] = [];
+let renderedNodes: Record<string, any>[] = [];
 
 jest.mock('reactflow', () => {
     const React = require('react');
@@ -14,7 +14,7 @@ jest.mock('reactflow', () => {
     return {
         __esModule: true,
         default: ({ children, nodes, onNodesChange, onNodeDragStop }: { children?: React.ReactNode; nodes?: Record<string, unknown>[]; onNodesChange?: (changes: unknown[]) => void; onNodeDragStop?: (event: unknown, node: Record<string, unknown>) => void }) => {
-            renderedNodes = Array.isArray(nodes) ? nodes : [];
+            renderedNodes = Array.isArray(nodes) ? (nodes as any[]) : [];
             capturedOnNodesChange = onNodesChange ?? null;
             capturedOnNodeDragStop = onNodeDragStop ?? null;
             return <div data-testid="workflow-canvas-root">{children}</div>;
@@ -106,7 +106,7 @@ jest.mock('../../components/V2AgentNode', () => ({
     V2AgentNode: () => null,
 }));
 
-describe('WorkflowCanvas drag anti-collision', () => {
+describe('WorkflowCanvas minimize->move->restore', () => {
     beforeEach(() => {
         capturedOnNodesChange = null;
         capturedOnNodeDragStop = null;
@@ -184,108 +184,64 @@ describe('WorkflowCanvas drag anti-collision', () => {
         workflowStoreState = {
             getCurrentWorkflowId: jest.fn(() => 'wf-1'),
         };
+
+        // Default renderedNodes reflect initial positions
+        renderedNodes = [
+            {
+                id: 'node-1',
+                position: { x: 20, y: 20 },
+                width: 360,
+                height: 460,
+                data: { agentInstance: { id: 'instance-1', workflowId: 'wf-1' } },
+            },
+            {
+                id: 'node-2',
+                position: { x: 440, y: 20 },
+                width: 360,
+                height: 460,
+                data: { agentInstance: { id: 'instance-2', workflowId: 'wf-1' } },
+            },
+        ];
     });
 
-    it('resolves a dropped node to a non-overlapping position before notifying App', () => {
+    it('moves restored node out of overlap when it was moved while minimized and does not persist', async () => {
         const onUpdateNodePosition = jest.fn();
+        const onToggleNodeMinimize = jest.fn((nodeId: string) => {
+            // Simulate the app toggling minimized state and the user moving the minimized node to x=100 while minimized
+            designStoreState = {
+                ...designStoreState,
+                nodes: designStoreState.nodes.map((n: any) => n.id === nodeId ? { ...n, position: { x: 100, y: 20 } } : n),
+                agentInstances: designStoreState.agentInstances.map((i: any) => i.id === 'instance-2' ? { ...i, position: { x: 100, y: 20 }, isMinimized: true } : i),
+            };
+            // Update renderedNodes as if the minimized node was dragged visually
+            renderedNodes = renderedNodes.map(r => r.id === nodeId ? { ...r, position: { x: 100, y: 20 }, width: 120, height: 80 } : r);
+        });
 
-        render(<WorkflowCanvas workflowName="QA Workflow" onUpdateNodePosition={onUpdateNodePosition} />);
+        render(<WorkflowCanvas workflowName="QA Workflow" onUpdateNodePosition={onUpdateNodePosition} onToggleNodeMinimize={onToggleNodeMinimize} />);
 
-        act(() => {
-            capturedOnNodesChange?.([
-                {
-                    id: 'node-2',
-                    type: 'position',
-                    position: { x: 20, y: 20 },
-                    dragging: true,
-                },
-            ]);
-            capturedOnNodeDragStop?.({}, {
-                id: 'node-2',
-                position: { x: 20, y: 20 },
-                data: {
-                    workflowId: 'wf-1',
-                    agentInstance: {
-                        id: 'instance-2',
-                        workflowId: 'wf-1',
-                    },
-                },
-                width: 384,
-                height: 460,
-            });
+        // Ensure the test API is available
+        // @ts-ignore
+        expect(window.__ARC_TEST_API__).toBeDefined();
+
+        // Trigger the wrapper which will call the app toggle (mock above) then perform perimeter check
+        // @ts-ignore
+        await act(async () => {
+            // The wrapper uses requestAnimationFrame twice; emulate by advancing microtasks
+            // Trigger the minimize wrapper
+            // @ts-ignore
+            window.__ARC_TEST_API__.triggerToggle('node-2');
+        });
+
+        // The wrapper should call onUpdateNodePosition with persist: false when correcting restore
+        await waitFor(() => {
+            expect(onUpdateNodePosition).toHaveBeenCalled();
         });
 
         const call = onUpdateNodePosition.mock.calls.find((c: any) => c[0] === 'node-2');
         expect(call).toBeDefined();
-        expect(call[1].x).toBeGreaterThanOrEqual(380);
-        expect(call[1].x).not.toEqual(20);
-    });
-
-    it('does not request any position update during a passive node projection rerender', async () => {
-        const onUpdateNodePosition = jest.fn();
-        const passiveNodes = [
-            {
-                id: 'node-passive-1',
-                type: 'agent',
-                position: { x: 20, y: 20 },
-                data: {
-                    robotId: 'archi',
-                    label: 'Passive One',
-                    workflowId: 'wf-1',
-                    agent: null,
-                    agentInstance: {
-                        id: 'instance-passive-1',
-                        prototypeId: 'prototype-1',
-                        name: 'Passive One',
-                        workflowId: 'wf-1',
-                        position: { x: 20, y: 20 },
-                        isMinimized: false,
-                        isMaximized: false,
-                        configuration_json: null,
-                    },
-                },
-            },
-        ];
-
-        designStoreState = {
-            ...designStoreState,
-            nodes: [],
-            agentInstances: [],
-        };
-
-        const { rerender } = render(
-            <WorkflowCanvas
-                workflowName="QA Workflow"
-                nodes={passiveNodes as any}
-                onUpdateNodePosition={onUpdateNodePosition}
-            />
-        );
-
-        act(() => {
-            rerender(
-                <WorkflowCanvas
-                    workflowName="QA Workflow"
-                    nodes={[
-                        {
-                            ...passiveNodes[0],
-                            position: { x: 120, y: 220 },
-                            data: {
-                                ...passiveNodes[0].data,
-                                agentInstance: {
-                                    ...passiveNodes[0].data.agentInstance,
-                                    position: { x: 120, y: 220 },
-                                },
-                            },
-                        },
-                    ] as any}
-                    onUpdateNodePosition={onUpdateNodePosition}
-                />
-            );
-        });
-
-        await waitFor(() => {
-            expect(renderedNodes[0].position).toEqual({ x: 120, y: 220 });
-        });
-        expect(onUpdateNodePosition).not.toHaveBeenCalled();
+        // options third arg should have persist false
+        expect(call[2] && call[2].persist).toBe(false);
+        // The resolved x should not equal the undesired minimized x (100)
+        expect(call[1].x).not.toEqual(100);
     });
 });

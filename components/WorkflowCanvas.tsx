@@ -251,6 +251,10 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       }];
     });
 
+    const gestureVector = movedNode?.position && desiredPosition
+      ? { x: desiredPosition.x - movedNode.position.x, y: desiredPosition.y - movedNode.position.y }
+      : undefined;
+
     return findCollisionFreeWorkflowNodePosition({
       nodeId,
       instanceId,
@@ -264,6 +268,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         width: draggedNodeSize?.width ?? getNodeWidth(movedLiveNode),
         height: draggedNodeSize?.height ?? getNodeHeight(movedLiveNode),
       },
+      gestureVector,
     });
   }, [reactFlowInstance, workflowId]);
 
@@ -684,7 +689,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       onEditPrototype: handleEditPrototype,
       navigationHandler: onNavigate,
       onDeleteNode,
-      onToggleNodeMinimize,
+      // Expose the stable wrapper so consumers call the perimeter-check wrapper
+      onToggleNodeMinimize: (nodeId: string) => stableRefs.current.callbacks.onToggleNodeMinimize(nodeId),
       onUpdateNodePosition,
       onOpenImagePanel,
       onOpenImageModificationPanel,
@@ -692,6 +698,37 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       onOpenMapsPanel,
       onOpenFullscreen,
     }), [handleEditPrototype, onNavigate, onDeleteNode, onToggleNodeMinimize, onUpdateNodePosition, onOpenImagePanel, onOpenImageModificationPanel, onOpenVideoPanel, onOpenMapsPanel, onOpenFullscreen]);
+
+  // DEV/TEST API: expose a trigger to run the minimize->restore perimeter check from tests
+  useEffect(() => {
+    try {
+      const globalWindow: any = typeof window !== 'undefined' ? window : {};
+      if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
+        globalWindow.__ARC_TEST_API__ = globalWindow.__ARC_TEST_API__ || {};
+        globalWindow.__ARC_TEST_API__.triggerToggle = (nodeId: string) => {
+          try {
+            return stableRefs.current.callbacks.onToggleNodeMinimize(nodeId);
+          } catch (e) {
+            // swallow in tests
+            // eslint-disable-next-line no-console
+            console.warn('[WorkflowCanvas] __ARC_TEST_API__.triggerToggle failed', e);
+          }
+        };
+      }
+    } catch (e) {
+      // ignore
+    }
+    return () => {
+      try {
+        const globalWindow: any = typeof window !== 'undefined' ? window : {};
+        if (globalWindow && globalWindow.__ARC_TEST_API__) {
+          delete globalWindow.__ARC_TEST_API__.triggerToggle;
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+  }, []);
 
   const effectiveWorkflowId = workflowId === 'default-workflow' && isAuthenticated ? undefined : workflowId;
 
