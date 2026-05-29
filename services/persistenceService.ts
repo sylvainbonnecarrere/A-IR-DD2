@@ -13,7 +13,7 @@
  * ENDPOINTS UTILISÉS:
  * - PUT /api/workflows/:id - Save workflow (structure + canvasState)
  * - PUT /api/agent-instances/:id - Save agent instance (auto-save)
- * - POST /api/agent-instances/:id/content - Add content (chat/image/video/error)
+ * - POST /api/agent-instances/:id/journal - Persist timeline content via journal authority
  * 
  * SOLID PRINCIPLES:
  * - S: Single responsibility (persistence only)
@@ -105,6 +105,197 @@ export interface AgentInstanceContent {
     subType?: string;
     timestamp?: Date;
     metadata?: Record<string, any>;
+}
+
+type JournalWriteType = 'chat' | 'error' | 'media';
+
+interface JournalWriteRequest {
+    type: JournalWriteType;
+    payload: Record<string, unknown>;
+    timestamp: string;
+    severity?: 'info' | 'warn' | 'error';
+}
+
+function normalizeContentRole(role?: string): 'user' | 'agent' | 'tool' | 'tool_result' {
+    if (role === 'user' || role === 'tool' || role === 'tool_result') {
+        return role;
+    }
+
+    if (role === 'assistant') {
+        return 'agent';
+    }
+
+    return 'agent';
+}
+
+function normalizeErrorSource(source: unknown): 'llm_service' | 'tool_executor' | 'frontend' {
+    if (source === 'llm_service' || source === 'tool_executor' || source === 'frontend') {
+        return source;
+    }
+
+    return 'frontend';
+}
+
+function extractCorrelationIds(metadata: Record<string, unknown>): Record<string, string> {
+    const correlationIds: Record<string, string> = {};
+
+    if (typeof metadata.messageId === 'string' && metadata.messageId.trim().length > 0) {
+        correlationIds.messageId = metadata.messageId.trim();
+    }
+    if (typeof metadata.toolCallId === 'string' && metadata.toolCallId.trim().length > 0) {
+        correlationIds.toolCallId = metadata.toolCallId.trim();
+    }
+    if (typeof metadata.executionId === 'string' && metadata.executionId.trim().length > 0) {
+        correlationIds.executionId = metadata.executionId.trim();
+    }
+
+    return correlationIds;
+}
+
+function resolveMediaExtension(mimeType: string, contentType: 'image' | 'video'): string {
+    switch (mimeType) {
+        case 'image/jpeg':
+            return 'jpg';
+        case 'image/webp':
+            return 'webp';
+        case 'image/gif':
+            return 'gif';
+        case 'video/webm':
+            return 'webm';
+        default:
+            return contentType === 'video' ? 'mp4' : 'png';
+    }
+}
+
+function resolveMediaMimeType(content: AgentInstanceContent, metadata: Record<string, unknown>): string {
+    if (typeof metadata.mimeType === 'string' && metadata.mimeType.trim().length > 0) {
+        return metadata.mimeType.trim();
+    }
+
+    return content.type === 'video' ? 'video/mp4' : 'image/png';
+}
+
+function resolveMediaFileName(
+    content: AgentInstanceContent,
+    metadata: Record<string, unknown>,
+    mimeType: string,
+): string {
+    if (typeof metadata.fileName === 'string' && metadata.fileName.trim().length > 0) {
+        return metadata.fileName.trim();
+    }
+
+    const stem = typeof content.mediaId === 'string' && content.mediaId.trim().length > 0
+        ? content.mediaId.trim()
+        : `legacy-${content.type}`;
+
+    return `${stem}.${resolveMediaExtension(mimeType, content.type as 'image' | 'video')}`;
+}
+
+function resolveMediaSize(metadata: Record<string, unknown>): number {
+    if (typeof metadata.byteSize === 'number' && Number.isFinite(metadata.byteSize)) {
+        return metadata.byteSize;
+    }
+    if (typeof metadata.sizeInBytes === 'number' && Number.isFinite(metadata.sizeInBytes)) {
+        return metadata.sizeInBytes;
+    }
+    if (typeof metadata.size === 'number' && Number.isFinite(metadata.size)) {
+        return metadata.size;
+    }
+
+    return 0;
+}
+
+function mapContentToJournalWrite(content: AgentInstanceContent): JournalWriteRequest | null {
+    const contentTimestamp = content.timestamp || new Date();
+    const metadata = (content.metadata || {}) as Record<string, unknown>;
+    const correlationIds = extractCorrelationIds(metadata);
+
+    if (content.type === 'chat') {
+        const toolCalls = Array.isArray(metadata.toolCalls)
+            ? metadata.toolCalls
+                .filter((toolCall): toolCall is { id?: unknown; name?: unknown; arguments?: unknown } => !!toolCall && typeof toolCall === 'object')
+                .map((toolCall) => ({
+                    id: typeof toolCall.id === 'string' ? toolCall.id : '',
+                    name: typeof toolCall.name === 'string' ? toolCall.name : '',
+                    arguments: typeof toolCall.arguments === 'string' ? toolCall.arguments : '{}',
+                }))
+                .filter((toolCall) => toolCall.name.length > 0)
+            : undefined;
+
+        return {
+            type: 'chat',
+            timestamp: contentTimestamp.toISOString(),
+            payload: {
+                ...correlationIds,
+                role: normalizeContentRole(content.role),
+                content: content.message || '',
+                llmProvider: typeof metadata.llmProvider === 'string' ? metadata.llmProvider : undefined,
+                modelUsed: typeof metadata.modelUsed === 'string' ? metadata.modelUsed : undefined,
+                tokensUsed: typeof metadata.tokensUsed === 'number' ? metadata.tokensUsed : undefined,
+                toolCalls,
+                imageBase64: typeof metadata.imageBase64 === 'string' ? metadata.imageBase64 : undefined,
+                fileContent: typeof metadata.fileContent === 'string' ? metadata.fileContent : undefined,
+                mimeType: typeof metadata.mimeType === 'string' ? metadata.mimeType : undefined,
+                fileName: typeof metadata.fileName === 'string' ? metadata.fileName : undefined,
+            }
+        };
+    }
+
+    if (content.type === 'error') {
+        return {
+            type: 'error',
+            severity: 'error',
+            timestamp: contentTimestamp.toISOString(),
+            payload: {
+                ...correlationIds,
+                errorCode: typeof metadata.errorCode === 'string' ? metadata.errorCode : content.subType || 'frontend_error',
+                message: content.message || '',
+                source: normalizeErrorSource(metadata.source),
+                retryable: typeof metadata.retryable === 'boolean' ? metadata.retryable : false,
+                attempts: typeof metadata.attempts === 'number' ? metadata.attempts : 1,
+                stack: typeof metadata.stack === 'string' ? metadata.stack : undefined,
+            }
+        };
+    }
+
+    const mimeType = resolveMediaMimeType(content, metadata);
+    const fileName = resolveMediaFileName(content, metadata, mimeType);
+    const storageMode = typeof metadata.path === 'string' && metadata.path.trim().length > 0
+        ? 'local'
+        : typeof content.url === 'string' && content.url.trim().length > 0
+            ? 'cloud'
+            : null;
+
+    if (!storageMode) {
+        return null;
+    }
+
+    return {
+        type: 'media',
+        timestamp: contentTimestamp.toISOString(),
+        payload: {
+            ...correlationIds,
+            mimeType,
+            fileName,
+            size: resolveMediaSize(metadata),
+            storageMode,
+            ...(storageMode === 'local'
+                ? { path: (metadata.path as string).trim() }
+                : { url: content.url?.trim() }),
+            generationPrompt: content.prompt,
+            generationModel: typeof metadata.generatedBy === 'string'
+                ? metadata.generatedBy
+                : typeof metadata.model === 'string'
+                    ? metadata.model
+                    : undefined,
+            metadata: {
+                ...metadata,
+                legacyMediaId: content.mediaId,
+                legacyDuration: content.duration,
+                legacyType: content.type,
+            }
+        }
+    };
 }
 
 // ============================================
@@ -458,13 +649,20 @@ export async function addAgentInstanceContent(
             return { success: false, error: 'No access token provided' };
         }
 
-        const response = await fetch(`${API_BASE_URL}/api/agent-instances/${instanceId}/content`, {
+        const journalWrite = mapContentToJournalWrite(contentWithTimestamp);
+        if (!journalWrite) {
+            return {
+                success: false,
+                error: 'Unsupported legacy media payload for journal persistence'
+            };
+        }
+
+        const response = await fetch(`${API_BASE_URL}/api/agent-instances/${instanceId}/journal`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${options.accessToken}`
-            },
-            body: JSON.stringify({ content: contentWithTimestamp })
+            headers: buildGovernanceHeaders(options.accessToken, {
+                'Content-Type': 'application/json'
+            }),
+            body: JSON.stringify(journalWrite)
         });
 
         if (!response.ok) {
@@ -475,7 +673,7 @@ export async function addAgentInstanceContent(
             };
         }
 
-        console.log('[PersistenceService] Content added via API');
+        console.log('[PersistenceService] Content added via journal API');
         return { success: true };
         
     } catch (err) {

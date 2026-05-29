@@ -31,9 +31,9 @@ import { UserToolRun } from '../models/UserToolRun.model';
 import { getMediaStorageService } from '../services/mediaStorage.service';
 import { S3StorageStrategy } from '../services/s3Storage.service';
 import { GCSStorageStrategy } from '../services/gcsStorage.service';
-import { createWorkspaceManager } from '../services/workspace/WorkspaceManager';
 import { WorkflowMediaExplorerService } from '../services/workflowMediaExplorer.service';
 import { resolveCloudAccessForMediaReference } from '../services/cloudMediaAccess.service';
+import { resolveMediaReferenceLocalPath } from '../services/mediaLocalPath.service';
 import { IUser } from '../models/User.model';
 import { 
     CloudStorageConfig, 
@@ -47,8 +47,6 @@ const router = Router();
 // ============================================
 // CONSTANTES
 // ============================================
-
-const STORAGE_ROOT = process.env.MEDIA_STORAGE_PATH || path.join(process.cwd(), 'storage');
 
 // Tailles de chunks pour streaming
 const DEFAULT_CHUNK_SIZE = 1024 * 1024; // 1MB
@@ -67,70 +65,6 @@ function asPayloadRecord(value: unknown): Record<string, unknown> | null {
     }
 
     return value as Record<string, unknown>;
-}
-
-// ============================================
-// UTILITAIRES DE SÉCURITÉ
-// ============================================
-
-/**
- * Valide un chemin relatif contre les attaques path-traversal
- * 
- * @param relativePath Chemin relatif à valider
- * @param expectedUserId UserId attendu dans le chemin
- * @returns true si le chemin est valide et sécurisé
- */
-function validateMediaPath(relativePath: string, expectedUserId: string): boolean {
-    // Normaliser le chemin
-    const normalized = path.normalize(relativePath).replace(/\\/g, '/');
-    
-    // Bloquer les remontées de directory
-    if (normalized.includes('..')) {
-        console.warn(`[MediaRoutes] Path-traversal attempt blocked: ${relativePath}`);
-        return false;
-    }
-    
-    // Bloquer les chemins absolus
-    if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
-        console.warn(`[MediaRoutes] Absolute path blocked: ${relativePath}`);
-        return false;
-    }
-    
-    // Vérifier la structure attendue: users/{userId}/...
-    const parts = normalized.split('/');
-    if (parts.length < 2 || parts[0] !== 'users') {
-        console.warn(`[MediaRoutes] Invalid path structure: ${relativePath}`);
-        return false;
-    }
-    
-    // Vérifier que le userId dans le chemin correspond
-    if (parts[1] !== expectedUserId) {
-        console.warn(`[MediaRoutes] UserId mismatch in path: expected ${expectedUserId}, got ${parts[1]}`);
-        return false;
-    }
-    
-    return true;
-}
-
-function validateWorkspaceOutputPath(relativePath: string): boolean {
-    const normalized = path.normalize(relativePath).replace(/\\/g, '/');
-
-    if (normalized.includes('..')) {
-        console.warn(`[MediaRoutes] Path-traversal attempt blocked: ${relativePath}`);
-        return false;
-    }
-
-    if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
-        console.warn(`[MediaRoutes] Absolute path blocked: ${relativePath}`);
-        return false;
-    }
-
-    if (!normalized.startsWith('output/')) {
-        console.warn(`[MediaRoutes] Invalid workspace output path: ${relativePath}`);
-        return false;
-    }
-
-    return true;
 }
 
 /**
@@ -233,6 +167,10 @@ const workflowMediaExplorerQuerySchema = z.object({
     storageMode: z.enum(['db', 'workspace', 'cloud']).optional(),
 });
 
+const workflowMediaExplorerRepairSchema = z.object({
+    storageMode: z.enum(['db', 'workspace', 'cloud']).optional(),
+});
+
 const testCloudConfigSchema = z.object({
     provider: z.enum(['s3', 'gcs']),
     s3: z.object({
@@ -292,6 +230,43 @@ router.get('/workflows/:workflowId/explorer', requireAuth, async (req: Request, 
         });
     } catch (error) {
         console.error('[MediaRoutes] Erreur read model workflow media:', error);
+        return res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+router.post('/workflows/:workflowId/explorer/repair-legacy-catalog', requireAuth, async (req: Request, res: Response) => {
+    try {
+        const user = req.user as IUser;
+        const { workflowId } = req.params;
+
+        if (!isValidObjectId(workflowId)) {
+            return res.status(400).json({ error: 'workflowId invalide' });
+        }
+
+        const parseResult = workflowMediaExplorerRepairSchema.safeParse(req.body ?? {});
+        if (!parseResult.success) {
+            return res.status(400).json({
+                error: 'Paramètres invalides',
+                details: parseResult.error.errors,
+            });
+        }
+
+        const result = await workflowMediaExplorerService.repairLegacyWorkflowMediaCatalog({
+            ownerUserId: user._id.toString(),
+            workflowId,
+            storageMode: parseResult.data.storageMode,
+        });
+
+        if (!result.workflowOwned) {
+            return res.status(404).json({ error: 'Workflow introuvable' });
+        }
+
+        return res.json({
+            success: true,
+            meta: result,
+        });
+    } catch (error) {
+        console.error('[MediaRoutes] Erreur maintenance catalogue media legacy:', error);
         return res.status(500).json({ error: 'Erreur serveur' });
     }
 });
@@ -798,26 +773,7 @@ async function redirectToCloudMedia(
 }
 
 async function resolveLocalMediaAbsolutePath(mediaRef: IMediaReference, userId: string): Promise<string | null> {
-    if (!mediaRef.localPath) {
-        return null;
-    }
-
-    const normalizedPath = path.normalize(mediaRef.localPath).replace(/\\/g, '/');
-    if (normalizedPath.startsWith('users/')) {
-        if (!validateMediaPath(normalizedPath, userId)) {
-            return null;
-        }
-
-        return path.join(STORAGE_ROOT, normalizedPath);
-    }
-
-    if (!validateWorkspaceOutputPath(normalizedPath)) {
-        return null;
-    }
-
-    const workspace = await createWorkspaceManager().ensureWorkflowWorkspace(userId, mediaRef.workflowId.toString());
-    const relativeToOutputRoot = normalizedPath.slice('output/'.length);
-    return path.join(workspace.runtimeRoots.outputRoot, relativeToOutputRoot);
+    return resolveMediaReferenceLocalPath(mediaRef, userId)?.absolutePath ?? null;
 }
 
 async function deleteLocalMediaByReference(
@@ -825,29 +781,20 @@ async function deleteLocalMediaByReference(
     userId: string,
     storageService: ReturnType<typeof getMediaStorageService>,
 ): Promise<boolean> {
-    if (!mediaRef.localPath) {
+    const resolvedPath = resolveMediaReferenceLocalPath(mediaRef, userId);
+    if (!resolvedPath) {
         return false;
     }
 
-    const normalizedPath = path.normalize(mediaRef.localPath).replace(/\\/g, '/');
-    if (normalizedPath.startsWith('users/')) {
-        if (!validateMediaPath(normalizedPath, userId)) {
-            return false;
-        }
-
-        return storageService.deleteLocalMedia(normalizedPath);
-    }
-
-    const absolutePath = await resolveLocalMediaAbsolutePath(mediaRef, userId);
-    if (!absolutePath) {
-        return false;
+    if (resolvedPath.storageZone === 'legacy') {
+        return storageService.deleteLocalMedia(resolvedPath.normalizedPath);
     }
 
     try {
-        await unlink(absolutePath);
+        await unlink(resolvedPath.absolutePath);
         return true;
     } catch (error) {
-        console.warn(`[MediaRoutes] Échec suppression ${normalizedPath}:`, error);
+        console.warn(`[MediaRoutes] Échec suppression ${resolvedPath.normalizedPath}:`, error);
         return false;
     }
 }

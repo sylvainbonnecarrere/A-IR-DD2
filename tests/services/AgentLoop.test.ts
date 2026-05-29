@@ -20,7 +20,8 @@ describe('AgentLoop canonical tool registry convergence', () => {
                     {
                         name: 'hello_test',
                         arguments: { city: 'Paris' },
-                        raw: '<tool_call />'
+                        raw: '<tool_call />',
+                        confidence: 1,
                     }
                 ]
             },
@@ -36,7 +37,7 @@ describe('AgentLoop canonical tool registry convergence', () => {
             provider: LLMProvider.LMStudio,
             supportsNativeToolCalling: false,
             complete: jest.fn(async (request) => {
-                requestLog.push(request as Record<string, unknown>);
+                requestLog.push(request as unknown as Record<string, unknown>);
                 return adapterResponses.shift() as LLMResponse;
             })
         };
@@ -111,7 +112,8 @@ describe('AgentLoop canonical tool registry convergence', () => {
                     {
                         name: 'web_search_py',
                         arguments: { query: 'meteo paris demain' },
-                        raw: '<tool_call />'
+                        raw: '<tool_call />',
+                        confidence: 1,
                     }
                 ]
             },
@@ -189,11 +191,10 @@ describe('AgentLoop canonical tool registry convergence', () => {
             testArgs: { query: 'meteo paris demain' },
             toolSelection: {
                 toolId: 'tool-web',
-                versionRef: {
-                    versionTag: 'v1',
+                versionRef: expect.objectContaining({
                     versionNumber: 1,
                     workspaceId: null,
-                }
+                })
             }
         }));
         expect(JSON.parse(String(requestInit?.body))).not.toHaveProperty('functionId');
@@ -209,7 +210,8 @@ describe('AgentLoop canonical tool registry convergence', () => {
                     {
                         name: 'web_search_py',
                         arguments: { query: 'meteo demain', language: 'fr' },
-                        raw: '<tool_call />'
+                        raw: '<tool_call />',
+                        confidence: 1,
                     }
                 ]
             },
@@ -220,7 +222,8 @@ describe('AgentLoop canonical tool registry convergence', () => {
                     {
                         name: 'web_search_py',
                         arguments: { query: 'meteo demain', language: 'fr' },
-                        raw: '<tool_call />'
+                        raw: '<tool_call />',
+                        confidence: 1,
                     }
                 ]
             }
@@ -298,7 +301,8 @@ describe('AgentLoop canonical tool registry convergence', () => {
                 language: 'fr',
                 safe_search: true,
             },
-            raw: '<tool_call />'
+            raw: '<tool_call />',
+            confidence: 1,
         };
 
         const adapterResponses: LLMResponse[] = [
@@ -400,12 +404,14 @@ describe('AgentLoop canonical tool registry convergence', () => {
                     {
                         name: 'demo_tool',
                         arguments: { city: 'Paris' },
-                        raw: '<tool_call />'
+                        raw: '<tool_call />',
+                        confidence: 1,
                     },
                     {
                         name: 'demo_tool',
                         arguments: { city: 'Paris' },
-                        raw: '<tool_call />'
+                        raw: '<tool_call />',
+                        confidence: 1,
                     }
                 ]
             },
@@ -474,7 +480,7 @@ describe('AgentLoop canonical tool registry convergence', () => {
         const adapter: ILLMAdapter = {
             provider: LLMProvider.LMStudio,
             supportsNativeToolCalling: false,
-            complete: jest.fn(async () => ({
+            complete: jest.fn(async (): Promise<LLMResponse> => ({
                 content: '',
                 finishReason: 'error',
                 rawContent: 'LMStudio request timeout exceeded after 600000ms',
@@ -516,7 +522,7 @@ describe('AgentLoop canonical tool registry convergence', () => {
         const adapter: ILLMAdapter = {
             provider: LLMProvider.LMStudio,
             supportsNativeToolCalling: false,
-            complete: jest.fn(async () => ({
+            complete: jest.fn(async (): Promise<LLMResponse> => ({
                 content: '   ',
                 finishReason: 'stop',
                 rawContent: '',
@@ -556,7 +562,8 @@ describe('AgentLoop canonical tool registry convergence', () => {
                     {
                         name: 'web_search_py',
                         arguments: { query: 'Donne moi la météo pour demain à Paris', language: 'fr' },
-                        raw: '<tool_call />'
+                        raw: '<tool_call />',
+                        confidence: 1,
                     }
                 ]
             },

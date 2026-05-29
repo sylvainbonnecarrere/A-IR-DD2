@@ -1,9 +1,16 @@
 import mongoose from 'mongoose';
+import {
+    buildMediaReferenceCanonicalLocator,
+    deriveMediaReferencePrimaryStorageMode,
+    type CloudProvider,
+    type MediaStorageMode,
+    type ProductMediaStorageMode,
+} from '../models/MediaReference.model';
 
 const DEFAULT_MONGODB_URI = 'mongodb://localhost:27017/aitest';
 
-type BackfillStorageMode = 'db' | 'local' | 'cloud';
-type BackfillPrimaryStorageMode = 'db' | 'workspace' | 'cloud';
+type BackfillStorageMode = MediaStorageMode;
+type BackfillPrimaryStorageMode = ProductMediaStorageMode;
 
 export interface MediaReferenceCatalogBackfillSummary {
     collectionFound: boolean;
@@ -14,20 +21,17 @@ export interface MediaReferenceCatalogBackfillSummary {
     indexesEnsured: number;
 }
 
-function normalizeStorageMode(value: unknown): BackfillStorageMode | undefined {
-    return value === 'db' || value === 'local' || value === 'cloud' ? value : undefined;
+function trimToNull(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function derivePrimaryStorageMode(storageMode: BackfillStorageMode): BackfillPrimaryStorageMode {
-    switch (storageMode) {
-        case 'local':
-            return 'workspace';
-        case 'cloud':
-            return 'cloud';
-        case 'db':
-        default:
-            return 'db';
-    }
+function normalizeStorageMode(value: unknown): BackfillStorageMode | undefined {
+    return value === 'db' || value === 'local' || value === 'cloud' ? value : undefined;
 }
 
 function toIdString(value: unknown): string | undefined {
@@ -47,44 +51,11 @@ function toIdString(value: unknown): string | undefined {
     return undefined;
 }
 
-function buildCanonicalLocator(doc: Record<string, unknown>, storageMode: BackfillStorageMode): string | undefined {
-    switch (storageMode) {
-        case 'local': {
-            const localPath = typeof doc.localPath === 'string' ? doc.localPath : undefined;
-            return localPath ? `workspace://${localPath}` : undefined;
-        }
-        case 'db': {
-            const gridfsId = toIdString(doc.gridfsId);
-            if (gridfsId) {
-                return `gridfs://${gridfsId}`;
-            }
 
-            const journalEntryId = toIdString(doc.journalEntryId);
-            return journalEntryId ? `journal://${journalEntryId}` : undefined;
-        }
-        case 'cloud': {
-            const cloudKey = typeof doc.cloudKey === 'string' ? doc.cloudKey : undefined;
-            if (!cloudKey) {
-                return undefined;
-            }
-
-            const cloudProvider = doc.cloudProvider === 's3' || doc.cloudProvider === 'gcs'
-                ? doc.cloudProvider
-                : undefined;
-            const cloudBucket = typeof doc.cloudBucket === 'string' ? doc.cloudBucket : undefined;
-
-            if (cloudProvider && cloudBucket) {
-                return `${cloudProvider}://${cloudBucket}/${cloudKey}`;
-            }
-
-            return `cloud://${cloudKey}`;
-        }
-        default:
-            return undefined;
-    }
-}
-
-function buildBackfillUpdate(doc: Record<string, unknown>) {
+function buildBackfillUpdate(
+    doc: Record<string, unknown>,
+    journalMetadataById: Map<string, { cloudConnectionProfileId?: string }>,
+) {
     const storageMode = normalizeStorageMode(doc.storageMode);
     if (!storageMode) {
         return { blocked: true as const, update: null };
@@ -92,19 +63,32 @@ function buildBackfillUpdate(doc: Record<string, unknown>) {
 
     const $set: Record<string, unknown> = {};
     const $unset: Record<string, ''> = {};
-    const derivedPrimaryStorageMode = derivePrimaryStorageMode(storageMode);
-    const derivedCanonicalLocator = buildCanonicalLocator(doc, storageMode);
+    const derivedPrimaryStorageMode = deriveMediaReferencePrimaryStorageMode(storageMode);
+    const derivedCanonicalLocator = buildMediaReferenceCanonicalLocator({
+        storageMode,
+        localPath: typeof doc.localPath === 'string' ? doc.localPath : undefined,
+        gridfsId: toIdString(doc.gridfsId),
+        journalEntryId: toIdString(doc.journalEntryId),
+        cloudKey: typeof doc.cloudKey === 'string' ? doc.cloudKey : undefined,
+        cloudProvider: doc.cloudProvider === 's3' || doc.cloudProvider === 'gcs'
+            ? doc.cloudProvider as CloudProvider
+            : undefined,
+        cloudBucket: typeof doc.cloudBucket === 'string' ? doc.cloudBucket : undefined,
+    });
     const agentInstanceId = doc.agentInstanceId;
     const generatedBy = typeof doc.generatedBy === 'string' && doc.generatedBy.trim() ? doc.generatedBy : undefined;
+    const journalEntryId = toIdString(doc.journalEntryId);
+    const journalMetadata = journalEntryId ? journalMetadataById.get(journalEntryId) : undefined;
 
-    if (!doc.primaryStorageMode) {
+    if (doc.primaryStorageMode !== derivedPrimaryStorageMode) {
         $set.primaryStorageMode = derivedPrimaryStorageMode;
     }
 
-    if (!doc.canonicalLocator) {
-        if (!derivedCanonicalLocator) {
-            return { blocked: true as const, update: null };
-        }
+    if (!derivedCanonicalLocator) {
+        return { blocked: true as const, update: null };
+    }
+
+    if (doc.canonicalLocator !== derivedCanonicalLocator) {
         $set.canonicalLocator = derivedCanonicalLocator;
     }
 
@@ -126,6 +110,15 @@ function buildBackfillUpdate(doc: Record<string, unknown>) {
             : generatedBy;
         if (fallbackName) {
             $set.lastModifiedByAgentName = fallbackName;
+        }
+    }
+
+    if (storageMode === 'cloud') {
+        const existingCloudConnectionProfileId = trimToNull(doc.cloudConnectionProfileId);
+        const repairedCloudConnectionProfileId = journalMetadata?.cloudConnectionProfileId;
+
+        if (!existingCloudConnectionProfileId && repairedCloudConnectionProfileId) {
+            $set.cloudConnectionProfileId = repairedCloudConnectionProfileId;
         }
     }
 
@@ -171,13 +164,20 @@ export async function backfillMediaReferenceCatalogFields(db: any): Promise<Medi
 
     const mediaCollection = db.collection('media_references');
     const mediaReferences = await mediaCollection.find({}).toArray();
+    const journalMetadataById = await loadCloudJournalMetadataById(
+        db,
+        (mediaReferences as Array<Record<string, unknown>>)
+            .filter((mediaReference) => mediaReference.storageMode === 'cloud')
+            .map((mediaReference) => toIdString(mediaReference.journalEntryId))
+            .filter((value): value is string => Boolean(value)),
+    );
 
     let updated = 0;
     let alreadyCompatible = 0;
     let blocked = 0;
 
     for (const mediaReference of mediaReferences as Array<Record<string, unknown>>) {
-        const result = buildBackfillUpdate(mediaReference);
+        const result = buildBackfillUpdate(mediaReference, journalMetadataById);
 
         if (result.blocked) {
             blocked++;
@@ -194,18 +194,34 @@ export async function backfillMediaReferenceCatalogFields(db: any): Promise<Medi
     }
 
     const indexes = [
-        { userId: 1, workflowId: 1 },
-        { userId: 1, createdAt: -1 },
-        { agentInstanceId: 1, createdAt: -1 },
-        { workflowId: 1, storageMode: 1 },
-        { workflowId: 1, primaryStorageMode: 1, isOrphan: 1, updatedAt: -1 },
-        { workflowId: 1, createdByAgentInstanceId: 1, updatedAt: -1 },
-        { storageMode: 1, createdAt: 1 },
+        { keys: { userId: 1, workflowId: 1 } },
+        { keys: { userId: 1, createdAt: -1 } },
+        { keys: { agentInstanceId: 1, createdAt: -1 } },
+        { keys: { workflowId: 1, storageMode: 1 } },
+        { keys: { workflowId: 1, primaryStorageMode: 1, isOrphan: 1, updatedAt: -1 } },
+        { keys: { workflowId: 1, createdByAgentInstanceId: 1, updatedAt: -1 } },
+        {
+            keys: { userId: 1, workflowId: 1, canonicalLocator: 1 },
+            options: {
+                unique: true,
+                partialFilterExpression: { canonicalLocator: { $exists: true } },
+                name: 'uq_media_reference_user_workflow_locator',
+            },
+        },
+        {
+            keys: { userId: 1, workflowId: 1, journalEntryId: 1 },
+            options: {
+                unique: true,
+                partialFilterExpression: { journalEntryId: { $exists: true } },
+                name: 'uq_media_reference_user_workflow_journal',
+            },
+        },
+        { keys: { storageMode: 1, createdAt: 1 } },
     ];
 
     let indexesEnsured = 0;
     for (const index of indexes) {
-        await mediaCollection.createIndex(index);
+        await mediaCollection.createIndex(index.keys, index.options ?? {});
         indexesEnsured++;
     }
 
@@ -251,4 +267,49 @@ if (isDirectCliInvocation) {
         console.error('[Migration 006] ERREUR:', err instanceof Error ? err.message : String(err));
         process.exit(1);
     });
+}
+
+async function loadCloudJournalMetadataById(
+    db: any,
+    journalEntryIds: string[],
+): Promise<Map<string, { cloudConnectionProfileId?: string }>> {
+    if (journalEntryIds.length === 0) {
+        return new Map();
+    }
+
+    const collections = await db.listCollections({ name: 'agent_journals' }).toArray();
+    if (collections.length === 0) {
+        return new Map();
+    }
+
+    const journalCollection = db.collection('agent_journals');
+    const objectIds = journalEntryIds
+        .filter((journalEntryId) => mongoose.Types.ObjectId.isValid(journalEntryId))
+        .map((journalEntryId) => new mongoose.Types.ObjectId(journalEntryId));
+
+    if (objectIds.length === 0) {
+        return new Map();
+    }
+
+    const journals = await journalCollection.find({
+        _id: { $in: objectIds },
+        type: 'media',
+    }).toArray();
+
+    const journalMetadataById = new Map<string, { cloudConnectionProfileId?: string }>();
+
+    for (const journal of journals as Array<Record<string, unknown>>) {
+        const journalId = toIdString(journal._id);
+        const payload = journal.payload as Record<string, unknown> | undefined;
+        const metadata = payload?.metadata as Record<string, unknown> | undefined;
+        const cloudConnectionProfileId = trimToNull(metadata?.cloudConnectionProfileId);
+
+        if (!journalId || !cloudConnectionProfileId) {
+            continue;
+        }
+
+        journalMetadataById.set(journalId, { cloudConnectionProfileId });
+    }
+
+    return journalMetadataById;
 }

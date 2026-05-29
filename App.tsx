@@ -1,11 +1,10 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, Tool, normalizePersistenceConfig, sanitizePersistenceConfigForApi } from './types';
+import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, AgentDraft, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, NodePositionUpdateOptions, normalizePersistenceConfig } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
 import { AgentFormModal } from './components/modals/AgentFormModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { Header } from './components/Header';
-import { getAllGuestKeys } from './utils/guestDataUtils';
 import { LoginModal } from './components/modals/LoginModal';
 import { RegisterModal } from './components/modals/RegisterModal';
 import { ImageGenerationPanel } from './components/panels/ImageGenerationPanel';
@@ -14,7 +13,6 @@ import { VideoGenerationConfigPanel } from './components/panels/VideoGenerationC
 import { MapsGroundingConfigPanel } from './components/panels/MapsGroundingConfigPanel';
 import { useLocalization } from './hooks/useLocalization';
 import { Button } from './components/UI';
-import { ConfirmationModal } from './components/modals/ConfirmationModal';
 import { FullscreenChatModal } from './components/modals/FullscreenChatModal';
 import { AgentConfigurationModal } from './components/modals/AgentConfigurationModal';
 import { useRuntimeStore } from './stores/useRuntimeStore';
@@ -34,23 +32,16 @@ import { WorkflowSwitchOverlay } from './components/WorkflowSwitchOverlay';
 import { HyperspaceReveal } from './components/HyperspaceReveal';
 // ⭐ AUTO-SAVE: Import PersistenceService for immediate instance creation
 import { PersistenceService } from './services/persistenceService';
-import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from './services/persistedChatMessages';
-import { normalizeAgentToolReferences } from './services/toolSelectionResolver';
+import { createAgentPrototype, updateAgentPrototype } from './services/agentPrototypeAPI';
 import { resolveActiveWorkflowId } from './services/workflowIdResolver';
 import { remapAgentInstanceReference, remapEditingImageInfo, remapPanelNodeId } from './utils/mediaPanelRuntimeSync';
 // ⭐ V2: Import apiClient for workflow switch orchestration
 import apiClient from './utils/apiClient';
 // ⭐ FIX QA: Import useJournalQueue for image persistence
 import { useJournalQueue } from './hooks/useJournalQueue';
-import { getWorkspaceSessionGateState } from './utils/workspaceSessionGate';
-import {
-  createWorkspaceBootstrapIssue,
-  loadAuthenticatedWorkspaceBootstrap,
-  logWorkspaceBootstrapIssue,
-  type WorkspaceSnapshot,
-} from './services/workspaceBootstrapService';
-
-const RESUME_WORKSPACE_REFRESH_THROTTLE_MS = 5000;
+import type { WorkspaceSnapshot } from './services/workspaceBootstrapService';
+import { useWorkspaceHydrationOrchestrator } from './hooks/useWorkspaceHydrationOrchestrator';
+import { findAvailableWorkflowNodePosition, findCollisionFreeWorkflowNodePosition } from './utils/workflowNodePlacement';
 
 interface EditingImageInfo {
   nodeId: string;
@@ -60,194 +51,12 @@ interface EditingImageInfo {
   agentInstance?: AgentInstance;
 }
 
-interface DeleteConfirmationState {
-  agentId: string;
-  agentName: string;
-}
-
-interface UpdateConfirmationState {
-  agentData: Omit<Agent, 'id'>;
-  agentId: string;
-  count: number;
-}
-
-function sanitizeProviderTools(rawTools: unknown): Tool[] {
-  if (!Array.isArray(rawTools)) {
-    return [];
-  }
-
-  return rawTools.flatMap((candidate) => {
-    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-      return [];
-    }
-
-    const name = typeof (candidate as Record<string, unknown>).name === 'string'
-      ? (candidate as Record<string, unknown>).name.trim()
-      : '';
-
-    if (name.length === 0) {
-      return [];
-    }
-
-    const description = typeof (candidate as Record<string, unknown>).description === 'string'
-      ? (candidate as Record<string, unknown>).description
-      : '';
-    const parameters = (candidate as Record<string, unknown>).parameters;
-    const outputSchema = (candidate as Record<string, unknown>).outputSchema;
-
-    return [{
-      name,
-      description,
-      parameters: parameters && typeof parameters === 'object' && !Array.isArray(parameters)
-        ? parameters
-        : { type: 'object' },
-      ...(outputSchema !== undefined ? { outputSchema } : {}),
-    } satisfies Tool];
-  });
-}
-
-const mapPrototypeToAgent = (prototype: any, fallbackTimestamp: string): Agent => {
-  const normalizedToolReferences = normalizeAgentToolReferences(
-    Array.isArray(prototype.toolSelections) ? prototype.toolSelections : undefined,
-    Array.isArray(prototype.functionIds)
-      ? prototype.functionIds
-      : (Array.isArray(prototype.tools)
-          ? prototype.tools.map((tool: any) => tool?.toString ? tool.toString() : String(tool))
-          : []),
-  );
-
-  return {
-    id: prototype.id || prototype._id,
-    name: prototype.name,
-    role: prototype.role || prototype.description || 'assistant',
-    systemPrompt: prototype.systemPrompt || prototype.description || '',
-    llmProvider: (prototype.provider as LLMProvider) || LLMProvider.Gemini,
-    model: prototype.model || 'gemini-2.0-flash',
-    capabilities: Array.isArray(prototype.capabilities) ? prototype.capabilities : [],
-    tools: sanitizeProviderTools(prototype.tools),
-    functionIds: normalizedToolReferences.functionIds,
-    toolSelections: normalizedToolReferences.toolSelections,
-    outputConfig: prototype.outputConfig || {},
-    historyConfig: prototype.historyConfig || {},
-    persistenceConfig: prototype.persistenceConfig
-      ? normalizePersistenceConfig(prototype.persistenceConfig)
-      : undefined,
-    creator_id: prototype.robotId || RobotId.Archi,
-    created_at: prototype.created_at || fallbackTimestamp,
-    updated_at: prototype.updated_at || fallbackTimestamp
-  };
-};
-
-const buildInstanceConfiguration = (instance: any, prototype?: Agent) => {
-  const rawConfiguration = instance.configuration_json;
-
-  if (rawConfiguration && typeof rawConfiguration === 'object') {
-    const resolvedProviderTools = rawConfiguration.tools !== undefined
-      ? rawConfiguration.tools
-      : (Array.isArray(instance.tools) && instance.tools.length > 0
-          ? instance.tools
-          : prototype?.tools);
-
-    return {
-      ...rawConfiguration,
-      role: rawConfiguration.role || instance.role || prototype?.role || 'assistant',
-      model: rawConfiguration.model || instance.llmModel || instance.model || prototype?.model || 'gemini-2.0-flash',
-      llmProvider: rawConfiguration.llmProvider || instance.llmProvider || instance.provider || prototype?.llmProvider || LLMProvider.Gemini,
-      systemPrompt: rawConfiguration.systemPrompt || instance.systemPrompt || instance.systemInstruction || prototype?.systemPrompt || '',
-      capabilities: Array.isArray(rawConfiguration.capabilities) ? rawConfiguration.capabilities : (Array.isArray(instance.capabilities) ? instance.capabilities : (prototype?.capabilities || [])),
-      tools: sanitizeProviderTools(resolvedProviderTools),
-      toolSelections: Array.isArray(rawConfiguration.toolSelections) ? rawConfiguration.toolSelections : (Array.isArray(instance.toolSelections) ? instance.toolSelections : (prototype?.toolSelections || [])),
-      historyConfig: rawConfiguration.historyConfig || instance.historyConfig || prototype?.historyConfig || {},
-      outputConfig: rawConfiguration.outputConfig || instance.outputConfig || prototype?.outputConfig || {},
-      position: rawConfiguration.position || instance.position || { x: 0, y: 0 },
-    };
-  }
-
-  return {
-    role: instance.role || prototype?.role || 'assistant',
-    model: instance.llmModel || instance.model || prototype?.model || 'gemini-2.0-flash',
-    llmProvider: instance.llmProvider || instance.provider || prototype?.llmProvider || LLMProvider.Gemini,
-    systemPrompt: instance.systemPrompt || instance.systemInstruction || prototype?.systemPrompt || '',
-    capabilities: Array.isArray(instance.capabilities) ? instance.capabilities : (prototype?.capabilities || []),
-    tools: sanitizeProviderTools(instance.tools ?? prototype?.tools),
-    toolSelections: Array.isArray(instance.toolSelections) ? instance.toolSelections : (prototype?.toolSelections || []),
-    functionInheritance: instance.functionInheritance || undefined,
-    historyConfig: instance.historyConfig || prototype?.historyConfig || {},
-    outputConfig: instance.outputConfig || prototype?.outputConfig || {},
-    position: instance.position || { x: 0, y: 0 }
-  };
-};
-
-const mapInstanceToAgentInstance = (instance: any, workflowId?: string, prototype?: Agent): AgentInstance => ({
-  id: instance.id || instance._id,
-  prototypeId: instance.prototypeId || prototype?.id || instance.id || instance._id,
-  name: instance.name,
-  position: instance.position || instance.configuration_json?.position || { x: 0, y: 0 },
-  isMinimized: instance.isMinimized || false,
-  isMaximized: instance.isMaximized || false,
-  workflowId: instance.workflowId || workflowId,
-  persistenceConfig: instance.persistenceConfig
-    ? normalizePersistenceConfig(sanitizePersistenceConfigForApi(instance.persistenceConfig) ?? instance.persistenceConfig)
-    : undefined,
-  configuration_json: buildInstanceConfiguration(instance, prototype)
-});
-
-const mapInstanceToLegacyWorkflowNode = (instance: any, workflowId: string | undefined, prototype?: Agent, fallbackTimestamp?: string): WorkflowNode => {
-  const timestamp = fallbackTimestamp || new Date().toISOString();
-  const hydratedInstance = mapInstanceToAgentInstance(instance, workflowId, prototype);
-  const hydratedAgent: Agent = prototype || {
-    id: hydratedInstance.prototypeId,
-    name: instance.name,
-    role: hydratedInstance.configuration_json.role,
-    systemPrompt: hydratedInstance.configuration_json.systemPrompt,
-    llmProvider: hydratedInstance.configuration_json.llmProvider,
-    model: hydratedInstance.configuration_json.model,
-    capabilities: hydratedInstance.configuration_json.capabilities || [],
-    tools: hydratedInstance.configuration_json.tools || [],
-    historyConfig: hydratedInstance.configuration_json.historyConfig || {},
-    outputConfig: hydratedInstance.configuration_json.outputConfig || {},
-    creator_id: instance.robotId || RobotId.Archi,
-    created_at: instance.createdAt || timestamp,
-    updated_at: timestamp
-  };
-
-  return {
-    id: hydratedInstance.id,
-    agent: hydratedAgent,
-    position: hydratedInstance.position,
-    messages: [],
-    isMinimized: hydratedInstance.isMinimized,
-    isMaximized: hydratedInstance.isMaximized,
-    instanceId: hydratedInstance.id
-  };
-};
-
-const mapInstanceToV2Node = (instance: any, workflowId: string | undefined, prototype?: Agent, fallbackTimestamp?: string): V2WorkflowNode => {
-  const legacyNode = mapInstanceToLegacyWorkflowNode(instance, workflowId, prototype, fallbackTimestamp);
-  const hydratedInstance = mapInstanceToAgentInstance(instance, workflowId, prototype);
-
-  return {
-    id: `node-${hydratedInstance.id}`,
-    type: 'agent',
-    position: hydratedInstance.position,
-    data: {
-      robotId: legacyNode.agent.creator_id,
-      label: hydratedInstance.name,
-      agent: legacyNode.agent,
-      agentInstance: hydratedInstance,
-      workflowId,
-      isMinimized: hydratedInstance.isMinimized,
-      isMaximized: hydratedInstance.isMaximized
-    }
-  };
-};
-
 /**
  * Inner App component that uses Auth context
  * Must be wrapped by AuthProvider to access useAuth()
  */
 export function AppContent() {
-  const { isAuthenticated, accessToken, runtimeLLMConfigs, localLLMProfiles, user, logout, refreshRuntimeConfigState, sessionStatus, isLoading: authLoading, error: authError } = useAuth();
+  const { isAuthenticated, accessToken, runtimeLLMConfigs: authRuntimeLLMConfigs, localLLMProfiles: authLocalLLMProfiles, user, logout, refreshRuntimeConfigState, sessionStatus, isLoading: authLoading, error: authError } = useAuth();
   const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
   const [isAgentModalOpen, setAgentModalOpen] = useState(false);
   const [isLoginModalOpen, setLoginModalOpen] = useState(false);
@@ -267,8 +76,6 @@ export function AppContent() {
   const [currentVideoAgentInstance, setCurrentVideoAgentInstance] = useState<AgentInstance | null>(null);
   const [currentMapsNodeId, setCurrentMapsNodeId] = useState<string | null>(null);
 
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [workflowNodes, setWorkflowNodes] = useState<WorkflowNode[]>([]);
   const [editingImageInfo, setEditingImageInfo] = useState<EditingImageInfo | null>(null);
   const [mapsPreloadedResults, setMapsPreloadedResults] = useState<{
     text: string;
@@ -279,34 +86,27 @@ export function AppContent() {
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; mimeType: string } | null>(null);
   const { t } = useLocalization();
 
-  const llmConfigs = runtimeLLMConfigs;
-  const { sessionReadyForWorkspaceHydration, awaitingStableAuthenticatedSession } = getWorkspaceSessionGateState({
-    isAuthenticated,
-    accessToken,
-    sessionStatus,
-    userId: user?.id ?? null,
-    authLoading,
-  });
-
-  // ⭐ ÉTAPE 5: Hydration state for authenticated users
-  const [isHydrating, setIsHydrating] = useState(false);
-  const [hydrationProgress, setHydrationProgress] = useState(0);
-  const [hydrationMessage, setHydrationMessage] = useState('Chargement de votre workspace...');
-  
   // ⭐ V2: Flag to distinguish initial login hydration from user-initiated workflow switch
   // isInitialHydrationRef removed (was dead code — never read)
 
   // ⭐ V2: State dédié au switch overlay (séparé de l'hydratation login)
   const [isSwitchingWorkflow, setIsSwitchingWorkflow] = useState(false);
-  const [switchWorkflowName, setSwitchWorkflowName] = useState('');
   const [switchProgress, setSwitchProgress] = useState(0);
+  const [switchWorkflowName, setSwitchWorkflowName] = useState('');
   const isSwitchingRef = useRef(false);  // Guard anti-re-entrance (pas de useState pour éviter re-render)
-  const isHydratingRef = useRef(false);
-  const workspaceReloadPromiseRef = useRef<Promise<void> | null>(null);
-  const hydratedWorkspaceIdentityRef = useRef<string | null>(null);
-  const lastResumeWorkspaceRefreshAtRef = useRef(0);
+  const [awaitingHydratedCanvasReady, setAwaitingHydratedCanvasReady] = useState(false);
 
-  // ⭐ UX Polish: Hyperspace animation state for guests
+  // Robot Navigation State
+  const [currentPath, setCurrentPath] = useState('/bos/dashboard');
+  const currentRouteUsesWorkflowCanvas = currentPath.startsWith('/bos/dashboard')
+    || (currentPath.startsWith('/bos') && !currentPath.startsWith('/bos/workflows/manage'));
+
+  const handleRobotNavigation = (robotId: RobotId, path: string) => {
+    setCurrentPath(path);
+    // TODO: Implement proper routing logic
+    console.log(`Navigating to robot ${robotId} at path ${path}`);
+  };
+
   // Shows when: first load as guest OR after logout
   const [showHyperspace, setShowHyperspace] = useState(!isAuthenticated);
   const [hyperspaceActive, setHyperspaceActive] = useState(false);
@@ -345,9 +145,15 @@ export function AppContent() {
 
   // Runtime Store access
   const { updateLLMConfigs, updateLocalLLMProfiles, setNavigationHandler, addNodeMessage } = useRuntimeStore();
+  const runtimeStoreLLMConfigs = useRuntimeStore((state) => state.llmConfigs);
+  const runtimeStoreLocalLLMProfiles = useRuntimeStore((state) => state.localLLMProfiles);
+  const runtimeNodeMessages = useRuntimeStore((state) => state.nodeMessages);
+  const llmConfigs = runtimeStoreLLMConfigs.length > 0 ? runtimeStoreLLMConfigs : authRuntimeLLMConfigs;
+  const localLLMProfiles = runtimeStoreLocalLLMProfiles.length > 0 ? runtimeStoreLocalLLMProfiles : authLocalLLMProfiles;
 
   // Design Store access for integrity validation  
   const {
+    agents: designAgents,
     validateWorkflowIntegrity,
     cleanupOrphanedInstances,
     addAgentInstance,
@@ -355,15 +161,18 @@ export function AppContent() {
     deleteAgentInstance,
     hydrateFromServer,
     updateInstanceId,
+    updateAgentInstance,
     addNode,
+    updateNode,
     agentInstances,
     nodes: storeNodes,
     workflows: designWorkflows,
     currentWorkflowId: designCurrentWorkflowId,
+    currentRobotId,
   } = useDesignStore();
-  
+
   // ⭐ SELF-HEALING: Workflow Store for hydrating workflow ID
-  const { hydrateWorkflowFromServer, getCurrentWorkflowId } = useWorkflowStore();
+  const { getCurrentWorkflowId } = useWorkflowStore();
   
   // ⭐ FIX QA: Journal queue for persisting generated images
   const { enqueueEntry: enqueueJournalEntry } = useJournalQueue();
@@ -374,13 +183,25 @@ export function AppContent() {
     legacyWorkflowId: getCurrentWorkflowId(),
   }), [designCurrentWorkflowId, designWorkflows, getCurrentWorkflowId]);
 
-  useEffect(() => {
-    isHydratingRef.current = isHydrating;
-  }, [isHydrating]);
+  const {
+    sessionReadyForWorkspaceHydration,
+    awaitingStableAuthenticatedSession,
+    isHydrating,
+    hydrationProgress,
+    hydrationMessage,
+    hydrateInteractiveWorkspaceState,
+  } = useWorkspaceHydrationOrchestrator({
+    accessToken,
+    authError,
+    authLoading,
+    isAuthenticated,
+    isSwitchingRef,
+    refreshRuntimeConfigState,
+    sessionStatus,
+    userId: user?.id ?? null,
+  });
 
   const clearTransientUiState = useCallback(() => {
-    setWorkflowNodes([]);
-    setAgents([]);
     setImagePanelOpen(false);
     setCurrentImageNodeId(null);
     setCurrentImageAgent(null);
@@ -396,280 +217,6 @@ export function AppContent() {
     setMapsPreloadedResults(null);
   }, []);
 
-  const applyWorkspaceSnapshot = useCallback((workspace: WorkspaceSnapshot, options?: { preserveRuntimeMessages?: boolean }) => {
-    const snapshotWorkflowId = workspace.workflow?.id;
-    const fallbackTimestamp = new Date().toISOString();
-    const rawPrototypes = Array.isArray(workspace.agentPrototypes) ? workspace.agentPrototypes : [];
-    const rawInstances = Array.isArray(workspace.agentInstances) ? workspace.agentInstances : [];
-    const prototypeIndex = new Map<string, Agent>();
-    const hydratedPrototypes = rawPrototypes.map((prototype: any) => {
-      const hydratedPrototype = mapPrototypeToAgent(prototype, fallbackTimestamp);
-      prototypeIndex.set(hydratedPrototype.id, hydratedPrototype);
-      return hydratedPrototype;
-    });
-    const hydratedInstances = rawInstances.map((instance: any) => {
-      const prototype = prototypeIndex.get(instance.prototypeId);
-      return mapInstanceToAgentInstance(instance, snapshotWorkflowId, prototype);
-    });
-    const v2Nodes = rawInstances.map((instance: any) => {
-      const prototype = prototypeIndex.get(instance.prototypeId);
-      return mapInstanceToV2Node(instance, snapshotWorkflowId, prototype, fallbackTimestamp);
-    });
-    const legacyNodes = rawInstances.map((instance: any) => {
-      const prototype = prototypeIndex.get(instance.prototypeId);
-      return mapInstanceToLegacyWorkflowNode(instance, snapshotWorkflowId, prototype, fallbackTimestamp);
-    });
-
-    if (workspace.workflow) {
-      hydrateWorkflowFromServer({
-        id: workspace.workflow.id,
-        name: workspace.workflow.name,
-        description: workspace.workflow.description,
-        isDefault: workspace.workflow.isDefault,
-        isActive: workspace.workflow.isActive,
-        canvasState: workspace.workflow.canvasState
-      });
-    }
-
-    useDesignStore.getState().setCurrentWorkflowId(snapshotWorkflowId || null);
-    hydrateFromServer({
-      agents: hydratedPrototypes,
-      agentInstances: hydratedInstances,
-      nodes: v2Nodes,
-      edges: Array.isArray(workspace.edges) ? workspace.edges : []
-    });
-
-    setAgents(hydratedPrototypes);
-    setWorkflowNodes(legacyNodes);
-
-    const { setNodeMessages, getNodeMessages } = useRuntimeStore.getState();
-    for (const instance of rawInstances) {
-      const instanceId = instance.id || instance._id;
-      if (!instanceId) {
-        continue;
-      }
-      const nodeId = `node-${instanceId}`;
-      const persistedMessages = mapPersistedChatMessages(instance.chatMessages);
-      const nextMessages = options?.preserveRuntimeMessages
-        ? mergePersistedAndRuntimeMessages(persistedMessages, getNodeMessages(nodeId))
-        : persistedMessages;
-      setNodeMessages(nodeId, nextMessages);
-    }
-
-    console.log('[App] Workspace snapshot applied:', {
-      workflowId: snapshotWorkflowId,
-      prototypes: hydratedPrototypes.length,
-      instances: hydratedInstances.length,
-      edges: Array.isArray(workspace.edges) ? workspace.edges.length : 0
-    });
-    return snapshotWorkflowId || null;
-  }, [hydrateFromServer, hydrateWorkflowFromServer]);
-
-  const hydrateInteractiveWorkspaceState = useCallback(async (
-    workspace: WorkspaceSnapshot,
-    options?: {
-      preserveRuntimeMessages?: boolean;
-      onSnapshotApplied?: () => void;
-    },
-  ) => {
-    const snapshotWorkflowId = applyWorkspaceSnapshot(workspace, {
-      preserveRuntimeMessages: options?.preserveRuntimeMessages,
-    });
-
-    options?.onSnapshotApplied?.();
-    await useFunctionStore.getState().loadFunctions(snapshotWorkflowId || undefined);
-    return snapshotWorkflowId;
-  }, [applyWorkspaceSnapshot]);
-
-  const reloadWorkspaceSnapshot = useCallback(async ({
-    reason,
-    mode,
-  }: {
-    reason: string;
-    mode: 'initial-auth' | 'resume';
-  }) => {
-    if (!isAuthenticated || !sessionReadyForWorkspaceHydration || !user?.id) {
-      return;
-    }
-
-    if (workspaceReloadPromiseRef.current) {
-      return workspaceReloadPromiseRef.current;
-    }
-
-    const reloadPromise = (async () => {
-      const showOverlay = mode === 'initial-auth';
-
-      if (showOverlay) {
-        setHydrationMessage('Chargement de votre workspace...');
-        setIsHydrating(true);
-        setHydrationProgress(10);
-      }
-
-      try {
-        if (mode === 'initial-auth') {
-          useDesignStore.getState().resetAll();
-          useRuntimeStore.getState().resetForWorkflowSwitch();
-
-          const allGuestKeys = getAllGuestKeys();
-          allGuestKeys.forEach(key => localStorage.removeItem(key));
-
-          sessionStorage.clear();
-          sessionStorage.setItem('_arc_hydrating', 'true');
-          setHydrationProgress(30);
-        }
-
-        if (showOverlay) {
-          setHydrationMessage('Synchronisation de la session runtime...');
-          setHydrationProgress(55);
-        }
-
-        const { workspace, runtimeState, runtimeIssue } = await loadAuthenticatedWorkspaceBootstrap({
-          loadRuntimeState: () => refreshRuntimeConfigState(),
-        });
-
-        if (runtimeIssue) {
-          logWorkspaceBootstrapIssue('[App]', runtimeIssue, {
-            reason,
-            mode,
-            userId: user.id,
-          });
-        }
-
-        if (runtimeState) {
-          updateLLMConfigs(runtimeState.runtimeLLMConfigs);
-          updateLocalLLMProfiles(runtimeState.localLLMProfiles);
-        }
-
-        if (showOverlay) {
-          setHydrationMessage('Restauration du canvas...');
-          setHydrationProgress(75);
-        }
-
-        await hydrateInteractiveWorkspaceState(workspace, {
-          preserveRuntimeMessages: mode === 'resume',
-          onSnapshotApplied: showOverlay
-            ? () => {
-              setHydrationMessage('Chargement du catalogue d\'outils...');
-              setHydrationProgress(90);
-            }
-            : undefined,
-        });
-
-        if (showOverlay) {
-          setHydrationProgress(100);
-        }
-
-        hydratedWorkspaceIdentityRef.current = `auth:${user.id}`;
-
-        console.log('[App] Workspace reload complete:', {
-          reason,
-          mode,
-          userId: user.id,
-        });
-      } catch (err) {
-        const issue = createWorkspaceBootstrapIssue('workspace', err);
-        logWorkspaceBootstrapIssue('[App]', issue, {
-          reason,
-          mode,
-          userId: user?.id,
-        });
-        if (showOverlay) {
-          setHydrationMessage(
-            issue.transient
-              ? 'Backend indisponible. Relancez la session quand le service est revenu.'
-              : authError || 'Restauration de session impossible. Reconnexion requise.'
-          );
-        }
-      } finally {
-        if (showOverlay) {
-          setTimeout(() => {
-            setIsHydrating(false);
-            setHydrationProgress(0);
-            sessionStorage.removeItem('_arc_hydrating');
-          }, 500);
-        }
-      }
-    })().finally(() => {
-      workspaceReloadPromiseRef.current = null;
-    });
-
-    workspaceReloadPromiseRef.current = reloadPromise;
-    return reloadPromise;
-  }, [authError, hydrateInteractiveWorkspaceState, isAuthenticated, refreshRuntimeConfigState, sessionReadyForWorkspaceHydration, updateLLMConfigs, updateLocalLLMProfiles, user?.id]);
-
-  /**
-   * ⭐ ÉTAPE 5: Hydration for authenticated users
-   * Fetches workspace data from GET /api/user/workspace and populates stores
-   */
-  useEffect(() => {
-    if (!isAuthenticated) {
-      hydratedWorkspaceIdentityRef.current = null;
-      setIsHydrating(false);
-      sessionStorage.removeItem('_arc_hydrating');
-      return;
-    }
-
-    if (!sessionReadyForWorkspaceHydration || !user?.id) {
-      return;
-    }
-
-    const currentIdentity = `auth:${user.id}`;
-    if (hydratedWorkspaceIdentityRef.current === currentIdentity) {
-      return;
-    }
-
-    void reloadWorkspaceSnapshot({
-      reason: 'initial-auth-hydration',
-      mode: 'initial-auth',
-    });
-  }, [isAuthenticated, reloadWorkspaceSnapshot, sessionReadyForWorkspaceHydration, user?.id]);
-
-  useEffect(() => {
-    if (!sessionReadyForWorkspaceHydration || !user?.id) {
-      return;
-    }
-
-    const requestResumeWorkspaceRefresh = (reason: string) => {
-      const now = Date.now();
-
-      if (isHydratingRef.current || isSwitchingRef.current) {
-        return;
-      }
-
-      if (now - lastResumeWorkspaceRefreshAtRef.current < RESUME_WORKSPACE_REFRESH_THROTTLE_MS) {
-        return;
-      }
-
-      lastResumeWorkspaceRefreshAtRef.current = now;
-
-      void reloadWorkspaceSnapshot({
-        reason,
-        mode: 'resume',
-      });
-    };
-
-    const handleFocus = () => requestResumeWorkspaceRefresh('window-focus');
-    const handleOnline = () => requestResumeWorkspaceRefresh('network-online');
-    const handlePageShow = () => requestResumeWorkspaceRefresh('page-show');
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        requestResumeWorkspaceRefresh('visibility-visible');
-      }
-    };
-
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('pageshow', handlePageShow);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('pageshow', handlePageShow);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [reloadWorkspaceSnapshot, sessionReadyForWorkspaceHydration, user?.id]);
-
   /**
    * ⭐ V2 SWITCH WORKFLOW: Fonction unifiée de réhydratation complète
    * Orchestre le switch de workflow avec feedback UX (WorkflowSwitchOverlay jaune Bos)
@@ -681,7 +228,7 @@ export function AppContent() {
    * 1. Reset runtime store → nettoyer chat/execution du workflow précédent
    * 2. Fetch les données du workflow via POST /select (avec agentPrototypes)
    * 3. Mapper les prototypes (copie exacte de l'hydratation initiale L310-329)
-   * 4. Hydratation atomique → hydrateFromServer + setAgents + hydrateWorkflowFromServer
+  * 4. Hydratation atomique → hydrateFromServer + hydrateWorkflowFromServer
    * 5. Recharger les journals → restaurer l'historique chat
    * 6. Reconstruire le React state legacy → workflowNodes pour le canvas
    * 7. Refresh liste workflows
@@ -807,46 +354,36 @@ export function AppContent() {
   }, [clearTransientUiState, isAuthenticated, user?.id]);
 
   useEffect(() => {
-    updateLLMConfigs(llmConfigs);
-  }, [llmConfigs, updateLLMConfigs]);
+    if (isAuthenticated && authRuntimeLLMConfigs.length === 0 && runtimeStoreLLMConfigs.length > 0) {
+      return;
+    }
+
+    updateLLMConfigs(authRuntimeLLMConfigs);
+  }, [authRuntimeLLMConfigs, isAuthenticated, runtimeStoreLLMConfigs.length, updateLLMConfigs]);
 
   // ⭐ NEW: Sync local LLM profiles into runtime store
   useEffect(() => {
-    updateLocalLLMProfiles(localLLMProfiles);
-  }, [localLLMProfiles, updateLocalLLMProfiles]);
+    if (isAuthenticated && authLocalLLMProfiles.length === 0 && runtimeStoreLocalLLMProfiles.length > 0) {
+      return;
+    }
 
-  // ⭐ PHASE 2: Load workflows on authentication
-  // ⭐ V4 FIX: Wait for hydration to complete before loading workflows
-  // The hydration useEffect sets _arc_hydrating flag; we wait until it's cleared.
+    updateLocalLLMProfiles(authLocalLLMProfiles);
+  }, [authLocalLLMProfiles, isAuthenticated, runtimeStoreLocalLLMProfiles.length, updateLocalLLMProfiles]);
+
   useEffect(() => {
-    if (!sessionReadyForWorkspaceHydration) return;
+    if (isHydrating && currentRouteUsesWorkflowCanvas) {
+      setAwaitingHydratedCanvasReady(true);
+      return;
+    }
 
-    const loadWorkflows = async (retryCount = 0) => {
-      try {
-        // Wait for hydration to finish before loading workflows
-        const isHydrating = sessionStorage.getItem('_arc_hydrating') === 'true';
-        if (isHydrating && retryCount < 5) {
-          // Hydration still in progress — retry after 300ms
-          setTimeout(() => loadWorkflows(retryCount + 1), 300);
-          return;
-        }
-        
-        const designStore = useDesignStore.getState();
-        await designStore.loadUserWorkflows();
-        console.log('[App] ✅ Workflows loaded successfully');
-      } catch (error) {
-        console.error('[App] ❌ Failed to load workflows:', error);
-        // Error is already in store.workflowLoadError
-      }
-    };
+    if (!currentRouteUsesWorkflowCanvas) {
+      setAwaitingHydratedCanvasReady(false);
+    }
+  }, [currentRouteUsesWorkflowCanvas, isHydrating]);
 
-    // Load after initial hydration settles
-    const timer = setTimeout(() => {
-      loadWorkflows();
-    }, 200);
-
-    return () => clearTimeout(timer);
-  }, [sessionReadyForWorkspaceHydration, user?.id]);
+  const handleWorkflowCanvasReady = useCallback(() => {
+    setAwaitingHydratedCanvasReady(false);
+  }, []);
 
   // ⭐ V2: L'ancien watcher PHASE 2 (resetAll sur currentWorkflowId change) est supprimé.
   // switchToWorkflow() orchestre désormais le reset + rechargement complet.
@@ -865,61 +402,44 @@ export function AppContent() {
     // Then validate workflow integrity
     const { fixedCount } = validateWorkflowIntegrity();
 
-    // 🆕 Migration: Créer des instances pour les nodes legacy sans instanceId
-    let migratedCount = 0;
-    const currentWorkflowId = resolveCurrentWorkflowId();
-    const updatedNodes = workflowNodes.map(node => {
-      if (!node.instanceId && node.agent) {
-        // Créer une instance pour ce node legacy - pass workflowId
-        const instanceId = addAgentInstance(node.agent.id, node.position, node.agent.name, currentWorkflowId || undefined);
-        migratedCount++;
-        return { ...node, instanceId };
-      }
-      return node;
-    });
-
-    if (migratedCount > 0) {
-      setWorkflowNodes(updatedNodes);
-      console.log(`🔄 Migrated ${migratedCount} legacy nodes to instance architecture`);
-    }
-
     if (cleanedCount > 0 || fixedCount > 0) {
       console.log(`🚀 App startup integrity check completed: cleaned ${cleanedCount} instances, fixed ${fixedCount} nodes`);
     }
   }, []); // Run only once on mount
 
-  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null);
-  const [updateConfirmation, setUpdateConfirmation] = useState<UpdateConfirmationState | null>(null);
-
-  // Robot Navigation State
-  const [currentPath, setCurrentPath] = useState('/bos/dashboard');
-
-  const handleRobotNavigation = (robotId: RobotId, path: string) => {
-    setCurrentPath(path);
-    // TODO: Implement proper routing logic
-    console.log(`Navigating to robot ${robotId} at path ${path}`);
-  };
-
-  const handleSaveAgent = async (agentData: Omit<Agent, 'id'>, agentId?: string) => {
+  const handleSaveAgent = async (agentData: AgentDraft, agentId?: string) => {
     try {
+      if (!accessToken) {
+        throw new Error('Missing access token for prototype persistence');
+      }
+
       let backendId: string;
-      let savedAgent: any;
+      const robotId = editingAgent?.creator_id ?? currentRobotId;
 
       if (agentId) {
         // ⭐ ÉTAPE 3: Update existing agent prototype
         console.log('[App] 📤 Updating agent prototype:', agentId);
-        const { data: updatedAgent } = await apiClient.put(`/api/agent-prototypes/${agentId}`, agentData);
+        const apiResult = await updateAgentPrototype(agentId, agentData, accessToken, robotId);
+        if (!apiResult.success || !apiResult.data) {
+          throw new Error(apiResult.error || 'Prototype update failed');
+        }
 
-        savedAgent = updatedAgent;
-        backendId = savedAgent._id || agentId;
+        backendId = apiResult.data.id || agentId;
         console.log('[App] ✅ Agent prototype updated:', backendId);
       } else {
         // ⭐ ÉTAPE 3: Create new agent prototype
         console.log('[App] 📤 Creating new agent prototype:', agentData.name);
-        const { data: createdAgent } = await apiClient.post('/api/agent-prototypes', agentData);
+        const apiResult = await createAgentPrototype(
+          agentData,
+          accessToken,
+          robotId,
+          resolveCurrentWorkflowId() || undefined,
+        );
+        if (!apiResult.success || !apiResult.data) {
+          throw new Error(apiResult.error || 'Prototype creation failed');
+        }
 
-        savedAgent = createdAgent;
-        backendId = savedAgent._id;
+        backendId = apiResult.data.id;
         console.log('[App] ✅ Agent prototype created with backendId:', backendId);
 
         // ⭐ ÉTAPE 3 CRITICAL: Convert tempId → backendId for NEW agents
@@ -962,6 +482,7 @@ export function AppContent() {
         accessToken,
         refreshToken: null,
         user,
+        sessionStatus,
         runtimeLLMConfigs: llmConfigs,
         localLLMProfiles,
         login: async () => { },
@@ -972,8 +493,8 @@ export function AppContent() {
         refreshLLMApiKeys: async () => { },
         llmApiKeys: null,
         refreshRuntimeConfigState,
-        isLoading: false,
-        error: null
+        isLoading: authLoading,
+        error: authError
       });
 
       // NOTE J4.4: LLMConfigs are now managed separately via useLLMConfigs hook
@@ -991,45 +512,6 @@ export function AppContent() {
     }
   };
 
-  const handleUpdateConfirmation = (updateInstances: boolean) => {
-    if (updateConfirmation) {
-      const { agentData, agentId } = updateConfirmation;
-      const updatedAgent = { ...agentData, id: agentId };
-
-      // Update the prototype agent
-      setAgents(prev => prev.map(a => a.id === agentId ? updatedAgent : a));
-
-      if (updateInstances) {
-        setWorkflowNodes(prev => prev.map(node =>
-          node.agent.id === agentId
-            ? { ...node, agent: updatedAgent }
-            : node
-        ));
-      }
-    }
-    setUpdateConfirmation(null);
-  };
-
-  const handleDeleteAgent = (agentId: string) => {
-    const agentToDelete = agents.find(agent => agent.id === agentId);
-    if (agentToDelete) {
-      setDeleteConfirmation({ agentId, agentName: agentToDelete.name });
-    }
-  };
-
-  const confirmDeleteAgent = () => {
-    if (deleteConfirmation) {
-      const { agentId } = deleteConfirmation;
-      // ⭐ FIX: Close modal IMMEDIATELY before performing deletion to prevent double-click
-      // This prevents event bubbling from re-triggering the delete button
-      setDeleteConfirmation(null);
-      
-      // Then perform the actual deletion
-      setAgents(prev => prev.filter(agent => agent.id !== agentId));
-      setWorkflowNodes(prev => prev.filter(node => node.agent.id !== agentId));
-    }
-  };
-
   const handleOpenEditAgentModal = (agent: Agent) => {
     setEditingAgent(agent);
     setAgentModalOpen(true);
@@ -1042,22 +524,17 @@ export function AppContent() {
    * This ensures the agent_instances collection is populated immediately on creation.
    */
   const addAgentToWorkflow = useCallback(async (agent: Agent) => {
-    // ⭐ BUG FIX: Calculate position based on STORE instances (not legacy workflowNodes)
-    // This prevents collision when reconnecting (workflowNodes is empty on load)
-    // Use getState() to get current count of instances in Zustand store
-    const storeInstances = useDesignStore.getState().agentInstances;
-    const instanceCount = storeInstances.length;
-    
-    const position = {
-      x: (instanceCount % 4) * 420 + 20,
-      y: Math.floor(instanceCount / 4) * 540 + 20,
-    };
-
     // Use instanceName if provided, otherwise use agent name
     const instanceName = agent.instanceName || agent.name;
 
     // ⭐ Get workflowId BEFORE creating instance
     const workflowId = resolveCurrentWorkflowId();
+    const designState = useDesignStore.getState();
+    const position = findAvailableWorkflowNodePosition({
+      workflowId,
+      nodes: designState.nodes,
+      agentInstances: designState.agentInstances,
+    });
 
     // Add agent instance to DesignStore with custom instance name and workflowId
     const instanceId = addAgentInstance(agent.id, position, instanceName, workflowId || undefined);
@@ -1218,17 +695,6 @@ export function AppContent() {
         });
       }
       
-      // Legacy: Also add to local state with the final ID
-      const newNode: WorkflowNode = {
-        id: `node-${Date.now()}`,
-        agent,
-        position,
-        messages: [],
-        isMinimized: false,
-        isMaximized: false,
-        instanceId: finalInstanceId // ⭐ Utiliser l'ID final
-      };
-      setWorkflowNodes(prev => [...prev, newNode]);
     } else {
       console.log('[App] Guest mode - agent instance saved to localStorage via store');
       
@@ -1252,19 +718,8 @@ export function AppContent() {
         });
       }
       
-      // Legacy state
-      const newNode: WorkflowNode = {
-        id: `node-${Date.now()}`,
-        agent,
-        position,
-        messages: [],
-        isMinimized: false,
-        isMaximized: false,
-        instanceId
-      };
-      setWorkflowNodes(prev => [...prev, newNode]);
     }
-  }, [workflowNodes, addAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId, updateInstanceId, addNode, agentInstances]);
+  }, [addAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId, updateInstanceId, addNode]);
 
   /**
    * ⭐ FIX: Suppression robuste d'un node avec persistance backend
@@ -1272,34 +727,20 @@ export function AppContent() {
    */
   const handleDeleteNode = useCallback(async (nodeId: string) => {
     console.log('[App] handleDeleteNode called with:', nodeId);
-    
-    // 1. Trouver le node dans le state legacy pour obtenir l'instanceId
-    const legacyNode = workflowNodes.find(node => node.id === nodeId);
-    const instanceId = legacyNode?.instanceId;
-    
-    // 2. Trouver le node V2 dans le store (format: node-{instanceId})
-    const v2NodeId = instanceId ? `node-${instanceId}` : nodeId;
-    const v2Node = storeNodes.find(node => node.id === v2NodeId || node.id === nodeId);
-    const v2InstanceId = v2Node?.data?.agentInstance?.id;
-    
-    // Déterminer l'ID d'instance final
-    const finalInstanceId = instanceId || v2InstanceId;
+
+    const v2Node = storeNodes.find((node) => node.id === nodeId);
+    const finalInstanceId = v2Node?.data?.agentInstance?.id
+      || (nodeId.startsWith('node-') ? nodeId.replace(/^node-/, '') : undefined);
     
     console.log('[App] Delete node resolution:', { 
       nodeId, 
-      legacyInstanceId: instanceId, 
-      v2NodeId, 
-      v2InstanceId,
+      storeInstanceId: v2Node?.data?.agentInstance?.id,
       finalInstanceId 
     });
-    
-    // 3. Supprimer du state legacy
-    setWorkflowNodes(prev => prev.filter(node => node.id !== nodeId));
-    
-    // 4. Supprimer du store Zustand (essayer les deux formats d'ID)
+
+    // 4. Supprimer du store Zustand
     deleteNode(nodeId);
-    deleteNode(v2NodeId);
-    
+
     // 5. Supprimer l'instance du store si trouvée
     if (finalInstanceId) {
       deleteAgentInstance(finalInstanceId);
@@ -1317,7 +758,7 @@ export function AppContent() {
         }
       }
     }
-  }, [workflowNodes, storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId]);
+  }, [storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, resolveCurrentWorkflowId]);
 
   const handleDeleteNodes = useCallback(async (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy = 'delete_media'): Promise<AgentBatchDeleteResult> => {
     // Batch delete multiple nodes by instanceId (used when deleting prototype with instances)
@@ -1349,7 +790,6 @@ export function AppContent() {
         continue;
       }
 
-      setWorkflowNodes(prev => prev.filter(node => node.instanceId !== instanceId));
       deleteNode(`node-${instanceId}`);
       deleteAgentInstance(instanceId);
     }
@@ -1363,24 +803,55 @@ export function AppContent() {
       : { success: true };
   }, [deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId]);
 
-  const handleUpdateNodePosition = (nodeId: string, position: { x: number; y: number }) => {
-    setWorkflowNodes(prev =>
-      prev.map(node => (node.id === nodeId ? { ...node, position } : node))
-    );
-  };
+  const handleUpdateNodePosition = useCallback((nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => {
+    const designState = useDesignStore.getState();
+    const movedNode = designState.nodes.find((node) => node.id === nodeId);
+    const instanceId = movedNode?.data.agentInstance?.id;
+    updateNode(nodeId, { position });
 
-  const handleToggleNodeMaximize = (nodeId: string) => {
-    setWorkflowNodes(prev =>
-      prev.map(node => {
-        // Si c'est le node ciblé, inverser son état isMaximized
-        if (node.id === nodeId) {
-          return { ...node, isMaximized: !node.isMaximized };
-        }
-        // Forcer tous les autres nodes à isMaximized: false (un seul à la fois)
-        return { ...node, isMaximized: false };
-      })
-    );
-  };
+    if (instanceId) {
+      updateAgentInstance(instanceId, { position });
+    }
+
+    if (!options?.persist || !instanceId) {
+      return;
+    }
+
+    if (isAuthenticated && !accessToken) {
+      console.warn('[App] Skipping node position persistence because the authenticated session has no access token yet:', {
+        nodeId,
+        instanceId,
+      });
+      return;
+    }
+
+    void PersistenceService.saveAgentInstance(
+      {
+        id: instanceId,
+        position,
+      },
+      {
+        isAuthenticated,
+        accessToken: accessToken ?? undefined,
+      },
+    ).then((result) => {
+      if (!result.success) {
+        console.error('[App] Failed to persist node position after drag-stop:', {
+          nodeId,
+          instanceId,
+          position,
+          error: result.error,
+        });
+      }
+    }).catch((error) => {
+      console.error('[App] Unexpected error while persisting node position after drag-stop:', {
+        nodeId,
+        instanceId,
+        position,
+        error,
+      });
+    });
+  }, [accessToken, isAuthenticated, updateAgentInstance, updateNode]);
 
   const handleOpenImagePanel = (nodeId: string, agent: Agent, agentInstance: AgentInstance) => {
     setCurrentImageNodeId(nodeId);
@@ -1466,11 +937,12 @@ export function AppContent() {
   };
 
   const handleUpdateNodeMessages = (nodeId: string, messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    setWorkflowNodes(prev => prev.map(node =>
-      node.id === nodeId
-        ? { ...node, messages: typeof messages === 'function' ? messages(node.messages) : messages }
-        : node
-    ));
+    const runtimeStore = useRuntimeStore.getState();
+    const previousMessages = runtimeStore.getNodeMessages(nodeId);
+    runtimeStore.setNodeMessages(
+      nodeId,
+      typeof messages === 'function' ? messages(previousMessages) : messages,
+    );
   };
 
   const handleOpenFullscreen = (src: string, mimeType: string) => {
@@ -1511,9 +983,9 @@ export function AppContent() {
 
         {/* ⭐ ÉTAPE 5: Hydration Overlay - Blur Racing Style (login only) */}
         <HydrationOverlay 
-          isLoading={isHydrating || awaitingStableAuthenticatedSession}
-          progress={isHydrating ? hydrationProgress : 10}
-          message={isHydrating ? hydrationMessage : 'Stabilisation de la session...'}
+          isLoading={isHydrating || awaitingStableAuthenticatedSession || awaitingHydratedCanvasReady}
+          progress={isHydrating ? hydrationProgress : awaitingHydratedCanvasReady ? 100 : 10}
+          message={isHydrating ? hydrationMessage : awaitingHydratedCanvasReady ? 'Preparation de la carte...' : 'Stabilisation de la session...'}
         />
 
         <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
@@ -1522,12 +994,11 @@ export function AppContent() {
           />
           <div className="flex flex-1 overflow-hidden">
             <NavigationLayout
-              agents={agents}
+              agents={designAgents}
               isCollapsed={isSidebarCollapsed}
               onToggleCollapse={() => setSidebarCollapsed(!isSidebarCollapsed)}
               onAddAgent={() => { setEditingAgent(null); setAgentModalOpen(true); }}
               onAddToWorkflow={addAgentToWorkflow}
-              onDeleteAgent={handleDeleteAgent}
               onEditAgent={handleOpenEditAgentModal}
               currentPath={currentPath}
               onNavigate={handleRobotNavigation}
@@ -1537,25 +1008,19 @@ export function AppContent() {
                 currentPath={currentPath}
                 llmConfigs={llmConfigs}
                 onNavigate={handleRobotNavigation}
-                agents={agents}
-                workflowNodes={workflowNodes}
+                onWorkflowCanvasReady={handleWorkflowCanvasReady}
+                agents={designAgents}
                 onDeleteNode={handleDeleteNode}
                 onDeleteNodes={handleDeleteNodes}
                 onUpdateNodeMessages={handleUpdateNodeMessages}
                 onUpdateNodePosition={handleUpdateNodePosition}
                 onToggleNodeMinimize={handleToggleNodeMinimize}
-                onToggleNodeMaximize={handleToggleNodeMaximize}
                 onOpenImagePanel={handleOpenImagePanel}
                 onOpenImageModificationPanel={handleOpenImageModificationPanel}
                 onOpenVideoPanel={handleOpenVideoPanel}
                 onOpenMapsPanel={handleOpenMapsPanel}
                 onOpenFullscreen={handleOpenFullscreen}
-                onOpenAgentFullscreen={handleOpenAgentFullscreen}
                 onAddToWorkflow={handleAddToWorkflow}
-                isImagePanelOpen={isImagePanelOpen}
-                isImageModificationPanelOpen={isImageModificationPanelOpen}
-                isVideoPanelOpen={isVideoPanelOpen}
-                isMapsPanelOpen={isMapsPanelOpen}
               />
             </main>
           </div>
@@ -1592,30 +1057,6 @@ export function AppContent() {
             />
           )}
 
-          {updateConfirmation && (
-            <ConfirmationModal
-              isOpen={true}
-              title={t('dialog_update_title')}
-              message={t('dialog_update_message', { count: updateConfirmation.count })}
-              confirmText={t('dialog_update_confirmButton')}
-              cancelText={t('dialog_update_cancelButton')}
-              onConfirm={() => handleUpdateConfirmation(true)}
-              onCancel={() => handleUpdateConfirmation(false)}
-            />
-          )}
-
-          {deleteConfirmation && (
-            <ConfirmationModal
-              isOpen={true}
-              title={t('dialog_delete_title')}
-              message={t('dialog_delete_message', { agentName: deleteConfirmation.agentName })}
-              confirmText={t('dialog_delete_confirmButton')}
-              onConfirm={confirmDeleteAgent}
-              onCancel={() => setDeleteConfirmation(null)}
-              variant="danger"
-            />
-          )}
-
           {isImagePanelOpen && (
             <>
               <ImageGenerationPanel
@@ -1624,7 +1065,6 @@ export function AppContent() {
                 agent={currentImageAgent}
                 agentInstance={currentImageAgentInstance}
                 llmConfigs={llmConfigs}
-                workflowNodes={workflowNodes}
                 onClose={() => setImagePanelOpen(false)}
                 onImageGenerated={handleImageGenerated}
                 onOpenImageModificationPanel={handleOpenImageModificationPanel}
@@ -1637,7 +1077,6 @@ export function AppContent() {
               isOpen={isImageModificationPanelOpen}
               editingImageInfo={editingImageInfo}
               llmConfigs={llmConfigs}
-              workflowNodes={workflowNodes}
               onClose={() => setImageModificationPanelOpen(false)}
               onImageModified={handleImageModified}
             />
@@ -1648,7 +1087,6 @@ export function AppContent() {
               isOpen={isVideoPanelOpen}
               nodeId={currentVideoNodeId}
               llmConfigs={llmConfigs}
-              workflowNodes={workflowNodes}
               onClose={() => setVideoPanelOpen(false)}
             />
           )}
@@ -1658,7 +1096,6 @@ export function AppContent() {
               isOpen={isMapsPanelOpen}
               nodeId={currentMapsNodeId}
               llmConfigs={llmConfigs}
-              workflowNodes={workflowNodes}
               onClose={() => {
                 setMapsPanelOpen(false);
                 setMapsPreloadedResults(null);
@@ -1692,8 +1129,6 @@ export function AppContent() {
           {/* Fullscreen Chat Modal */}
           <FullscreenChatModal
             onDeleteNode={handleDeleteNode}
-            onOpenImagePanel={handleOpenImagePanel}
-            onOpenVideoPanel={handleOpenVideoPanel}
             onOpenMapsPanel={handleOpenMapsPanel}
             onOpenFullscreen={handleOpenFullscreen}
             onOpenImageModificationPanel={handleOpenImageModificationPanel}

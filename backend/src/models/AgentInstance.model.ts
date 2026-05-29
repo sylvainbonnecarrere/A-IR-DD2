@@ -139,8 +139,9 @@ export interface IAgentInstance extends Document {
     isMaximized: boolean;
     zIndex: number;
 
-    // ⭐ NOUVEAU: Contenu polymorphe (ÉTAPE 1.6)
-    content: IAgentInstanceContent[];
+    // Legacy compatibility only.
+    // Timeline/chat authority is now agent_journals + projected chatMessages.
+    content?: IAgentInstanceContent[];
 
     // ⭐ NOUVEAU: Métriques d'exécution (ÉTAPE 1.6)
     metrics: IAgentInstanceMetrics;
@@ -288,7 +289,8 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         default: 0
     },
 
-    // ⭐ NOUVEAU: Contenu polymorphe (ÉTAPE 1.6)
+    // Legacy compatibility only.
+    // This field is no longer emitted by frontend-facing read models.
     content: [{
         type: {
             type: String,

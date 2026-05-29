@@ -1,18 +1,18 @@
 import React, { useState, useRef } from 'react';
-import { Agent, AgentInstance, LLMCapability, LLMConfig, WorkflowNode } from '../../types';
+import { Agent, AgentInstance, LLMCapability, LLMConfig } from '../../types';
 import { Button, SlideOver } from '../UI';
 import * as llmService from '../../services/llmService';
 import { useLocalization } from '../../hooks/useLocalization';
 import { fileToBase64 } from '../../utils/fileUtils';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { resolveAgentRuntimeConfig } from '../../services/runtimeConfigResolver';
+import { usePanelNodeContext } from './usePanelNodeContext';
 
 interface ImageGenerationPanelProps {
     isOpen: boolean;
     nodeId: string | null;
     agent?: Agent | null;
     agentInstance?: AgentInstance | null;
-    workflowNodes: WorkflowNode[];
     llmConfigs: LLMConfig[];
     onClose: () => void;
     onImageGenerated: (nodeId: string, imageBase64: string) => void;
@@ -25,7 +25,6 @@ export const ImageGenerationPanel = ({
     nodeId, 
     agent: agentProp,
     agentInstance: agentInstanceProp,
-    workflowNodes, 
     llmConfigs, 
     onClose, 
     onImageGenerated, 
@@ -39,9 +38,13 @@ export const ImageGenerationPanel = ({
     const { t } = useLocalization();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const localLLMProfiles = useRuntimeStore(state => state.localLLMProfiles);
+    const { normalizedNodeId, resolvedAgent, resolvedAgentInstance } = usePanelNodeContext({
+        nodeId,
+        agent: agentProp,
+        agentInstance: agentInstanceProp,
+    });
 
-    // ⭐ UNIFIED DATA SOURCE: Source-agnostic (props FIRST priority, lookup fallback)
-    const agent = agentProp || workflowNodes.find(n => n.id === nodeId)?.agent;
+    const agent = resolvedAgent;
     const agentRuntime = resolveAgentRuntimeConfig(agent || null, llmConfigs, localLLMProfiles);
     const agentConfig = agentRuntime.config;
 
@@ -57,7 +60,7 @@ export const ImageGenerationPanel = ({
     }, [isOpen]);
 
     // ⭐ EARLY RETURN: Check agent (not node) to avoid rendering null
-    if (!agent || !nodeId) {
+    if (!agent || !normalizedNodeId) {
         return null;
     }
     
@@ -85,22 +88,22 @@ export const ImageGenerationPanel = ({
     };
 
     const handleAddToChat = () => {
-        if (generatedImage && nodeId) {
-            onImageGenerated(nodeId, generatedImage);
+        if (generatedImage && normalizedNodeId) {
+            onImageGenerated(normalizedNodeId, generatedImage);
             onClose();
         }
     };
 
     const handleEditImage = () => {
-        if (generatedImage && nodeId) {
-            onOpenImageModificationPanel(nodeId, generatedImage, agentProp, agentInstanceProp, 'image/png');
+        if (generatedImage && normalizedNodeId) {
+            onOpenImageModificationPanel(normalizedNodeId, generatedImage, agent, resolvedAgentInstance || undefined, 'image/png');
             onClose();
         }
     };
 
     const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file && nodeId) {
+        if (file && normalizedNodeId) {
             try {
                 setIsLoading(true);
                 setError(null);

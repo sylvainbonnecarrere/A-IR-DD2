@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { LLMConfig, WorkflowNode, ChatMessage, Agent, AgentInstance } from '../../types';
+import { LLMConfig, ChatMessage, Agent, AgentInstance } from '../../types';
 import { Button, SlideOver } from '../UI';
 import * as llmService from '../../services/llmService';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { resolveAgentRuntimeConfig } from '../../services/runtimeConfigResolver';
+import { usePanelNodeContext } from './usePanelNodeContext';
 
 interface EditingImageInfo {
   nodeId: string;
@@ -17,13 +18,12 @@ interface EditingImageInfo {
 interface ImageModificationPanelProps {
     isOpen: boolean;
     editingImageInfo: EditingImageInfo | null;
-    workflowNodes: WorkflowNode[];
     llmConfigs: LLMConfig[];
     onClose: () => void;
     onImageModified: (nodeId: string, newImage: string, text: string) => void;
 }
 
-export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes, llmConfigs, onClose, onImageModified }: ImageModificationPanelProps) => {
+export const ImageModificationPanel = ({ isOpen, editingImageInfo, llmConfigs, onClose, onImageModified }: ImageModificationPanelProps) => {
     const [prompt, setPrompt] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [modifiedImage, setModifiedImage] = useState<string | null>(null);
@@ -31,10 +31,13 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
     const [currentSourceImage, setCurrentSourceImage] = useState<string | null>(null);
     const { t } = useLocalization();
     const localLLMProfiles = useRuntimeStore(state => state.localLLMProfiles);
+    const { normalizedNodeId, resolvedAgent } = usePanelNodeContext({
+        nodeId: editingImageInfo?.nodeId,
+        agent: editingImageInfo?.agent,
+        agentInstance: editingImageInfo?.agentInstance,
+    });
 
-    // Use agent from editingImageInfo if available (fresh from V2AgentNode)
-    // Otherwise fallback to lookup from workflowNodes
-    const agent = editingImageInfo?.agent || workflowNodes.find(n => n.id === editingImageInfo?.nodeId)?.agent;
+    const agent = resolvedAgent;
     const agentRuntime = resolveAgentRuntimeConfig(agent || null, llmConfigs, localLLMProfiles);
     const agentConfig = agentRuntime.config;
     
@@ -93,7 +96,7 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
     const handleAddToChat = async () => {
         if (modifiedImage && editingImageInfo) {
              if (!agentConfig) {
-                onImageModified(editingImageInfo.nodeId, modifiedImage, `Image modifiée.`);
+                onImageModified(normalizedNodeId || editingImageInfo.nodeId, modifiedImage, `Image modifiée.`);
                 onClose();
                 return;
             }
@@ -118,7 +121,7 @@ export const ImageModificationPanel = ({ isOpen, editingImageInfo, workflowNodes
                 agentRuntime.credential
             );
             
-            onImageModified(editingImageInfo.nodeId, modifiedImage, text || `Image modifiée selon vos instructions.`);
+            onImageModified(normalizedNodeId || editingImageInfo.nodeId, modifiedImage, text || `Image modifiée selon vos instructions.`);
             onClose();
         }
     };

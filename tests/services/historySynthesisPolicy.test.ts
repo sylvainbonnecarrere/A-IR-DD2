@@ -27,19 +27,19 @@ describe('historySynthesisPolicy', () => {
     it.each([
         {
             limitKey: 'char',
-            messages: [{ id: 'm-1', sender: 'user', text: 'abcdef', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
+            messages: [{ id: 'm-1', sender: 'user' as const, text: 'abcdef', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
         },
         {
             limitKey: 'word',
-            messages: [{ id: 'm-1', sender: 'user', text: 'un deux trois quatre cinq six sept huit neuf dix', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
+            messages: [{ id: 'm-1', sender: 'user' as const, text: 'un deux trois quatre cinq six sept huit neuf dix', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
         },
         {
             limitKey: 'token',
-            messages: [{ id: 'm-1', sender: 'user', text: 'abcdefghijklmnopqrstuvwxabcdefghijklmnopqrstuvwx', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
+            messages: [{ id: 'm-1', sender: 'user' as const, text: 'abcdefghijklmnopqrstuvwxabcdefghijklmnopqrstuvwx', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
         },
         {
             limitKey: 'sentence',
-            messages: [{ id: 'm-1', sender: 'user', text: 'Un. Deux. Trois. Quatre. Cinq. Six. Sept. Huit. Neuf. Dix.', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
+            messages: [{ id: 'm-1', sender: 'user' as const, text: 'Un. Deux. Trois. Quatre. Cinq. Six. Sept. Huit. Neuf. Dix.', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
         },
         {
             limitKey: 'message',
@@ -61,7 +61,7 @@ describe('historySynthesisPolicy', () => {
         const stats = computeHistoryLimitStats([
             {
                 id: 'm-1',
-                sender: 'user',
+                sender: 'user' as const,
                 text: 'abcdef',
                 timestamp: new Date('2026-05-07T12:00:00.000Z'),
             },
@@ -76,7 +76,7 @@ describe('historySynthesisPolicy', () => {
         const stats = computeHistoryLimitStats([
             {
                 id: 'm-1',
-                sender: 'user',
+                sender: 'user' as const,
                 text: 'abcdef',
                 timestamp: new Date('2026-05-07T12:00:00.000Z'),
             },
@@ -98,7 +98,7 @@ describe('historySynthesisPolicy', () => {
         const stats = computeHistoryLimitStats([
             {
                 id: 'm-1',
-                sender: 'user',
+                sender: 'user' as const,
                 text: 'a b c d e f g h i j',
                 timestamp: new Date('2026-05-07T12:00:00.000Z'),
             },

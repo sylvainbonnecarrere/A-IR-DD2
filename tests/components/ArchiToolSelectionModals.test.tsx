@@ -262,7 +262,6 @@ describe('Archi tool selection modals', () => {
                         },
                     },
                 ],
-                creator_id: RobotId.Archi,
             }),
             undefined
         );

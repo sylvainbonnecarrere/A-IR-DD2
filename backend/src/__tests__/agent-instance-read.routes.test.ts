@@ -170,6 +170,8 @@ describe('Agent instance read projection', () => {
             .set('Authorization', `Bearer ${accessToken}`)
             .expect(200);
 
+        expect(response.body).not.toHaveProperty('content');
+
         expect(response.body.chatMessages).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: 'chat-read-1',

@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { AgentPrototype } from '../models/AgentPrototype.model';
+import { AgentInstance } from '../models/AgentInstance.model';
+import { WorkflowNodeV2 } from '../models/WorkflowNodeV2.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { requireRobotGovernance } from '../middleware/robot-governance.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
@@ -77,6 +79,10 @@ const queryParamsSchema = z.object({
     workflowId: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid ObjectId format').optional()
 });
 
+const prototypeImpactQuerySchema = z.object({
+    workflowId: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid ObjectId format').optional()
+});
+
 // GET /api/agent-prototypes - Liste des prototypes (filtrés par workflow si workflowId fourni)
 router.get('/', requireAuth, async (req, res) => {
     try {
@@ -126,6 +132,91 @@ router.get('/:id',
         } catch (error) {
             console.error('[AgentPrototypes] GET/:id error:', error);
             res.status(500).json({ error: 'Erreur récupération prototype' });
+        }
+    }
+);
+
+router.get('/:id/impact',
+    requireAuth,
+    requireOwnershipAsync(async (req) => {
+        const prototype = await AgentPrototype.findById(req.params.id);
+        return prototype ? prototype.userId.toString() : null;
+    }),
+    async (req, res) => {
+        try {
+            const user = req.user as IUser;
+
+            const queryValidation = prototypeImpactQuerySchema.safeParse(req.query);
+            if (!queryValidation.success) {
+                return res.status(400).json({ error: 'Invalid query parameters', details: queryValidation.error.issues });
+            }
+
+            const prototype = await AgentPrototype.findOne({ _id: req.params.id, userId: user.id }).select('_id workflowId');
+            if (!prototype) {
+                return res.status(404).json({ error: 'Prototype introuvable' });
+            }
+
+            const scopedWorkflowId = queryValidation.data.workflowId ?? prototype.workflowId?.toString();
+            const instanceQuery: Record<string, unknown> = {
+                userId: user.id,
+                prototypeId: prototype._id,
+            };
+
+            if (scopedWorkflowId) {
+                instanceQuery.workflowId = scopedWorkflowId;
+            }
+
+            const instances = await AgentInstance.find(instanceQuery)
+                .select('_id name position workflowId prototypeId')
+                .lean<Array<{
+                    _id: mongoose.Types.ObjectId;
+                    name: string;
+                    position: { x: number; y: number };
+                }>>();
+
+            const instanceIds = instances.map((instance) => instance._id);
+            let nodes: Array<{ _id: mongoose.Types.ObjectId; instanceId?: mongoose.Types.ObjectId }> = [];
+
+            if (instanceIds.length > 0) {
+                const nodeQuery: Record<string, unknown> = {
+                    ownerId: user.id,
+                    nodeType: 'agent',
+                    instanceId: { $in: instanceIds },
+                };
+
+                if (scopedWorkflowId) {
+                    nodeQuery.workflowId = scopedWorkflowId;
+                }
+
+                nodes = await WorkflowNodeV2.find(nodeQuery)
+                    .select('_id instanceId')
+                    .lean<Array<{ _id: mongoose.Types.ObjectId; instanceId?: mongoose.Types.ObjectId }>>();
+            }
+
+            const liveInstanceIds = new Set(
+                nodes
+                    .map((node) => node.instanceId?.toString())
+                    .filter((instanceId): instanceId is string => typeof instanceId === 'string' && instanceId.length > 0)
+            );
+
+            const liveInstances = instances.filter((instance) => liveInstanceIds.has(instance._id.toString()));
+
+            res.json({
+                instanceCount: liveInstances.length,
+                nodeCount: nodes.length,
+                instances: liveInstances.map((instance) => ({
+                    id: instance._id.toString(),
+                    name: instance.name,
+                    position: {
+                        x: instance.position.x,
+                        y: instance.position.y,
+                    },
+                })),
+                nodeIds: nodes.map((node) => node._id.toString()),
+            });
+        } catch (error) {
+            console.error('[AgentPrototypes] GET/:id/impact error:', error);
+            res.status(500).json({ error: 'Erreur calcul impact prototype' });
         }
     }
 );

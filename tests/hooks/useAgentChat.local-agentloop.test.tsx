@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useAgentChat } from '../../hooks/useAgentChat';
-import { LLMCapability, LLMProvider, RobotId, type Agent } from '../../types';
+import { LLMCapability, LLMProvider, RobotId, type Agent, type AgentInstance } from '../../types';
 import type { UserFunction } from '../../types/function.types';
 
 const mockRunAgentLoop = jest.fn();
@@ -13,11 +13,11 @@ jest.mock('../../services/llmService', () => ({
 }));
 
 jest.mock('../../services/adapters/AdapterFactory', () => ({
-  createAdapter: (...args: unknown[]) => mockCreateAdapter(...args),
+  createAdapter: (...args: unknown[]) => (mockCreateAdapter as (...callArgs: unknown[]) => unknown)(...args),
 }));
 
 jest.mock('../../services/llm/AgentLoop', () => ({
-  runAgentLoop: (...args: unknown[]) => mockRunAgentLoop(...args),
+  runAgentLoop: (...args: unknown[]) => (mockRunAgentLoop as (...callArgs: unknown[]) => unknown)(...args),
 }));
 
 jest.mock('../../utils/toolExecutor', () => ({
@@ -29,7 +29,7 @@ jest.mock('../../services/runtimeConfigResolver', () => ({
     config: { enabled: true, localEndpoint: 'http://localhost:1234' },
     credential: 'http://localhost:1234',
   })),
-  resolveHistoryRuntimeConfig: (...args: unknown[]) => mockResolveHistoryRuntimeConfig(...args),
+  resolveHistoryRuntimeConfig: (...args: unknown[]) => (mockResolveHistoryRuntimeConfig as (...callArgs: unknown[]) => unknown)(...args),
 }));
 
 const designState = {
@@ -38,7 +38,7 @@ const designState = {
       id: 'instance-1',
       workflowId: 'wf-1',
     },
-  ],
+  ] as Partial<AgentInstance>[],
 };
 
 jest.mock('../../stores/useDesignStore', () => {
@@ -290,6 +290,12 @@ describe('useAgentChat local AgentLoop path', () => {
         id: 'instance-1',
         workflowId: 'wf-1',
         configuration_json: {
+          role: 'assistant',
+          model: 'local-model',
+          llmProvider: LLMProvider.LMStudio,
+          systemPrompt: 'Use tools when relevant',
+          tools: [],
+          position: { x: 0, y: 0 },
           toolSelections: [{ toolId: '507f1f77bcf86cd799439022' }],
         },
       },

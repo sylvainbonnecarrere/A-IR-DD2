@@ -42,7 +42,6 @@ describe('RobotPageRouter BOS media button', () => {
         currentPath="/bos/dashboard"
         llmConfigs={[]}
         agents={[]}
-        workflowNodes={[]}
       />,
     );
 

@@ -278,18 +278,6 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     setActiveSidePanel('none');
   };
 
-  // Créer un mockNode pour workflowNodes basé sur les données actuelles
-  const mockWorkflowNode = fullscreenChatNodeId && agent ? {
-    id: fullscreenChatNodeId,
-    agent: agent,
-    position: { x: 0, y: 0 },
-    data: {},
-    width: 300,
-    height: 200
-  } : null;
-
-  const workflowNodesForPanels = mockWorkflowNode ? [mockWorkflowNode] : [];
-
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedInput = userInput.trim();
@@ -700,9 +688,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
 
           {/* Side Panel - Configuration (Image, Video, Maps) */}
           {activeSidePanel !== 'none' && (
-            <div className={`w-96 flex flex-col border-l border-cyan-500 bg-gray-800/90 backdrop-blur-sm overflow-hidden transition-all duration-500 ease-in-out transform ${
-              activeSidePanel !== 'none' ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
-            } shadow-[-10px_0_30px_-10px_rgba(6,182,212,0.3)]`}>
+            <div className="w-96 flex flex-col border-l border-cyan-500 bg-gray-800/90 backdrop-blur-sm overflow-hidden transition-all duration-500 ease-in-out transform translate-x-0 opacity-100 shadow-[-10px_0_30px_-10px_rgba(6,182,212,0.3)]">
               
               {/* Side Panel Content - Scrollable (No Header - let child components manage it) */}
               <div className="flex-1 overflow-y-auto">
@@ -710,7 +696,8 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   <ImageGenerationPanel
                     isOpen={true}
                     nodeId={fullscreenChatNodeId || null}
-                    workflowNodes={workflowNodesForPanels as any}
+                    agent={agent}
+                    agentInstance={agentInstance}
                     llmConfigs={llmConfigs}
                     onClose={handleCloseSidePanel}
                     onImageGenerated={(nodeId: string, imageBase64: string) => {
@@ -752,7 +739,6 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   <MapsGroundingConfigPanel
                     isOpen={true}
                     nodeId={fullscreenChatNodeId || null}
-                    workflowNodes={workflowNodesForPanels as any}
                     llmConfigs={llmConfigs}
                     onClose={handleCloseSidePanel}
                     hideSlideOver={true}

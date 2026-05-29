@@ -468,6 +468,8 @@ export interface Agent {
   instanceName?: string;
 }
 
+export type AgentDraft = Omit<Agent, 'id' | 'creator_id' | 'created_at' | 'updated_at'>;
+
 /**
  * Local LLM Profile - represents one local LLM server instance
  * (Ollama, LMStudio, Jan, etc.)
@@ -721,6 +723,10 @@ export interface RobotCapability {
   name: string;
   description: string;
   requiresAuth?: boolean;
+}
+
+export interface NodePositionUpdateOptions {
+  persist?: boolean;
 }
 
 // V2 React Flow Types - Architecture Prototype vs Instance

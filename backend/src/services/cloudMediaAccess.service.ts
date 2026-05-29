@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import { AgentInstance } from '../models/AgentInstance.model';
 import { AgentJournal } from '../models/AgentJournal.model';
 import { CloudConnectionProfile } from '../models/CloudConnectionProfile.model';
 import type { CloudProvider, IMediaReference } from '../models/MediaReference.model';
@@ -85,45 +84,10 @@ function ensureMediaReferenceMatchesResolvedProfile(
     }
 }
 
-async function resolveProfileIdFromJournal(mediaRef: CloudMediaReferenceShape): Promise<string | null> {
-    if (!mediaRef.journalEntryId) {
-        return null;
-    }
-
-    const journalEntry = await AgentJournal.findOne({
-        _id: mediaRef.journalEntryId,
-        type: 'media',
-        workflowId: mediaRef.workflowId,
-        agentInstanceId: mediaRef.agentInstanceId,
-    })
-        .select('payload')
-        .lean<{ payload?: { metadata?: Record<string, unknown> } }>();
-
-    return trimToNull(journalEntry?.payload?.metadata?.cloudConnectionProfileId);
-}
-
-async function resolveProfileIdFromAgentInstance(
-    mediaRef: CloudMediaReferenceShape,
-    ownerUserId: string,
-): Promise<string | null> {
-    const agentInstance = await AgentInstance.findOne({
-        _id: mediaRef.agentInstanceId,
-        workflowId: mediaRef.workflowId,
-        userId: ownerUserId,
-    })
-        .select('persistenceConfig.cloudConnectionProfileId')
-        .lean<{ persistenceConfig?: { cloudConnectionProfileId?: string } }>();
-
-    return trimToNull(agentInstance?.persistenceConfig?.cloudConnectionProfileId);
-}
-
 async function resolveProfileId(
     mediaRef: CloudMediaReferenceShape,
-    ownerUserId: string,
 ): Promise<string | null> {
-    return trimToNull(mediaRef.cloudConnectionProfileId)
-        ?? await resolveProfileIdFromJournal(mediaRef)
-        ?? await resolveProfileIdFromAgentInstance(mediaRef, ownerUserId);
+    return trimToNull(mediaRef.cloudConnectionProfileId);
 }
 
 export async function resolveCloudAccessForMediaReference(
@@ -138,7 +102,7 @@ export async function resolveCloudAccessForMediaReference(
         );
     }
 
-    const profileId = await resolveProfileId(mediaRef, ownerUserId);
+    const profileId = await resolveProfileId(mediaRef);
     if (!profileId) {
         throw new CloudStorageError(
             'Aucun profil cloud resolvable pour ce media.',
@@ -148,6 +112,7 @@ export async function resolveCloudAccessForMediaReference(
                 workflowId: mediaRef.workflowId.toString(),
                 agentInstanceId: mediaRef.agentInstanceId.toString(),
                 journalEntryId: mediaRef.journalEntryId?.toString(),
+                catalogProfileRequired: true,
             },
         );
     }

@@ -179,6 +179,216 @@ describe('agent instance deletion media policy', () => {
         }));
     });
 
+    it('deletes uncatalogued workspace media files under output/media/agents and journals the cleanup anomaly', async () => {
+        const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+        const user = await User.create({
+            email: `agent-instance-delete-policy-uncatalogued-output-${suffix}@test.com`,
+            password: 'hashedpassword12345',
+            username: `agentinstancedeletepolicyuncatalogued${suffix}`,
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Delete Policy Uncatalogued Workspace Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 },
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `delete-policy-uncatalogued-output-${suffix}`,
+            status: 'running',
+            name: 'Deletion Policy Uncatalogued Output Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0,
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'local',
+                allowWorkspaceWrite: true,
+            },
+        });
+
+        const uncataloguedAbsolutePath = path.join(
+            testWorkspaceStorageRoot,
+            'users',
+            user.id,
+            'workflows',
+            workflow.id,
+            'output',
+            'media',
+            'agents',
+            instance.id,
+            '2026-05',
+            'uncatalogued-artifact.txt',
+        );
+        await fs.mkdir(path.dirname(uncataloguedAbsolutePath), { recursive: true });
+        await fs.writeFile(uncataloguedAbsolutePath, 'uncatalogued workspace artifact', 'utf-8');
+
+        const response = await request(app)
+            .delete(`/api/workflows/${workflow.id}/instances/${instance.id}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .set('X-Robot-Id', 'AR_001')
+            .query({ mediaPolicy: 'delete_media' })
+            .expect(200);
+
+        expect(response.body.audit).toEqual(expect.objectContaining({
+            severity: 'warn',
+            origin: 'agent_instance_delete_route',
+        }));
+        expect(response.body.audit.anomalyCodes).toEqual(expect.arrayContaining([
+            'LEGACY_WORKSPACE_FILES_DELETED_OUTSIDE_CATALOG',
+        ]));
+        expect(response.body.cascadeDelete).toEqual(expect.objectContaining({
+            mediaFilesDeleted: 1,
+            mediaReferencesDeleted: 0,
+        }));
+        await expect(fs.access(uncataloguedAbsolutePath)).rejects.toThrow();
+    });
+
+    it('repairs a missing media catalog entry before orphaning so legacy media stays visible in BOS', async () => {
+        const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+        const user = await User.create({
+            email: `agent-instance-delete-policy-orphan-repair-${suffix}@test.com`,
+            password: 'hashedpassword12345',
+            username: `agentinstancedeletepolicyorphanrepair${suffix}`,
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Delete Policy Orphan Repair Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 },
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `delete-policy-orphan-repair-${suffix}`,
+            status: 'running',
+            name: 'Deletion Policy Repair Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0,
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'db',
+            },
+        });
+
+        const mediaJournal = await AgentJournal.create({
+            agentInstanceId: instance._id,
+            workflowId: workflow._id,
+            type: 'media',
+            severity: 'info',
+            payload: {
+                mimeType: 'text/plain',
+                fileName: 'legacy-visible-orphan.txt',
+                size: 21,
+                storageMode: 'database',
+                data: Buffer.from('visible after orphan', 'utf-8'),
+                metadata: {
+                    originalName: 'legacy-visible-orphan-original.txt',
+                },
+            },
+            timestamp: new Date(),
+        });
+
+        const response = await request(app)
+            .delete(`/api/workflows/${workflow.id}/instances/${instance.id}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .set('X-Robot-Id', 'AR_001')
+            .query({ mediaPolicy: 'orphan_media' })
+            .expect(200);
+
+        expect(response.body.audit).toEqual(expect.objectContaining({
+            severity: 'info',
+            anomalyCount: 0,
+            origin: 'agent_instance_delete_route',
+        }));
+
+        const repairedOrphanReference = await MediaReference.findOne({
+            journalEntryId: mediaJournal._id,
+        }).lean();
+
+        expect(repairedOrphanReference).toEqual(expect.objectContaining({
+            storageMode: 'db',
+            primaryStorageMode: 'db',
+            canonicalLocator: `journal://${mediaJournal.id}`,
+            originalName: 'legacy-visible-orphan-original.txt',
+            createdByAgentName: 'Deletion Policy Repair Agent',
+            lastModifiedByAgentName: 'Deletion Policy Repair Agent',
+            isOrphan: true,
+            orphanReason: 'agent_deleted',
+        }));
+
+        const auditJournal = await AgentJournal.findOne({
+            agentInstanceId: instance._id,
+            type: 'system',
+            'payload.event': 'media_deletion_policy_applied',
+        }).lean();
+        expect(auditJournal).toEqual(expect.objectContaining({
+            severity: 'info',
+            payload: expect.objectContaining({
+                details: expect.objectContaining({
+                    legacyCatalogRepair: expect.objectContaining({
+                        scanned: 1,
+                        missing: 1,
+                        repaired: 1,
+                        skipped: 0,
+                    }),
+                }),
+            }),
+        }));
+    });
+
     it('deletes linked workspace media when delete_media is requested', async () => {
         const user = await User.create({
             email: `agent-instance-delete-policy-local-${Date.now()}@test.com`,
@@ -310,7 +520,7 @@ describe('agent instance deletion media policy', () => {
         await expect(fs.access(absolutePath)).rejects.toThrow();
     });
 
-    it('physically deletes cloud media when delete_media resolves the profile from the live instance config', async () => {
+    it('physically deletes cloud media when delete_media resolves the profile from the media catalog entry', async () => {
         const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
         const user = await User.create({
             email: `agent-instance-delete-policy-cloud-${suffix}@test.com`,
@@ -398,6 +608,7 @@ describe('agent instance deletion media policy', () => {
             cloudKey: 'tenant/instances/cloud-artifact.txt',
             cloudProvider: 's3',
             cloudBucket: 'instance-delete-bucket',
+            cloudConnectionProfileId: profile.id,
             fileName: 'cloud-artifact.txt',
             originalName: 'cloud-artifact.txt',
             mimeType: 'text/plain',
@@ -425,6 +636,124 @@ describe('agent instance deletion media policy', () => {
             origin: 'agent_instance_delete_route',
         }));
         expect(deleteSpy).toHaveBeenCalledWith('tenant/instances/cloud-artifact.txt');
+        expect(await MediaReference.findOne({ agentInstanceId: instance._id })).toBeNull();
+    });
+
+    it('does not fall back to the live instance config when a cloud media entry has no catalog or journal profile reference', async () => {
+        const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+        const user = await User.create({
+            email: `agent-instance-delete-policy-cloud-runtime-fallback-${suffix}@test.com`,
+            password: 'hashedpassword12345',
+            username: `agentinstancedeletepolicycloudruntimefallback${suffix}`,
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Delete Policy Cloud Runtime Fallback Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 },
+        });
+
+        const profile = new CloudConnectionProfile({
+            userId: user._id,
+            displayName: `agent-instance-delete-policy-cloud-runtime-fallback-profile-${suffix}`,
+            provider: 's3',
+            enabled: true,
+            target: {
+                bucketName: 'instance-delete-bucket',
+                region: 'eu-west-3',
+                keyPrefix: 'tenant/',
+            },
+            statusState: 'missing_secret',
+        });
+        profile.setSecretMaterial({
+            provider: 's3',
+            s3: {
+                accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+                secretAccessKey: 'super-secret-key',
+                bucketName: 'instance-delete-bucket',
+                region: 'eu-west-3',
+                keyPrefix: 'tenant/',
+            },
+        });
+        await profile.save();
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `delete-policy-cloud-runtime-fallback-${suffix}`,
+            status: 'running',
+            name: 'Deletion Policy Cloud Runtime Fallback Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0,
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'cloud',
+                cloudConnectionProfileId: profile.id,
+            },
+        });
+
+        await MediaReference.create({
+            userId: user._id,
+            workflowId: workflow._id,
+            agentInstanceId: instance._id,
+            storageMode: 'cloud',
+            primaryStorageMode: 'cloud',
+            canonicalLocator: 's3://instance-delete-bucket/tenant/instances/runtime-fallback-cloud-artifact.txt',
+            cloudKey: 'tenant/instances/runtime-fallback-cloud-artifact.txt',
+            cloudProvider: 's3',
+            cloudBucket: 'instance-delete-bucket',
+            fileName: 'runtime-fallback-cloud-artifact.txt',
+            originalName: 'runtime-fallback-cloud-artifact.txt',
+            mimeType: 'text/plain',
+            size: 38,
+            createdByAgentInstanceId: instance._id,
+            createdByAgentName: 'Deletion Policy Cloud Runtime Fallback Agent',
+            lastModifiedByAgentInstanceId: instance._id,
+            lastModifiedByAgentName: 'Deletion Policy Cloud Runtime Fallback Agent',
+            isOrphan: false,
+        });
+
+        jest.spyOn(S3StorageStrategy.prototype, 'initialize').mockResolvedValue(undefined);
+        const deleteSpy = jest.spyOn(S3StorageStrategy.prototype, 'delete').mockResolvedValue(true);
+
+        const response = await request(app)
+            .delete(`/api/workflows/${workflow.id}/instances/${instance.id}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .set('X-Robot-Id', 'AR_001')
+            .query({ mediaPolicy: 'delete_media' })
+            .expect(200);
+
+        expect(response.body.audit).toEqual(expect.objectContaining({
+            severity: 'warn',
+            origin: 'agent_instance_delete_route',
+        }));
+        expect(response.body.audit.anomalyCodes).toContain('CLOUD_MEDIA_NOT_PHYSICALLY_DELETED');
+        expect(deleteSpy).not.toHaveBeenCalled();
         expect(await MediaReference.findOne({ agentInstanceId: instance._id })).toBeNull();
     });
 
@@ -570,8 +899,8 @@ describe('agent instance deletion media policy', () => {
             'INLINE_MEDIA_JOURNAL_MISSING',
             'LOCAL_MEDIA_FILE_MISSING',
             'CLOUD_MEDIA_NOT_PHYSICALLY_DELETED',
-            'UNCATALOGUED_MEDIA_JOURNALS_DELETED',
         ]));
+        expect(response.body.audit.anomalyCodes).not.toContain('UNCATALOGUED_MEDIA_JOURNALS_DELETED');
 
         const auditJournal = await AgentJournal.findOne({
             agentInstanceId: instance._id,
@@ -585,11 +914,16 @@ describe('agent instance deletion media policy', () => {
                 details: expect.objectContaining({
                     origin: 'agent_instance_delete_route',
                     mediaPolicy: 'delete_media',
+                    legacyCatalogRepair: expect.objectContaining({
+                        scanned: 1,
+                        missing: 1,
+                        repaired: 1,
+                        skipped: 0,
+                    }),
                     anomalies: expect.arrayContaining([
                         expect.objectContaining({ code: 'INLINE_MEDIA_JOURNAL_MISSING' }),
                         expect.objectContaining({ code: 'LOCAL_MEDIA_FILE_MISSING' }),
                         expect.objectContaining({ code: 'CLOUD_MEDIA_NOT_PHYSICALLY_DELETED' }),
-                        expect.objectContaining({ code: 'UNCATALOGUED_MEDIA_JOURNALS_DELETED' }),
                     ]),
                 }),
             }),

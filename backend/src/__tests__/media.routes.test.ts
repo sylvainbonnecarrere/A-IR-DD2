@@ -390,7 +390,7 @@ describe('media routes workflow explorer and workspace output compatibility', ()
         }));
     });
 
-    it('physically deletes cloud media through the legacy journal profile fallback before removing the catalog entry', async () => {
+    it('physically deletes cloud media through the catalog profile reference before removing the catalog entry', async () => {
         const user = await User.create({
             email: `media-routes-cloud-delete-${Date.now()}@test.com`,
             password: 'hashedpassword12345',
@@ -495,6 +495,7 @@ describe('media routes workflow explorer and workspace output compatibility', ()
             storageMode: 'cloud',
             primaryStorageMode: 'cloud',
             canonicalLocator: 's3://delete-bucket/tenant/workflows/delete-artifact.txt',
+            cloudConnectionProfileId: profile.id,
             cloudKey: 'tenant/workflows/delete-artifact.txt',
             cloudProvider: 's3',
             cloudBucket: 'delete-bucket',
@@ -763,7 +764,7 @@ describe('media routes workflow explorer and workspace output compatibility', ()
         ]);
     });
 
-    it('auto-backfills legacy media journals into the workflow explorer read model on demand', async () => {
+    it('keeps explorer GET read-only and repairs legacy media catalog entries through an explicit maintenance route', async () => {
         const user = await User.create({
             email: `media-routes-legacy-explorer-${Date.now()}@test.com`,
             password: 'hashedpassword12345',
@@ -843,21 +844,33 @@ describe('media routes workflow explorer and workspace output compatibility', ()
             .expect(200);
 
         expect(firstResponse.body.meta).toEqual(expect.objectContaining({
-            total: 1,
+            total: 0,
             counts: {
-                db: 1,
+                db: 0,
                 workspace: 0,
                 cloud: 0,
             },
         }));
-        expect(firstResponse.body.data).toEqual([
-            expect.objectContaining({
-                storageMode: 'db',
-                canonicalLocator: `journal://${journalEntry.id}`,
-                originalName: 'legacy-only.txt',
-                createdByAgentName: 'Legacy Backfill Agent',
+        expect(firstResponse.body.data).toEqual([]);
+        expect(await MediaReference.countDocuments({ workflowId })).toBe(0);
+
+        const repairResponse = await request(app)
+            .post(`/api/media/workflows/${workflowId}/explorer/repair-legacy-catalog`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({ storageMode: 'db' })
+            .expect(200);
+
+        expect(repairResponse.body).toEqual(expect.objectContaining({
+            success: true,
+            meta: expect.objectContaining({
+                workflowOwned: true,
+                scanned: 1,
+                missing: 1,
+                stale: 0,
+                repaired: 1,
+                skipped: 0,
             }),
-        ]);
+        }));
         expect(await MediaReference.countDocuments({ workflowId })).toBe(1);
 
         const secondResponse = await request(app)
@@ -881,6 +894,154 @@ describe('media routes workflow explorer and workspace output compatibility', ()
             }),
         ]);
         expect(await MediaReference.countDocuments({ workflowId })).toBe(1);
+    });
+
+    it('repairs stale cloud catalog metadata explicitly before media fetch or delete relies on the catalog', async () => {
+        const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+        const user = await User.create({
+            email: `media-routes-cloud-repair-${suffix}@test.com`,
+            password: 'hashedpassword12345',
+            username: `mediaroutescloudrepair${suffix}`,
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Media Routes Cloud Repair Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 },
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `media-routes-cloud-repair-${suffix}`,
+            status: 'running',
+            name: 'Cloud Repair Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0,
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'cloud',
+                cloudConnectionProfileId: 'runtime-only-profile-should-not-be-used',
+            },
+        });
+
+        const profile = new CloudConnectionProfile({
+            userId: user._id,
+            displayName: `media-routes-cloud-repair-profile-${suffix}`,
+            provider: 's3',
+            enabled: true,
+            target: {
+                bucketName: 'cloud-repair-bucket',
+                region: 'eu-west-3',
+                keyPrefix: 'tenant/',
+            },
+            statusState: 'missing_secret',
+        });
+        profile.setSecretMaterial({
+            provider: 's3',
+            s3: {
+                accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+                secretAccessKey: 'super-secret-key',
+                bucketName: 'cloud-repair-bucket',
+                region: 'eu-west-3',
+                keyPrefix: 'tenant/',
+            },
+        });
+        await profile.save();
+
+        const journalEntry = await AgentJournal.create({
+            agentInstanceId: instance._id,
+            workflowId: workflow._id,
+            type: 'media',
+            severity: 'info',
+            payload: {
+                mimeType: 'text/plain',
+                fileName: 'repair-cloud-artifact.txt',
+                size: 24,
+                storageMode: 'cloud',
+                url: 'https://signed.example.test/repair-cloud-artifact.txt',
+                metadata: {
+                    cloudKey: 'tenant/workflows/repair-cloud-artifact.txt',
+                    cloudProvider: 's3',
+                    cloudBucket: 'cloud-repair-bucket',
+                    cloudConnectionProfileId: profile.id,
+                },
+            },
+            timestamp: new Date(),
+        });
+
+        const staleReference = await MediaReference.create({
+            userId: user._id,
+            workflowId: workflow._id,
+            agentInstanceId: instance._id,
+            journalEntryId: journalEntry._id,
+            storageMode: 'cloud',
+            primaryStorageMode: 'cloud',
+            canonicalLocator: 's3://cloud-repair-bucket/tenant/workflows/repair-cloud-artifact.txt',
+            cloudKey: 'tenant/workflows/repair-cloud-artifact.txt',
+            cloudProvider: 's3',
+            cloudBucket: 'cloud-repair-bucket',
+            fileName: 'repair-cloud-artifact.txt',
+            originalName: 'repair-cloud-artifact.txt',
+            mimeType: 'text/plain',
+            size: 24,
+            createdByAgentInstanceId: instance._id,
+            createdByAgentName: 'Cloud Repair Agent',
+            lastModifiedByAgentInstanceId: instance._id,
+            lastModifiedByAgentName: 'Cloud Repair Agent',
+            isOrphan: false,
+        });
+
+        const repairResponse = await request(app)
+            .post(`/api/media/workflows/${workflow.id}/explorer/repair-legacy-catalog`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({ storageMode: 'cloud' })
+            .expect(200);
+
+        expect(repairResponse.body).toEqual(expect.objectContaining({
+            success: true,
+            meta: expect.objectContaining({
+                workflowOwned: true,
+                scanned: 1,
+                missing: 0,
+                stale: 1,
+                repaired: 1,
+                skipped: 0,
+            }),
+        }));
+
+        const repairedReference = await MediaReference.findById(staleReference.id).lean();
+        expect(repairedReference).toEqual(expect.objectContaining({
+            cloudConnectionProfileId: profile.id,
+            cloudKey: 'tenant/workflows/repair-cloud-artifact.txt',
+            cloudProvider: 's3',
+            cloudBucket: 'cloud-repair-bucket',
+        }));
     });
 
     it('tests cloud configuration through the real S3 strategy path instead of a simulated response', async () => {

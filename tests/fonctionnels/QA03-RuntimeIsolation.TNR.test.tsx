@@ -11,7 +11,6 @@ import {
     LLMProvider,
     LocalLLMProfile,
     RobotId,
-    WorkflowNode,
 } from '../../types';
 import { ImageGenerationPanel } from '../../components/panels/ImageGenerationPanel';
 import { ImageModificationPanel } from '../../components/panels/ImageModificationPanel';
@@ -19,6 +18,16 @@ import { MapsGroundingConfigPanel } from '../../components/panels/MapsGroundingC
 
 const mockCreateAdapter = jest.fn();
 const mockRunAgentLoop = jest.fn();
+const mockDesignStoreState = {
+    agentInstances: [
+        { id: 'instance-alpha', workflowId: 'wf-1' },
+        { id: 'instance-beta', workflowId: 'wf-1' },
+        { id: 'instance-multi-turn', workflowId: 'wf-1' },
+        { id: 'instance-follow-up', workflowId: 'wf-1' },
+    ],
+    nodes: [] as any[],
+    agents: [] as Agent[],
+};
 
 jest.mock('../../services/llmService', () => ({
     generateContentStream: jest.fn(),
@@ -59,15 +68,7 @@ jest.mock('../../stores/useDesignStore', () => {
     return {
         ...actual,
         useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-            const state = {
-                agentInstances: [
-                    { id: 'instance-alpha', workflowId: 'wf-1' },
-                    { id: 'instance-beta', workflowId: 'wf-1' },
-                    { id: 'instance-multi-turn', workflowId: 'wf-1' },
-                    { id: 'instance-follow-up', workflowId: 'wf-1' },
-                ],
-            };
-            return selector ? selector(state) : state;
+            return selector ? selector(mockDesignStoreState as unknown as Record<string, unknown>) : mockDesignStoreState;
         }),
     };
 });
@@ -149,6 +150,8 @@ function createStream(chunks: any[]) {
 describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockDesignStoreState.nodes = [];
+        mockDesignStoreState.agents = [];
         useRuntimeStore.getState().resetAll();
         useRuntimeStore.getState().updateLocalLLMProfiles(LOCAL_PROFILES);
         useRuntimeStore.getState().updateLLMConfigs([LOCAL_RUNTIME_CONFIG, CLOUD_RUNTIME_CONFIG]);
@@ -226,6 +229,13 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
                     token: 10000,
                     sentence: 10000,
                     message: 10000,
+                },
+                enabledLimits: {
+                    char: true,
+                    word: true,
+                    token: true,
+                    sentence: true,
+                    message: true,
                 },
             },
         });
@@ -314,17 +324,38 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
     it('le panel image utilise le credential resolu du profil local actif', async () => {
         mockedGenerateImage.mockResolvedValue({ image: 'generated-image' });
 
+        const imageAgent = createAgent({
+            id: 'agent-image',
+            localLLMProfileId: 'profile-alpha',
+            capabilities: [LLMCapability.ImageGeneration],
+        });
+        mockDesignStoreState.agents = [imageAgent];
+        mockDesignStoreState.nodes = [{
+            id: 'node-image',
+            type: 'agent',
+            position: { x: 0, y: 0 },
+            data: {
+                label: imageAgent.name,
+                robotId: RobotId.Archi,
+                agent: imageAgent,
+                agentInstance: {
+                    id: 'instance-alpha',
+                    prototypeId: imageAgent.id,
+                    name: imageAgent.name,
+                    position: { x: 0, y: 0 },
+                    workflowId: 'wf-1',
+                    isMinimized: false,
+                    isMaximized: false,
+                    configuration_json: null,
+                },
+            },
+        }];
+
         render(
             <ImageGenerationPanel
                 isOpen={true}
                 hideSlideOver={true}
                 nodeId="node-image"
-                agent={createAgent({
-                    id: 'agent-image',
-                    localLLMProfileId: 'profile-alpha',
-                    capabilities: [LLMCapability.ImageGeneration],
-                })}
-                workflowNodes={[]}
                 llmConfigs={[LOCAL_RUNTIME_CONFIG]}
                 onClose={jest.fn()}
                 onImageGenerated={jest.fn()}
@@ -349,6 +380,33 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
         mockedEditImage.mockResolvedValue({ image: 'modified-image' });
         mockedGenerateContent.mockResolvedValue({ text: 'Image modifiee avec succes' });
 
+        const imageEditAgent = createAgent({
+            id: 'agent-edit',
+            localLLMProfileId: 'profile-beta',
+            capabilities: [LLMCapability.ImageModification],
+        });
+        mockDesignStoreState.agents = [imageEditAgent];
+        mockDesignStoreState.nodes = [{
+            id: 'node-edit',
+            type: 'agent',
+            position: { x: 0, y: 0 },
+            data: {
+                label: imageEditAgent.name,
+                robotId: RobotId.Archi,
+                agent: imageEditAgent,
+                agentInstance: {
+                    id: 'instance-beta',
+                    prototypeId: imageEditAgent.id,
+                    name: imageEditAgent.name,
+                    position: { x: 0, y: 0 },
+                    workflowId: 'wf-1',
+                    isMinimized: false,
+                    isMaximized: false,
+                    configuration_json: null,
+                },
+            },
+        }];
+
         render(
             <ImageModificationPanel
                 isOpen={true}
@@ -356,13 +414,7 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
                     nodeId: 'node-edit',
                     sourceImage: 'source-image',
                     mimeType: 'image/png',
-                    agent: createAgent({
-                        id: 'agent-edit',
-                        localLLMProfileId: 'profile-beta',
-                        capabilities: [LLMCapability.ImageModification],
-                    }),
                 }}
-                workflowNodes={[]}
                 llmConfigs={[LOCAL_RUNTIME_CONFIG]}
                 onClose={jest.fn()}
                 onImageModified={jest.fn()}
@@ -391,23 +443,33 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
             model: 'gemini-2.5-pro',
             capabilities: [LLMCapability.MapsGrounding],
         });
-
-        const workflowNodes: WorkflowNode[] = [
-            {
-                id: 'node-maps',
-                type: 'agentNode',
-                position: { x: 0, y: 0 },
-                data: { label: cloudAgent.name, robotId: RobotId.Archi, agent: cloudAgent },
+        mockDesignStoreState.agents = [cloudAgent];
+        mockDesignStoreState.nodes = [{
+            id: 'node-maps',
+            type: 'agent',
+            position: { x: 0, y: 0 },
+            data: {
+                label: cloudAgent.name,
+                robotId: RobotId.Archi,
                 agent: cloudAgent,
-            } as any,
-        ];
+                agentInstance: {
+                    id: 'instance-maps',
+                    prototypeId: cloudAgent.id,
+                    name: cloudAgent.name,
+                    position: { x: 0, y: 0 },
+                    workflowId: 'wf-1',
+                    isMinimized: false,
+                    isMaximized: false,
+                    configuration_json: null,
+                },
+            },
+        }];
 
         render(
             <MapsGroundingConfigPanel
                 isOpen={true}
                 hideSlideOver={true}
                 nodeId="node-maps"
-                workflowNodes={workflowNodes}
                 llmConfigs={[CLOUD_RUNTIME_CONFIG]}
                 onClose={jest.fn()}
             />
@@ -425,7 +487,7 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
                 'gemini-test-key-placeholder',
                 'gemini-2.5-pro',
                 'restaurants in Paris',
-                undefined,
+                'System prompt',
                 undefined
             );
         });

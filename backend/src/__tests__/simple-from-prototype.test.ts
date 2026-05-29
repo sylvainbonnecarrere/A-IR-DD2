@@ -6,6 +6,7 @@ import passport from 'passport';
 import { User } from '../models/User.model';
 import { Workflow } from '../models/Workflow.model';
 import { AgentPrototype } from '../models/AgentPrototype.model';
+import { WorkflowNodeV2 } from '../models/WorkflowNodeV2.model';
 import agentInstancesRoutes from '../routes/agent-instances.routes';
 import { generateAccessToken } from '../utils/jwt';
 
@@ -75,6 +76,23 @@ describe('Simple Test - POST /from-prototype', () => {
         expect(res.status).toBe(201);
         expect(res.body.id).toBeDefined();
         expect(res.body.name).toBe('Test Proto');
+        expect(res.body.node).toEqual(expect.objectContaining({
+            instanceId: res.body.id,
+            nodeType: 'agent',
+            position: expect.objectContaining({ x: 10, y: 20 }),
+        }));
+
+        const persistedNode = await WorkflowNodeV2.findOne({
+            workflowId,
+            ownerId: user.id,
+            instanceId: res.body.id,
+            nodeType: 'agent',
+        }).lean();
+
+        expect(persistedNode).toEqual(expect.objectContaining({
+            position: expect.objectContaining({ x: 10, y: 20 }),
+            uiConfig: expect.objectContaining({ label: 'Test Proto', expanded: true }),
+        }));
     });
 
     it('POST /from-prototype should preserve a workspace media override on the created instance', async () => {
@@ -114,7 +132,7 @@ describe('Simple Test - POST /from-prototype', () => {
         }));
     });
 
-    it('updates workspace media persistence after creating an instance from a prototype without media persistence config', async () => {
+    it('updates workspace media persistence and synchronizes the canonical workflow node position on instance save', async () => {
         const creationResponse = await request(app)
             .post(`/api/workflows/${workflowId}/instances/from-prototype`)
             .set('Authorization', `Bearer ${token}`)
@@ -129,6 +147,7 @@ describe('Simple Test - POST /from-prototype', () => {
             .set('Authorization', `Bearer ${token}`)
             .send({
                 name: 'Test Proto',
+                position: { x: 140, y: 260 },
                 configuration_json: {
                     role: 'Test',
                     systemPrompt: 'Test prompt',
@@ -154,6 +173,18 @@ describe('Simple Test - POST /from-prototype', () => {
             saveMedia: true,
             mediaStorage: 'workspace',
             allowWorkspaceWrite: true,
+        }));
+        expect(updateResponse.body.position).toEqual(expect.objectContaining({ x: 140, y: 260 }));
+
+        const persistedNode = await WorkflowNodeV2.findOne({
+            workflowId,
+            ownerId: user.id,
+            instanceId: creationResponse.body.id,
+            nodeType: 'agent',
+        }).lean();
+
+        expect(persistedNode).toEqual(expect.objectContaining({
+            position: expect.objectContaining({ x: 140, y: 260 }),
         }));
     });
 });

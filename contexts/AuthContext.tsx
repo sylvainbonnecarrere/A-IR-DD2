@@ -378,17 +378,76 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }, [refreshRuntimeConfigState, saveAuthData]);
 
     /**
-     * Logout - Clear all auth data and RESET ALL STORES
-     * ⚠️ CRITICAL SECURITY FIX J4.4:
-     * - Clears authenticated user state
-     * - Wipes ALL stores (prevents auth data leak to guest session)
-     * - Does NOT wipe guest localStorage (user may want to continue as guest)
-     * 
-     * ANTI-REGRESSION: This must ALWAYS reset stores, not wipe guest data!
-     * Auth data must NOT persist into guest mode.
+     * Logout - ENFORCED FULL WIPE (Security strict rule)
+     * RULE: When a user logs out, absolutely no element belonging to that user
+     * must remain accessible to subsequent visitors (guests or other users).
+     * This implementation performs a deterministic, irrevocable cleanup:
+     * - Clears all `localStorage` and `sessionStorage`
+     * - Attempts to delete all IndexedDB databases (when available)
+     * - Calls `wipeGuestData()` to defensively remove known guest keys and reset stores
+     * - Resets all zustand stores and clears the auth session storage
+     *
+     * This is intentionally aggressive and must remain so to respect the
+     * security invariant: logout => zero retention of user-specific data.
      */
     const logout = useCallback(() => {
-        clearAuthState({ sessionStatus: 'ready', error: null });
+        // 1) Defensive: wipe known guest keys and reset in-memory stores
+        try {
+            wipeGuestData();
+        } catch (err) {
+            console.warn('[AuthContext] wipeGuestData failed during logout', err);
+        }
+
+        // 2) Aggressive: clear all storages (localStorage + sessionStorage)
+        try {
+            try {
+                localStorage.clear();
+            } catch (e) {
+                console.warn('[AuthContext] localStorage.clear failed during logout', e);
+            }
+
+            try {
+                sessionStorage.clear();
+            } catch (e) {
+                console.warn('[AuthContext] sessionStorage.clear failed during logout', e);
+            }
+        } catch (err) {
+            console.warn('[AuthContext] Storage clear encountered an error', err);
+        }
+
+        // 3) Best-effort: delete all IndexedDB databases (if supported)
+        try {
+            if (typeof indexedDB !== 'undefined' && typeof indexedDB.databases === 'function') {
+                // browsers that support indexedDB.databases()
+                // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                (async () => {
+                    try {
+                        const dbs = await (indexedDB as any).databases();
+                        for (const dbInfo of dbs) {
+                            if (dbInfo && dbInfo.name) {
+                                indexedDB.deleteDatabase(dbInfo.name);
+                            }
+                        }
+                    } catch (e) {
+                        // Not critical — best-effort cleanup
+                        console.warn('[AuthContext] indexedDB cleanup failed', e);
+                    }
+                })();
+            }
+        } catch (err) {
+            console.warn('[AuthContext] IndexedDB cleanup not available', err);
+        }
+
+        // 4) Reset auth-related state and zustand stores. clearStorage=false because
+        // we've already cleared localStorage above (avoid redundant ops).
+        clearAuthState({ sessionStatus: 'ready', error: null, clearStorage: false, resetStores: true });
+
+        // 5) Emit logout event for other parts of the app to react (if needed)
+        try {
+            window.dispatchEvent(new CustomEvent('auth:logout', { detail: { reason: 'manual_logout' } }));
+        } catch (e) {
+            // ignore
+        }
     }, [clearAuthState]);
 
     /**

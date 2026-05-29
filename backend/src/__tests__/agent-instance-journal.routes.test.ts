@@ -259,6 +259,98 @@ describe('Agent instance journal route centralization', () => {
         }));
     });
 
+    it('forwards explicit timestamp and severity options to JournalService when provided by compatibility callers', async () => {
+        const user = await User.create({
+            email: `agent-instance-journal-options-${Date.now()}@test.com`,
+            password: 'hashedpassword12345',
+            username: `agentinstancejournaloptions${Date.now()}`
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Journal Route Options Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `exec-route-options-${Date.now()}`,
+            status: 'running',
+            name: 'Journal Route Options Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'db'
+            }
+        });
+
+        const explicitTimestamp = new Date('2026-05-19T08:30:00.000Z');
+        const persistSpy = jest.spyOn(JournalService.prototype, 'persistJournalEntry');
+
+        await request(app)
+            .post(`/api/workflows/${workflow.id}/instances/${instance.id}/journal`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                type: 'chat',
+                timestamp: explicitTimestamp.toISOString(),
+                severity: 'warn',
+                payload: {
+                    role: 'tool_result',
+                    content: 'compatibility caller payload',
+                    messageId: 'compat-msg-1'
+                }
+            })
+            .expect(200);
+
+        expect(persistSpy).toHaveBeenCalledWith({
+            instanceId: instance.id,
+            type: 'chat',
+            payload: expect.objectContaining({
+                role: 'tool_result',
+                content: 'compatibility caller payload',
+                messageId: 'compat-msg-1'
+            })
+        }, {
+            timestamp: explicitTimestamp,
+            severity: 'warn'
+        });
+
+        const savedEntry = await AgentJournal.findOne({
+            agentInstanceId: instance._id,
+            'payload.messageId': 'compat-msg-1'
+        }).lean();
+
+        expect(savedEntry?.severity).toBe('warn');
+        expect(savedEntry?.timestamp?.toISOString()).toBe(explicitTimestamp.toISOString());
+    });
+
     it('catalogs inline chat image attachments as workspace media when saveMedia is enabled', async () => {
         const user = await User.create({
             email: `agent-instance-journal-media-${Date.now()}@test.com`,
@@ -555,6 +647,102 @@ describe('Agent instance journal route centralization', () => {
         }));
     });
 
+    it('catalogs direct media journal entries without requiring explorer backfill', async () => {
+        const user = await User.create({
+            email: `agent-instance-journal-direct-media-${Date.now()}@test.com`,
+            password: 'hashedpassword12345',
+            username: `agentinstancejournaldirectmedia${Date.now()}`
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Journal Route Direct Media Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `exec-route-direct-media-${Date.now()}`,
+            status: 'running',
+            name: 'Journal Route Direct Media Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'local'
+            }
+        });
+
+        const relativeMediaPath = `output/media/agents/${instance.id}/2026-05/direct-journal-upload.png`;
+
+        const response = await request(app)
+            .post(`/api/workflows/${workflow.id}/instances/${instance.id}/journal`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                type: 'media',
+                payload: {
+                    messageId: 'direct-media-1',
+                    mimeType: 'image/png',
+                    fileName: 'direct-journal-upload.png',
+                    size: 123,
+                    storageMode: 'local',
+                    path: relativeMediaPath,
+                    metadata: {
+                        originalName: 'direct-journal-upload.png',
+                    }
+                }
+            })
+            .expect(200);
+
+        expect(response.body).toEqual(expect.objectContaining({
+            success: true,
+            journalId: expect.any(String)
+        }));
+
+        const mediaReference = await MediaReference.findOne({
+            journalEntryId: response.body.journalId,
+        }).lean();
+
+        expect(mediaReference).not.toBeNull();
+        expect(mediaReference).toEqual(expect.objectContaining({
+            agentInstanceId: instance._id,
+            originalName: 'direct-journal-upload.png',
+            fileName: 'direct-journal-upload.png',
+            storageMode: 'local',
+            primaryStorageMode: 'workspace',
+            canonicalLocator: `workspace://${relativeMediaPath}`,
+            createdByAgentName: 'Journal Route Direct Media Agent',
+            lastModifiedByAgentName: 'Journal Route Direct Media Agent',
+            isOrphan: false,
+        }));
+    });
+
     it('imports a pending text file draft as workspace media without forcing a chat entry', async () => {
         const user = await User.create({
             email: `agent-instance-journal-draft-import-${Date.now()}@test.com`,
@@ -785,6 +973,115 @@ describe('Agent instance journal route centralization', () => {
         expect(mediaReference).toEqual(expect.objectContaining({
             primaryStorageMode: 'workspace',
             mimeType: 'image/png',
+            isOrphan: false,
+        }));
+    });
+
+    it('backfills catalog metadata for duplicate direct media journal entries without waiting for explorer reads', async () => {
+        const user = await User.create({
+            email: `agent-instance-journal-direct-media-duplicate-${Date.now()}@test.com`,
+            password: 'hashedpassword12345',
+            username: `agentinstancejournaldirectmediaduplicate${Date.now()}`
+        });
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const workflow = await Workflow.create({
+            userId: user._id,
+            name: 'Journal Route Direct Media Duplicate Workflow',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const instance = await AgentInstance.create({
+            workflowId: workflow._id,
+            userId: user._id,
+            executionId: `exec-route-direct-media-duplicate-${Date.now()}`,
+            status: 'running',
+            name: 'Journal Route Direct Media Duplicate Agent',
+            role: 'assistant',
+            systemPrompt: 'system',
+            llmProvider: 'mock',
+            llmModel: 'mock-model',
+            capabilities: [],
+            robotId: 'AR_001',
+            position: { x: 0, y: 0 },
+            isMinimized: false,
+            isMaximized: false,
+            zIndex: 1,
+            content: [],
+            metrics: {
+                totalTokens: 0,
+                totalErrors: 0,
+                totalMediaGenerated: 0,
+                callCount: 0
+            },
+            persistenceConfig: {
+                saveChat: true,
+                saveChatHistory: true,
+                saveErrors: true,
+                saveTasks: false,
+                saveTaskExecution: false,
+                saveLinks: false,
+                saveMedia: true,
+                saveHistorySummary: false,
+                mediaStorage: 'local'
+            }
+        });
+
+        const existingJournal = await AgentJournal.create({
+            agentInstanceId: instance._id,
+            workflowId: workflow._id,
+            type: 'media',
+            severity: 'info',
+            payload: {
+                messageId: 'direct-media-duplicate-1',
+                mimeType: 'image/png',
+                fileName: 'duplicate-journal-upload.png',
+                size: 321,
+                storageMode: 'local',
+                path: `output/media/agents/${instance.id}/2026-05/duplicate-journal-upload.png`,
+                metadata: {
+                    originalName: 'duplicate-journal-upload.png',
+                }
+            },
+            timestamp: new Date(),
+        });
+
+        const response = await request(app)
+            .post(`/api/workflows/${workflow.id}/instances/${instance.id}/journal`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({
+                type: 'media',
+                payload: {
+                    messageId: 'direct-media-duplicate-1',
+                    mimeType: 'image/png',
+                    fileName: 'duplicate-journal-upload.png',
+                    size: 321,
+                    storageMode: 'local',
+                    path: `output/media/agents/${instance.id}/2026-05/duplicate-journal-upload.png`,
+                    metadata: {
+                        originalName: 'duplicate-journal-upload.png',
+                    }
+                }
+            })
+            .expect(200);
+
+        expect(response.body).toEqual(expect.objectContaining({
+            skipped: true,
+            reason: 'Duplicate messageId - entry already exists',
+            existingJournalId: expect.any(String)
+        }));
+
+        const mediaReference = await MediaReference.findOne({
+            journalEntryId: existingJournal._id,
+        }).lean();
+
+        expect(mediaReference).not.toBeNull();
+        expect(mediaReference).toEqual(expect.objectContaining({
+            originalName: 'duplicate-journal-upload.png',
+            primaryStorageMode: 'workspace',
+            createdByAgentName: 'Journal Route Direct Media Duplicate Agent',
             isOrphan: false,
         }));
     });

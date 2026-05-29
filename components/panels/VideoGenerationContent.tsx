@@ -14,7 +14,6 @@ import { useLocalization } from '../../hooks/useLocalization';
 interface VideoGenerationContentProps {
   nodeId?: string;
   llmConfigs?: any[];
-  workflowNodes?: any[];
   onClose: () => void;
   onSubmit: (config: any) => void;
   videoStatus?: VideoGenerationStatus | null;
@@ -23,7 +22,6 @@ interface VideoGenerationContentProps {
 export const VideoGenerationContent: React.FC<VideoGenerationContentProps> = ({
   nodeId,
   llmConfigs,
-  workflowNodes,
   onClose,
   onSubmit,
   videoStatus = null
@@ -33,8 +31,8 @@ export const VideoGenerationContent: React.FC<VideoGenerationContentProps> = ({
 
   const [prompt, setPrompt] = useState('');
   const [referenceImages, setReferenceImages] = useState<{ mimeType: string; data: string }[]>([]);
-  const [resolution, setResolution] = useState<'720p' | '1080p' | '4k'>('1080p');
-  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '1:1'>('16:9');
+  const [resolution, setResolution] = useState<NonNullable<VideoGenerationOptions['resolution']>>('1080p');
+  const [aspectRatio, setAspectRatio] = useState<NonNullable<VideoGenerationOptions['aspectRatio']>>('16:9');
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []) as File[];
@@ -72,7 +70,12 @@ export const VideoGenerationContent: React.FC<VideoGenerationContentProps> = ({
     const options: VideoGenerationOptions = {
       prompt: prompt.trim(),
       mode: referenceImages.length > 0 ? 'with-references' : 'text-to-video',
-      referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
+      referenceImages: referenceImages.length > 0
+        ? referenceImages.map((image) => ({
+            image,
+            referenceType: 'asset' as const,
+          }))
+        : undefined,
       resolution,
       aspectRatio
     };
@@ -192,14 +195,14 @@ export const VideoGenerationContent: React.FC<VideoGenerationContentProps> = ({
         </label>
         <select
           value={resolution}
-          onChange={(e) => setResolution(e.target.value as any)}
+          onChange={(e) => setResolution(e.target.value as NonNullable<VideoGenerationOptions['resolution']>)}
           disabled={isGenerating}
           className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white
                      focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 focus:outline-none"
         >
           <option value="720p">720p (HD)</option>
           <option value="1080p">1080p (Full HD)</option>
-          <option value="4k">4K (Ultra HD)</option>
+          <option value="4k" disabled>4K (bientot)</option>
         </select>
       </div>
 
@@ -210,14 +213,14 @@ export const VideoGenerationContent: React.FC<VideoGenerationContentProps> = ({
         </label>
         <select
           value={aspectRatio}
-          onChange={(e) => setAspectRatio(e.target.value as any)}
+          onChange={(e) => setAspectRatio(e.target.value as NonNullable<VideoGenerationOptions['aspectRatio']>)}
           disabled={isGenerating}
           className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white
                      focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 focus:outline-none"
         >
           <option value="16:9">16:9 (Widescreen)</option>
           <option value="9:16">9:16 (Vertical / Mobile)</option>
-          <option value="1:1">1:1 (Square)</option>
+          <option value="1:1" disabled>1:1 (bientot)</option>
         </select>
       </div>
 

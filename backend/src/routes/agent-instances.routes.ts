@@ -6,6 +6,7 @@ import { AgentJournal } from '../models/AgentJournal.model';
 import { AgentPrototype } from '../models/AgentPrototype.model';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { Workflow } from '../models/Workflow.model';
+import { WorkflowNodeV2 } from '../models/WorkflowNodeV2.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { requireRobotGovernance } from '../middleware/robot-governance.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
@@ -433,6 +434,28 @@ router.post('/from-prototype', requireAuth,
 
         await instance.save();
 
+        let node;
+
+        try {
+            node = await WorkflowNodeV2.create({
+                workflowId,
+                ownerId: user.id,
+                instanceId: instance._id,
+                nodeType: 'agent',
+                position,
+                uiConfig: {
+                    label: finalName,
+                    expanded: true,
+                },
+            });
+        } catch (nodeError) {
+            await AgentInstance.findByIdAndDelete(instance._id).catch((rollbackError) => {
+                console.error('[AgentInstances] ❌ Failed to rollback orphaned instance after node creation error:', rollbackError);
+            });
+
+            throw nodeError;
+        }
+
         // Marquer workflow comme dirty
         workflow.isDirty = true;
         await workflow.save();
@@ -450,7 +473,17 @@ router.post('/from-prototype', requireAuth,
         // Use the helper function to ensure consistency across all endpoints
         const mappedInstance = transformAgentInstanceForFrontend(instance);
 
-        res.status(201).json(mappedInstance);
+        res.status(201).json({
+            ...mappedInstance,
+            instance: mappedInstance,
+            node: {
+                id: node._id.toString(),
+                instanceId: instance._id.toString(),
+                nodeType: node.nodeType,
+                position: node.position,
+                uiConfig: node.uiConfig,
+            },
+        });
     } catch (error: any) {
         // ⭐ LOGGING AMÉLIORÉ: afficher les détails de l'erreur de validation
         console.error('[AgentInstances] ❌ POST/from-prototype error:', {
@@ -645,9 +678,35 @@ router.put('/:id',
             const normalizedOtherUpdates = normalizedPayload.webSearchParams !== undefined
                 ? { ...normalizedPayload, webSearchParams: parseWebSearchParams(normalizedPayload.webSearchParams) }
                 : normalizedPayload;
+            const shouldSyncWorkflowNodePosition = !!normalizedOtherUpdates.position
+                && typeof normalizedOtherUpdates.position.x === 'number'
+                && typeof normalizedOtherUpdates.position.y === 'number';
 
             Object.assign(instance, normalizedOtherUpdates);
             await instance.save();
+
+            if (shouldSyncWorkflowNodePosition) {
+                const syncedNode = await WorkflowNodeV2.findOneAndUpdate(
+                    {
+                        workflowId: instance.workflowId,
+                        ownerId: user.id,
+                        instanceId: instance._id,
+                    },
+                    {
+                        $set: {
+                            position: instance.position,
+                        },
+                    },
+                    { new: true }
+                );
+
+                if (!syncedNode) {
+                    console.warn('[AgentInstances] ⚠️ No WorkflowNodeV2 found while syncing instance position:', {
+                        instanceId,
+                        workflowId: instance.workflowId?.toString?.() || instance.workflowId,
+                    });
+                }
+            }
 
             // ⭐ CRITICAL: Log saved state for debugging (BREAK #2 fix)
             const historyConfigObj = instance.historyConfig as any || {};
@@ -712,6 +771,252 @@ const contentSchema = z.object({
     })
 });
 
+type LegacyContentPayload = z.infer<typeof contentSchema>['content'];
+
+function normalizeLegacyChatRole(role?: string): 'user' | 'agent' | 'tool' | 'tool_result' {
+    if (role === 'user' || role === 'tool' || role === 'tool_result') {
+        return role;
+    }
+
+    if (role === 'assistant') {
+        return 'agent';
+    }
+
+    return 'agent';
+}
+
+function normalizeLegacyErrorSource(source: unknown): 'llm_service' | 'tool_executor' | 'frontend' | 'system' {
+    if (
+        source === 'llm_service'
+        || source === 'tool_executor'
+        || source === 'frontend'
+        || source === 'system'
+    ) {
+        return source;
+    }
+
+    return 'frontend';
+}
+
+function extractLegacyCorrelationIds(metadata: Record<string, unknown>) {
+    const correlationIds: Record<string, string> = {};
+
+    if (typeof metadata.messageId === 'string' && metadata.messageId.trim().length > 0) {
+        correlationIds.messageId = metadata.messageId.trim();
+    }
+    if (typeof metadata.toolCallId === 'string' && metadata.toolCallId.trim().length > 0) {
+        correlationIds.toolCallId = metadata.toolCallId.trim();
+    }
+    if (typeof metadata.executionId === 'string' && metadata.executionId.trim().length > 0) {
+        correlationIds.executionId = metadata.executionId.trim();
+    }
+
+    return correlationIds;
+}
+
+function resolveLegacyMediaExtension(mimeType: string, fallbackType: 'image' | 'video'): string {
+    if (mimeType === 'image/jpeg') {
+        return 'jpg';
+    }
+    if (mimeType === 'image/webp') {
+        return 'webp';
+    }
+    if (mimeType === 'image/gif') {
+        return 'gif';
+    }
+    if (mimeType === 'video/webm') {
+        return 'webm';
+    }
+
+    return fallbackType === 'video' ? 'mp4' : 'png';
+}
+
+function resolveLegacyMediaMimeType(content: LegacyContentPayload, metadata: Record<string, unknown>): string {
+    if (typeof metadata.mimeType === 'string' && metadata.mimeType.trim().length > 0) {
+        return metadata.mimeType.trim();
+    }
+
+    return content.type === 'video' ? 'video/mp4' : 'image/png';
+}
+
+function resolveLegacyMediaFileName(
+    content: LegacyContentPayload,
+    metadata: Record<string, unknown>,
+    mimeType: string,
+): string {
+    if (typeof metadata.fileName === 'string' && metadata.fileName.trim().length > 0) {
+        return metadata.fileName.trim();
+    }
+
+    const stem = typeof content.mediaId === 'string' && content.mediaId.trim().length > 0
+        ? content.mediaId.trim()
+        : `legacy-${content.type}-${Date.now()}`;
+
+    return `${stem}.${resolveLegacyMediaExtension(mimeType, content.type === 'video' ? 'video' : 'image')}`;
+}
+
+function resolveLegacyMediaSize(metadata: Record<string, unknown>): number {
+    if (typeof metadata.byteSize === 'number' && Number.isFinite(metadata.byteSize)) {
+        return metadata.byteSize;
+    }
+    if (typeof metadata.sizeInBytes === 'number' && Number.isFinite(metadata.sizeInBytes)) {
+        return metadata.sizeInBytes;
+    }
+
+    return 0;
+}
+
+function buildLegacyMetricsIncrement(content: LegacyContentPayload): Record<string, number> {
+    if (content.type === 'chat') {
+        const metricsUpdate: Record<string, number> = {
+            'metrics.callCount': 1,
+        };
+
+        if (typeof content.metadata?.tokensUsed === 'number' && Number.isFinite(content.metadata.tokensUsed)) {
+            metricsUpdate['metrics.totalTokens'] = content.metadata.tokensUsed;
+        }
+
+        return metricsUpdate;
+    }
+
+    if (content.type === 'error') {
+        return { 'metrics.totalErrors': 1 };
+    }
+
+    return { 'metrics.totalMediaGenerated': 1 };
+}
+
+function mapLegacyContentToJournalEntry(content: LegacyContentPayload): {
+    type: 'chat' | 'error' | 'media';
+    payload: Record<string, unknown>;
+    severity?: 'info' | 'warn' | 'error';
+} | null {
+    const metadata = content.metadata || {};
+    const correlationIds = extractLegacyCorrelationIds(metadata);
+
+    if (content.type === 'chat') {
+        const toolCalls = Array.isArray(metadata.toolCalls)
+            ? metadata.toolCalls
+                .filter((toolCall): toolCall is { id?: unknown; name?: unknown; arguments?: unknown } => !!toolCall && typeof toolCall === 'object')
+                .map((toolCall) => ({
+                    id: typeof toolCall.id === 'string' ? toolCall.id : '',
+                    name: typeof toolCall.name === 'string' ? toolCall.name : '',
+                    arguments: typeof toolCall.arguments === 'string' ? toolCall.arguments : '{}',
+                }))
+                .filter((toolCall) => toolCall.name.length > 0)
+            : undefined;
+
+        return {
+            type: 'chat',
+            payload: {
+                ...correlationIds,
+                role: normalizeLegacyChatRole(content.role),
+                content: content.message || '',
+                llmProvider: typeof metadata.llmProvider === 'string' ? metadata.llmProvider : undefined,
+                modelUsed: typeof metadata.modelUsed === 'string' ? metadata.modelUsed : undefined,
+                tokensUsed: typeof metadata.tokensUsed === 'number' ? metadata.tokensUsed : undefined,
+                toolCalls,
+                imageBase64: typeof metadata.imageBase64 === 'string' ? metadata.imageBase64 : undefined,
+                fileContent: typeof metadata.fileContent === 'string' ? metadata.fileContent : undefined,
+                mimeType: typeof metadata.mimeType === 'string' ? metadata.mimeType : undefined,
+                fileName: typeof metadata.fileName === 'string' ? metadata.fileName : undefined,
+            },
+        };
+    }
+
+    if (content.type === 'error') {
+        return {
+            type: 'error',
+            severity: 'error',
+            payload: {
+                ...correlationIds,
+                errorCode: typeof metadata.errorCode === 'string'
+                    ? metadata.errorCode
+                    : content.subType || 'legacy_content_error',
+                message: content.message || '',
+                source: normalizeLegacyErrorSource(metadata.source),
+                retryable: typeof metadata.retryable === 'boolean' ? metadata.retryable : false,
+                attempts: typeof metadata.attempts === 'number' ? metadata.attempts : 1,
+                stack: typeof metadata.stack === 'string' ? metadata.stack : undefined,
+            },
+        };
+    }
+
+    const mimeType = resolveLegacyMediaMimeType(content, metadata);
+    const fileName = resolveLegacyMediaFileName(content, metadata, mimeType);
+    const base64Payload = typeof metadata.dataBase64 === 'string'
+        ? metadata.dataBase64
+        : typeof metadata.imageBase64 === 'string'
+            ? metadata.imageBase64
+            : undefined;
+    const explicitStorageMode = metadata.storageMode;
+
+    let storageMode: 'database' | 'local' | 'cloud' | null = null;
+    let payload: Record<string, unknown> = {
+        ...correlationIds,
+        mimeType,
+        fileName,
+        size: resolveLegacyMediaSize(metadata),
+        generationPrompt: content.prompt,
+        generationModel: typeof metadata.generatedBy === 'string'
+            ? metadata.generatedBy
+            : typeof metadata.model === 'string'
+                ? metadata.model
+                : undefined,
+        metadata: {
+            ...metadata,
+            legacyMediaId: content.mediaId,
+            legacyDuration: content.duration,
+        },
+    };
+
+    if (explicitStorageMode === 'database' || explicitStorageMode === 'local' || explicitStorageMode === 'cloud') {
+        storageMode = explicitStorageMode;
+    } else if (typeof metadata.path === 'string' && metadata.path.trim().length > 0) {
+        storageMode = 'local';
+    } else if (typeof content.url === 'string' && content.url.trim().length > 0) {
+        storageMode = 'cloud';
+    } else if (typeof base64Payload === 'string' && base64Payload.trim().length > 0) {
+        storageMode = 'database';
+    }
+
+    if (storageMode === 'database') {
+        if (typeof base64Payload !== 'string' || base64Payload.trim().length === 0) {
+            return null;
+        }
+        payload = {
+            ...payload,
+            storageMode,
+            data: Buffer.from(base64Payload, 'base64'),
+        };
+    } else if (storageMode === 'local') {
+        if (typeof metadata.path !== 'string' || metadata.path.trim().length === 0) {
+            return null;
+        }
+        payload = {
+            ...payload,
+            storageMode,
+            path: metadata.path.trim(),
+        };
+    } else if (storageMode === 'cloud') {
+        if (typeof content.url !== 'string' || content.url.trim().length === 0) {
+            return null;
+        }
+        payload = {
+            ...payload,
+            storageMode,
+            url: content.url.trim(),
+        };
+    } else {
+        return null;
+    }
+
+    return {
+        type: 'media',
+        payload,
+    };
+}
+
 router.post('/:id/content',
     requireAuth,
     validateRequest(contentSchema),
@@ -736,33 +1041,69 @@ router.post('/:id/content',
                 return res.status(404).json({ error: 'Instance introuvable' });
             }
 
-            // Add content with timestamp
             const contentWithTimestamp = {
                 ...content,
                 timestamp: content.timestamp ? new Date(content.timestamp) : new Date()
             };
 
-            // Push to content array
-            instance.content.push(contentWithTimestamp);
-
-            // Update metrics based on content type
-            if (content.type === 'chat') {
-                instance.metrics.callCount = (instance.metrics.callCount || 0) + 1;
-                if (content.metadata?.tokensUsed) {
-                    instance.metrics.totalTokens = (instance.metrics.totalTokens || 0) + content.metadata.tokensUsed;
-                }
-            } else if (content.type === 'error') {
-                instance.metrics.totalErrors = (instance.metrics.totalErrors || 0) + 1;
-            } else if (content.type === 'image' || content.type === 'video') {
-                instance.metrics.totalMediaGenerated = (instance.metrics.totalMediaGenerated || 0) + 1;
+            const journalEntry = mapLegacyContentToJournalEntry(contentWithTimestamp);
+            if (!journalEntry) {
+                return res.status(422).json({
+                    error: 'Legacy content payload cannot be mapped to journal authority'
+                });
             }
 
-            await instance.save();
+            const result = await journalService.persistJournalEntry(
+                {
+                    instanceId,
+                    type: journalEntry.type,
+                    payload: journalEntry.payload as never,
+                },
+                {
+                    timestamp: contentWithTimestamp.timestamp,
+                    severity: journalEntry.severity,
+                }
+            );
 
-            console.log(`[AgentInstances] ✅ Content added to ${instanceId}: ${content.type}`);
+            if (!result.success) {
+                return res.status(500).json({
+                    error: result.error || 'Erreur ajout contenu'
+                });
+            }
+
+            if (result.saved) {
+                const metricsIncrement = buildLegacyMetricsIncrement(contentWithTimestamp);
+                await AgentInstance.findByIdAndUpdate(instanceId, {
+                    ...(Object.keys(metricsIncrement).length > 0 ? { $inc: metricsIncrement } : {}),
+                    $set: {
+                        'state.lastActivity': contentWithTimestamp.timestamp,
+                    },
+                });
+            }
+
+            const contentCount = await AgentJournal.countDocuments({
+                agentInstanceId: instance._id,
+                type: { $in: ['chat', 'error', 'media'] },
+            });
+
+            if (!result.saved) {
+                console.log(`[AgentInstances] Legacy content skipped for ${instanceId}: ${result.reason || 'unknown reason'}`);
+                return res.status(200).json({
+                    success: true,
+                    skipped: true,
+                    reason: result.reason,
+                    contentCount,
+                    authority: 'agent_journals',
+                    ...(result.existingEntryId ? { journalId: result.existingEntryId } : {}),
+                });
+            }
+
+            console.log(`[AgentInstances] ✅ Legacy content stored in journals for ${instanceId}: ${content.type}`);
             res.status(201).json({ 
-                success: true, 
-                contentCount: instance.content.length 
+                success: true,
+                contentCount,
+                authority: 'agent_journals',
+                ...(result.entryId ? { journalId: result.entryId } : {}),
             });
 
         } catch (error) {
@@ -786,7 +1127,7 @@ router.post(
     async (req: Request, res: Response) => {
         try {
             const { agentInstanceId } = req.params;
-            const { type, payload } = req.body;
+            const { type, payload, timestamp, severity } = req.body;
             const user = req.user as IUser;
 
             // Validation du type d'entrée
@@ -808,11 +1149,37 @@ router.post(
                 return res.status(403).json({ error: 'Unauthorized - user does not own this instance' });
             }
 
-            const result = await journalService.persistJournalEntry({
-                instanceId: agentInstanceId,
-                type,
-                payload
-            });
+            const journalOptions: {
+                timestamp?: Date;
+                severity?: 'info' | 'warn' | 'error';
+            } = {};
+
+            if (timestamp !== undefined) {
+                const parsedTimestamp = timestamp instanceof Date ? timestamp : new Date(timestamp);
+                if (Number.isNaN(parsedTimestamp.getTime())) {
+                    return res.status(400).json({ error: 'Invalid journal timestamp' });
+                }
+                journalOptions.timestamp = parsedTimestamp;
+            }
+
+            if (severity !== undefined) {
+                if (severity !== 'info' && severity !== 'warn' && severity !== 'error') {
+                    return res.status(400).json({ error: 'Invalid journal severity' });
+                }
+                journalOptions.severity = severity;
+            }
+
+            const result = Object.keys(journalOptions).length > 0
+                ? await journalService.persistJournalEntry({
+                    instanceId: agentInstanceId,
+                    type,
+                    payload
+                }, journalOptions)
+                : await journalService.persistJournalEntry({
+                    instanceId: agentInstanceId,
+                    type,
+                    payload
+                });
 
             if (!result.success) {
                 return res.status(500).json({ error: result.error || 'Failed to create journal entry' });
