@@ -93,16 +93,19 @@ const collectOccupiedNodePositions = (
 };
 
 const rectanglesOverlap = (candidate: Position, occupied: Position): boolean => {
-    const candidateLeft = candidate.x;
-    const candidateRight = candidate.x + WORKFLOW_NODE_COLLISION_BOX.width;
-    const candidateTop = candidate.y;
-    const candidateBottom = candidate.y + WORKFLOW_NODE_COLLISION_BOX.height;
+    const pad = WORKFLOW_NODE_COLLISION_BOX.padding ?? 0;
 
-    const occupiedLeft = occupied.x;
-    const occupiedRight = occupied.x + WORKFLOW_NODE_COLLISION_BOX.width;
-    const occupiedTop = occupied.y;
-    const occupiedBottom = occupied.y + WORKFLOW_NODE_COLLISION_BOX.height;
+    const candidateLeft = candidate.x - pad;
+    const candidateRight = candidate.x + WORKFLOW_NODE_COLLISION_BOX.width + pad;
+    const candidateTop = candidate.y - pad;
+    const candidateBottom = candidate.y + WORKFLOW_NODE_COLLISION_BOX.height + pad;
 
+    const occupiedLeft = occupied.x - pad;
+    const occupiedRight = occupied.x + WORKFLOW_NODE_COLLISION_BOX.width + pad;
+    const occupiedTop = occupied.y - pad;
+    const occupiedBottom = occupied.y + WORKFLOW_NODE_COLLISION_BOX.height + pad;
+
+    // Edge-to-edge contact is considered a collision (inclusive checks)
     return candidateLeft <= occupiedRight
         && candidateRight >= occupiedLeft
         && candidateTop <= occupiedBottom
@@ -125,21 +128,23 @@ const rectanglesOverlapWithSize = (
     occupied: WorkflowNodeCollisionRect,
     subjectSize?: Size,
 ): boolean => {
+    const pad = WORKFLOW_NODE_COLLISION_BOX.padding ?? 0;
     const candidateWidth = resolveCollisionAxisSize(subjectSize?.width, WORKFLOW_NODE_COLLISION_BOX.width);
     const candidateHeight = resolveCollisionAxisSize(subjectSize?.height, WORKFLOW_NODE_COLLISION_BOX.height);
     const occupiedWidth = resolveCollisionAxisSize(occupied.width, WORKFLOW_NODE_COLLISION_BOX.width);
     const occupiedHeight = resolveCollisionAxisSize(occupied.height, WORKFLOW_NODE_COLLISION_BOX.height);
 
-    const candidateLeft = candidate.x;
-    const candidateRight = candidate.x + candidateWidth;
-    const candidateTop = candidate.y;
-    const candidateBottom = candidate.y + candidateHeight;
+    const candidateLeft = candidate.x - pad;
+    const candidateRight = candidate.x + candidateWidth + pad;
+    const candidateTop = candidate.y - pad;
+    const candidateBottom = candidate.y + candidateHeight + pad;
 
-    const occupiedLeft = occupied.position.x;
-    const occupiedRight = occupied.position.x + occupiedWidth;
-    const occupiedTop = occupied.position.y;
-    const occupiedBottom = occupied.position.y + occupiedHeight;
+    const occupiedLeft = occupied.position.x - pad;
+    const occupiedRight = occupied.position.x + occupiedWidth + pad;
+    const occupiedTop = occupied.position.y - pad;
+    const occupiedBottom = occupied.position.y + occupiedHeight + pad;
 
+    // Edge-to-edge contact is considered a collision (inclusive checks)
     return candidateLeft <= occupiedRight
         && candidateRight >= occupiedLeft
         && candidateTop <= occupiedBottom
@@ -190,29 +195,31 @@ const resolveDirectionalCandidate = ({
 
     if (preferredAxis === 'x' && deltaX !== 0) {
         const gap = resolveDirectionalGap(subjectSize, 'x');
+        const pad = WORKFLOW_NODE_COLLISION_BOX.padding ?? 0;
 
         return deltaX < 0
             ? {
-                x: Math.max(...collidingEntries.map((entry) => entry.position.x + resolveCollisionAxisSize(entry.width, WORKFLOW_NODE_COLLISION_BOX.width) + gap)),
+                x: Math.max(...collidingEntries.map((entry) => entry.position.x + resolveCollisionAxisSize(entry.width, WORKFLOW_NODE_COLLISION_BOX.width) + pad + gap)),
                 y: desiredPosition.y,
             }
             : {
-                x: Math.min(...collidingEntries.map((entry) => entry.position.x - subjectWidth - gap)),
+                x: Math.min(...collidingEntries.map((entry) => entry.position.x - subjectWidth - pad - gap)),
                 y: desiredPosition.y,
             };
     }
 
     if (preferredAxis === 'y' && deltaY !== 0) {
         const gap = resolveDirectionalGap(subjectSize, 'y');
+        const pad = WORKFLOW_NODE_COLLISION_BOX.padding ?? 0;
 
         return deltaY < 0
             ? {
                 x: desiredPosition.x,
-                y: Math.max(...collidingEntries.map((entry) => entry.position.y + resolveCollisionAxisSize(entry.height, WORKFLOW_NODE_COLLISION_BOX.height) + gap)),
+                y: Math.max(...collidingEntries.map((entry) => entry.position.y + resolveCollisionAxisSize(entry.height, WORKFLOW_NODE_COLLISION_BOX.height) + pad + gap)),
             }
             : {
                 x: desiredPosition.x,
-                y: Math.min(...collidingEntries.map((entry) => entry.position.y - subjectHeight - gap)),
+                y: Math.min(...collidingEntries.map((entry) => entry.position.y - subjectHeight - pad - gap)),
             };
     }
 
@@ -262,11 +269,16 @@ const resolveDirectionalCollision = ({
         : null;
 };
 
-const collectSearchCandidates = (desiredPosition: Position, maxSearchRadius: number): Position[] => {
+const collectSearchCandidates = (desiredPosition: Position, maxSearchRadius: number, subjectSize?: Size): Position[] => {
     const candidates: Position[] = [desiredPosition];
     const seen = new Set<string>([`${desiredPosition.x}:${desiredPosition.y}`]);
-    const stepX = Math.max(1, Math.round(WORKFLOW_NODE_COLLISION_BOX.width / 8));
-    const stepY = Math.max(1, Math.round(WORKFLOW_NODE_COLLISION_BOX.height / 8));
+    const pad = WORKFLOW_NODE_COLLISION_BOX.padding ?? 0;
+    const width = resolveCollisionAxisSize(subjectSize?.width, WORKFLOW_NODE_COLLISION_BOX.width);
+    const height = resolveCollisionAxisSize(subjectSize?.height, WORKFLOW_NODE_COLLISION_BOX.height);
+
+    // Step sizes scaled to the subject size + padding to make search denser for small nodes and coarser for large ones
+    const stepX = Math.max(1, Math.round((width + pad) / 4));
+    const stepY = Math.max(1, Math.round((height + pad) / 4));
 
     for (let radius = 0; radius <= maxSearchRadius; radius += 1) {
         for (let rowOffset = -radius; rowOffset <= radius; rowOffset += 1) {
@@ -378,7 +390,7 @@ export const findCollisionFreeWorkflowNodePosition = ({
         return directionallyResolvedPosition;
     }
 
-    const searchCandidates = collectSearchCandidates(desiredPosition, maxSearchRadius);
+    const searchCandidates = collectSearchCandidates(desiredPosition, maxSearchRadius, subjectSize);
     for (const candidate of searchCandidates) {
         const collides = occupiedPositions.some((entry) => rectanglesOverlapWithSize(candidate, entry, subjectSize));
         if (!collides) {

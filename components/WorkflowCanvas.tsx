@@ -319,15 +319,14 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         // Call upstream handler (App) to toggle runtime state
         (onToggleNodeMinimize || (() => {}))(nodeId);
 
-        // Wait for DOM/CSS transition to complete so measurements reflect new size
-        setTimeout(() => {
+        // Wait for DOM/React updates (double rAF) then perform explicit perimeter check
+        requestAnimationFrame(() => requestAnimationFrame(() => {
           try {
-            // Query rendered node DOM element provided by React Flow
             const nodeEl = document.querySelector(`[data-id=\"${nodeId}\"]`) as HTMLElement | null;
             const measuredWidth = nodeEl?.offsetWidth ?? undefined;
             const measuredHeight = nodeEl?.offsetHeight ?? undefined;
 
-            // If we could measure new dimensions, update the reactFlowNodes measured field
+            // Update measured size on the visual node
             if (typeof measuredWidth === 'number' || typeof measuredHeight === 'number') {
               setReactFlowNodes((current) => current.map((n) => {
                 if (n.id !== nodeId) return n;
@@ -339,31 +338,93 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
                   },
                 };
               }));
+            }
 
-              // Re-evaluate collisions for this node and apply a local (non-persistent) correction if needed
-              const designState = useDesignStore.getState();
-              const movedNode = designState.nodes.find((candidate) => candidate.id === nodeId);
-              if (movedNode && Number.isFinite(movedNode.position?.x) && Number.isFinite(movedNode.position?.y)) {
-                const desiredPosition = movedNode.position;
-                const resolved = resolveDroppedNodePosition(nodeId, desiredPosition, {
-                  width: measuredWidth,
-                  height: measuredHeight,
-                });
+            const designState = useDesignStore.getState();
+            const movedNode = designState.nodes.find((candidate) => candidate.id === nodeId);
 
-                if (resolved && (resolved.x !== desiredPosition.x || resolved.y !== desiredPosition.y)) {
-                  // Update visual position locally only (no persist)
-                  setReactFlowNodes((current) => current.map((n) => n.id === nodeId ? { ...n, position: resolved } : n));
-                  // Notify parent without persist flag so stores/UI update but DB is not written
-                  (onUpdateNodePosition || (() => {}))(nodeId, resolved);
-                }
+            // Prefer live visual position, fall back to design position
+            const liveNode = (reactFlowInstance && typeof (reactFlowInstance as any).getNode === 'function')
+              ? (reactFlowInstance as any).getNode(nodeId)
+              : stableRefs.current.reactFlowNodes.find((n) => n.id === nodeId);
+
+            const hasValidLivePosition = liveNode && Number.isFinite(liveNode.position?.x) && Number.isFinite(liveNode.position?.y);
+            const designPositionValid = movedNode && Number.isFinite(movedNode.position?.x) && Number.isFinite(movedNode.position?.y);
+            const desiredPosition = hasValidLivePosition ? liveNode.position : (designPositionValid ? movedNode.position : undefined);
+            if (!desiredPosition) return;
+
+            // If measured values are still small (minimized), use expanded fallback for collision perimeter
+            const expandedFallback = { width: 384, height: 550 };
+            const subjectWidth = (typeof measuredWidth === 'number' && measuredWidth > 300) ? measuredWidth : expandedFallback.width;
+            const subjectHeight = (typeof measuredHeight === 'number' && measuredHeight > 300) ? measuredHeight : expandedFallback.height;
+
+            // Build live occupied rects from visual nodes
+            const liveNodes: ReactFlowNodeWithMeasuredSize[] = typeof (reactFlowInstance as typeof reactFlowInstance & { getNodes?: () => ReactFlowNodeWithMeasuredSize[] }).getNodes === 'function'
+              ? (reactFlowInstance as typeof reactFlowInstance & { getNodes: () => ReactFlowNodeWithMeasuredSize[] }).getNodes()
+              : (stableRefs.current.reactFlowNodes as ReactFlowNodeWithMeasuredSize[]);
+
+            const occupiedNodeRects = liveNodes.flatMap((candidate) => {
+              if (!Number.isFinite(candidate.position?.x) || !Number.isFinite(candidate.position?.y)) return [];
+              return [{
+                nodeId: candidate.id,
+                instanceId: candidate.data?.agentInstance?.id,
+                position: candidate.position,
+                workflowId: candidate.data?.workflowId ?? candidate.data?.agentInstance?.workflowId ?? workflowId ?? null,
+                width: candidate.measured?.width ?? candidate.width,
+                height: candidate.measured?.height ?? candidate.height,
+              }];
+            });
+
+            // Diagnostic trace for QA: record perimeter, occupied rects and desired position
+            try {
+              const globalWindow: any = typeof window !== 'undefined' ? window : {};
+              globalWindow.__ARC_RESTORE_LOG__ = globalWindow.__ARC_RESTORE_LOG__ || [];
+              const trace: any = {
+                occurredAt: new Date().toISOString(),
+                nodeId,
+                desiredPosition,
+                subjectSize: { width: subjectWidth, height: subjectHeight },
+                occupiedCount: occupiedNodeRects.length,
+                occupiedSample: occupiedNodeRects.slice(0, 8),
+                workflowId,
+                resolved: null,
+                applied: false,
+              };
+              globalWindow.__ARC_RESTORE_LOG__.push(trace);
+
+              // Ask placement util for a non-overlapping position using expanded subject size
+              const resolved = findCollisionFreeWorkflowNodePosition({
+              nodeId,
+              instanceId: movedNode?.data?.agentInstance?.id,
+              currentPosition: movedNode?.position,
+              desiredPosition,
+              workflowId,
+              nodes: designState.nodes,
+              agentInstances: designState.agentInstances,
+              occupiedNodeRects,
+              subjectSize: { width: subjectWidth, height: subjectHeight },
+              maxSearchRadius: 24,
+            });
+              if (resolved && (resolved.x !== desiredPosition.x || resolved.y !== desiredPosition.y)) {
+                setReactFlowNodes((current) => current.map((n) => n.id === nodeId ? { ...n, position: resolved } : n));
+                (onUpdateNodePosition || (() => {}))(nodeId, resolved, { persist: false } as any);
+                trace.resolved = resolved;
+                trace.applied = true;
+              } else {
+                trace.resolved = resolved;
+                trace.applied = false;
               }
+              // eslint-disable-next-line no-console
+              console.info('[WorkflowCanvas][restore-trace]', trace);
+            } catch (traceErr) {
+              // eslint-disable-next-line no-console
+              console.warn('[WorkflowCanvas] failed to record/emit restore trace', traceErr);
             }
           } catch (err) {
-            // swallow measurement errors
             // eslint-disable-next-line no-console
-            console.warn('[WorkflowCanvas] failed to re-measure node after toggle minimize:', err);
+            console.warn('[WorkflowCanvas] perimeter-check/restore correction failed:', err);
           }
-        }, 120); // small delay for CSS transitions
+        }));
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[WorkflowCanvas] onToggleNodeMinimize wrapper error:', err);
