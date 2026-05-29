@@ -1,5 +1,8 @@
 # Plan d'implementation technique - refonte native `web_fetch_py`
 
+> STATUS: ON HOLD — Ce plan est mis en attente. Priorité suivante: `Guides/TODO/MEDIA/PLAN_CORRECTIF_FRONTEND_TESTS_POST_MEDIA.md`.
+> Ne pas commencer l'implémentation du Lot 2B tant que l'alignement sur le plan correctif frontend n'est pas confirmé.
+
 ## 1. Qualification du chantier
 
 - **Categorie concernee**: **fonction native applicative**
@@ -898,6 +901,58 @@ Implementer la refonte selon l'ordre suivant:
 4. http client
 5. extraction pipeline
 6. artefacts
+
+---
+
+## Lot 2B — Implémentation technique (Phase B)
+
+**Objectif:** Finaliser l'intégration native `web_fetch_py` avec une implémentation robuste et extensible : exécution sandboxée, gestion d'artefacts, sanitisation de `privateContext`, stratégie de provisionnement, et compatibilité non-régressive.
+
+**Principes architecturaux:**
+- **Service Layer (Dependency Inversion):** `WebFetchService` expose une interface `IWebFetchService` et délègue aux `RunnerStrategy` (Strategy Pattern) pour l'exécution native vs fallback Docker.
+- **Repository Pattern:** `ArtifactRepository` pour persister/chercher artefacts (`media_references`, `user_tool_runs`).
+- **Orchestrator (Single Responsibility):** `ExecutionOrchestrator` coordonne provision, run, post-processing — aucune logique métier d'extraction dans les routes.
+- **Factory + Strategy:** `RunnerFactory` choisit `NativeRunner` ou `DockerRunner` selon feature-flag / provisioning state.
+- **Validation & Security (Decorator):** `UrlValidationDecorator` et `PrivateContextSanitizer` enveloppent l'appel pour valider SSRF et supprimer secrets.
+
+**Modules / fichiers à créer/modifier (impact minimal, listés par priorité):**
+- `backend/src/services/webFetchService.ts` — implémente `IWebFetchService`, orchestration des runners, gestion de timeouts/retries.
+- `backend/src/runners/nativeRunner.ts` — wrapper de `python` tool invocation, streaming stdout -> parser, respect `privateContext`.
+- `backend/src/runners/dockerRunner.ts` — fallback existant (réutiliser `ExecutionOrchestrator` patterns).
+- `backend/src/repositories/artifactRepository.ts` — persistance des artefacts, indexation et lifecycle (TTL éventuel).
+- `backend/src/controllers/sandbox.routes.ts` — adaptateurs pour `privateContext` et feature-flagging, leverage `WebFetchService`.
+- `backend/src/services/urlValidator.ts` — encapsule règles SSRF (initial + final redirect check).
+- `backend/src/__tests__/*` — tests unitaires et TNR demandés plus haut.
+
+**Tâches détaillées (ordre recommandé):**
+1. Définir les interfaces `IWebFetchService`, `IRunner` et `IArtifactRepository` dans `types/`.
+2. Implémenter `NativeRunner` minimal qui exécute le binaire Python whitelisté, transmet `privateContext` via stdin (non loggé), lit stdout JSON, et écrit artefacts temporaires.
+3. Ajouter `UrlValidationDecorator` autour du runner pour valider URL initiale + final redirect (HEAD suivi jusqu'à final) — échouer avant exécution si non-allowed.
+4. Implémenter `ArtifactRepository` et tests pour persister `output/web_fetch/*` en DB via `media_references`.
+5. Mettre à jour `ExecutionOrchestrator` pour appeler `WebFetchService.run(toolSelection, privateContext)` et centraliser post-processing/artefacts.
+6. Ajouter tests TNR et d'intégration (voir §15) — couvrir provisioning, route sandbox, orchestrateur et non-fuite de `privateContext`.
+7. Feature-flag `native_web_fetch` et rollout progressif (beta users) — garder `DockerRunner` comme fallback.
+
+**Sécurité & non-régression:**
+- Ne jamais sérialiser ni logger `privateContext` — utiliser `traceId` pour corrélation uniquement.
+- Valider les URL initiale + finale (no internal IPs, localhost, 127.0.0.1; block redirects to internal hosts).
+- Timeouts stricts et limites de taille d'artefact (reject > X MB).
+- Tests automatiques TNR obligatoires avant merge.
+
+**Déploiement & rollback:**
+- Merge behind feature-flag.
+- Déployer en canary sur API instances non critiques.
+- Monitorer `user_tool_runs` pour augmentation d'erreurs; rollback si régression.
+
+**Critères d'acceptation Lot 2B:**
+- `WebFetchService` implémente les interfaces et passe tous les tests unitaires.
+- Les runs natifs écrivent les artefacts attendus et `user_tool_runs` est correctement mis à jour.
+- Aucune fuite de `privateContext` dans les outputs/journaux.
+- Feature-flag activable/désactivable sans migration de schéma.
+
+---
+
+Ajoute ces tâches au backlog et je commence l'implémentation du Lot 2B lorsque tu me donnes le feu vert (je peux démarrer par les interfaces et `NativeRunner`).
 7. seed + provisioning
 8. integration sandbox
 9. TNR final

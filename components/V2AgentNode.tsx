@@ -1681,18 +1681,20 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
                       backdrop-blur-sm relative z-10
                       hover:from-gray-800/90 hover:via-gray-700/70 hover:to-gray-800/90
                       transition-all duration-300">
-        <div className="flex items-center space-x-2">
-          <div className={`w-2 h-2 rounded-full shadow-lg transition-all duration-200 ${isLoading
-            ? 'bg-yellow-400 animate-pulse shadow-yellow-400/60'
-            : 'bg-green-400 shadow-green-400/60 group-hover:shadow-green-400/80'
-            }`}></div>
-          <h3 className="font-semibold text-white truncate 
-                         group-hover:text-cyan-100 transition-colors duration-200">
-            {displayName}
-          </h3>
-        </div>
+        <div className="flex items-center space-x-2 min-w-0">
+            <div className={`w-2 h-2 rounded-full shadow-lg transition-all duration-200 ${isLoading
+              ? 'bg-yellow-400 animate-pulse shadow-yellow-400/60'
+              : 'bg-green-400 shadow-green-400/60 group-hover:shadow-green-400/80'
+              }`}></div>
+            <div className="min-w-0">
+              <h3 className="font-semibold text-white truncate min-w-0
+                           group-hover:text-cyan-100 transition-colors duration-200">
+                {displayName}
+              </h3>
+            </div>
+          </div>
 
-        <div className="flex items-center space-x-1">
+          <div className="flex items-center space-x-1 flex-none">
           <Button
             variant="ghost"
             className="p-1 h-6 w-6 text-gray-400 hover:text-blue-400 

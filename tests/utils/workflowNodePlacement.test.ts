@@ -1,29 +1,6 @@
 import type { AgentInstance, V2WorkflowNode } from '../../types';
 import { findAvailableWorkflowNodePosition, findCollisionFreeWorkflowNodePosition } from '../../utils/workflowNodePlacement';
-
-const buildNode = (id: string, workflowId: string, position: { x: number; y: number }): V2WorkflowNode => ({
-    id,
-    type: 'agent',
-    position,
-    data: {
-        robotId: 'archi' as any,
-        label: id,
-        workflowId,
-        isMinimized: false,
-        isMaximized: false,
-        agentInstance: {
-            id: id.replace('node-', 'instance-'),
-            prototypeId: 'prototype-1',
-            name: id,
-            workflowId,
-            position,
-            isMinimized: false,
-            isMaximized: false,
-            configuration_json: null,
-        } as AgentInstance,
-        agent: null,
-    },
-});
+import { buildNode, buildAgentInstance } from './builders/WorkflowNodeBuilder';
 
 describe('workflowNodePlacement', () => {
     it('ignores nodes from other workflows when choosing the next slot', () => {
@@ -101,5 +78,48 @@ describe('workflowNodePlacement', () => {
         });
 
         expect(position).toEqual({ x: 428, y: 20 });
+    });
+
+    it('treats edge-to-edge contact as a collision and resolves with directional gap', () => {
+        const position = findCollisionFreeWorkflowNodePosition({
+            workflowId: 'workflow-1',
+            nodeId: 'node-2',
+            instanceId: 'instance-2',
+            currentPosition: { x: 440, y: 20 },
+            desiredPosition: { x: 380, y: 20 }, // edge-to-edge against node at x=20 (width=360)
+            nodes: [
+                buildNode('node-1', 'workflow-1', { x: 20, y: 20 }),
+                buildNode('node-2', 'workflow-1', { x: 440, y: 20 }),
+            ],
+            agentInstances: [
+                buildAgentInstance('instance-1', 'workflow-1', { x: 20, y: 20 }),
+                buildAgentInstance('instance-2', 'workflow-1', { x: 440, y: 20 }),
+            ],
+        });
+
+        // subjectSize undefined => gap = round(360/8)=45 -> expected x = 20 + 360 + 45 = 425
+        expect(position).toEqual({ x: 425, y: 20 });
+    });
+
+    it('allows a small proximity gap that does not overlap edge-to-edge', () => {
+        const desired = { x: 390, y: 20 }; // 10px gap from occupiedRight=380
+
+        const position = findCollisionFreeWorkflowNodePosition({
+            workflowId: 'workflow-1',
+            nodeId: 'node-2',
+            instanceId: 'instance-2',
+            currentPosition: { x: 440, y: 20 },
+            desiredPosition: desired,
+            nodes: [
+                buildNode('node-1', 'workflow-1', { x: 20, y: 20 }),
+                buildNode('node-2', 'workflow-1', { x: 440, y: 20 }),
+            ],
+            agentInstances: [
+                buildAgentInstance('instance-1', 'workflow-1', { x: 20, y: 20 }),
+                buildAgentInstance('instance-2', 'workflow-1', { x: 440, y: 20 }),
+            ],
+        });
+
+        expect(position).toEqual(desired);
     });
 });
