@@ -1,13 +1,12 @@
 import React, { createContext, useContext } from 'react';
-import { Agent, AgentInstance } from '../types';
+import { Agent, AgentInstance, NodePositionUpdateOptions } from '../types';
 
 interface WorkflowCanvasContextType {
   onEditPrototype?: (nodeId: string) => void;
   navigationHandler?: (robotId: string, path: string) => void;
   onDeleteNode?: (nodeId: string) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
-  onToggleNodeMaximize?: (nodeId: string) => void;
-  onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }) => void;
+  onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;

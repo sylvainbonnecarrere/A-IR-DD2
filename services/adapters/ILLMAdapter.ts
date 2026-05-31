@@ -10,7 +10,7 @@
 
 import type { LLMProvider, ChatMessage, OutputConfig } from '../../types';
 import type { ToolRegistryReadModel } from '../../types/function.types';
-import type { ParsedToolCall } from '../llm/ToolCallParser';
+import type { ParsedToolCall, ToolCallParseTrace } from '../llm/ToolCallParser';
 
 // ─── Value objects ───────────────────────────────────────────────────────────
 
@@ -23,6 +23,14 @@ export interface LLMRequest {
     systemPrompt?: string;
     /** Optional output constraints (JSON schema, format, …). */
     outputConfig?: OutputConfig;
+}
+
+export interface LocalLLMTerminalError {
+    code: string;
+    message: string;
+    retryable: boolean;
+    provider: LLMProvider;
+    model: string;
 }
 
 export interface LLMResponse {
@@ -38,6 +46,10 @@ export interface LLMResponse {
     finishReason: 'stop' | 'tool_calls' | 'length' | 'error';
     /** Optional raw text response (before tool call extraction). */
     rawContent?: string;
+    /** Structured terminal error for local providers. */
+    terminalError?: LocalLLMTerminalError;
+    /** Structured parsing trace for emulated local tool-calling. */
+    parseTrace?: ToolCallParseTrace;
 }
 
 // ─── Adapter contract ────────────────────────────────────────────────────────

@@ -187,7 +187,7 @@ enabled: {  // au lieu de isEnabled
 
 1. **Supprimer les collections en double** :
 ```bash
-docker exec -it a-ir-dd2-mongodb mongosh -u admin -p SecurePassword123! --authenticationDatabase admin
+docker exec -it a-ir-dd2-mongodb mongosh -u "$MONGO_USER" -p "$MONGO_PASSWORD" --authenticationDatabase admin
 use a-ir-dd2-dev
 db.llmconfigs.drop()
 db.agentprototypes.drop()

@@ -56,19 +56,26 @@ export interface LLMConfig {
   needsReconfig?: boolean; // True when backend decryption failed (encryption key mismatch)
 }
 
+export type HistoryLimitKey = 'char' | 'word' | 'token' | 'sentence' | 'message';
+
+export type HistoryLimitValues = Record<HistoryLimitKey, number>;
+
+export type HistoryLimitEnabledMap = Record<HistoryLimitKey, boolean>;
+
 export interface HistoryConfig {
   enabled: boolean;
   llmProvider: LLMProvider;
   model: string;
   role: string;
   systemPrompt: string;
-  limits: {
-    char: number;
-    word: number;
-    token: number;
-    sentence: number;
-    message: number;
-  };
+  limits: HistoryLimitValues;
+  enabledLimits: HistoryLimitEnabledMap;
+}
+
+export interface InvisibleHistorySummaryState {
+  summary: string;
+  coveredThroughMessageId: string;
+  updatedAt: string;
 }
 
 export interface Tool {
@@ -88,11 +95,216 @@ export interface OutputConfig {
   schema?: object;
 }
 
+export type WebSearchEngine = 'duckduckgo.com' | 'bing.com' | 'google.com' | 'baidu.com' | 'qwant.com';
+
+export type WebSearchRerankStrategy = 'Fast' | 'Deep';
+
+export const DEFAULT_WEB_SEARCH_MAX_CONTEXT_TOKENS = 4000;
+
+export interface WebSearchParams {
+  nb_request_transformation: number;
+  request_list: boolean;
+  max_uses: number;
+  cross_lingual_search: boolean;
+  web_engine_search: boolean;
+  web_engine: WebSearchEngine;
+  web_engine_nb_result_select: number;
+  dig_snippet: boolean;
+  allowed_domains: string[];
+  query_transformation: string;
+  reranking_prompt: string;
+  relevance_threshold: number;
+  rerank_strategy: WebSearchRerankStrategy;
+  max_context_tokens?: number;
+}
+
+export const defaultWebSearchQueryTransformationPrompt = `Transforme la demande utilisateur en requête web concise.
+Retourne uniquement une ligne de mots-clés utiles, sans phrase ni commentaire.
+Résous date, lieu et spécialisation à partir du contexte si disponible.
+CONTEXTE={{system_context}}
+INPUT={{user_query}}`;
+
+export const defaultWebSearchRerankingPrompt = `# ROLE
+Tu es le "Information Juror", un expert en analyse de pertinence et en vérification de faits. Ta mission est de classer des sources web en fonction de leur utilité réelle pour répondre à une intention spécifique.
+
+# PARAMÈTRES D'ENTRÉE
+- INTENTION_INITIALE : {{user_query}}
+
+# CRITÈRES D'ÉVALUATION (Score sur 10)
+1. ADÉQUATION : La source contient-elle une réponse directe ou des données pivots pour l'intention ?
+2. FRAÎCHEUR : La date de la source est-elle cohérente avec la temporalité de la demande ?
+3. DENSITÉ : Ratio informations utiles / bruit publicitaire ou remplissage.
+
+# FORMAT DE SORTIE (STRICT JSON)
+{
+  "relevance_score": [0-10],
+  "reasoning": "Explication en 10 mots max",
+  "critical_fragment": "Le passage exact contenant l'info clé"
+}`;
+
+export const defaultWebSearchParams: WebSearchParams = {
+  nb_request_transformation: 1,
+  request_list: false,
+  max_uses: 5,
+  cross_lingual_search: false,
+  web_engine_search: true,
+  web_engine: 'duckduckgo.com',
+  web_engine_nb_result_select: 3,
+  dig_snippet: false,
+  allowed_domains: [],
+  query_transformation: defaultWebSearchQueryTransformationPrompt,
+  reranking_prompt: defaultWebSearchRerankingPrompt,
+  relevance_threshold: 7,
+  rerank_strategy: 'Fast',
+};
+
 /**
- * Configuration granulaire de persistance par agent
- * Définit ce qui est sauvegardé pour chaque agent individuellement
+ * Configuration granulaire de persistance par agent.
+ * `workspace` est le vocabulaire produit cible.
+ * `local` reste un alias legacy accepte uniquement aux bords de compatibilite.
  */
-export type MediaStorageType = 'db' | 'local' | 'cloud';
+export type MediaStorageType = 'db' | 'workspace' | 'cloud';
+export type LegacyMediaStorageType = 'local';
+export type AcceptedMediaStorageType = MediaStorageType | LegacyMediaStorageType;
+
+export function normalizeMediaStorageType(
+  value?: AcceptedMediaStorageType | 'database' | null,
+): MediaStorageType {
+  switch (value) {
+    case 'workspace':
+    case 'cloud':
+    case 'db':
+      return value;
+    case 'local':
+      return 'workspace';
+    case 'database':
+    default:
+      return 'db';
+  }
+}
+
+export function toPersistedMediaStorageType(
+  value?: AcceptedMediaStorageType | 'database' | null,
+): 'db' | 'local' | 'cloud' {
+  const normalized = normalizeMediaStorageType(value);
+
+  switch (normalized) {
+    case 'workspace':
+      return 'local';
+    case 'cloud':
+      return 'cloud';
+    case 'db':
+    default:
+      return 'db';
+  }
+}
+
+export function normalizePersistenceConfig(
+  config?: Partial<PersistenceConfig> | null,
+): PersistenceConfig {
+  const {
+    cloudConnectionProfileId: rawCloudConnectionProfileId,
+    cloudStorageConfig: rawCloudStorageConfig,
+    ...remainingConfig
+  } = (config || {}) as Partial<PersistenceConfig> & {
+    cloudConnectionProfileId?: string | null;
+    cloudStorageConfig?: CloudStorageConfig | null;
+  };
+  const saveMedia = config?.saveMedia ?? defaultPersistenceConfig.saveMedia;
+  const mediaStorage = normalizeMediaStorageType(config?.mediaStorage as any);
+  const allowWorkspaceWrite = !saveMedia
+    ? false
+    : mediaStorage === 'workspace'
+      ? true
+      : (config?.allowWorkspaceWrite ?? true);
+  const cloudConnectionProfileId = typeof rawCloudConnectionProfileId === 'string'
+    && rawCloudConnectionProfileId.trim().length > 0
+      ? rawCloudConnectionProfileId
+      : undefined;
+  const cloudStorageConfig = rawCloudStorageConfig
+    && typeof rawCloudStorageConfig === 'object'
+    && typeof rawCloudStorageConfig.provider === 'string'
+      ? rawCloudStorageConfig
+      : undefined;
+
+  return {
+    ...defaultPersistenceConfig,
+    ...remainingConfig,
+    saveMedia,
+    mediaStorage,
+    allowWorkspaceWrite,
+    ...(cloudConnectionProfileId ? { cloudConnectionProfileId } : {}),
+    ...(cloudStorageConfig ? { cloudStorageConfig } : {}),
+  };
+}
+
+export interface PersistenceConfigApiPayload {
+  saveChat?: boolean;
+  saveChatHistory?: boolean;
+  saveErrors?: boolean;
+  saveHistorySummary?: boolean;
+  saveLinks?: boolean;
+  saveTasks?: boolean;
+  saveTaskExecution?: boolean;
+  saveMedia?: boolean;
+  mediaStorage?: MediaStorageType;
+  allowWorkspaceWrite?: boolean;
+  cloudConnectionProfileId?: string;
+  retentionDays?: number;
+}
+
+export function sanitizePersistenceConfigForApi(
+  config?: (Partial<PersistenceConfig> & {
+    saveChatHistory?: boolean | null;
+    saveTaskExecution?: boolean | null;
+    retentionDays?: number | null;
+    cloudConnectionProfileId?: string | null;
+    cloudStorageConfig?: CloudStorageConfig | null;
+  }) | null,
+): PersistenceConfigApiPayload | undefined {
+  if (!config) {
+    return undefined;
+  }
+
+  const normalized = normalizePersistenceConfig(config);
+  const retentionDays = typeof config.retentionDays === 'number'
+    && Number.isInteger(config.retentionDays)
+    && config.retentionDays > 0
+      ? config.retentionDays
+      : undefined;
+
+  return {
+    saveChat: normalized.saveChat,
+    ...(typeof config.saveChatHistory === 'boolean' ? { saveChatHistory: config.saveChatHistory } : {}),
+    saveErrors: normalized.saveErrors,
+    saveHistorySummary: normalized.saveHistorySummary,
+    saveLinks: normalized.saveLinks,
+    saveTasks: normalized.saveTasks,
+    ...(typeof config.saveTaskExecution === 'boolean' ? { saveTaskExecution: config.saveTaskExecution } : {}),
+    saveMedia: normalized.saveMedia,
+    mediaStorage: normalized.mediaStorage,
+    allowWorkspaceWrite: normalized.allowWorkspaceWrite,
+    ...(typeof normalized.cloudConnectionProfileId === 'string' ? { cloudConnectionProfileId: normalized.cloudConnectionProfileId } : {}),
+    ...(retentionDays !== undefined ? { retentionDays } : {}),
+  };
+}
+
+export function summarizePersistenceConfig(
+  config?: Partial<PersistenceConfig> | null,
+) {
+  const normalized = normalizePersistenceConfig(config);
+
+  return {
+    saveChat: normalized.saveChat,
+    saveErrors: normalized.saveErrors,
+    saveMedia: normalized.saveMedia,
+    mediaStorage: normalized.mediaStorage,
+    allowWorkspaceWrite: normalized.allowWorkspaceWrite,
+    cloudConnectionProfileId: normalized.cloudConnectionProfileId ?? null,
+    hasCloudStorageConfig: !!normalized.cloudStorageConfig,
+    cloudProvider: normalized.cloudStorageConfig?.provider ?? null,
+  };
+}
 
 /**
  * Types pour le stockage cloud (S3/GCS)
@@ -106,6 +318,8 @@ export interface S3StorageConfig {
   region: string;
   bucketName: string;
   endpoint?: string;             // Pour MinIO / LocalStack
+  forcePathStyle?: boolean;
+  keyPrefix?: string;
 }
 
 /** Configuration Google Cloud Storage */
@@ -113,6 +327,8 @@ export interface GCSStorageConfig {
   projectId: string;
   bucketName: string;
   serviceAccountKey?: string;    // JSON stringifié, chiffré backend
+  location?: string;
+  keyPrefix?: string;
 }
 
 /** Configuration cloud complète (discriminated union) */
@@ -120,6 +336,55 @@ export interface CloudStorageConfig {
   provider: CloudProvider;
   s3?: S3StorageConfig;
   gcs?: GCSStorageConfig;
+}
+
+export type CloudConnectionStatusState = 'configured' | 'invalid' | 'missing_secret' | 'never_tested' | 'disabled';
+
+export interface CloudConnectionProfileStatus {
+  state: CloudConnectionStatusState;
+  lastValidatedAt?: string | null;
+  lastErrorCode?: string | null;
+  lastValidationMessage?: string | null;
+}
+
+export interface CloudConnectionProfileTarget {
+  bucketName: string;
+  region?: string | null;
+  endpoint?: string | null;
+  forcePathStyle?: boolean;
+  keyPrefix?: string | null;
+  projectId?: string | null;
+  location?: string | null;
+}
+
+export interface CloudConnectionProfileSecretSummary {
+  accessKeyIdMasked?: string | null;
+  secretAccessKeyPresent?: boolean;
+  serviceAccountEmailMasked?: string | null;
+  serviceAccountKeyPresent?: boolean;
+}
+
+export interface CloudConnectionProfile {
+  id: string;
+  displayName: string;
+  provider: CloudProvider;
+  enabled: boolean;
+  hasSecretMaterial: boolean;
+  target: CloudConnectionProfileTarget;
+  status: CloudConnectionProfileStatus;
+  secretSummary: CloudConnectionProfileSecretSummary;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CloudConnectionProfileSecretInput {
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  serviceAccountKey?: string;
+}
+
+export interface CloudConnectionProfileDraft extends CloudConnectionProfile {
+  secretInput?: CloudConnectionProfileSecretInput;
 }
 
 /** Régions AWS S3 disponibles */
@@ -144,7 +409,17 @@ export interface PersistenceConfig {
   saveTasks: boolean;             // Défaut: false - Sauvegarder les tâches assignées
   saveMedia: boolean;             // Default: false
   mediaStorage: MediaStorageType; // Défaut: 'db' - Mode de stockage des médias
+  allowWorkspaceWrite: boolean;   // Autorise aussi une publication workspace si demandée
+  cloudConnectionProfileId?: string;
   cloudStorageConfig?: CloudStorageConfig;  // Cloud storage config
+}
+
+export type AgentDeletionMediaPolicy = 'delete_media' | 'orphan_media';
+
+export interface AgentBatchDeleteResult {
+  success: boolean;
+  error?: string;
+  failedInstanceIds?: string[];
 }
 
 export const defaultPersistenceConfig: PersistenceConfig = {
@@ -154,7 +429,8 @@ export const defaultPersistenceConfig: PersistenceConfig = {
   saveLinks: false,
   saveTasks: false,
   saveMedia: false,               // Disabled by default
-  mediaStorage: 'db'
+  mediaStorage: 'db',
+  allowWorkspaceWrite: false,
 };
 
 export interface ToolVersionRef {
@@ -181,6 +457,7 @@ export interface Agent {
   functionIds?: string[];               // Alias legacy transitoire avant convergence complète sur toolSelections
   toolSelections?: ToolSelection[];     // Références canoniques versionnées vers user_tools
   outputConfig?: OutputConfig;
+  webSearchParams?: WebSearchParams;
   persistenceConfig?: PersistenceConfig;
   localLLMProfileId?: string;            // Only set when llmProvider === LLMProvider.LMStudio
   // V2 Governance: Robot creator validation
@@ -190,6 +467,8 @@ export interface Agent {
   // V2 Workflow: Optional custom instance name when added to workflow
   instanceName?: string;
 }
+
+export type AgentDraft = Omit<Agent, 'id' | 'creator_id' | 'created_at' | 'updated_at'>;
 
 /**
  * Local LLM Profile - represents one local LLM server instance
@@ -272,6 +551,7 @@ export interface AgentInstance {
     systemPrompt: string;
     tools: Tool[];
     outputConfig?: OutputConfig;
+    webSearchParams?: WebSearchParams;
     capabilities?: LLMCapability[];
     historyConfig?: HistoryConfig;
     localLLMProfileId?: string;  // Which local LLM profile is used for this instance
@@ -346,6 +626,11 @@ export interface ToolCallRecord {
   runner?: string;
   exitCode?: number;
   failureKind?: string;
+  errorCode?: string;
+  errorSubsystem?: string;
+  retryable?: boolean;
+  deterministicFailure?: boolean;
+  duplicateSuppressed?: boolean;
   persistedRunStatus?: 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out';
   persistedRunUpdatedAt?: string;
   artifacts?: Array<{
@@ -392,6 +677,19 @@ export interface ChatMessage {
   toolCallRecord?: ToolCallRecord;
 }
 
+export interface PendingNodeAttachment {
+  id: string;
+  file?: File;
+  fileName: string;
+  mimeType: string;
+  base64Content: string;
+  textContent?: string;
+  origin: 'llm_file_upload';
+  createdAt: Date;
+  draftPersisted?: boolean;
+  persistedAt?: Date;
+}
+
 export interface WorkflowNode {
   id: string;
   agent: Agent;
@@ -425,6 +723,10 @@ export interface RobotCapability {
   name: string;
   description: string;
   requiresAuth?: boolean;
+}
+
+export interface NodePositionUpdateOptions {
+  persist?: boolean;
 }
 
 // V2 React Flow Types - Architecture Prototype vs Instance

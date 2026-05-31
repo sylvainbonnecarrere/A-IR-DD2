@@ -6,22 +6,50 @@ import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../contexts/NotificationContext';
-import { AgentInstance, LLMProvider, Tool, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, PersistenceConfig, defaultPersistenceConfig, LocalLLMProfile, ToolSelection } from '../../types';
+import { AgentInstance, HistoryLimitKey, LLMProvider, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, PersistenceConfig, defaultPersistenceConfig, LocalLLMProfile, ToolSelection, defaultWebSearchParams, normalizePersistenceConfig, sanitizePersistenceConfigForApi } from '../../types';
 import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels, getCapabilitiesForLLM } from '../../llmModels';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
-import { initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
+import { createDefaultHistoryConfig, initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
 import { API_BASE_URL } from '../../config/api.config';
 import { buildGovernanceHeaders } from '../../utils/governanceHeaders';
 import { isLocalProvider, isLMStudio } from '../../utils/llmProviderUtils';
 import * as localLLMProfileService from '../../services/localLLMProfileService';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
 import { FunctionSelector } from '../FunctionSelector';
+import { LLMNativeFunctionsPanel } from '../LLMNativeFunctionsPanel';
 import { useFunctionStore } from '../../stores/useFunctionStore';
-import { buildToolSelectionsFromFunctions, deriveSelectedToolIds } from '../../services/toolSelectionResolver';
+import { deriveSelectedToolIds, normalizeToolSelections } from '../../services/toolSelectionResolver';
+import { HISTORY_LIMIT_KEYS } from '../../services/historySynthesisPolicy';
+import { getDisplayableNativeFunctions } from '../../utils/llmNativeFunctionCatalog';
+import { buildCanonicalAgentInstanceConfiguration, createDefaultAgentInstanceConfiguration, type CanonicalAgentInstanceConfiguration } from '../../services/agentContractAdapters';
 
 type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence' | 'links' | 'tasks' | 'logs' | 'errors';
 
 const EMPTY_LOCAL_LLM_PROFILES: LocalLLMProfile[] = [];
+const DEFAULT_HISTORY_CONFIG = createDefaultHistoryConfig();
+const getHistoryLimitLabelKey = (limitKey: HistoryLimitKey) => `history_limit_${limitKey}`;
+
+function serializeToolSelection(selection: ToolSelection): string {
+    const versionRef = selection.versionRef ?? {};
+
+    return JSON.stringify({
+        toolId: selection.toolId,
+        versionTag: versionRef.versionTag ?? null,
+        versionNumber: versionRef.versionNumber ?? null,
+        workspaceId: versionRef.workspaceId ?? null,
+    });
+}
+
+function areToolSelectionListsEquivalent(left: ToolSelection[], right: ToolSelection[]): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+
+    const normalizedLeft = left.map(serializeToolSelection).sort();
+    const normalizedRight = right.map(serializeToolSelection).sort();
+
+    return normalizedLeft.every((entry, index) => entry === normalizedRight[index]);
+}
 
 /**
  * Modal de Configuration Enrichie par Instance
@@ -46,31 +74,16 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
     const [editedName, setEditedName] = useState('');
     const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
-    // J6: Function Inheritance
-    const [inheritFromPrototype, setInheritFromPrototype] = useState(true);
-    const [overrideFunctionIds, setOverrideFunctionIds] = useState<string[]>([]);
+    const [selectedApplicationToolSelections, setSelectedApplicationToolSelections] = useState<ToolSelection[]>([]);
     const availableFunctions = useFunctionStore(state => state.functions);
 
     // Récupérer l'instance et le prototype (peut être null)
     const resolved = configModalInstanceId ? getResolvedInstance(configModalInstanceId) : null;
 
     // Configuration initiale (utilisée uniquement pour l'initialisation du useState)
-    const config = {
-        role: '',
-        model: '',
-        llmProvider: LLMProvider.OpenAI,
-        systemPrompt: '',
-        tools: [],
-        position: { x: 0, y: 0 },
-        links: [],
-        tasks: [],
-        logs: [],
-        errors: []
-    };
-
-    const [editedConfig, setEditedConfig] = useState(config);
+    const [editedConfig, setEditedConfig] = useState<CanonicalAgentInstanceConfiguration>(createDefaultAgentInstanceConfiguration());
     
-    const [editedPersistenceConfig, setEditedPersistenceConfig] = useState<PersistenceConfig>(defaultPersistenceConfig);
+    const [editedPersistenceConfig, setEditedPersistenceConfig] = useState<PersistenceConfig>(normalizePersistenceConfig(defaultPersistenceConfig));
 
     // Synchronise editedConfig and editedName when instance changes
     useEffect(() => {
@@ -109,15 +122,20 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             ? (localLLMProfiles.find(p => p.id === resolvedLocalLLMProfileId)?.detectedModel || '')
             : rawModel;
 
-        const currentConfig = {
+        const hydratedConfig = buildCanonicalAgentInstanceConfiguration(currentResolved.instance, prototypeConfig);
+
+        const currentConfig: CanonicalAgentInstanceConfiguration = {
+            ...createDefaultAgentInstanceConfiguration(),
+            ...hydratedConfig,
             role: instanceConfig?.role || prototypeConfig.role || '',
             model: resolvedModel,
             llmProvider: resolvedLLMProvider,
             systemPrompt: instanceConfig?.systemPrompt || prototypeConfig.systemPrompt || '',
-            tools: JSON.parse(JSON.stringify(instanceConfig?.tools || prototypeConfig.tools || [])),
+            tools: JSON.parse(JSON.stringify(hydratedConfig.tools)),
             outputConfig: instanceConfig?.outputConfig
                 ? JSON.parse(JSON.stringify(instanceConfig.outputConfig))
                 : (prototypeConfig.outputConfig ? JSON.parse(JSON.stringify(prototypeConfig.outputConfig)) : undefined),
+            webSearchParams: JSON.parse(JSON.stringify(instanceConfig?.webSearchParams || prototypeConfig.webSearchParams || defaultWebSearchParams)),
             capabilities: instanceConfig?.capabilities
                 ? [...instanceConfig.capabilities]
                 : (prototypeConfig.capabilities ? [...prototypeConfig.capabilities] : []),
@@ -125,6 +143,8 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
             historyConfig: historyConfigValue,
             localLLMProfileId: resolvedLocalLLMProfileId,
             position: currentResolved.instance.position,
+            functionInheritance: instanceConfig?.functionInheritance,
+            toolSelections: hydratedConfig.toolSelections,
             links: instanceConfig?.links || [],
             tasks: instanceConfig?.tasks || [],
             logs: instanceConfig?.logs || [],
@@ -136,42 +156,76 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         
         const instancePersistence = currentResolved.instance.persistenceConfig;
         const prototypePersistence = prototypeConfig.persistenceConfig;
-        setEditedPersistenceConfig({
+        setEditedPersistenceConfig(normalizePersistenceConfig({
             ...defaultPersistenceConfig,
             ...(prototypePersistence || {}),
             ...(instancePersistence || {})
-        });
+        }));
 
-        // J6: Load function inheritance state
         const fi = instanceConfig?.functionInheritance;
-        setInheritFromPrototype(fi?.inheritFromPrototype !== false);
-        setOverrideFunctionIds(deriveSelectedToolIds(fi?.overrideToolSelections, fi?.overrideFunctionIds));
+        const instanceToolSelections = normalizeToolSelections(instanceConfig?.toolSelections, undefined, availableFunctions);
+        const overrideToolSelections = normalizeToolSelections(fi?.overrideToolSelections, fi?.overrideFunctionIds, availableFunctions);
+        const prototypeToolSelections = normalizeToolSelections(currentResolved.prototype.toolSelections, currentResolved.prototype.functionIds, availableFunctions);
+
+        setSelectedApplicationToolSelections(
+            instanceToolSelections.length > 0
+                ? instanceToolSelections
+                : overrideToolSelections.length > 0
+                    ? overrideToolSelections
+                    : prototypeToolSelections
+        );
 
         setHasChanges(false);
-    }, [configModalInstanceId, getResolvedInstance, localLLMProfiles]);
+    }, [availableFunctions, configModalInstanceId, getResolvedInstance, localLLMProfiles]);
 
-    // Recalculate capabilities when LLM provider or model changes
-    // This ensures buttons show/hide correctly when user changes LLM in the modal
+    const prototypeToolSelections = useMemo(() => {
+        if (!resolved) {
+            return [];
+        }
+
+        return normalizeToolSelections(resolved.prototype.toolSelections, resolved.prototype.functionIds, availableFunctions);
+    }, [availableFunctions, resolved]);
+
+    const activeApplicationFunctionCount = selectedApplicationToolSelections.length;
+    const activeNativeProviderFunctions = useMemo(
+        () => getDisplayableNativeFunctions(editedConfig.capabilities, editedConfig.llmProvider),
+        [editedConfig.capabilities, editedConfig.llmProvider],
+    );
+    const availableNativeProviderCapabilities = useMemo(() => {
+        if (!editedConfig.llmProvider || !editedConfig.model) {
+            return [];
+        }
+
+        return getModelCapabilities(editedConfig.llmProvider as LLMProvider, editedConfig.model);
+    }, [editedConfig.llmProvider, editedConfig.model]);
+    const functionTabBadgeCount = activeApplicationFunctionCount + activeNativeProviderFunctions.length;
+
+    // Only initialize capabilities from model defaults when no explicit selection was saved.
+    // Prototype and instance selections must stay authoritative for the Functions tab.
     useEffect(() => {
         if (!editedConfig.llmProvider || !editedConfig.model) return;
+        if (Array.isArray(editedConfig.capabilities) && editedConfig.capabilities.length > 0) return;
         
         const newCapabilities = getCapabilitiesForLLM(
             editedConfig.llmProvider as LLMProvider,
             editedConfig.model
         );
-        
-        // Only update if capabilities actually changed
-        const currentCaps = JSON.stringify([...(editedConfig.capabilities || [])].sort());
-        const newCaps = JSON.stringify([...newCapabilities].sort());
-        
-        if (currentCaps !== newCaps) {
-            setEditedConfig(prev => ({
-                ...prev,
-                capabilities: newCapabilities
-            }));
-            setHasChanges(true);
+
+        if (newCapabilities.length === 0) {
+            return;
         }
-    }, [editedConfig.llmProvider, editedConfig.model]);
+
+        setEditedConfig(prev => {
+            if (Array.isArray(prev.capabilities) && prev.capabilities.length > 0) {
+                return prev;
+            }
+
+            return {
+                ...prev,
+                capabilities: newCapabilities,
+            };
+        });
+    }, [editedConfig.capabilities, editedConfig.llmProvider, editedConfig.model]);
 
     // Early returns APRÈS tous les hooks
     if (!configModalInstanceId) return null;
@@ -201,19 +255,21 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         const enabledProvidersList = llmConfigs
           .filter(c => c.enabled)
           .map(c => c.provider) as any[];
+        const normalizedSelectedApplicationToolSelections = normalizeToolSelections(selectedApplicationToolSelections, undefined, availableFunctions);
+        const inheritsPrototypeApplicationFunctions = areToolSelectionListsEquivalent(
+            normalizedSelectedApplicationToolSelections,
+            prototypeToolSelections,
+        );
         
         const configToSave = {
             ...editedConfig,
             historyConfig: prepareHistoryConfigForSave(editedConfig.historyConfig || {}, enabledProvidersList),
-            // J6: Function inheritance
             functionInheritance: {
-                inheritFromPrototype,
-                overrideFunctionIds: inheritFromPrototype ? [] : overrideFunctionIds,
-                overrideToolSelections: inheritFromPrototype ? [] : buildToolSelectionsFromFunctions(overrideFunctionIds, availableFunctions),
+                inheritFromPrototype: inheritsPrototypeApplicationFunctions,
+                overrideFunctionIds: inheritsPrototypeApplicationFunctions ? [] : deriveSelectedToolIds(normalizedSelectedApplicationToolSelections),
+                overrideToolSelections: inheritsPrototypeApplicationFunctions ? [] : normalizedSelectedApplicationToolSelections,
             },
-            toolSelections: inheritFromPrototype
-                ? (prototype.toolSelections || buildToolSelectionsFromFunctions(prototype.functionIds || [], availableFunctions))
-                : buildToolSelectionsFromFunctions(overrideFunctionIds, availableFunctions),
+            toolSelections: normalizedSelectedApplicationToolSelections,
             // Preserve runtime data (logs, errors, tasks, links)
             logs: instance.configuration_json?.logs || [],
             errors: instance.configuration_json?.errors || [],
@@ -227,6 +283,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         // Sync changes to backend
         if (user && instance.id && accessToken) {
             try {
+                const persistenceConfigForApi = sanitizePersistenceConfigForApi(editedPersistenceConfig);
                 const response = await fetch(`${API_BASE_URL}/api/agent-instances/${instance.id}`, {
                     method: 'PUT',
                     headers: buildGovernanceHeaders(accessToken, {
@@ -235,7 +292,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                     body: JSON.stringify({
                         configuration_json: configToSave,
                         name: editedName,
-                        persistenceConfig: editedPersistenceConfig
+                        persistenceConfig: persistenceConfigForApi
                     })
                 });
 
@@ -338,7 +395,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                     <TabButton
                         active={activeTab === 'fonctions'}
                         onClick={() => setActiveTab('fonctions')}
-                        badge={inheritFromPrototype ? (prototype.functionIds?.length || undefined) : (overrideFunctionIds.length || undefined)}
+                        badge={functionTabBadgeCount || undefined}
                     >
                         {t('agentConfig_tab_functions')}
                     </TabButton>
@@ -412,12 +469,13 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
 
                     {activeTab === 'fonctions' && (
                         <FunctionsTab
-                            inheritFromPrototype={inheritFromPrototype}
-                            overrideFunctionIds={overrideFunctionIds}
-                            prototypeFunctionIds={prototype.functionIds || []}
-                            onInheritChange={(val) => { setInheritFromPrototype(val); setHasChanges(true); }}
-                            onOverrideChange={(ids) => { setOverrideFunctionIds(ids); setHasChanges(true); }}
-                            t={t}
+                            selectedApplicationToolSelections={selectedApplicationToolSelections}
+                            llmProvider={editedConfig.llmProvider}
+                            model={editedConfig.model}
+                            capabilities={editedConfig.capabilities || []}
+                            availableCapabilities={availableNativeProviderCapabilities}
+                            onApplicationToolsChange={(toolSelections) => { setSelectedApplicationToolSelections(toolSelections); setHasChanges(true); }}
+                            onProviderCapabilitiesChange={(capabilities) => handleConfigChange('capabilities', capabilities)}
                         />
                     )}
 
@@ -1045,8 +1103,14 @@ const ConfigurationTab: React.FC<{
                                         {cap === LLMCapability.Chat && '💬 Chat'}
                                         {cap === LLMCapability.FunctionCalling && '🛠️ Functions'}
                                         {cap === LLMCapability.OutputFormatting && '📋 JSON'}
+                                        {cap === LLMCapability.URLAnalysis && '🔗 URL Analysis'}
                                         {cap === LLMCapability.Embedding && '🧮 Embed'}
                                         {cap === LLMCapability.ImageGeneration && '🎨 Images'}
+                                        {cap === LLMCapability.ImageModification && '🖼️ Image Edit'}
+                                        {cap === LLMCapability.WebSearch && '🔎 Web Search'}
+                                        {cap === LLMCapability.VideoGeneration && '🎬 Video'}
+                                        {cap === LLMCapability.MapsGrounding && '🗺️ Maps'}
+                                        {cap === LLMCapability.WebSearchGrounding && '🌐 Web Grounding'}
                                         {cap === LLMCapability.OCR && '🔍 OCR'}
                                         {!Object.values(LLMCapability).includes(cap) && cap}
                                     </span>
@@ -1197,21 +1261,42 @@ const HistoryTab: React.FC<{
                     <div className="mt-4 space-y-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_history_limitsLabel')}</label>
-                            <div className="grid grid-cols-2 gap-4">
-                                {Object.keys(config.historyConfig?.limits || {}).map(key => (
-                                    <div key={key}>
-                                        <label className="text-xs text-gray-400 capitalize">{key}</label>
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                {HISTORY_LIMIT_KEYS.map((key) => {
+                                    const isEnabled = config.historyConfig?.enabledLimits?.[key] ?? DEFAULT_HISTORY_CONFIG.enabledLimits[key];
+                                    return (
+                                    <div key={key} className="rounded-md border border-gray-700 bg-gray-800/40 p-3 space-y-2">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <label className="text-xs font-medium text-gray-300">{t(getHistoryLimitLabelKey(key))}</label>
+                                            <label className="flex items-center gap-2 text-xs text-gray-400">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isEnabled}
+                                                    aria-label={`${t('history_limit_active')} ${t(getHistoryLimitLabelKey(key))}`}
+                                                    onChange={(e) => onChange('historyConfig', {
+                                                        ...config.historyConfig,
+                                                        enabledLimits: {
+                                                            ...config.historyConfig.enabledLimits,
+                                                            [key]: e.target.checked,
+                                                        }
+                                                    })}
+                                                    className="h-4 w-4 rounded border-gray-500 bg-gray-700 text-indigo-500 focus:ring-indigo-500"
+                                                />
+                                                <span>{t('history_limit_active')}</span>
+                                            </label>
+                                        </div>
                                         <input
                                             type="number"
                                             value={config.historyConfig.limits[key]}
                                             onChange={(e) => onChange('historyConfig', {
                                                 ...config.historyConfig,
-                                                limits: { ...config.historyConfig.limits, [key]: parseInt(e.target.value) || 0 }
+                                                limits: { ...config.historyConfig.limits, [key]: parseInt(e.target.value, 10) || 0 }
                                             })}
-                                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm mt-1"
+                                            disabled={!isEnabled}
+                                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm disabled:cursor-not-allowed disabled:opacity-50"
                                         />
                                     </div>
-                                ))}
+                                )})}
                             </div>
                         </div>
 
@@ -1277,49 +1362,40 @@ const HistoryTab: React.FC<{
 
 // Functions Tab Component
 const FunctionsTab: React.FC<{
-    inheritFromPrototype: boolean;
-    overrideFunctionIds: string[];
-    prototypeFunctionIds: string[];
-    onInheritChange: (val: boolean) => void;
-    onOverrideChange: (ids: string[]) => void;
-    t: (key: string) => string;
-}> = ({ inheritFromPrototype, overrideFunctionIds, prototypeFunctionIds, onInheritChange, onOverrideChange }) => {
+    selectedApplicationToolSelections: ToolSelection[];
+    llmProvider: LLMProvider;
+    model?: string;
+    capabilities: LLMCapability[];
+    availableCapabilities: LLMCapability[];
+    onApplicationToolsChange: (toolSelections: ToolSelection[]) => void;
+    onProviderCapabilitiesChange: (capabilities: LLMCapability[]) => void;
+}> = ({ selectedApplicationToolSelections, llmProvider, model, capabilities, availableCapabilities, onApplicationToolsChange, onProviderCapabilitiesChange }) => {
     return (
-        <div className="space-y-4">
-            {/* Toggle héritage */}
-            <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
-                <ToggleSwitch
-                    label="Hériter les fonctions du prototype"
-                    checked={inheritFromPrototype}
-                    onChange={onInheritChange}
-                />
-                <p className="mt-2 text-xs text-gray-400">
-                    {inheritFromPrototype
-                        ? `Les fonctions définies sur le prototype sont utilisées automatiquement (${prototypeFunctionIds.length} fonction(s)).`
-                        : 'Personnalisez les fonctions pour cette instance en ignorant le prototype.'}
-                </p>
+        <div className="grid gap-6 xl:grid-cols-2 items-start">
+            <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700 h-full">
+                <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-white">Fonctions natives/custom application</h3>
+                    <p className="mt-1 text-xs text-gray-400">
+                        Fonctions versionnees issues de Phil et persistees via toolSelections pour cette instance.
+                    </p>
+                </div>
+
+                <div className="max-h-[34rem] overflow-y-auto pr-2">
+                    <FunctionSelector
+                        selectedToolSelections={selectedApplicationToolSelections}
+                        onChangeToolSelections={onApplicationToolsChange}
+                    />
+                </div>
             </div>
 
-            {/* Sélecteur ou affichage hérité */}
-            {inheritFromPrototype ? (
-                prototypeFunctionIds.length > 0 ? (
-                    <FunctionSelector
-                        selectedIds={prototypeFunctionIds}
-                        onChange={() => {}}
-                        readOnly
-                    />
-                ) : (
-                    <div className="bg-gray-900/50 p-6 rounded-lg border border-gray-700 text-center">
-                        <p className="text-sm text-gray-400">Aucune fonction définie sur le prototype.</p>
-                        <p className="text-xs text-gray-500 mt-1">Désactivez l'héritage pour personnaliser les fonctions de cette instance.</p>
-                    </div>
-                )
-            ) : (
-                <FunctionSelector
-                    selectedIds={overrideFunctionIds}
-                    onChange={onOverrideChange}
-                />
-            )}
+            <LLMNativeFunctionsPanel
+                llmProvider={llmProvider}
+                model={model}
+                capabilities={capabilities}
+                availableCapabilities={availableCapabilities}
+                onChangeSelectedCapabilities={onProviderCapabilitiesChange}
+                emptyMessage="Aucune fonction provider/cloud disponible pour cette configuration."
+            />
         </div>
     );
 };

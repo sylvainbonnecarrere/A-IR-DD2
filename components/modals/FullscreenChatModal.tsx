@@ -1,16 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '../UI';
-import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon } from '../Icons';
+import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon, ErrorIcon, HistorySynthesisIcon } from '../Icons';
+import { ToolCallBlock } from '../workflow/ToolCallBlock';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
-import { useDesignStore } from '../../stores/useDesignStore';
+import { selectResolvedAgentHasToolNamed, useDesignStore } from '../../stores/useDesignStore';
+import { useFunctionStore } from '../../stores/useFunctionStore';
 import { useAgentChat } from '../../hooks/useAgentChat';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../contexts/AuthContext';
 import { ChatMessage, Agent, LLMCapability, WorkflowNode, AgentInstance } from '../../types';
 import { ConfirmationModal } from './ConfirmationModal';
+import { WebSearchParamsModal } from './WebSearchParamsModal';
 import { ImageGenerationPanel } from '../panels/ImageGenerationPanel';
 import { VideoGenerationConfigPanel } from '../panels/VideoGenerationConfigPanel';
 import { MapsGroundingConfigPanel } from '../panels/MapsGroundingConfigPanel';
+import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from '../../services/persistedChatMessages';
+import { persistInstanceWebSearchParams } from '../../services/webSearchParamsConfigService';
+import apiClient from '../../utils/apiClient';
+import { shouldSuppressVisualToolResult } from '../../utils/toolResultVisibility';
 
 // Minimize icon
 const MinimizeIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -79,7 +86,8 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     isNodeExecuting
   } = useRuntimeStore();
 
-  const { agents, agentInstances } = useDesignStore();
+  const { agents, agentInstances, updateInstanceConfig } = useDesignStore();
+  const functions = useFunctionStore((state) => state.functions);
   const { t } = useLocalization();
   const { isAuthenticated, accessToken } = useAuth();
 
@@ -90,12 +98,33 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const [webFetchEnabled, setWebFetchEnabled] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [activeSidePanel, setActiveSidePanel] = useState<'none' | 'image' | 'video' | 'maps'>('none');
+  const [isWebSearchParamsModalOpen, setIsWebSearchParamsModalOpen] = useState(false);
+  const [isSavingWebSearchParams, setIsSavingWebSearchParams] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const inferredInstanceId = React.useMemo(() => {
+    if (fullscreenChatAgentInstance?.id) {
+      return fullscreenChatAgentInstance.id;
+    }
+
+    if (!fullscreenChatNodeId) {
+      return null;
+    }
+
+    const exactMatch = agentInstances.find(inst => inst.id === fullscreenChatNodeId);
+    if (exactMatch) {
+      return exactMatch.id;
+    }
+
+    const normalizedNodeId = fullscreenChatNodeId.replace(/^node-/, '');
+    const prefixedMatch = agentInstances.find(inst => inst.id === normalizedNodeId);
+    return prefixedMatch?.id ?? null;
+  }, [fullscreenChatAgentInstance, fullscreenChatNodeId, agentInstances]);
+
   // Read agentInstance from store (triggers re-render when config is updated)
-  const agentInstance = fullscreenChatAgentInstance?.id
-    ? agentInstances.find(inst => inst.id === fullscreenChatAgentInstance.id)
+  const agentInstance = inferredInstanceId
+    ? agentInstances.find(inst => inst.id === inferredInstanceId) || fullscreenChatAgentInstance
     : fullscreenChatAgentInstance;
   
   const messages = fullscreenChatNodeId ? getNodeMessages(fullscreenChatNodeId) : [];
@@ -114,14 +143,49 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     ? {
         ...agentPrototype,
         ...(agentInstance.configuration_json as any),
+        webSearchParams: agentInstance.configuration_json?.webSearchParams || agentPrototype.webSearchParams,
         historyConfig: agentInstance.configuration_json?.historyConfig 
           || agentPrototype.historyConfig
       }
     : agentPrototype || null;
+
+  const hasWebSearchPyTool = useDesignStore((state) => selectResolvedAgentHasToolNamed(
+    state,
+    agentPrototype ?? fullscreenChatAgent,
+    inferredInstanceId ?? undefined,
+    functions,
+    'web_search_py'
+  ));
+
+  const handleSaveWebSearchParams = async (webSearchParams: NonNullable<Agent['webSearchParams']>) => {
+    if (!agentInstance?.id || !agentInstance.configuration_json) {
+      return;
+    }
+
+    setIsSavingWebSearchParams(true);
+
+    try {
+      const updatedConfig = {
+        ...agentInstance.configuration_json,
+        webSearchParams,
+      };
+
+      await persistInstanceWebSearchParams(
+        { ...agentInstance, configuration_json: updatedConfig },
+        webSearchParams,
+        accessToken
+      );
+
+      updateInstanceConfig(agentInstance.id, updatedConfig);
+      setIsWebSearchParamsModalOpen(false);
+    } finally {
+      setIsSavingWebSearchParams(false);
+    }
+  };
   
   const instanceId = agentInstance?.id;
 
-  const { handleSendMessage: sendMessageToLLM, loadingMessage } = useAgentChat({
+  const { handleSendMessage: sendMessageToLLM, loadingMessage, isHistorySynthesisActive } = useAgentChat({
     nodeId: fullscreenChatNodeId || '',
     agent,
     llmConfigs,
@@ -136,69 +200,26 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   // This ensures history is available even if runtime store was cleared
   useEffect(() => {
     const loadChatHistoryFromBackend = async () => {
-      if (!fullscreenChatAgentInstance?.id || !isAuthenticated || !accessToken || !fullscreenChatNodeId) {
-        return; // Skip if not authenticated or missing instance
+      if (!instanceId || !isAuthenticated || !fullscreenChatNodeId) {
+        return;
       }
 
       try {
-        // Fetch instance with all its content
-        const response = await fetch(
-          `http://localhost:3001/api/agent-instances/${fullscreenChatAgentInstance.id}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`
-            }
-          }
-        );
+        const response = await apiClient.get<{ chatMessages?: any[] }>(`/api/agent-instances/${instanceId}`);
+        const persistedMessages = mapPersistedChatMessages(response.data?.chatMessages || []);
 
-        if (!response.ok) {
-          return;
-        }
-
-        const instance = await response.json();
-        
-        // Transform backend content array to ChatMessage format
-        if (instance.content && Array.isArray(instance.content)) {
-          const backendMessages = instance.content.map((item: any, idx: number) => {
-            // Transform role to sender
-            let sender: 'user' | 'agent' | 'tool' = 'agent';
-            if (item.role === 'user') sender = 'user';
-            else if (item.role === 'tool' || item.type === 'error') sender = 'tool';
-            else sender = 'agent';
-
-            return {
-              id: item.metadata?.messageId || `msg-loaded-${idx}`,
-              sender,
-              text: item.message || '',
-              image: item.metadata?.image || undefined,
-              filename: item.metadata?.filename || undefined,
-              isError: item.type === 'error',
-              toolCalls: item.metadata?.toolCalls || undefined,
-              timestamp: item.timestamp ? new Date(item.timestamp) : new Date()
-            };
-          });
-
-          // Get existing messages from runtime store
+        if (persistedMessages.length > 0) {
           const existingMessages = getNodeMessages(fullscreenChatNodeId) || [];
-          
-          // Merge: keep existing (local) messages, prepend backend messages that aren't duplicates
-          const existingIds = new Set(existingMessages.map(m => m.id));
-          const newBackendMessages = backendMessages.filter(m => !existingIds.has(m.id));
-          
-          const mergedMessages = [...newBackendMessages, ...existingMessages];
-          
-          // Only update if we loaded messages from backend
-          if (newBackendMessages.length > 0) {
-            setNodeMessages(fullscreenChatNodeId, mergedMessages);
-          }
+          const mergedMessages = mergePersistedAndRuntimeMessages(persistedMessages, existingMessages);
+          setNodeMessages(fullscreenChatNodeId, mergedMessages);
         }
-      } catch (err) {
-        // Don't block UI - continue without history if load fails
+      } catch {
+        // Don't block UI - continue without history if load fails.
       }
     };
 
     loadChatHistoryFromBackend();
-  }, [fullscreenChatAgentInstance?.id, fullscreenChatNodeId, isAuthenticated, accessToken, getNodeMessages, setNodeMessages]);
+  }, [instanceId, fullscreenChatNodeId, isAuthenticated, getNodeMessages, setNodeMessages]);
 
   // Auto-scroll vers le bas quand de nouveaux messages arrivent
   useEffect(() => {
@@ -257,18 +278,6 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     setActiveSidePanel('none');
   };
 
-  // Créer un mockNode pour workflowNodes basé sur les données actuelles
-  const mockWorkflowNode = fullscreenChatNodeId && agent ? {
-    id: fullscreenChatNodeId,
-    agent: agent,
-    position: { x: 0, y: 0 },
-    data: {},
-    width: 300,
-    height: 200
-  } : null;
-
-  const workflowNodesForPanels = mockWorkflowNode ? [mockWorkflowNode] : [];
-
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedInput = userInput.trim();
@@ -293,9 +302,39 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const renderMessage = (message: ChatMessage) => {
     const isUser = message.sender === 'user';
     const isError = message.isError;
+    const isToolResult = message.sender === 'tool_result';
+    const isToolCall = message.sender === 'tool';
+    const suppressToolResult = shouldSuppressVisualToolResult(message, messages);
+
+    if (suppressToolResult) {
+      return null;
+    }
 
     return (
       <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+        {isToolCall && message.toolCallRecord && (
+          <div className="w-full mr-12">
+            <ToolCallBlock toolCall={message.toolCallRecord} defaultExpanded={false} />
+          </div>
+        )}
+
+        {isToolResult && (
+          <div className="max-w-3xl mr-12 w-full">
+            <div className="mb-2 p-2 bg-gray-800 rounded-lg border border-gray-600">
+              <div className="flex items-center mb-1">
+                <ErrorIcon className={`w-4 h-4 mr-2 ${isError ? 'text-red-400' : 'text-green-400'}`} />
+                <span className="text-xs font-semibold text-gray-300">
+                  {isError ? t('tool_error') : t('tool_result')}: {message.toolName}
+                </span>
+              </div>
+              <div className="text-xs text-gray-400 font-mono bg-gray-900 p-2 rounded break-words overflow-wrap-anywhere whitespace-pre-wrap">
+                {message.text}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isToolResult && !isToolCall && (
         <div className={`max-w-3xl px-4 py-2 rounded-lg ${isUser
           ? 'bg-indigo-600 text-white ml-12'
           : isError
@@ -366,6 +405,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
             </div>
           )}
         </div>
+        )}
       </div>
     );
   };
@@ -450,6 +490,9 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   <div className="bg-gray-700 text-gray-100 mr-12 px-4 py-2 rounded-lg">
                     <div className="flex items-center space-x-2">
                       <div className="animate-spin w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full"></div>
+                      {isHistorySynthesisActive && (
+                        <HistorySynthesisIcon data-testid="history-synthesis-icon" className="w-4 h-4 text-cyan-300 animate-pulse" />
+                      )}
                       <span>{loadingMessage || 'Agent en cours de réflexion...'}</span>
                     </div>
                   </div>
@@ -531,6 +574,20 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                     onClick={() => setWebSearchEnabled(!webSearchEnabled)}
                     disabled={isLoading}
                     title={webSearchEnabled ? 'Web Search activé' : 'Web Search désactivé'}
+                  >
+                    <WebSearchIcon width={16} height={16} className="mr-1" />
+                    Web Search
+                  </Button>
+                )}
+
+                {hasWebSearchPyTool && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-9 rounded-lg border border-sky-300/35 bg-[linear-gradient(135deg,rgba(10,37,64,0.96),rgba(17,94,145,0.88)_52%,rgba(148,210,255,0.2))] px-3 text-sky-50 hover:border-sky-200/60 hover:bg-[linear-gradient(135deg,rgba(12,48,79,0.98),rgba(14,116,144,0.92)_56%,rgba(186,230,253,0.28))] hover:text-white hover:shadow-[0_0_18px_rgba(125,211,252,0.35)] transition-all duration-200 text-sm font-medium"
+                    onClick={() => setIsWebSearchParamsModalOpen(true)}
+                    disabled={isLoading}
+                    title="Paramètres Web Search de l'agent"
                   >
                     <WebSearchIcon width={16} height={16} className="mr-1" />
                     Web Search
@@ -631,9 +688,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
 
           {/* Side Panel - Configuration (Image, Video, Maps) */}
           {activeSidePanel !== 'none' && (
-            <div className={`w-96 flex flex-col border-l border-cyan-500 bg-gray-800/90 backdrop-blur-sm overflow-hidden transition-all duration-500 ease-in-out transform ${
-              activeSidePanel !== 'none' ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
-            } shadow-[-10px_0_30px_-10px_rgba(6,182,212,0.3)]`}>
+            <div className="w-96 flex flex-col border-l border-cyan-500 bg-gray-800/90 backdrop-blur-sm overflow-hidden transition-all duration-500 ease-in-out transform translate-x-0 opacity-100 shadow-[-10px_0_30px_-10px_rgba(6,182,212,0.3)]">
               
               {/* Side Panel Content - Scrollable (No Header - let child components manage it) */}
               <div className="flex-1 overflow-y-auto">
@@ -641,7 +696,8 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   <ImageGenerationPanel
                     isOpen={true}
                     nodeId={fullscreenChatNodeId || null}
-                    workflowNodes={workflowNodesForPanels as any}
+                    agent={agent}
+                    agentInstance={agentInstance}
                     llmConfigs={llmConfigs}
                     onClose={handleCloseSidePanel}
                     onImageGenerated={(nodeId: string, imageBase64: string) => {
@@ -683,7 +739,6 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   <MapsGroundingConfigPanel
                     isOpen={true}
                     nodeId={fullscreenChatNodeId || null}
-                    workflowNodes={workflowNodesForPanels as any}
                     llmConfigs={llmConfigs}
                     onClose={handleCloseSidePanel}
                     hideSlideOver={true}
@@ -694,6 +749,15 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
           )}
         </div>
       </div>
+
+      <WebSearchParamsModal
+        isOpen={isWebSearchParamsModalOpen}
+        agentName={agentName}
+        initialParams={agentInstance?.configuration_json?.webSearchParams || agent?.webSearchParams}
+        isSaving={isSavingWebSearchParams}
+        onClose={() => setIsWebSearchParamsModalOpen(false)}
+        onSave={handleSaveWebSearchParams}
+      />
 
       {/* Modal de confirmation de suppression */}
       <ConfirmationModal

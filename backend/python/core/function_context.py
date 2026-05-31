@@ -24,10 +24,11 @@ class FunctionContext:
         guard (SecurityGuard): Validateur de chemins anti-traversal
     """
 
-    def __init__(self, workspace_dir: str, function_name: str):
+    def __init__(self, workspace_dir: str, function_name: str, private_context=None):
         self.workspace_dir = Path(workspace_dir).resolve()
         self.function_name = function_name
         self.guard = SecurityGuard(base_dir=self.workspace_dir)
+        self.private_context = private_context if isinstance(private_context, dict) else {}
 
         # Créer le répertoire workspace s'il n'existe pas
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -48,3 +49,7 @@ class FunctionContext:
         """Log vers stderr (ne pollue pas le stdout réservé au résultat JSON)."""
         import sys
         print(f"[{self.function_name}] {message}", file=sys.stderr)
+
+    def get_private(self, key: str, default=None):
+        """Accès contrôlé au contexte privé transmis hors payload public du tool."""
+        return self.private_context.get(key, default)

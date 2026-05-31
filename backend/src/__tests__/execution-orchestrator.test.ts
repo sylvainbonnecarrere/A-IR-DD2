@@ -5,6 +5,126 @@ import mongoose from 'mongoose';
 import { ExecutionOrchestrator } from '../services/runtime/ExecutionOrchestrator';
 
 describe('ExecutionOrchestrator', () => {
+    it('projects agent-scoped runtime artifacts into the media catalog after run completion', async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'airdd2-orchestrator-catalog-'));
+        const outputRoot = path.join(tempRoot, 'output');
+        await fs.mkdir(outputRoot, { recursive: true });
+
+        const orchestrator = new ExecutionOrchestrator();
+        const createQueuedRun = jest.fn().mockResolvedValue(undefined);
+        const markRunning = jest.fn().mockResolvedValue(undefined);
+        const completeRun = jest.fn().mockResolvedValue(undefined);
+        const failRun = jest.fn().mockResolvedValue(undefined);
+        const registerRuntimeOutputArtifacts = jest.fn().mockResolvedValue([]);
+        const workflowId = new mongoose.Types.ObjectId();
+        const agentInstanceId = new mongoose.Types.ObjectId().toString();
+        const userId = new mongoose.Types.ObjectId().toString();
+
+        (orchestrator as any).runtimeHealthService = {
+            getHealthReport: jest.fn().mockResolvedValue({ summary: 'ready' })
+        };
+        (orchestrator as any).buildService = {
+            getBuildStatus: jest.fn().mockResolvedValue(null)
+        };
+        (orchestrator as any).workspaceManager = {
+            ensureWorkflowWorkspace: jest.fn().mockResolvedValue({
+                workspaceId: 'workspace-catalog',
+                wasCreated: false,
+                logicalRoot: tempRoot,
+                runtimeRoots: {
+                    sourceRoot: path.join(tempRoot, 'source'),
+                    manifestsRoot: path.join(tempRoot, 'manifests'),
+                    buildRoot: path.join(tempRoot, 'build'),
+                    outputRoot
+                },
+                manifests: {
+                    packageJson: false,
+                    packageLockJson: false,
+                    requirementsTxt: false,
+                    pyprojectToml: false
+                },
+                status: 'active',
+                lastScanAt: null
+            })
+        };
+        (orchestrator as any).sandboxRunnerFactory = {
+            getPreferredRunner: jest.fn().mockReturnValue({
+                getRunnerId: () => 'docker_sandbox',
+                getReadiness: () => ({ ready: true })
+            })
+        };
+        (orchestrator as any).dockerRunner = {
+            execute: jest.fn().mockImplementation(async () => {
+                await fs.writeFile(path.join(outputRoot, 'runtime.json'), '{"ok":true}', 'utf-8');
+                return {
+                    success: true,
+                    output: { ok: true },
+                    stdout: 'ok',
+                    stderr: '',
+                    durationMs: 10,
+                    exitCode: 0,
+                    runner: 'docker_sandbox',
+                    metadata: { exitCode: 0 },
+                    resourceUsage: { wallTimeMs: 10, memoryLimitMb: 256 }
+                };
+            })
+        };
+        (orchestrator as any).firecrackerRunner = {
+            execute: jest.fn()
+        };
+        (orchestrator as any).userToolRunService = {
+            createQueuedRun,
+            markRunning,
+            completeRun,
+            failRun,
+            timeoutRun: jest.fn().mockResolvedValue(undefined)
+        };
+        (orchestrator as any).mediaCatalogService = {
+            registerRuntimeOutputArtifacts,
+        };
+
+        const result = await orchestrator.execute({
+            fn: {
+                _id: new mongoose.Types.ObjectId(),
+                userId: new mongoose.Types.ObjectId(),
+                workflowId,
+                name: 'catalog_projection_test',
+                displayName: 'Catalog Projection Test',
+                description: 'Catalog runtime artifacts',
+                language: 'typescript',
+                origin: 'custom',
+                tags: [],
+                inputSchema: { type: 'object' },
+                outputSchema: { type: 'object' },
+                codeInline: 'function run() { return { ok: true }; }',
+                dependencies: { npm: [], python: [] },
+                isEnabled: true,
+                isReadonly: false,
+                version: 1,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            } as any,
+            userId,
+            args: {},
+            launchContext: 'workflow_run',
+            agentInstanceId,
+        });
+
+        expect(registerRuntimeOutputArtifacts).toHaveBeenCalledWith({
+            userId,
+            workflowId: workflowId.toString(),
+            agentInstanceId,
+            executionId: result.executionId,
+            workspaceOutputRoot: outputRoot,
+            artifacts: [
+                { path: 'output/runtime.json', kind: 'json' }
+            ]
+        });
+        expect(completeRun.mock.invocationCallOrder[0]).toBeLessThan(registerRuntimeOutputArtifacts.mock.invocationCallOrder[0]);
+
+        await fs.rm(tempRoot, { recursive: true, force: true });
+    });
+
     it('captures newly generated output artifacts and persists them on the run', async () => {
         const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'airdd2-orchestrator-'));
         const outputRoot = path.join(tempRoot, 'output');
@@ -565,6 +685,82 @@ describe('ExecutionOrchestrator', () => {
         await fs.rm(tempRoot, { recursive: true, force: true });
     });
 
+    it('transpiles inline TypeScript before dispatching to the sandbox runner', async () => {
+        const orchestrator = new ExecutionOrchestrator();
+        const execute = jest.fn().mockResolvedValue({
+            success: true,
+            output: { ok: true },
+            stdout: '',
+            stderr: '',
+            durationMs: 8,
+            exitCode: 0,
+            runner: 'docker_sandbox',
+            metadata: { exitCode: 0 },
+            resourceUsage: { wallTimeMs: 8, memoryLimitMb: 256 }
+        });
+
+        (orchestrator as any).runtimeHealthService = {
+            getHealthReport: jest.fn().mockResolvedValue({ summary: 'ready' })
+        };
+        (orchestrator as any).buildService = {
+            getBuildStatus: jest.fn().mockResolvedValue(null)
+        };
+        (orchestrator as any).workspaceManager = {
+            ensureWorkflowWorkspace: jest.fn().mockResolvedValue(null)
+        };
+        (orchestrator as any).sandboxRunnerFactory = {
+            getPreferredRunner: jest.fn().mockReturnValue({
+                getRunnerId: () => 'docker_sandbox',
+                getReadiness: () => ({ ready: true })
+            })
+        };
+        (orchestrator as any).dockerRunner = { execute };
+        (orchestrator as any).firecrackerRunner = { execute: jest.fn() };
+        (orchestrator as any).userToolRunService = {
+            createQueuedRun: jest.fn().mockResolvedValue(undefined),
+            markRunning: jest.fn().mockResolvedValue(undefined),
+            completeRun: jest.fn().mockResolvedValue(undefined),
+            failRun: jest.fn().mockResolvedValue(undefined),
+            timeoutRun: jest.fn().mockResolvedValue(undefined)
+        };
+
+        await orchestrator.execute({
+            fn: {
+                _id: new mongoose.Types.ObjectId(),
+                userId: new mongoose.Types.ObjectId(),
+                workflowId: null,
+                name: 'hello_test',
+                displayName: 'Hello Test',
+                description: 'Inline TS sample',
+                language: 'typescript',
+                origin: 'custom',
+                tags: [],
+                inputSchema: { type: 'object' },
+                outputSchema: { type: 'object' },
+                codeInline: 'export function run(context: FunctionContext, args: { user_name: string }): unknown { const userName = typeof args.user_name === "string" && args.user_name.trim().length > 0 ? args.user_name.trim() : "inconnu"; return { result: `Ton nom, ${userName}, est maintenant enregistré dans ma mémoire` }; }',
+                dependencies: { npm: [], python: [] },
+                isEnabled: true,
+                isReadonly: false,
+                version: 1,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            } as any,
+            userId: new mongoose.Types.ObjectId().toString(),
+            args: { user_name: 'Ada' },
+            launchContext: 'editor_test'
+        });
+
+        expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+            sourceCode: expect.stringContaining('exports.run = run;')
+        }));
+        expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+            sourceCode: expect.not.stringContaining('context: FunctionContext')
+        }));
+        expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+            sourceCode: expect.stringContaining('Ton nom, ')
+        }));
+    });
+
     it('persists a runtime escape attempt as a sandbox runtime error without inventing artifacts', async () => {
         const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'airdd2-orchestrator-escape-'));
         const outputRoot = path.join(tempRoot, 'output');
@@ -672,6 +868,8 @@ describe('ExecutionOrchestrator', () => {
             expect.objectContaining({
                 error: expect.objectContaining({
                     code: 'SANDBOX_RUNTIME_ERROR',
+                    subsystem: 'sandbox_runtime',
+                    failureKind: 'sandbox_runtime_error',
                     message: 'Permission denied: /etc/passwd'
                 }),
                 outputs: expect.not.objectContaining({

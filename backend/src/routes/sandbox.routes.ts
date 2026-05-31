@@ -19,7 +19,7 @@ import { validateRequest } from '../middleware/validation.middleware';
 import { BuildPreparationError } from '../services/build.service';
 import { RuntimeHealthService } from '../services/runtimeHealth.service';
 import { SandboxService } from '../services/sandbox.service';
-import { RuntimeNotReadyError } from '../services/runtime/errors';
+import { buildSandboxErrorDetails, RuntimeNotReadyError } from '../services/runtime/errors';
 import { IUser } from '../models/User.model';
 
 const router = Router();
@@ -28,22 +28,38 @@ const runtimeHealthService = new RuntimeHealthService();
 
 // ─── Schémas de Validation ────────────────────────────────────────────────────
 
-const runFunctionSchema = z.object({
-    functionId: z
-        .string()
-        .regex(/^[a-f\d]{24}$/i, 'functionId doit être un ObjectId MongoDB valide'),
-    toolSelection: z.object({
+const toolSelectionSchema = z.object({
         toolId: z.string().regex(/^[a-f\d]{24}$/i, 'toolId doit être un ObjectId MongoDB valide'),
         versionRef: z.object({
             versionTag: z.string().optional(),
             versionNumber: z.number().optional(),
             workspaceId: z.string().nullable().optional()
         }).optional()
-    }).optional(),
+    });
+
+const runFunctionSchema = z.object({
+    functionId: z
+        .string()
+        .regex(/^[a-f\d]{24}$/i, 'functionId doit être un ObjectId MongoDB valide')
+        .optional(),
+    agentInstanceId: z
+        .string()
+        .regex(/^[a-f\d]{24}$/i, 'agentInstanceId doit être un ObjectId MongoDB valide')
+        .optional(),
+    toolSelection: toolSelectionSchema.optional(),
     testArgs: z
         .record(z.unknown())
         .optional()
-        .default({})
+        .default({}),
+    privateContext: z.record(z.unknown()).optional()
+}).superRefine((value, ctx) => {
+    if (!value.functionId && !value.toolSelection) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'functionId ou toolSelection est requis',
+            path: ['functionId'],
+        });
+    }
 });
 
 const checkSyntaxSchema = z.object({
@@ -70,42 +86,160 @@ router.get('/health', requireAuth, async (_req, res) => {
 router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req, res) => {
     try {
         const user = req.user as IUser;
-        const { functionId, toolSelection, testArgs } = req.body;
+        const { functionId, agentInstanceId, toolSelection, testArgs, privateContext } = req.body;
 
-        const result = await sandboxService.runFunction(functionId, user.id, testArgs, toolSelection);
+        console.info('[SandboxRoute] POST /run start', {
+            userId: user.id,
+            functionId: functionId ?? null,
+            agentInstanceId: agentInstanceId ?? null,
+            toolId: toolSelection?.toolId ?? null,
+            versionTag: toolSelection?.versionRef?.versionTag ?? null,
+            argKeys: Object.keys(testArgs ?? {}),
+        });
+
+        const result = await sandboxService.runFunction(
+            functionId,
+            user.id,
+            testArgs,
+            toolSelection,
+            agentInstanceId,
+            privateContext,
+            req.headers.authorization,
+        );
+
+        console.info('[SandboxRoute] POST /run done', {
+            userId: user.id,
+            functionId: functionId ?? null,
+            agentInstanceId: agentInstanceId ?? null,
+            toolId: toolSelection?.toolId ?? null,
+            executionId: result.executionId ?? null,
+            success: result.success,
+            runner: result.runner ?? null,
+            exitCode: result.exitCode ?? null,
+            failureKind: result.metadata?.failureKind ?? result.errorDetails?.failureKind ?? null,
+        });
+
         res.json(result);
     } catch (error: any) {
         console.error('[SandboxRoute] POST /run error:', error);
 
         if (error.message?.includes('introuvable') || error.message?.includes('not found')) {
-            return res.status(404).json({ error: error.message });
+            return res.status(404).json({
+                error: error.message,
+                errorDetails: buildSandboxErrorDetails({
+                    message: error.message,
+                    code: 'SANDBOX_TARGET_NOT_FOUND',
+                    subsystem: 'validation',
+                    retryable: false,
+                })
+            });
         }
         if (error.message?.includes('désactivée') || error.message?.includes('disabled')) {
-            return res.status(403).json({ error: error.message });
+            return res.status(403).json({
+                error: error.message,
+                errorDetails: buildSandboxErrorDetails({
+                    message: error.message,
+                    code: 'SANDBOX_TARGET_DISABLED',
+                    subsystem: 'validation',
+                    retryable: false,
+                })
+            });
         }
         if (error instanceof BuildPreparationError || error.message?.includes('prepared via the build workflow')) {
-            return res.status(409).json({ error: error.message });
+            return res.status(409).json({
+                error: error.message,
+                errorDetails: buildSandboxErrorDetails({
+                    message: error.message,
+                    code: error instanceof BuildPreparationError ? error.code : 'BUILD_PREPARATION_ERROR',
+                    subsystem: 'build_preparation',
+                    retryable: false,
+                })
+            });
         }
         if (error instanceof RuntimeNotReadyError) {
-            return res.status(503).json({ error: error.message });
+            return res.status(503).json({
+                error: error.message,
+                errorDetails: buildSandboxErrorDetails({
+                    message: error.message,
+                    code: 'RUNTIME_NOT_READY',
+                    subsystem: 'runtime_readiness',
+                    retryable: true,
+                })
+            });
         }
         if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
-            return res.status(408).json({ error: 'Timeout : la fonction a dépassé le délai d\'exécution autorisé' });
+            const message = 'Timeout : la fonction a dépassé le délai d\'exécution autorisé';
+            return res.status(408).json({
+                error: message,
+                errorDetails: buildSandboxErrorDetails({
+                    message,
+                    code: 'TIMEOUT',
+                    subsystem: 'sandbox_runtime',
+                    retryable: false,
+                    failureKind: 'timeout',
+                })
+            });
         }
 
-        res.status(500).json({ error: 'Erreur lors de l\'exécution dans le sandbox' });
+        const message = 'Erreur lors de l\'exécution dans le sandbox';
+        res.status(500).json({
+            error: message,
+            errorDetails: buildSandboxErrorDetails({
+                message,
+                code: 'SANDBOX_ROUTE_ERROR',
+                subsystem: 'sandbox_runtime',
+                retryable: false,
+            })
+        });
     }
 });
 
 // ─── POST /api/sandbox/check ──────────────────────────────────────────────────
 router.post('/check', requireAuth, validateRequest(checkSyntaxSchema), async (req, res) => {
     try {
+        const user = req.user as IUser;
         const { language, code } = req.body;
+
+        console.info('[SandboxRoute] POST /check start', {
+            userId: user.id,
+            language,
+            codeLength: code.length,
+        });
+
         const result = await sandboxService.checkSyntax(language, code);
+
+        console.info('[SandboxRoute] POST /check done', {
+            userId: user.id,
+            language,
+            valid: result.valid,
+            errorCount: result.errors.length,
+        });
+
         res.json(result);
-    } catch (error) {
+    } catch (error: any) {
         console.error('[SandboxRoute] POST /check error:', error);
-        res.status(500).json({ error: 'Erreur lors de la vérification syntaxique' });
+
+        if (error instanceof RuntimeNotReadyError) {
+            return res.status(503).json({
+                error: error.message,
+                errorDetails: buildSandboxErrorDetails({
+                    message: error.message,
+                    code: 'RUNTIME_NOT_READY',
+                    subsystem: 'runtime_readiness',
+                    retryable: true,
+                })
+            });
+        }
+
+        res.status(500).json({
+            error: 'Erreur lors de la vérification syntaxique',
+            errorDetails: buildSandboxErrorDetails({
+                message: 'Erreur lors de la vérification syntaxique',
+                code: 'SANDBOX_SYNTAX_CHECK_ERROR',
+                subsystem: 'sandbox_runtime',
+                retryable: false,
+            })
+        });
     }
 });
 

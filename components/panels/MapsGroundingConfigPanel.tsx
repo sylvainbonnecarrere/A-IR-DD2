@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { SlideOver, Button } from '../UI';
-import { LLMConfig, WorkflowNode, ChatMessage, MapSource } from '../../types';
+import { LLMConfig, ChatMessage, MapSource } from '../../types';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import * as llmService from '../../services/llmService';
 import { resolveAgentRuntimeConfig } from '../../services/runtimeConfigResolver';
+import { usePanelNodeContext } from './usePanelNodeContext';
 
 interface MapsGroundingConfigPanelProps {
     isOpen: boolean;
     nodeId: string | null;
-    workflowNodes: WorkflowNode[];
     llmConfigs: LLMConfig[];
     onClose: () => void;
     preloadedResults?: {
@@ -30,7 +30,6 @@ interface MapsGroundingConfigPanelProps {
 export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> = ({
     isOpen,
     nodeId,
-    workflowNodes,
     llmConfigs,
     onClose,
     preloadedResults,
@@ -38,9 +37,9 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
 }) => {
     const { addNodeMessage, localLLMProfiles } = useRuntimeStore();
     const mapContainerRef = useRef<HTMLDivElement>(null);
+    const { normalizedNodeId, resolvedAgent } = usePanelNodeContext({ nodeId });
 
-    const node = workflowNodes.find(n => n.id === nodeId);
-    const agent = node?.agent;
+    const agent = resolvedAgent;
     const agentRuntime = resolveAgentRuntimeConfig(agent || null, llmConfigs, localLLMProfiles);
     const agentConfig = agentRuntime.config;
 
@@ -182,7 +181,7 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
     };
 
     const handleSubmit = async () => {
-        if (!query.trim() || !nodeId || !agent || !agentConfig?.enabled || !agentConfig?.apiKey) {
+        if (!query.trim() || !normalizedNodeId || !agent || !agentConfig?.enabled || !agentConfig?.apiKey) {
             return;
         }
 
@@ -203,7 +202,7 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
                 agentRuntime.credential,
                 agent.model,
                 query,
-                agent.systemInstruction,
+                agent.systemPrompt,
                 userLocation
             );
 
@@ -215,7 +214,7 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
                 mapsGrounding: result.mapSources,
                 timestamp: new Date()
             };
-            addNodeMessage(nodeId, mapsMessage);
+            addNodeMessage(normalizedNodeId, mapsMessage);
 
             // Afficher les résultats dans le panel
             setSearchResults({
@@ -240,7 +239,9 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
                 text: `❌ Erreur Maps Grounding: ${error instanceof Error ? error.message : String(error)}`,
                 timestamp: new Date()
             };
-            addNodeMessage(nodeId, errorMessage);
+            if (normalizedNodeId) {
+                addNodeMessage(normalizedNodeId, errorMessage);
+            }
         } finally {
             setIsLoading(false);
         }

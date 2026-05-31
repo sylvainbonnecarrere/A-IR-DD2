@@ -18,105 +18,22 @@
 import axios, {
     AxiosInstance,
     AxiosError,
+    AxiosHeaders,
     InternalAxiosRequestConfig,
     AxiosResponse,
 } from 'axios';
 import { API_BASE_URL } from '../config/api.config';
-import type { StoredAuthData } from '../contexts/types/auth.types';
 import { useDesignStore } from '../stores/useDesignStore';
+import {
+    readStoredAuthDataForSession,
+    refreshStoredSessionAccessToken,
+} from './authSessionService';
 
-const AUTH_STORAGE_KEY = 'auth_data_v1';
 const REFRESH_ENDPOINT = '/api/auth/refresh';
 
 interface RetryableRequestConfig extends InternalAxiosRequestConfig {
     _retry?: boolean;
 }
-
-type SessionDegradedReason = 'invalid_auth_data' | 'missing_refresh_token' | 'refresh_failed';
-
-let refreshRequestPromise: Promise<string> | null = null;
-
-const dispatchAuthEvent = <TDetail>(eventName: string, detail: TDetail) => {
-    window.dispatchEvent(new CustomEvent(eventName, { detail }));
-};
-
-const clearStoredAuthData = () => {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-};
-
-const readStoredAuthData = (): StoredAuthData | null => {
-    try {
-        const authDataStr = localStorage.getItem(AUTH_STORAGE_KEY);
-        if (!authDataStr) {
-            return null;
-        }
-
-        return JSON.parse(authDataStr) as StoredAuthData;
-    } catch (err) {
-        console.error('[apiClient] Error reading auth data:', err);
-        clearStoredAuthData();
-        dispatchAuthEvent('auth:session-degraded', {
-            reason: 'invalid_auth_data' as SessionDegradedReason,
-            message: 'Session locale invalide. Veuillez vous reconnecter.',
-        });
-        return null;
-    }
-};
-
-const persistStoredAuthData = (authData: StoredAuthData) => {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
-};
-
-const degradeSession = (reason: SessionDegradedReason, message: string) => {
-    clearStoredAuthData();
-    dispatchAuthEvent('auth:session-degraded', { reason, message });
-};
-
-const refreshAccessToken = async (): Promise<string> => {
-    if (refreshRequestPromise) {
-        return refreshRequestPromise;
-    }
-
-    const storedAuthData = readStoredAuthData();
-
-    if (!storedAuthData?.refreshToken) {
-        degradeSession('missing_refresh_token', 'Session expirée. Veuillez vous reconnecter.');
-        throw new Error('No refresh token available');
-    }
-
-    refreshRequestPromise = axios.post<{ accessToken: string }>(
-        `${API_BASE_URL}${REFRESH_ENDPOINT}`,
-        { refreshToken: storedAuthData.refreshToken },
-        {
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            timeout: 10000,
-        }
-    ).then(({ data }) => {
-        if (!data?.accessToken) {
-            throw new Error('Refresh response is missing accessToken');
-        }
-
-        persistStoredAuthData({
-            ...storedAuthData,
-            accessToken: data.accessToken,
-        });
-
-        dispatchAuthEvent('auth:session-refreshed', {
-            accessToken: data.accessToken,
-        });
-
-        return data.accessToken;
-    }).catch((error) => {
-        degradeSession('refresh_failed', 'Session expirée. Veuillez vous reconnecter.');
-        throw error;
-    }).finally(() => {
-        refreshRequestPromise = null;
-    });
-
-    return refreshRequestPromise;
-};
 
 /**
  * Create axios instance with base URL
@@ -134,7 +51,7 @@ const axiosInstance: AxiosInstance = axios.create({
  */
 axiosInstance.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
-        const authData = readStoredAuthData();
+        const authData = readStoredAuthDataForSession();
         if (authData?.accessToken && !config.headers.Authorization) {
             config.headers.Authorization = `Bearer ${authData.accessToken}`;
         }
@@ -164,7 +81,7 @@ axiosInstance.interceptors.response.use(
         // Le CdP a choisi la politique "Log, pas logout" pour éviter les wipe agressifs.
         if (error.response?.status === 401) {
             const originalRequest = error.config as RetryableRequestConfig | undefined;
-            const storedAuthData = readStoredAuthData();
+            const storedAuthData = readStoredAuthDataForSession();
 
             if (
                 originalRequest &&
@@ -175,8 +92,10 @@ axiosInstance.interceptors.response.use(
                 originalRequest._retry = true;
 
                 try {
-                    const newAccessToken = await refreshAccessToken();
-                    originalRequest.headers = originalRequest.headers ?? {};
+                    const newAccessToken = await refreshStoredSessionAccessToken();
+                    originalRequest.headers = originalRequest.headers instanceof AxiosHeaders
+                        ? originalRequest.headers
+                        : new AxiosHeaders(originalRequest.headers);
                     originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
                     return axiosInstance(originalRequest);
                 } catch (refreshError) {

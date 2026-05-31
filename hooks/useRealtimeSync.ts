@@ -1,10 +1,10 @@
 import { useEffect, useCallback, useRef } from 'react';
 import webSocketService from '../services/webSocketService';
-import { ChatMessage, WorkflowNode } from '../types';
+import { ChatMessage, NodePositionUpdateOptions, WorkflowNode } from '../types';
 
 interface UseRealtimeSyncProps {
   nodes: WorkflowNode[];
-  onUpdateNodePosition: (nodeId: string, position: { x: number; y: number }) => void;
+  onUpdateNodePosition: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onUpdateNodeMessages: (nodeId: string, messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
   onToggleNodeMinimize: (nodeId: string) => void;
   currentUserId?: string;

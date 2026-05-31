@@ -66,7 +66,13 @@ describe('J8 transition routes', () => {
     afterEach(async () => {
         runtimeHealthSpy.mockReset();
         await UserToolRun.deleteMany({});
-        await UserTool.deleteMany({ name: /transition-route-test-/i });
+        await UserTool.deleteMany({
+            $or: [
+                { name: 'hello_test' },
+                { name: /transition-route-test-/i },
+                { name: /web_(search|fetch)_py/i }
+            ]
+        });
         await Workspace.deleteMany({ logicalRoot: /transition-route-test-/i });
         await User.deleteMany({ email: /transition-route-test-/i });
     });
@@ -158,11 +164,469 @@ describe('J8 transition routes', () => {
             id: tool.id,
             legacyFunctionId: tool.id,
             compatibilityAliases: { functionId: tool.id },
+            readinessStatus: expect.objectContaining({
+                requirement: 'none',
+                state: 'ready',
+                runnable: true
+            }),
             workspaceContext: expect.objectContaining({
                 workspaceId: workspaceId.toString(),
                 status: 'active'
             })
         }));
+    });
+
+    it('exposes shared hello_test but hides foreign private custom tools from GET /api/tools', async () => {
+        const requester = await User.create({
+            email: `transition-route-test-shared-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionshared${Date.now()}`
+        });
+
+        const foreignOwner = await User.create({
+            email: `transition-route-test-foreign-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionforeign${Date.now()}`
+        });
+
+        await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'user',
+            workflowId: null,
+            name: 'hello_test',
+            displayName: 'Hello Test Shared',
+            description: 'Shared custom hello test example',
+            runtime: 'typescript',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v2',
+                contentHash: 'hello-test-shared-v2',
+                sourceMode: 'inline',
+                sourceInline: 'export function run(context, args) { return { result: `Ton nom, ${args.user_name}, est maintenant enregistré dans ma mémoire` }; }',
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v2',
+                contentHash: 'hello-test-shared-v2',
+                sourceMode: 'inline',
+                sourceInline: 'export function run(context, args) { return { result: `Ton nom, ${args.user_name}, est maintenant enregistré dans ma mémoire` }; }',
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['shared'],
+            dependencies: { npm: [], python: [] },
+            policy: { networkMode: 'none' },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        await UserTool.create({
+            ownerUserId: foreignOwner._id,
+            workspaceId: null,
+            scopeType: 'user',
+            workflowId: null,
+            name: `transition-route-test-private-${Date.now()}`,
+            displayName: 'Foreign Private Tool',
+            description: 'Should stay private to its owner',
+            runtime: 'typescript',
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: {
+                versionTag: 'v1',
+                contentHash: 'foreign-private-v1',
+                sourceMode: 'inline',
+                sourceInline: 'export function run() { return { ok: true }; }',
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v1',
+                contentHash: 'foreign-private-v1',
+                sourceMode: 'inline',
+                sourceInline: 'export function run() { return { ok: true }; }',
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: [],
+            dependencies: { npm: [], python: [] },
+            policy: { networkMode: 'none' },
+            isReadonly: false,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: requester.id, email: requester.email, role: requester.role });
+
+        const response = await request(app)
+            .get('/api/tools')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body.items.some((item: any) => item.name === 'hello_test')).toBe(true);
+        expect(response.body.items.some((item: any) => String(item.name).startsWith('transition-route-test-private-'))).toBe(false);
+    });
+
+    it('exposes a unified readiness status for web_fetch_py when platform provisioning is still missing', async () => {
+        const user = await User.create({
+            email: `transition-route-test-web-search-missing-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionwebsearchmissing${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_fetch_py',
+            displayName: 'Web Fetch',
+            description: 'Recuperation web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v1',
+                contentHash: 'web-fetch-v1-missing',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v1',
+                contentHash: 'web-fetch-v1-missing',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['fetch', 'native'],
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const response = await request(app)
+            .get(`/api/tools/${tool.id}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body.tool).toEqual(expect.objectContaining({
+            id: tool.id,
+            name: 'web_fetch_py',
+            readinessStatus: expect.objectContaining({
+                requirement: 'platform_provision',
+                state: 'waiting_for_provisioning',
+                prepared: false,
+                runnable: false,
+                dependencyReadiness: 'missing',
+                actionLabel: 'Provisionnement plateforme requis'
+            })
+        }));
+    });
+
+    it('exposes web_fetch_py readiness from GET /api/tools when platform provisioning is still missing', async () => {
+        const user = await User.create({
+            email: `transition-route-test-web-search-list-missing-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionwebsearchlistmissing${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_fetch_py',
+            displayName: 'Web Fetch',
+            description: 'Recuperation web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v-list-missing',
+                contentHash: 'web-fetch-list-missing',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v-list-missing',
+                contentHash: 'web-fetch-list-missing',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['fetch', 'native'],
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const response = await request(app)
+            .get('/api/tools?runtime=python')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body.items).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: tool.id,
+                name: 'web_fetch_py',
+                readinessStatus: expect.objectContaining({
+                    requirement: 'platform_provision',
+                    state: 'waiting_for_provisioning',
+                    prepared: false,
+                    runnable: false,
+                    dependencyReadiness: 'missing',
+                    actionLabel: 'Provisionnement plateforme requis'
+                })
+            })
+        ]));
+    });
+
+    it('exposes a unified readiness status for web_fetch_py when platform provisioning is complete', async () => {
+        const user = await User.create({
+            email: `transition-route-test-web-search-ready-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionwebsearchready${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_fetch_py',
+            displayName: 'Web Fetch',
+            description: 'Recuperation web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v2',
+                contentHash: 'web-fetch-v2-ready',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v2',
+                contentHash: 'web-fetch-v2-ready',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['fetch', 'native'],
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const response = await request(app)
+            .get(`/api/tools/${tool.id}`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body.tool).toEqual(expect.objectContaining({
+            id: tool.id,
+            name: 'web_fetch_py',
+            readinessStatus: expect.objectContaining({
+                requirement: 'platform_provision',
+                state: 'ready',
+                prepared: true,
+                runnable: true,
+                dependencyReadiness: 'satisfied',
+                actionLabel: 'Executable'
+            })
+        }));
+    });
+
+    it('allows explicit platform provisioning through POST /api/tools/:id/provision', async () => {
+        const user = await User.create({
+            email: `transition-route-test-web-search-provision-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionwebsearchprovision${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_fetch_py',
+            displayName: 'Web Fetch',
+            description: 'Recuperation web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v-provision',
+                contentHash: 'web-fetch-provision',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v-provision',
+                contentHash: 'web-fetch-provision',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'not_built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['fetch', 'native'],
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+        const provisionSpy = jest.spyOn(
+            require('../services/nativePythonProvisioning.service').NativePythonProvisioningService.prototype,
+            'provisionToolVersion'
+        ).mockResolvedValue({
+            toolId: tool.id,
+            toolName: 'web_fetch_py',
+            toolVersionTag: 'v-provision',
+            status: 'ready',
+            provisionedAt: '2026-03-31T12:00:00.000Z',
+            dependencies: ['requests==2.32.3'],
+            criticalModules: ['requests'],
+            sitePackagesPath: '/tmp/site-packages',
+            reportPath: '/tmp/provision-report.json'
+        });
+
+        const response = await request(app)
+            .post(`/api/tools/${tool.id}/provision?versionTag=v-provision`)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body).toEqual(expect.objectContaining({
+            toolId: tool.id,
+            toolVersionTag: 'v-provision',
+            status: 'ready'
+        }));
+        expect(provisionSpy).toHaveBeenCalledWith(tool.id, user.id, 'v-provision');
+        provisionSpy.mockRestore();
+    });
+
+    it('exposes web_fetch_py readiness from GET /api/tools when platform provisioning is complete', async () => {
+        const user = await User.create({
+            email: `transition-route-test-web-search-list-ready-${Date.now()}@test.com`,
+            password: 'test-only-password-123',
+            username: `transitionwebsearchlistready${Date.now()}`
+        });
+
+        const tool = await UserTool.create({
+            ownerUserId: null,
+            workspaceId: null,
+            scopeType: 'native',
+            workflowId: null,
+            name: 'web_fetch_py',
+            displayName: 'Web Fetch',
+            description: 'Recuperation web native',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'internal',
+            currentVersion: {
+                versionTag: 'v-list-ready',
+                contentHash: 'web-fetch-list-ready',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            },
+            versions: [{
+                versionTag: 'v-list-ready',
+                contentHash: 'web-fetch-list-ready',
+                sourceMode: 'path',
+                sourcePath: 'backend/python/native/web_fetch_py.py',
+                sourceInline: null,
+                createdAt: new Date(),
+                buildStatus: 'built',
+                validationStatus: 'valid'
+            }],
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object' },
+            tags: ['fetch', 'native'],
+            dependencies: { npm: [], python: ['requests==2.32.3'] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256 },
+            isReadonly: true,
+            isEnabled: true
+        });
+
+        const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
+
+        const response = await request(app)
+            .get('/api/tools?runtime=python')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200);
+
+        expect(response.body.items).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: tool.id,
+                name: 'web_fetch_py',
+                readinessStatus: expect.objectContaining({
+                    requirement: 'platform_provision',
+                    state: 'ready',
+                    prepared: true,
+                    runnable: true,
+                    dependencyReadiness: 'satisfied',
+                    actionLabel: 'Executable'
+                })
+            })
+        ]));
     });
 
     it('returns owner-scoped runs from GET /api/runs', async () => {

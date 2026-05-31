@@ -1,14 +1,18 @@
-import { useState } from 'react';
-import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall } from '../types';
+import { useMemo, useState } from 'react';
+import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, ToolCallRecord } from '../types';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import * as llmService from '../services/llmService';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
-import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
 import { isLLMConfigured } from '../utils/llmProviderUtils';
-import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
-// ⭐ AUTO-SAVE: Import persistence service for chat content
-import { PersistenceService } from '../services/persistenceService';
+import { resolveAgentRuntimeConfig } from '../services/runtimeConfigResolver';
+import { createAdapter } from '../services/adapters/AdapterFactory';
+import { runAgentLoop } from '../services/llm/AgentLoop';
+import { useFunctionStore } from '../stores/useFunctionStore';
+import { selectAgentExecutionSelectionContext, useDesignStore } from '../stores/useDesignStore';
+import { executeAgentToolCall } from '../services/agentToolExecution';
+import { useAgentJournalPersistence } from './useAgentJournalPersistence';
+import { prepareConversationHistoryForAPI } from '../services/historySynthesisService';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -32,6 +36,7 @@ interface UseAgentChatOptions {
 interface UseAgentChatReturn {
     handleSendMessage: (userInput: string, attachedFile: File | null) => Promise<void>;
     loadingMessage: string;
+    isHistorySynthesisActive: boolean;
 }
 
 /**
@@ -39,7 +44,8 @@ interface UseAgentChatReturn {
  * Principe SOLID : Single Responsibility - Ce hook gère UNIQUEMENT la logique de chat
  * Utilisé par V2AgentNode et FullscreenChatModal pour garantir un comportement identique
  * 
- * ⭐ AUTO-SAVE: Chat messages are automatically persisted to backend when authenticated
+ * Les messages runtime restent en Zustand.
+ * La persistance durable passe par le journal partage avec V2AgentNode.
  */
 export const useAgentChat = ({
     nodeId,
@@ -57,49 +63,62 @@ export const useAgentChat = ({
         setNodeMessages,
         setNodeExecuting,
         localLLMProfiles,
+        getNodeInvisibleHistorySummary = () => null,
+        setNodeInvisibleHistorySummary = () => undefined,
     } = useRuntimeStore();
+    const allFunctions = useFunctionStore((state) => state.functions);
+    const loadFunctions = useFunctionStore((state) => state.loadFunctions);
+    const agentInstances = useDesignStore((state) => state.agentInstances);
+    const { workflowId, scopedFunctions, selectedToolIds } = useMemo(
+        () => selectAgentExecutionSelectionContext({ agentInstances }, agent, instanceId, allFunctions),
+        [agent, agentInstances, allFunctions, instanceId]
+    );
+    const selectedIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
 
     const [loadingMessage, setLoadingMessage] = useState('');
+    const [isHistorySynthesisActive, setIsHistorySynthesisActive] = useState(false);
+    const { persistJournalEntry, persistToolInvocation, resetToolInvocationDedup } = useAgentJournalPersistence({
+        workflowId,
+        instanceId,
+    });
 
-    /**
-     * ⭐ AUTO-SAVE: Persist chat message to backend immediately
-     * Called after each addNodeMessage for authenticated users
-     */
-    const persistChatMessage = async (message: ChatMessage) => {
-        if (!instanceId || !isAuthenticated || !accessToken) {
-            return; // Skip for guest mode or missing instanceId
-        }
-
+    const parseToolArguments = (rawArguments: string): Record<string, unknown> => {
         try {
-            await PersistenceService.addAgentInstanceContent(
-                instanceId,
-                {
-                    type: message.isError ? 'error' : 'chat',
-                    role: message.sender,
-                    message: message.text,
-                    timestamp: new Date(),
-                    metadata: {
-                        messageId: message.id,
-                        hasImage: !!message.image,
-                        hasFile: !!message.filename,
-                        toolCalls: message.toolCalls
-                    }
-                },
-                { isAuthenticated, accessToken }
-            );
-            console.log('[useAgentChat] ✅ Message persisted:', message.id);
-        } catch (err) {
-            console.warn('[useAgentChat] ⚠️ Failed to persist message:', err);
-            // Don't block UI - message is in runtime state
+            const parsed = JSON.parse(rawArguments);
+            return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+        } catch {
+            return {};
         }
     };
 
-    /**
-     * Wrapper: Add message to runtime store AND persist to backend
-     */
-    const addAndPersistMessage = async (nodeId: string, message: ChatMessage) => {
-        addNodeMessage(nodeId, message);
-        await persistChatMessage(message);
+    const extractToolExecutionMetadata = (toolResult: unknown): Pick<ToolCallRecord, 'executionId' | 'runner' | 'exitCode' | 'failureKind' | 'artifacts'> => {
+        if (!toolResult || typeof toolResult !== 'object') {
+            return {};
+        }
+
+        const payload = toolResult as Record<string, unknown>;
+        const executionId = typeof payload.executionId === 'string' ? payload.executionId : undefined;
+        const runner = typeof payload.runner === 'string' ? payload.runner : undefined;
+        const exitCode = typeof payload.exitCode === 'number' ? payload.exitCode : undefined;
+        const failureKind = typeof payload.failureKind === 'string' ? payload.failureKind : undefined;
+        const artifacts = Array.isArray(payload.artifacts)
+            ? payload.artifacts.filter((artifact): artifact is { path: string; kind: 'file' | 'json' | 'log' } => {
+                return !!artifact
+                    && typeof artifact === 'object'
+                    && typeof (artifact as Record<string, unknown>).path === 'string'
+                    && ((artifact as Record<string, unknown>).kind === 'file'
+                        || (artifact as Record<string, unknown>).kind === 'json'
+                        || (artifact as Record<string, unknown>).kind === 'log');
+            })
+            : undefined;
+
+        return { executionId, runner, exitCode, failureKind, artifacts };
+    };
+
+    const isToolErrorResult = (toolResult: unknown): boolean => {
+        return !!toolResult
+            && typeof toolResult === 'object'
+            && 'error' in (toolResult as Record<string, unknown>);
     };
 
     const handleSendMessage = async (userInput: string, attachedFile: File | null) => {
@@ -112,7 +131,9 @@ export const useAgentChat = ({
             return;
         }
 
+        resetToolInvocationDedup();
         setNodeExecuting(nodeId, true);
+        const visibleMessagesBeforeSend = getNodeMessages(nodeId);
 
         const userMessage: ChatMessage = {
             id: generateMessageId('user'),
@@ -137,7 +158,18 @@ export const useAgentChat = ({
             }
         }
 
-        await addAndPersistMessage(nodeId, userMessage);
+        addNodeMessage(nodeId, userMessage);
+        persistJournalEntry('chat', {
+            messageId: userMessage.id,
+            role: 'user',
+            content: trimmedInput,
+            llmProvider: agent.llmProvider,
+            modelUsed: agent.model,
+            ...(userMessage.image ? { imageBase64: userMessage.image } : {}),
+            ...(userMessage.fileContent ? { fileContent: userMessage.fileContent } : {}),
+            ...(userMessage.mimeType ? { mimeType: userMessage.mimeType } : {}),
+            ...(userMessage.filename ? { fileName: userMessage.filename } : {}),
+        });
 
         const agentRuntime = resolveAgentRuntimeConfig(agent, llmConfigs, localLLMProfiles);
         const agentConfig = agentRuntime.config;
@@ -150,85 +182,156 @@ export const useAgentChat = ({
                 isError: true,
                 timestamp: new Date()
             };
-            await addAndPersistMessage(nodeId, errorMessage);
+            addNodeMessage(nodeId, errorMessage);
+            persistJournalEntry('error', {
+                messageId: errorMessage.id,
+                errorCode: 'LLM_NOT_CONFIGURED',
+                message: errorMessage.text,
+                source: 'llm_service',
+                retryable: false,
+                attempts: 1,
+            });
             setNodeExecuting(nodeId, false);
             return;
         }
 
         try {
-            const messages = getNodeMessages(nodeId);
-
-            // Gestion de l'historique avec messages d'information
-            let conversationHistoryForAPI: ChatMessage[];
-            const historyConfig = agent.historyConfig;
-            const currentFullHistory = [...messages, userMessage];
-
-            if (historyConfig?.enabled && messages.length > 0) {
-                const { limits } = historyConfig;
-                const stats = {
-                    tokens: countTokens(currentFullHistory),
-                    words: countWords(currentFullHistory),
-                    sentences: countSentences(currentFullHistory),
-                    messages: countMessages(currentFullHistory),
-                };
-
-                const shouldSummarize = stats.tokens >= limits.token ||
-                    stats.words >= limits.word ||
-                    stats.sentences >= limits.sentence ||
-                    stats.messages >= limits.message;
-
-                if (shouldSummarize) {
-                    setLoadingMessage(t('agentNode_history_summarizing'));
-                    const summarizationRuntime = resolveHistoryRuntimeConfig(
-                        historyConfig,
-                        llmConfigs,
-                        localLLMProfiles,
-                        agent.localLLMProfileId
-                    );
-                    const summarizationConfig = summarizationRuntime.config;
-
-                    if (!summarizationConfig) {
-                        throw new Error(`Summarization LLM ${historyConfig.llmProvider} not configured.`);
+            const preparedConversation = await prepareConversationHistoryForAPI({
+                visibleMessagesBeforeSend,
+                userMessage,
+                historyConfig: agent.historyConfig,
+                invisibleSummaryState: getNodeInvisibleHistorySummary(nodeId),
+                llmConfigs,
+                localLLMProfiles,
+                inheritedLocalLLMProfileId: agent.localLLMProfileId,
+                t,
+                accessToken,
+                onSummarizingChange: (isSummarizing) => {
+                    if (isSummarizing) {
+                        setIsHistorySynthesisActive(true);
+                        setLoadingMessage(t('agentNode_history_summarizing'));
+                        return;
                     }
 
-                    const summarizationPrompt = `${t('conversation_to_summarize')}:\n\n${currentFullHistory.map(m => `${m.sender}: ${m.text}`).join('\n')}`;
-                    const summarizationHistory: ChatMessage[] = [{
-                        id: generateMessageId('summary-prompt'),
-                        sender: 'user',
-                        text: summarizationPrompt,
-                        timestamp: new Date()
-                    }];
-
-                    const { text: summary } = await llmService.generateContent(
-                        summarizationConfig.provider,
-                        summarizationRuntime.credential,
-                        historyConfig.model,
-                        historyConfig.systemPrompt,
-                        summarizationHistory,
-                        undefined,
-                        undefined,
-                        summarizationRuntime.credential
-                    );
-
-                    const summaryMessage: ChatMessage = {
-                        id: generateMessageId('summary'),
-                        sender: 'agent',
-                        text: `(Résumé de l'historique): ${summary}`,
-                        timestamp: new Date()
-                    };
-
-                    conversationHistoryForAPI = [summaryMessage, userMessage];
-                    setNodeMessages(nodeId, [summaryMessage, userMessage]);
                     setLoadingMessage('');
-                } else {
-                    conversationHistoryForAPI = currentFullHistory;
+                },
+            });
+
+            setNodeInvisibleHistorySummary(nodeId, preparedConversation.invisibleSummaryState);
+            const conversationHistoryForAPI = preparedConversation.conversationHistoryForAPI;
+
+            const credential = agentRuntime.credential;
+            const adapter = createAdapter(
+                agent.llmProvider as LLMProvider,
+                agentConfig,
+                agent.model,
+                accessToken ?? undefined,
+            );
+
+            if (adapter) {
+                let enabledFunctions = scopedFunctions;
+
+                if (enabledFunctions.length === 0 && selectedToolIds.length > 0 && workflowId) {
+                    await loadFunctions(workflowId);
+                    const reloadedFunctions = useFunctionStore.getState().functions;
+                    enabledFunctions = reloadedFunctions.filter((fn) => fn.isEnabled && (selectedIdSet.has(fn._id) || (fn.toolId ? selectedIdSet.has(fn.toolId) : false)));
                 }
-            } else {
-                conversationHistoryForAPI = historyConfig?.enabled ? currentFullHistory : [userMessage];
+
+                const loopResult = await runAgentLoop(
+                    adapter,
+                    conversationHistoryForAPI,
+                    enabledFunctions,
+                    agent.systemPrompt ?? '',
+                    {
+                        authToken: accessToken ?? undefined,
+                        onEvent: (event) => {
+                            if (event.type === 'tool_call_start') {
+                                if (event.toolCall?.id) {
+                                    const matchedFunction = enabledFunctions.find((fn) => fn.name === event.toolCall?.name);
+                                    persistToolInvocation({
+                                        toolCallId: event.toolCall.id,
+                                        toolName: event.toolCall.name,
+                                        phase: 'started',
+                                        toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                                        functionId: matchedFunction?._id,
+                                    });
+                                }
+                                setLoadingMessage(`🔧 ${event.toolCall?.name ?? '…'}`);
+                            } else if (event.type === 'llm_start') {
+                                setLoadingMessage(t('loading'));
+                            }
+                        },
+                    }
+                );
+
+                for (const record of loopResult.toolCallLog) {
+                    const toolMessage: ChatMessage = {
+                        id: record.id,
+                        sender: 'tool',
+                        text: `${record.functionName}(${JSON.stringify(record.arguments)})${record.executionId ? ` [${record.executionId}]` : ''}`,
+                        toolName: record.functionName,
+                        timestamp: record.timestamp,
+                        isError: record.status === 'error',
+                        toolCallRecord: {
+                            id: record.id,
+                            functionName: record.functionName,
+                            arguments: record.arguments,
+                            result: record.result,
+                            status: record.status,
+                            durationMs: record.durationMs,
+                            executionId: record.executionId,
+                            runner: record.runner,
+                            exitCode: record.exitCode,
+                            failureKind: record.failureKind,
+                            artifacts: record.artifacts,
+                            timestamp: record.timestamp,
+                        },
+                    };
+                    addNodeMessage(nodeId, toolMessage);
+                    persistToolInvocation({
+                        toolCallId: record.id,
+                        toolName: record.functionName,
+                        phase: record.status === 'error' ? 'failed' : 'completed',
+                        executionId: record.executionId,
+                        toolId: record.toolId,
+                        functionId: record.functionId,
+                    });
+
+                    const toolResultMessage: ChatMessage = {
+                        id: generateMessageId('tool-result'),
+                        sender: 'tool_result',
+                        text: typeof record.result === 'string' ? record.result : JSON.stringify(record.result, null, 2),
+                        toolCallId: record.id,
+                        toolName: record.functionName,
+                        timestamp: record.timestamp,
+                        isError: record.status === 'error',
+                    };
+                    addNodeMessage(nodeId, toolResultMessage);
+                }
+
+                if (loopResult.finalResponse.trim() || loopResult.finishReason === 'error') {
+                    const agentMsg: ChatMessage = {
+                        id: generateMessageId('agent'),
+                        sender: 'agent',
+                        text: loopResult.finalResponse,
+                        isError: loopResult.finishReason === 'error',
+                        timestamp: new Date(),
+                    };
+                    addNodeMessage(nodeId, agentMsg);
+                    if (loopResult.finalResponse.trim()) {
+                        persistJournalEntry('chat', {
+                            messageId: agentMsg.id,
+                            role: 'agent',
+                            content: loopResult.finalResponse,
+                            llmProvider: agent.llmProvider,
+                            modelUsed: agent.model,
+                        });
+                    }
+                }
+
+                return;
             }
 
-            // Stream LLM response
-            const credential = agentRuntime.credential;
             const stream = llmService.generateContentStream(
                 agent.llmProvider,
                 credential,
@@ -293,35 +396,136 @@ export const useAgentChat = ({
                     };
 
                     const existingMessages = getNodeMessages(nodeId);
-                    setNodeMessages(nodeId, existingMessages.map(m =>
-                        m.id === agentMessageId ? toolMessage : m
-                    ));
+                    const existingAgentMessage = existingMessages.find(m => m.id === agentMessageId);
+                    if (existingAgentMessage) {
+                        setNodeMessages(nodeId, existingMessages.map(m =>
+                            m.id === agentMessageId ? toolMessage : m
+                        ));
+                    } else {
+                        addNodeMessage(nodeId, toolMessage);
+                    }
+
+                    for (const toolCall of toolCalls) {
+                        const matchedFunction = scopedFunctions.find((fn) => fn.isEnabled && fn.name === toolCall.name);
+                        persistToolInvocation({
+                            toolCallId: toolCall.id,
+                            toolName: toolCall.name,
+                            phase: 'started',
+                            toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                            functionId: matchedFunction?._id,
+                        });
+                    }
                 }
+            }
+
+            if (currentResponse.trim() && !toolCalls.length) {
+                persistJournalEntry('chat', {
+                    messageId: agentMessageId,
+                    role: 'agent',
+                    content: currentResponse,
+                    llmProvider: agent.llmProvider,
+                    modelUsed: agent.model,
+                });
             }
 
             // Execute tools if any
             if (toolCalls.length > 0) {
                 for (const toolCall of toolCalls) {
+                    const matchedFunction = scopedFunctions.find((fn) => fn.isEnabled && fn.name === toolCall.name);
+                    const toolTimestamp = new Date();
+
                     try {
-                        const toolResult = await executeTool(toolCall);
+                        const execution = await executeAgentToolCall({
+                            toolCall,
+                            agent,
+                            availableFunctions: scopedFunctions,
+                            authToken: accessToken ?? undefined,
+                        });
+                        const toolResult = execution.result;
+                        const toolExecutionError = isToolErrorResult(toolResult);
+                        const toolMessage: ChatMessage = {
+                            id: generateMessageId('tool-call'),
+                            sender: 'tool',
+                            text: `${toolCall.name}(${execution.serializedArguments})${execution.executionId ? ` [${execution.executionId}]` : ''}`,
+                            toolName: toolCall.name,
+                            timestamp: toolTimestamp,
+                            isError: toolExecutionError,
+                            toolCallRecord: {
+                                id: toolCall.id,
+                                toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                                functionId: matchedFunction?._id,
+                                functionName: toolCall.name,
+                                arguments: execution.executedArguments,
+                                result: toolResult,
+                                status: toolExecutionError ? 'error' : 'success',
+                                timestamp: toolTimestamp,
+                                executionId: execution.executionId,
+                                runner: execution.runner,
+                                exitCode: execution.exitCode,
+                                failureKind: execution.failureKind,
+                                artifacts: execution.artifacts,
+                            },
+                        };
+                        addNodeMessage(nodeId, toolMessage);
+                        persistToolInvocation({
+                            toolCallId: toolCall.id,
+                            toolName: toolCall.name,
+                            phase: toolExecutionError ? 'failed' : 'completed',
+                            executionId: execution.executionId,
+                            toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                            functionId: matchedFunction?._id,
+                        });
+
+                        const serializedToolResult = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
                         const toolResultMessage: ChatMessage = {
                             id: generateMessageId('tool-result'),
                             sender: 'tool_result',
-                            text: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
+                            text: execution.executionId
+                                ? `[executionId=${execution.executionId}] ${serializedToolResult}`
+                                : serializedToolResult,
                             toolCallId: toolCall.id,
                             toolName: toolCall.name,
-                            timestamp: new Date()
+                            timestamp: toolTimestamp,
+                            isError: toolExecutionError,
                         };
                         addNodeMessage(nodeId, toolResultMessage);
                     } catch (error) {
+                        const toolErrorText = `Erreur: ${error instanceof Error ? error.message : String(error)}`;
+                        const toolMessage: ChatMessage = {
+                            id: generateMessageId('tool-call'),
+                            sender: 'tool',
+                            text: `${toolCall.name}(${toolCall.arguments})`,
+                            toolName: toolCall.name,
+                            timestamp: toolTimestamp,
+                            isError: true,
+                            toolCallRecord: {
+                                id: toolCall.id,
+                                toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                                functionId: matchedFunction?._id,
+                                functionName: toolCall.name,
+                                arguments: parseToolArguments(toolCall.arguments),
+                                result: { error: toolErrorText },
+                                status: 'error',
+                                timestamp: toolTimestamp,
+                            },
+                        };
+                        addNodeMessage(nodeId, toolMessage);
+                        persistToolInvocation({
+                            toolCallId: toolCall.id,
+                            toolName: toolCall.name,
+                            phase: 'failed',
+                            toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                            functionId: matchedFunction?._id,
+                        });
+
                         const errorMessage: ChatMessage = {
                             id: generateMessageId('tool-error'),
                             sender: 'tool_result',
-                            text: `Erreur: ${error instanceof Error ? error.message : String(error)}`,
+                            text: toolErrorText,
                             toolCallId: toolCall.id,
                             toolName: toolCall.name,
                             isError: true,
-                            timestamp: new Date()
+                            timestamp: toolTimestamp,
                         };
                         addNodeMessage(nodeId, errorMessage);
                     }
@@ -332,6 +536,15 @@ export const useAgentChat = ({
                 setNodeMessages(nodeId, existingMessages.map(m =>
                     m.status === 'executing_tool' ? { ...m, status: undefined } : m
                 ));
+
+                persistJournalEntry('chat', {
+                    messageId: agentMessageId,
+                    role: 'agent',
+                    content: currentResponse,
+                    llmProvider: agent.llmProvider,
+                    modelUsed: agent.model,
+                    toolCalls,
+                });
 
                 // If agent has Chat capability, continue generation with tool results
                 if (agent?.capabilities?.includes(LLMCapability.Chat)) {
@@ -413,6 +626,16 @@ export const useAgentChat = ({
                             }
                         }
                     }
+
+                    if (followUpResponse.trim()) {
+                        persistJournalEntry('chat', {
+                            messageId: followUpMessageId,
+                            role: 'agent',
+                            content: followUpResponse,
+                            llmProvider: agent.llmProvider,
+                            modelUsed: agent.model,
+                        });
+                    }
                 }
             }
 
@@ -424,26 +647,25 @@ export const useAgentChat = ({
                 isError: true,
                 timestamp: new Date()
             };
-            // ⭐ AUTO-SAVE: Persist error message
-            await addAndPersistMessage(nodeId, errorMessage);
+            addNodeMessage(nodeId, errorMessage);
+            persistJournalEntry('error', {
+                messageId: errorMessage.id,
+                errorCode: 'AGENT_CHAT_ERROR',
+                message: error instanceof Error ? error.message : String(error),
+                source: 'llm_service',
+                retryable: true,
+                attempts: 1,
+            });
         } finally {
             setNodeExecuting(nodeId, false);
             setLoadingMessage('');
-            
-            // ⭐ AUTO-SAVE: After streaming is complete, persist the final agent response
-            if (instanceId && isAuthenticated && accessToken) {
-                const finalMessages = getNodeMessages(nodeId);
-                // Find the latest agent message that was added during this interaction
-                const latestAgentMessage = [...finalMessages].reverse().find(m => m.sender === 'agent');
-                if (latestAgentMessage && !latestAgentMessage.isError) {
-                    await persistChatMessage(latestAgentMessage);
-                }
-            }
+            setIsHistorySynthesisActive(false);
         }
     };
 
     return {
         handleSendMessage,
         loadingMessage,
+        isHistorySynthesisActive,
     };
 };

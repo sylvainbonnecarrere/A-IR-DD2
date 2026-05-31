@@ -7,6 +7,24 @@
 
 import { LLMProvider, LLMCapability } from '../../types';
 
+let authState = {
+    user: null as null | { email: string },
+    isAuthenticated: false,
+    refreshRuntimeConfigState: jest.fn().mockResolvedValue(undefined),
+};
+
+let cloudProfilesHookState = {
+    profiles: [] as Array<any>,
+    loading: false,
+    error: null as string | null,
+    loadProfiles: jest.fn().mockResolvedValue(undefined),
+    createProfile: jest.fn(),
+    updateProfile: jest.fn(),
+    deleteProfile: jest.fn(),
+    testProfile: jest.fn(),
+    clearError: jest.fn(),
+};
+
 jest.mock('../../hooks/useLocalization', () => ({
     useLocalization: () => ({
         t: (key: string) => key,
@@ -16,11 +34,7 @@ jest.mock('../../hooks/useLocalization', () => ({
 }));
 
 jest.mock('../../hooks/useAuth', () => ({
-    useAuth: () => ({
-        user: null,
-        isAuthenticated: false,
-        refreshRuntimeConfigState: jest.fn().mockResolvedValue(undefined),
-    }),
+    useAuth: () => authState,
 }));
 
 let llmHookRenderCount = 0;
@@ -68,6 +82,10 @@ jest.mock('../../hooks/useLocalLLMProfiles', () => ({
     }),
 }));
 
+jest.mock('../../hooks/useCloudConnectionProfiles', () => ({
+    useCloudConnectionProfiles: () => cloudProfilesHookState,
+}));
+
 jest.mock('../../i18n/locales', () => ({
     locales: ['fr', 'en'],
     Locale: {},
@@ -103,6 +121,15 @@ jest.mock('../../components/settings/LocalLLMProfileCard', () => ({
     LocalLLMProfileCard: () => React.createElement('div', null, 'profile-card'),
 }));
 
+jest.mock('../../components/settings/CloudConnectionProfileCard', () => ({
+    CloudConnectionProfileCard: ({ profile }: any) => React.createElement(
+        'div',
+        null,
+        profile.displayName,
+        React.createElement('span', null, profile.target?.bucketName)
+    ),
+}));
+
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { SettingsModal } from '../../components/modals/SettingsModal';
@@ -126,6 +153,22 @@ describe('SettingsModal.handleDetectLMStudio - TNR', () => {
     
     beforeEach(() => {
         llmHookRenderCount = 0;
+        authState = {
+            user: null,
+            isAuthenticated: false,
+            refreshRuntimeConfigState: jest.fn().mockResolvedValue(undefined),
+        };
+        cloudProfilesHookState = {
+            profiles: [],
+            loading: false,
+            error: null,
+            loadProfiles: jest.fn().mockResolvedValue(undefined),
+            createProfile: jest.fn(),
+            updateProfile: jest.fn(),
+            deleteProfile: jest.fn(),
+            testProfile: jest.fn(),
+            clearError: jest.fn(),
+        };
     });
 
     test('modal should not loop when hook configs get a new reference on each render', () => {
@@ -151,6 +194,70 @@ describe('SettingsModal.handleDetectLMStudio - TNR', () => {
         );
 
         consoleErrorSpy.mockRestore();
+    });
+
+    test('authenticated users should see the Cloud tab backed by profile data', async () => {
+        const { fireEvent } = await import('@testing-library/react');
+
+        authState = {
+            user: { email: 'cloud@test.local' },
+            isAuthenticated: true,
+            refreshRuntimeConfigState: jest.fn().mockResolvedValue(undefined),
+        };
+        cloudProfilesHookState = {
+            profiles: [
+                {
+                    id: 'cloud-profile-1',
+                    displayName: 'Media S3',
+                    provider: 's3',
+                    enabled: true,
+                    hasSecretMaterial: true,
+                    target: {
+                        bucketName: 'team-bucket',
+                        region: 'eu-west-3',
+                        endpoint: null,
+                        forcePathStyle: false,
+                        keyPrefix: 'workflow/'
+                    },
+                    status: {
+                        state: 'configured',
+                        lastValidatedAt: null,
+                        lastErrorCode: null,
+                        lastValidationMessage: null,
+                    },
+                    secretSummary: {
+                        accessKeyIdMasked: '••••MPLE',
+                        secretAccessKeyPresent: true,
+                    },
+                }
+            ],
+            loading: false,
+            error: null,
+            loadProfiles: jest.fn().mockResolvedValue(undefined),
+            createProfile: jest.fn(),
+            updateProfile: jest.fn(),
+            deleteProfile: jest.fn(),
+            testProfile: jest.fn(),
+            clearError: jest.fn(),
+        };
+
+        render(React.createElement(SettingsModal, {
+            llmConfigs: [
+                {
+                    provider: LLMProvider.OpenAI,
+                    enabled: false,
+                    apiKey: '',
+                    capabilities: { [LLMCapability.Chat]: true },
+                },
+            ],
+            onClose: jest.fn(),
+            onSave: jest.fn(),
+        }));
+
+        fireEvent.click(screen.getByRole('button', { name: 'Cloud' }));
+
+        expect(await screen.findByText('Media S3')).toBeInTheDocument();
+        expect(screen.getByText('team-bucket')).toBeInTheDocument();
     });
 
     test('endpoint should be properly URL encoded in proxy call', () => {

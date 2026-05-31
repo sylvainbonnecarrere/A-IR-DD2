@@ -45,13 +45,14 @@ export const LLM_MODELS_DETAILED: Record<LLMProvider, LLMModelDefinition[]> = {
             capabilities: [
                 LLMCapability.Chat,
                 LLMCapability.FileUpload,
+                LLMCapability.URLAnalysis,
                 LLMCapability.ImageGeneration,
                 LLMCapability.ImageModification,
                 LLMCapability.FunctionCalling,
+                LLMCapability.OutputFormatting,
                 LLMCapability.WebSearch,
                 LLMCapability.VideoGeneration,
-                LLMCapability.MapsGrounding,
-                LLMCapability.WebSearchGrounding
+                LLMCapability.MapsGrounding
             ],
             description: 'Multimodal: chat, images, video, maps & web grounding'
         },
@@ -73,9 +74,11 @@ export const LLM_MODELS_DETAILED: Record<LLMProvider, LLMModelDefinition[]> = {
             capabilities: [
                 LLMCapability.Chat,
                 LLMCapability.FileUpload,
+                LLMCapability.URLAnalysis,
                 LLMCapability.ImageGeneration,
                 LLMCapability.ImageModification,
                 LLMCapability.FunctionCalling,
+                LLMCapability.OutputFormatting,
                 LLMCapability.WebSearch,
                 LLMCapability.VideoGeneration,
                 LLMCapability.MapsGrounding,

@@ -390,7 +390,16 @@ export const generateContentStream = async function* (
 
         try {
             while (true) {
-                const { done, value } = await reader.read();
+                let streamChunk: ReadableStreamReadResult<Uint8Array>;
+
+                try {
+                    streamChunk = await reader.read();
+                } catch (readError) {
+                    const readErrorMessage = readError instanceof Error ? readError.message : String(readError);
+                    throw new Error(`LMStudio stream read failed for model ${model} on ${config.endpoint}: ${readErrorMessage}`);
+                }
+
+                const { done, value } = streamChunk;
                 if (done) break;
 
                 const chunk = new TextDecoder().decode(value);
@@ -407,6 +416,15 @@ export const generateContentStream = async function* (
 
                     try {
                         const data = JSON.parse(line.slice(6));
+
+                        if (typeof data?.error === 'string') {
+                            const errorCode = typeof data?.code === 'string' ? data.code : 'lmstudio_stream_error';
+                            const errorDetails = typeof data?.details === 'object' && data.details !== null
+                                ? ` ${JSON.stringify(data.details)}`
+                                : '';
+                            throw new Error(`LMStudio stream error [${errorCode}]${errorDetails}: ${data.error}`);
+                        }
+
                         const delta = data.choices?.[0]?.delta;
 
                         if (delta?.content) {
@@ -451,6 +469,9 @@ export const generateContentStream = async function* (
                             break;
                         }
                     } catch (parseError) {
+                        if (parseError instanceof Error && parseError.message.startsWith('LMStudio stream error [')) {
+                            throw parseError;
+                        }
                         console.warn('LMStudio parsing error:', parseError);
                     }
                 }

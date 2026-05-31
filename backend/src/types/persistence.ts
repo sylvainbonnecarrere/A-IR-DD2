@@ -23,6 +23,47 @@ import { Types } from 'mongoose';
  * - cloud: Stockage externe S3/GCS (future implémentation)
  */
 export type MediaStorageMode = 'database' | 'local' | 'cloud';
+export type ProductMediaStorageType = 'db' | 'workspace' | 'cloud';
+export type PersistedMediaStorageType = 'db' | 'local' | 'cloud';
+
+export interface LegacyCloudStorageConfig {
+    provider?: 'aws' | 'gcs';
+    bucket?: string;
+    region?: string;
+    endpoint?: string;
+}
+
+export function normalizePersistedMediaStorage(
+    value?: ProductMediaStorageType | PersistedMediaStorageType | MediaStorageMode | null
+): ProductMediaStorageType {
+    switch (value) {
+        case 'workspace':
+        case 'cloud':
+        case 'db':
+            return value;
+        case 'local':
+            return 'workspace';
+        case 'database':
+        default:
+            return 'db';
+    }
+}
+
+export function denormalizeMediaStorageForPersistence(
+    value?: ProductMediaStorageType | PersistedMediaStorageType | MediaStorageMode | null
+): PersistedMediaStorageType {
+    const normalized = normalizePersistedMediaStorage(value);
+
+    switch (normalized) {
+        case 'workspace':
+            return 'local';
+        case 'cloud':
+            return 'cloud';
+        case 'db':
+        default:
+            return 'db';
+    }
+}
 
 /**
  * Configuration de persistance d'un agent
@@ -37,19 +78,44 @@ export interface PersistenceConfig {
     saveTaskExecution?: boolean;    // ⭐ Alias pour saveTasks (compatibilité)
     saveLinks: boolean;             // Sauvegarder les liens entre agents
     saveMedia?: boolean;            // ⭐ Activer sauvegarde des fichiers médias
+    allowWorkspaceWrite?: boolean;  // ⭐ Autorise aussi une publication workspace si demandée
 
     // Stratégie de stockage des médias
-    mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' (inline), local (volume), cloud (S3/GCS)
+    mediaStorage?: ProductMediaStorageType | PersistedMediaStorageType; // Défaut: 'db' (inline), local/workspace, cloud (S3/GCS)
+    cloudConnectionProfileId?: string; // Référence vers un profil cloud sécurisé
+    cloudStorageConfig?: LegacyCloudStorageConfig | null; // Legacy compatibility only; never expose to frontend
 
     // Options avancées
     saveHistorySummary: boolean;    // Activer la compression automatique du contexte
     retentionDays?: number;         // Durée de conservation en jours (null = illimité)
 }
 
+export type PersistedPersistenceConfig = Omit<PersistenceConfig, 'mediaStorage'> & {
+    mediaStorage?: PersistedMediaStorageType;
+};
+
+type PersistenceConfigDocumentLike = {
+    toObject?: () => unknown;
+};
+
+export function extractPersistenceConfigValue(
+    config?: Partial<PersistenceConfig> | PersistenceConfigDocumentLike | null,
+): Partial<PersistenceConfig> | null {
+    if (!config) {
+        return null;
+    }
+
+    if (typeof (config as PersistenceConfigDocumentLike).toObject === 'function') {
+        return (config as PersistenceConfigDocumentLike).toObject?.() as Partial<PersistenceConfig>;
+    }
+
+    return config as Partial<PersistenceConfig>;
+}
+
 /**
  * Configuration de persistance par défaut
  */
-export const DEFAULT_PERSISTENCE_CONFIG: PersistenceConfig = {
+export const DEFAULT_PERSISTENCE_CONFIG: PersistedPersistenceConfig = {
     saveChat: true,
     saveChatHistory: true,
     saveErrors: true,
@@ -57,10 +123,91 @@ export const DEFAULT_PERSISTENCE_CONFIG: PersistenceConfig = {
     saveTaskExecution: false,
     saveLinks: false,
     saveMedia: true,
+    allowWorkspaceWrite: true,
     mediaStorage: 'db',
     saveHistorySummary: false,
     retentionDays: undefined
 };
+
+export function resolveAllowWorkspaceWrite(
+    saveMedia: boolean,
+    mediaStorage?: ProductMediaStorageType | PersistedMediaStorageType | MediaStorageMode | null,
+    explicitValue?: boolean | null,
+): boolean {
+    if (!saveMedia) {
+        return false;
+    }
+
+    if (normalizePersistedMediaStorage(mediaStorage) === 'workspace') {
+        return true;
+    }
+
+    return explicitValue ?? true;
+}
+
+export function normalizePersistenceConfigForPersistence(
+    config?: Partial<PersistenceConfig> | null,
+): PersistedPersistenceConfig {
+    const merged = {
+        ...DEFAULT_PERSISTENCE_CONFIG,
+        ...(config || {}),
+    } as PersistenceConfig;
+
+    const saveMedia = merged.saveMedia ?? DEFAULT_PERSISTENCE_CONFIG.saveMedia ?? false;
+    const mediaStorage = denormalizeMediaStorageForPersistence(merged.mediaStorage);
+
+    return {
+        ...merged,
+        saveMedia,
+        mediaStorage,
+        allowWorkspaceWrite: resolveAllowWorkspaceWrite(saveMedia, mediaStorage, merged.allowWorkspaceWrite),
+    };
+}
+
+export function normalizePersistenceConfigForProduct(
+    config?: Partial<PersistenceConfig> | null,
+): PersistenceConfig {
+    const normalized = normalizePersistenceConfigForPersistence(config);
+
+    return {
+        ...normalized,
+        mediaStorage: normalizePersistedMediaStorage(normalized.mediaStorage),
+        allowWorkspaceWrite: resolveAllowWorkspaceWrite(
+            normalized.saveMedia ?? false,
+            normalized.mediaStorage,
+            normalized.allowWorkspaceWrite,
+        ),
+    };
+}
+
+export function sanitizePersistenceConfigForInstanceEgress(
+    config?: Partial<PersistenceConfig> | null,
+): PersistenceConfig {
+    const normalized = normalizePersistenceConfigForProduct(config) as PersistenceConfig & {
+        cloudStorageConfig?: unknown;
+    };
+    const { cloudStorageConfig: _cloudStorageConfig, ...sanitized } = normalized;
+
+    return sanitized;
+}
+
+export function summarizePersistenceConfigBoundary(
+    config?: Partial<PersistenceConfig> | null,
+) {
+    const normalized = normalizePersistenceConfigForProduct(config);
+    const rawCloudConfig = (config as any)?.cloudStorageConfig;
+
+    return {
+        saveChat: normalized.saveChat,
+        saveErrors: normalized.saveErrors,
+        saveMedia: normalized.saveMedia,
+        mediaStorage: normalized.mediaStorage,
+        allowWorkspaceWrite: normalized.allowWorkspaceWrite,
+        cloudConnectionProfileId: (config as any)?.cloudConnectionProfileId ?? null,
+        hasCloudStorageConfig: !!rawCloudConfig,
+        cloudProvider: rawCloudConfig?.provider ?? null,
+    };
+}
 
 // ============================================
 // PAYLOADS MÉDIA
@@ -105,18 +252,24 @@ export interface MediaPayload {
 /**
  * Types d'événements enregistrés dans les journaux
  */
-export type JournalEntryType = 'chat' | 'error' | 'media' | 'task' | 'system';
+export type JournalEntryType = 'chat' | 'error' | 'media' | 'task' | 'system' | 'tool_invocation';
 
 /**
  * Niveaux de sévérité pour filtrage
  */
 export type JournalSeverity = 'info' | 'warn' | 'error';
 
+export interface JournalCorrelationIds {
+    messageId?: string;
+    toolCallId?: string;
+    executionId?: string;
+}
+
 /**
  * Payload pour les entrées de type 'chat'
  * ⭐ FIX QA: Added imageBase64, mimeType, fileName for media persistence in chat
  */
-export interface ChatJournalPayload {
+export interface ChatJournalPayload extends JournalCorrelationIds {
     role: 'user' | 'agent' | 'tool' | 'tool_result';
     content: string;
     llmProvider?: string;
@@ -129,6 +282,7 @@ export interface ChatJournalPayload {
     }[];
     // ⭐ FIX QA: Support images inline dans les messages chat
     imageBase64?: string;    // Image data en base64
+    fileContent?: string;    // Contenu texte d'un fichier importé
     mimeType?: string;       // ex: image/png, image/jpeg
     fileName?: string;       // Nom original du fichier
 }
@@ -136,7 +290,7 @@ export interface ChatJournalPayload {
 /**
  * Payload pour les entrées de type 'error'
  */
-export interface ErrorJournalPayload {
+export interface ErrorJournalPayload extends JournalCorrelationIds {
     errorCode: string;
     message: string;
     source: 'llm_service' | 'tool_executor' | 'frontend' | 'system';
@@ -148,7 +302,7 @@ export interface ErrorJournalPayload {
 /**
  * Payload pour les entrées de type 'media'
  */
-export interface MediaJournalPayload extends MediaPayload {
+export interface MediaJournalPayload extends MediaPayload, JournalCorrelationIds {
     generationPrompt?: string;
     generationModel?: string;
     generationTime?: number;        // temps de génération en ms
@@ -157,7 +311,7 @@ export interface MediaJournalPayload extends MediaPayload {
 /**
  * Payload pour les entrées de type 'task'
  */
-export interface TaskJournalPayload {
+export interface TaskJournalPayload extends JournalCorrelationIds {
     taskName: string;
     taskStatus: 'started' | 'progress' | 'completed' | 'failed' | 'cancelled';
     reasoning?: string;
@@ -169,24 +323,60 @@ export interface TaskJournalPayload {
 /**
  * Payload pour les entrées de type 'system'
  */
-export interface SystemJournalPayload {
+export interface SystemJournalPayload extends JournalCorrelationIds {
     event: 'instance_created' | 'instance_started' | 'instance_paused' | 
            'instance_resumed' | 'instance_stopped' | 'config_changed' | 
            'persistence_config_updated' | 'status_changed' | 
-           'interaction_started' | 'interaction_ended';
+           'interaction_started' | 'interaction_ended' |
+           'media_deletion_policy_applied';
     details?: Record<string, unknown>;
     triggeredBy?: string;           // userId ou 'system'
 }
 
+interface ToolInvocationJournalPayloadBase extends JournalCorrelationIds {
+    toolCallId: string;
+    toolName: string;
+    toolId?: string;
+    functionId?: string;
+}
+
+export interface ToolInvocationStartedJournalPayload extends ToolInvocationJournalPayloadBase {
+    phase: 'started';
+    executionId?: string;
+}
+
+export interface ToolInvocationSettledJournalPayload extends ToolInvocationJournalPayloadBase {
+    phase: 'completed' | 'failed';
+    executionId: string;
+}
+
 /**
- * Union des payloads selon le type
+ * Projection conversationnelle légère d'un appel outil.
+ * La vérité d'exécution détaillée reste dans user_tool_runs.
+ */
+export type ToolInvocationJournalPayload =
+    | ToolInvocationStartedJournalPayload
+    | ToolInvocationSettledJournalPayload;
+
+/**
+ * Union des payloads selon le type persiste en base.
  */
 export type JournalPayload = 
-    | { type: 'chat'; data: ChatJournalPayload }
-    | { type: 'error'; data: ErrorJournalPayload }
-    | { type: 'media'; data: MediaJournalPayload }
-    | { type: 'task'; data: TaskJournalPayload }
-    | { type: 'system'; data: SystemJournalPayload };
+    | ChatJournalPayload
+    | ErrorJournalPayload
+    | MediaJournalPayload
+    | TaskJournalPayload
+    | SystemJournalPayload
+    | ToolInvocationJournalPayload;
+
+export interface JournalPayloadByType {
+    chat: ChatJournalPayload;
+    error: ErrorJournalPayload;
+    media: MediaJournalPayload;
+    task: TaskJournalPayload;
+    system: SystemJournalPayload;
+    tool_invocation: ToolInvocationJournalPayload;
+}
 
 // ============================================
 // INTERFACES POUR LES MODÈLES MONGOOSE

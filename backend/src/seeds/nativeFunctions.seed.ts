@@ -8,13 +8,14 @@
  * NB: bash_py est isEnabled: false par mesure de sécurité (docker requis).
  */
 
-import { FunctionLanguage, FunctionOrigin } from '../models/UserFunction.model';
+type NativeFunctionLanguage = 'python' | 'typescript';
+type NativeFunctionOrigin = 'native';
 
 interface NativeFunctionSeed {
     name: string;
     description: string;
-    language: FunctionLanguage;
-    origin: FunctionOrigin;
+    language: NativeFunctionLanguage;
+    origin: NativeFunctionOrigin;
     userId: null;
     workflowId: null;
     inputSchema: object;
@@ -26,6 +27,12 @@ interface NativeFunctionSeed {
     isReadonly: boolean;
     version: number;
     tags: string[];
+    healthCheck?: {
+        criticalPythonImports?: Array<string | {
+            module: string;
+            dependency?: string;
+        }>;
+    };
 }
 
 export const nativeFunctionsSeed: NativeFunctionSeed[] = [
@@ -412,6 +419,16 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
         codePath: 'backend/python/native/web_fetch_py.py',
         codeInline: null,
         dependencies: ['beautifulsoup4', 'requests', 'lxml'],
+        healthCheck: {
+            criticalPythonImports: [
+                'requests',
+                {
+                    module: 'bs4',
+                    dependency: 'beautifulsoup4'
+                },
+                'lxml'
+            ]
+        },
         isEnabled: true,
         isReadonly: true,
         version: 1,
@@ -423,7 +440,7 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
     // ─────────────────────────────────────────────────────────────────
     {
         name: 'web_search_py',
-        description: "Effectue une recherche sur le web et retourne les résultats structurés (titre, URL, extrait). Utilise le moteur de recherche configuré dans les paramètres système.",
+        description: "Fonction web search en cours de réimplémentation. Retourne actuellement un message temporaire de disponibilité pendant le nettoyage du runtime.",
         language: 'python',
         origin: 'native',
         userId: null,
@@ -439,27 +456,12 @@ export const nativeFunctionsSeed: NativeFunctionSeed[] = [
             }
         },
         outputSchema: {
-            type: 'object',
-            properties: {
-                results: {
-                    type: 'array',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            title: { type: 'string' },
-                            url: { type: 'string' },
-                            snippet: { type: 'string' },
-                            position: { type: 'number' }
-                        }
-                    }
-                },
-                query: { type: 'string' },
-                total_results: { type: 'number' }
-            }
+            type: 'string',
+            description: "Message temporaire tant que la fonctionnalité n'est pas réimplémentée."
         },
         codePath: 'backend/python/native/web_search_py.py',
         codeInline: null,
-        dependencies: ['duckduckgo-search'],
+        dependencies: [],
         isEnabled: true,
         isReadonly: true,
         version: 1,

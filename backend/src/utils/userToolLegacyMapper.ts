@@ -45,6 +45,58 @@ export interface LegacyFunctionExecutionMetadata {
     policySnapshot: IUserToolPolicy;
 }
 
+export interface LegacyFunctionExecutionSource {
+    _id?: mongoose.Types.ObjectId | string | { toString(): string };
+    workflowId?: mongoose.Types.ObjectId | string | { toString(): string } | null;
+    name: string;
+    language: 'python' | 'typescript';
+    origin: 'native' | 'custom';
+    version?: number | string;
+    toolVersionTag?: string;
+    toolContentHash?: string;
+    policySnapshot?: IUserToolPolicy;
+    codePath?: string | null;
+    codeInline?: string | null;
+    dependencies?: LegacyDependencies;
+}
+
+type LegacyFunctionSourceSignature = Pick<
+    LegacyFunctionLike,
+    'name' | 'language' | 'codePath' | 'codeInline' | 'dependencies' | 'version'
+>;
+
+type LegacyFunctionPolicySignature = Pick<
+    LegacyFunctionLike,
+    'policySnapshot' | 'origin' | 'name'
+>;
+
+interface ExistingUserToolVersionLike {
+    versionTag?: string;
+    contentHash?: string;
+    createdAt?: Date | string;
+    buildStatus?: 'not_built' | 'building' | 'built' | 'failed';
+    validationStatus?: 'unknown' | 'valid' | 'invalid';
+}
+
+interface ExistingUserToolLike {
+    currentVersion?: ExistingUserToolVersionLike | null;
+    versions?: ExistingUserToolVersionLike[] | null;
+}
+
+const NETWORK_ENABLED_NATIVE_FUNCTIONS = new Set([
+    'web_search_py'
+]);
+
+const NATIVE_FUNCTION_POLICY_OVERRIDES: Partial<Record<string, IUserToolPolicy>> = {
+    web_search_py: {
+        networkMode: 'restricted',
+        writablePaths: [],
+        secretAliases: [],
+        timeoutSeconds: 180,
+        maxMemoryMb: 256
+    }
+};
+
 function normalizeDate(value: Date | string | undefined): Date | undefined {
     if (!value) return undefined;
     const normalized = value instanceof Date ? value : new Date(value);
@@ -67,7 +119,7 @@ function normalizeDependencies(
     };
 }
 
-function buildSourceMode(legacy: LegacyFunctionLike): 'inline' | 'path' {
+function buildSourceMode(legacy: Pick<LegacyFunctionLike, 'codePath'>): 'inline' | 'path' {
     return legacy.codePath ? 'path' : 'inline';
 }
 
@@ -78,7 +130,7 @@ function buildVersionTag(version: number | string | undefined): string {
     return String(version);
 }
 
-function buildContentHash(legacy: LegacyFunctionLike): string {
+function buildContentHash(legacy: LegacyFunctionSourceSignature): string {
     const sourceMode = buildSourceMode(legacy);
     const dependencies = normalizeDependencies(legacy.dependencies, legacy.language);
 
@@ -95,14 +147,62 @@ function buildContentHash(legacy: LegacyFunctionLike): string {
         .digest('hex');
 }
 
-export function mapLegacyFunctionToUserToolFields(legacy: LegacyFunctionLike): Record<string, unknown> {
+function buildDefaultPolicy(legacy: LegacyFunctionPolicySignature): IUserToolPolicy {
+    if (legacy.policySnapshot) {
+        return legacy.policySnapshot;
+    }
+
+    const explicitDefault = NATIVE_FUNCTION_POLICY_OVERRIDES[legacy.name];
+    if (explicitDefault) {
+        return explicitDefault;
+    }
+
+    const networkMode = legacy.origin === 'native' && NETWORK_ENABLED_NATIVE_FUNCTIONS.has(legacy.name)
+        ? 'restricted'
+        : 'none';
+
+    return {
+        networkMode,
+        writablePaths: [],
+        secretAliases: []
+    };
+}
+
+function preserveVersionRuntimeState(
+    mappedVersion: Record<string, unknown>,
+    existingVersion?: ExistingUserToolVersionLike | null
+): Record<string, unknown> {
+    if (!existingVersion) {
+        return mappedVersion;
+    }
+
+    if (
+        existingVersion.versionTag !== mappedVersion.versionTag
+        || existingVersion.contentHash !== mappedVersion.contentHash
+    ) {
+        return mappedVersion;
+    }
+
+    return {
+        ...mappedVersion,
+        createdAt: normalizeDate(existingVersion.createdAt) ?? mappedVersion.createdAt,
+        buildStatus: existingVersion.buildStatus ?? mappedVersion.buildStatus,
+        validationStatus: existingVersion.validationStatus ?? mappedVersion.validationStatus,
+    };
+}
+
+export function mapLegacyFunctionToUserToolFields(
+    legacy: LegacyFunctionLike,
+    existingTool?: ExistingUserToolLike | null
+): Record<string, unknown> {
     const sourceMode = buildSourceMode(legacy);
     const createdAt = normalizeDate(legacy.updatedAt) ?? normalizeDate(legacy.createdAt) ?? new Date();
     const dependencies = normalizeDependencies(legacy.dependencies, legacy.language);
     const versionTag = buildVersionTag(legacy.version);
     const contentHash = buildContentHash(legacy);
+    const policy = buildDefaultPolicy(legacy);
 
-    const currentVersion = {
+    const mappedCurrentVersion = {
         versionTag,
         contentHash,
         sourceMode,
@@ -114,6 +214,12 @@ export function mapLegacyFunctionToUserToolFields(legacy: LegacyFunctionLike): R
         buildStatus: 'not_built',
         validationStatus: 'unknown'
     };
+
+    const currentVersion = preserveVersionRuntimeState(mappedCurrentVersion, existingTool?.currentVersion);
+    const matchingExistingVersion = existingTool?.versions?.find(
+        (candidate) => candidate.versionTag === versionTag && candidate.contentHash === contentHash
+    );
+    const versions = [preserveVersionRuntimeState(mappedCurrentVersion, matchingExistingVersion)];
 
     return {
         ownerUserId: legacy.origin === 'native' ? null : (legacy.userId ?? null),
@@ -127,23 +233,19 @@ export function mapLegacyFunctionToUserToolFields(legacy: LegacyFunctionLike): R
         status: legacy.isEnabled ? 'ready' : 'disabled',
         trustLevel: legacy.origin === 'native' ? 'internal' : 'user_private',
         currentVersion,
-        versions: [currentVersion],
+        versions,
         inputSchema: legacy.inputSchema ?? {},
         outputSchema: legacy.outputSchema ?? {},
         tags: Array.isArray(legacy.tags) ? legacy.tags : [],
         dependencies,
-        policy: {
-            networkMode: 'none',
-            writablePaths: [],
-            secretAliases: []
-        },
+        policy,
         isReadonly: legacy.isReadonly,
         isEnabled: legacy.isEnabled
     };
 }
 
 export function deriveExecutionMetadataFromLegacyFunction(
-    legacy: LegacyFunctionLike
+    legacy: LegacyFunctionExecutionSource
 ): LegacyFunctionExecutionMetadata {
     if (!legacy._id) {
         throw new Error('Legacy function _id is required to derive execution metadata');
@@ -165,10 +267,6 @@ export function deriveExecutionMetadataFromLegacyFunction(
         runtime: legacy.language,
         toolVersionTag: legacy.toolVersionTag ?? buildVersionTag(legacy.version),
         toolContentHash: legacy.toolContentHash ?? buildContentHash(legacy),
-        policySnapshot: legacy.policySnapshot ?? {
-            networkMode: 'none',
-            writablePaths: [],
-            secretAliases: []
-        }
+        policySnapshot: buildDefaultPolicy(legacy)
     };
 }

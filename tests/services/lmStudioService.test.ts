@@ -33,7 +33,7 @@ describe('lmStudioService local runtime transport', () => {
                     controller.close();
                 },
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         const chunks = [] as Array<{ response?: { text?: string }; isComplete?: boolean }>;
         for await (const chunk of generateContentStream(
@@ -75,7 +75,7 @@ describe('lmStudioService local runtime transport', () => {
             json: async () => ({
                 choices: [{ message: { content: 'Salut' } }],
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         const result = await generateContent(
             'http://localhost:1234',
@@ -104,7 +104,7 @@ describe('lmStudioService local runtime transport', () => {
             json: async () => ({
                 choices: [{ message: { content: 'Salut' } }],
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         const history: ChatMessage[] = [
             {
@@ -162,7 +162,7 @@ describe('lmStudioService local runtime transport', () => {
                 error: 'Endpoint forbidden',
                 details: 'Only localhost, loopback, Docker host, or private-network endpoints are allowed for local LLM access.',
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         await expect(generateContent(
             'http://8.8.8.8:1234',
@@ -183,7 +183,7 @@ describe('lmStudioService local runtime transport', () => {
             json: async () => ({
                 choices: [{ message: { content: 'Salut' } }],
             }),
-        } as Response)) as typeof fetch;
+        } as unknown as Response)) as typeof fetch;
 
         await generateContent(
             'http://localhost:1337',
@@ -202,5 +202,34 @@ describe('lmStudioService local runtime transport', () => {
                 Authorization: 'Bearer jwt-token-123',
             }),
         }));
+    });
+
+    it('throws a terminal stream error when the backend emits an SSE error payload', async () => {
+        const encoder = new TextEncoder();
+        const ssePayload = 'data: {"error":"LMStudio request timeout exceeded after 600000ms","code":"timeout","details":{"timeoutMs":600000}}\n\n';
+
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            body: new ReadableStream({
+                start(controller) {
+                    controller.enqueue(encoder.encode(ssePayload));
+                    controller.close();
+                },
+            }),
+        } as unknown as Response)) as typeof fetch;
+
+        const iterator = generateContentStream(
+            'http://localhost:11434',
+            'llama3.1',
+            'system',
+            [],
+            undefined,
+            undefined,
+            undefined
+        );
+
+        await expect(iterator.next()).rejects.toThrow(
+            'LMStudio stream error [timeout] {"timeoutMs":600000}: LMStudio request timeout exceeded after 600000ms'
+        );
     });
 });

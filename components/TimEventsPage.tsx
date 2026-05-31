@@ -11,6 +11,24 @@ interface TimEventsPageProps {
   onNavigateToWorkflow?: () => void;
 }
 
+type EventDraft = {
+  name: string;
+  type: EventPrototype['type'];
+  schedule: string;
+  conditions: Record<string, unknown>;
+  rateLimit: { max_calls: number; time_window: number };
+};
+
+function createInitialEventDraft(): EventDraft {
+  return {
+    name: '',
+    type: 'trigger',
+    schedule: '',
+    conditions: {},
+    rateLimit: { max_calls: 100, time_window: 3600 },
+  };
+}
+
 // Mock store for event prototypes - à remplacer par un vrai store plus tard
 const useEventsStore = () => {
   const [events, setEvents] = useState<EventPrototype[]>([]);
@@ -45,13 +63,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
   const { currentRobotId } = useDesignStore();
 
   const [isCreating, setIsCreating] = useState(false);
-  const [newEvent, setNewEvent] = useState({
-    name: '',
-    type: 'trigger' as const,
-    schedule: '',
-    conditions: {},
-    rateLimit: { max_calls: 100, time_window: 3600 }
-  });
+  const [newEvent, setNewEvent] = useState<EventDraft>(createInitialEventDraft());
 
   const handleCreateEvent = () => {
     if (!newEvent.name.trim()) {
@@ -89,13 +101,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
         message: `"${newEvent.name}" ${t('created_successfully')}`,
         duration: 3000
       });
-      setNewEvent({
-        name: '',
-        type: 'trigger',
-        schedule: '',
-        conditions: {},
-        rateLimit: { max_calls: 100, time_window: 3600 }
-      });
+      setNewEvent(createInitialEventDraft());
       setIsCreating(false);
     }
   };

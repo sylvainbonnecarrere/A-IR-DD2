@@ -6,7 +6,6 @@ import passport from 'passport';
 import request from 'supertest';
 import '../middleware/auth.middleware';
 import { User } from '../models/User.model';
-import { UserFunction } from '../models/UserFunction.model';
 import { UserTool } from '../models/UserTool.model';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { Workspace } from '../models/Workspace.model';
@@ -27,7 +26,6 @@ describe('Function run routes', () => {
         await UserToolRun.deleteMany({});
         await UserTool.deleteMany({});
         await Workspace.deleteMany({});
-        await UserFunction.deleteMany({ name: /function-runs-test-/i });
         await User.deleteMany({ email: /function-runs-test-/i });
         if (tempRoot) {
             await fs.rm(tempRoot, { recursive: true, force: true });
@@ -49,30 +47,15 @@ describe('Function run routes', () => {
         });
 
         const workflowId = new (require('mongoose').Types.ObjectId)();
-        const fn = await UserFunction.create({
-            userId: user._id,
-            workflowId,
-            name: `function-runs-test-${Date.now()}`,
-            description: 'Function run route test',
-            language: 'typescript',
-            origin: 'custom',
-            tags: ['test'],
-            inputSchema: { type: 'object' },
-            outputSchema: { type: 'object' },
-            codeInline: 'function run() { return { ok: true }; }',
-            isEnabled: true,
-            isReadonly: false,
-            version: 1
-        });
-
-        await UserTool.create({
-            _id: fn._id,
+        const sourceInline = 'function run() { return { ok: true }; }';
+        const fn = await UserTool.create({
+            _id: new (require('mongoose').Types.ObjectId)(),
             ownerUserId: user._id,
             workspaceId: null,
             scopeType: 'user',
             workflowId,
-            name: fn.name,
-            description: fn.description,
+            name: `function-runs-test-${Date.now()}`,
+            description: 'Function run route test',
             runtime: 'typescript',
             status: 'ready',
             trustLevel: 'user_private',
@@ -81,7 +64,7 @@ describe('Function run routes', () => {
                 contentHash: 'hash-function-run',
                 sourceMode: 'inline',
                 sourcePath: null,
-                sourceInline: fn.codeInline,
+                sourceInline,
                 entrypoint: null,
                 createdAt: new Date(),
                 createdBy: user._id,
@@ -93,7 +76,7 @@ describe('Function run routes', () => {
                 contentHash: 'hash-function-run',
                 sourceMode: 'inline',
                 sourcePath: null,
-                sourceInline: fn.codeInline,
+                sourceInline,
                 entrypoint: null,
                 createdAt: new Date(),
                 createdBy: user._id,
@@ -194,6 +177,8 @@ describe('Function run routes', () => {
             error: {
                 message: 'boom',
                 code: 'sandbox_runtime_error',
+                subsystem: 'sandbox_runtime',
+                failureKind: 'sandbox_runtime_error',
                 retryable: false
             },
             policySnapshot: {
@@ -376,24 +361,25 @@ describe('Function run routes', () => {
         expect(response.text).toBe('sandbox ok');
     });
 
-    it('cleans up old runs and their orphan artifacts', async () => {
+    it('rejects legacy cleanup and points to the canonical runs route', async () => {
         const fixture = await createFixture();
 
         const response = await request(app)
             .post(`/api/functions/${fixture.fn.id}/runs/cleanup`)
             .set('Authorization', `Bearer ${fixture.accessToken}`)
             .send({ retentionDays: 14, retainLatest: 2 })
-            .expect(200);
+            .expect(410);
 
         expect(response.body).toEqual(expect.objectContaining({
-            deletedRuns: 1,
-            retainedRuns: 2,
-            deletedArtifacts: ['output/stale.log'],
-            dryRun: false
+            code: 'legacy_functions_read_only',
+            canonical: {
+                method: 'POST',
+                path: `/api/runs/tool/${fixture.fn.id}/cleanup`
+            }
         }));
 
-        expect(await UserToolRun.countDocuments({ toolId: fixture.fn._id })).toBe(2);
-        await expect(fs.access(path.join(tempRoot, 'output', 'stale.log'))).rejects.toBeTruthy();
+        expect(await UserToolRun.countDocuments({ toolId: fixture.fn._id })).toBe(3);
+        await expect(fs.access(path.join(tempRoot, 'output', 'stale.log'))).resolves.toBeUndefined();
     });
 
     it('returns an artifact preview via the target runs route', async () => {

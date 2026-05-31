@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import { CANONICAL_ROBOT_IDS } from '../types';
+import type { PersistedPersistenceConfig } from '../types/persistence';
 
 // ============================================
 // PERSISTENCE CONFIG (copie de AgentPrototype)
@@ -9,24 +10,7 @@ import { CANONICAL_ROBOT_IDS } from '../types';
  * ⭐ PERSISTENCE CONFIG: Configuration granulaire par agent instance
  * Hérité du prototype avec possibilité d'override à l'instanciation
  */
-export interface IPersistenceConfig {
-    saveChat: boolean;             // Défaut: true - Sauvegarder les messages de chat
-    saveChatHistory?: boolean;     // ⭐ Alias pour saveChat (compatibilité)
-    saveErrors: boolean;           // Défaut: true - Sauvegarder les erreurs rencontrées
-    saveTasks: boolean;            // Défaut: false - Sauvegarder les tâches assignées
-    saveTaskExecution?: boolean;   // ⭐ Alias pour saveTasks (compatibilité)
-    saveLinks: boolean;            // Défaut: false - Sauvegarder les liens entre agents
-    saveMedia?: boolean;           // ⭐ Activer sauvegarde des fichiers médias
-    saveHistorySummary: boolean;   // Défaut: false - Générer et stocker un résumé périodique
-    mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
-    cloudStorageConfig?: {         // ⭐ FIX QA: Config cloud S3/GCS
-        provider?: 'aws' | 'gcs';
-        bucket?: string;
-        region?: string;
-        endpoint?: string;
-    } | null;
-    retentionDays?: number;        // Durée de conservation en jours
-}
+export type IPersistenceConfig = PersistedPersistenceConfig;
 
 export interface IToolSelectionVersionRef {
     versionTag?: string;
@@ -46,7 +30,7 @@ export interface IToolSelection {
 // Type: Chat Message
 export interface IAgentInstanceChatContent {
     type: 'chat';
-    role: 'user' | 'agent' | 'tool';
+    role: 'user' | 'agent' | 'tool' | 'tool_result';
     message: string;
     timestamp: Date;
     metadata?: {
@@ -135,8 +119,8 @@ export interface IAgentInstance extends Document {
     llmModel: string;
     capabilities: string[];
     historyConfig?: object;
-    // ⭐ Tools V2: références vers user_functions + héritage prototype
-    tools?: mongoose.Types.ObjectId[];   // Références vers user_functions._id
+    // ⭐ Tools V2: références vers user_tools + héritage prototype
+    tools?: mongoose.Types.ObjectId[];   // Références vers user_tools._id
     toolSelections?: IToolSelection[];   // Références versionnées effectives pour cette instance
     legacyTools?: object[];              // Ancien format inline (migration rétrocompat)
     functionInheritance?: {
@@ -144,6 +128,7 @@ export interface IAgentInstance extends Document {
         overrideFunctionIds?: string[]; // Si inheritFromPrototype = false
         overrideToolSelections?: IToolSelection[];
     };
+    webSearchParams?: object;
     outputConfig?: object;
     localLLMProfileId?: string;   // Which LocalLLMProfile is used for this instance
     robotId: string;
@@ -154,8 +139,9 @@ export interface IAgentInstance extends Document {
     isMaximized: boolean;
     zIndex: number;
 
-    // ⭐ NOUVEAU: Contenu polymorphe (ÉTAPE 1.6)
-    content: IAgentInstanceContent[];
+    // Legacy compatibility only.
+    // Timeline/chat authority is now agent_journals + projected chatMessages.
+    content?: IAgentInstanceContent[];
 
     // ⭐ NOUVEAU: Métriques d'exécution (ÉTAPE 1.6)
     metrics: IAgentInstanceMetrics;
@@ -235,10 +221,10 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         type: String
     }],
     historyConfig: Schema.Types.Mixed,
-    // ⭐ Tools V2: tableau de références ObjectId vers user_functions
+    // ⭐ Tools V2: tableau de références ObjectId vers user_tools
     tools: [{
         type: Schema.Types.ObjectId,
-        ref: 'UserFunction'
+        ref: 'UserTool'
     }],
     toolSelections: [{
         toolId: { type: String, required: true, trim: true },
@@ -250,7 +236,10 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         _id: false
     }],
     // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)
-    legacyTools: [Schema.Types.Mixed],
+    legacyTools: {
+        type: [Schema.Types.Mixed],
+        default: undefined
+    },
     // ⭐ Tools V2: configuration d'héritage des fonctions depuis le prototype
     functionInheritance: {
         inheritFromPrototype: { type: Boolean, default: true },
@@ -266,6 +255,7 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         }],
         _id: false
     },
+    webSearchParams: Schema.Types.Mixed,
     outputConfig: Schema.Types.Mixed,
     // ⭐ LOCAL LLM: Profil LLM local sélectionné pour cette instance
     localLLMProfileId: {
@@ -299,7 +289,8 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         default: 0
     },
 
-    // ⭐ NOUVEAU: Contenu polymorphe (ÉTAPE 1.6)
+    // Legacy compatibility only.
+    // This field is no longer emitted by frontend-facing read models.
     content: [{
         type: {
             type: String,
@@ -309,7 +300,7 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
         // Chat fields
         role: {
             type: String,
-            enum: ['user', 'agent', 'tool']
+            enum: ['user', 'agent', 'tool', 'tool_result']
         },
         message: String,
         // Image/Video fields
@@ -374,6 +365,8 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
             saveTasks: { type: Boolean, default: false },
             // ⭐ FIX QA: Added saveMedia field for media persistence toggle
             saveMedia: { type: Boolean, default: false },
+            allowWorkspaceWrite: { type: Boolean, default: false },
+            cloudConnectionProfileId: { type: String, default: undefined },
             mediaStorage: { 
                 type: String, 
                 enum: ['db', 'local', 'cloud'], 
@@ -392,6 +385,7 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
             saveLinks: false,
             saveTasks: false,
             saveMedia: false,
+            allowWorkspaceWrite: false,
             mediaStorage: 'db',
             cloudStorageConfig: null
         }

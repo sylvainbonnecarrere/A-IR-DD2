@@ -10,7 +10,6 @@ import {
     QueryCache,
     MutationCache,
 } from '@tanstack/react-query';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 
 // Create query client with default options
 const createQueryClient = () => {
@@ -68,9 +67,6 @@ export const QueryProvider: React.FC<QueryProviderProps> = ({ children }) => {
     return (
         <QueryClientProvider client={client}>
             {children}
-            {process.env.NODE_ENV === 'development' && (
-                <ReactQueryDevtools initialIsOpen={false} />
-            )}
         </QueryClientProvider>
     );
 };

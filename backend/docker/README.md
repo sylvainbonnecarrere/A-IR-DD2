@@ -340,8 +340,8 @@ grep MONGO_ backend/.env
 
 # Test credentials manually
 docker exec -it a-ir-dd2-mongodb mongosh \
-  --username admin \
-  --password SecurePassword123! \
+  --username "$MONGO_USER" \
+  --password "$MONGO_PASSWORD" \
   --authenticationDatabase admin
 ```
 
@@ -394,9 +394,9 @@ npm run dev             # Triggers re-initialization
 ### Environment Variables
 ```env
 # .env.docker template
-MONGODB_URI=mongodb://admin:SecurePassword123!@localhost:27017/a-ir-dd2-dev?authSource=admin
-MONGO_USER=admin
-MONGO_PASSWORD=SecurePassword123!
+MONGODB_URI=mongodb://<set-mongo-admin-user>:<set-mongo-strong-password>@localhost:27017/a-ir-dd2-dev?authSource=admin
+MONGO_USER=<set-mongo-admin-user>
+MONGO_PASSWORD=<set-mongo-strong-password>
 JWT_SECRET=<generated-32-hex>
 ENCRYPTION_KEY=<generated-32-hex>
 ```

@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { LLMConfig, LLMCapability, LLMProvider, LocalLLMProfile, ILLMConfigUI } from '../../types';
+import {
+  CloudConnectionProfile,
+  CloudConnectionProfileDraft,
+  LLMConfig,
+  LLMCapability,
+  LLMProvider,
+  LocalLLMProfile,
+  ILLMConfigUI,
+} from '../../types';
 import { Button, ToggleSwitch } from '../UI';
 import { CloseIcon, PlusIcon } from '../Icons';
 import { useLocalization } from '../../hooks/useLocalization';
@@ -7,9 +15,11 @@ import { useAuth } from '../../hooks/useAuth';
 import { useLLMConfigs } from '../../hooks/useLLMConfigs';
 import { useSaveMode } from '../../hooks/useSaveMode';
 import { useLocalLLMProfiles } from '../../hooks/useLocalLLMProfiles';
+import { useCloudConnectionProfiles } from '../../hooks/useCloudConnectionProfiles';
 import { locales, Locale } from '../../i18n/locales';
 import { isLocalProvider, getInputLabel, getInputPlaceholder, getInputType, getProviderHelperText } from '../../utils/llmProviderUtils';
 import { LocalLLMProfileCard } from '../settings/LocalLLMProfileCard';
+import { CloudConnectionProfileCard } from '../settings/CloudConnectionProfileCard';
 
 interface SettingsModalProps {
   llmConfigs: LLMConfig[];
@@ -90,6 +100,51 @@ function areSetsEqual(left: Set<string>, right: Set<string>): boolean {
   return true;
 }
 
+function areCloudProfilesEqual(left: CloudConnectionProfileDraft[], right: CloudConnectionProfileDraft[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function toCloudProfileDraft(profile: CloudConnectionProfile): CloudConnectionProfileDraft {
+  return {
+    ...profile,
+    secretInput: {},
+  };
+}
+
+function buildCloudProfilePayload(profile: CloudConnectionProfileDraft) {
+  if (profile.provider === 's3') {
+    return {
+      displayName: profile.displayName || 'Profil cloud',
+      provider: 's3' as const,
+      enabled: profile.enabled,
+      replaceSecret: !!(profile.secretInput?.accessKeyId || profile.secretInput?.secretAccessKey),
+      s3: {
+        accessKeyId: profile.secretInput?.accessKeyId || undefined,
+        secretAccessKey: profile.secretInput?.secretAccessKey || undefined,
+        bucketName: profile.target.bucketName || '',
+        region: profile.target.region || '',
+        endpoint: profile.target.endpoint || undefined,
+        forcePathStyle: profile.target.forcePathStyle,
+        keyPrefix: profile.target.keyPrefix || undefined,
+      },
+    };
+  }
+
+  return {
+    displayName: profile.displayName || 'Profil cloud',
+    provider: 'gcs' as const,
+    enabled: profile.enabled,
+    replaceSecret: !!profile.secretInput?.serviceAccountKey,
+    gcs: {
+      projectId: profile.target.projectId || '',
+      bucketName: profile.target.bucketName || '',
+      serviceAccountKey: profile.secretInput?.serviceAccountKey || undefined,
+      location: profile.target.location || undefined,
+      keyPrefix: profile.target.keyPrefix || undefined,
+    },
+  };
+}
+
 
 export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: SettingsModalProps) => {
   const [currentLLMConfigs, setCurrentLLMConfigs] = useState<LLMConfigWithHasKey[]>(JSON.parse(JSON.stringify(propConfigs)));
@@ -104,13 +159,24 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
     updateProfile: updateLLMProfile,
     deleteProfile: deleteLLMProfile
   } = useLocalLLMProfiles();
+  const {
+    profiles: hookCloudProfiles,
+    loading: hookCloudProfilesLoading,
+    createProfile: createCloudProfile,
+    updateProfile: updateCloudProfile,
+    deleteProfile: deleteCloudProfile,
+    testProfile: testCloudProfile,
+  } = useCloudConnectionProfiles();
 
   // Draft state for local LLM profiles (edited in-modal, saved on "Enregistrer")
   const [localProfiles, setLocalProfiles] = useState<LocalLLMProfile[]>([]);
   // Track IDs that existed at open time, to detect deletions on save
   const [originalProfileIds, setOriginalProfileIds] = useState<Set<string>>(new Set());
+  const [cloudProfiles, setCloudProfiles] = useState<CloudConnectionProfileDraft[]>([]);
+  const [originalCloudProfileIds, setOriginalCloudProfileIds] = useState<Set<string>>(new Set());
+  const [testingCloudProfileId, setTestingCloudProfileId] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'llms' | 'save' | 'language'>('llms');
+  const [activeTab, setActiveTab] = useState<'llms' | 'cloud' | 'save' | 'language'>('llms');
   const [isSaving, setIsSaving] = useState(false);
 
   // Load authenticated user's configs from hook on auth state change
@@ -185,6 +251,24 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
     }
   }, [hookProfiles, hookProfilesLoading]);
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setCloudProfiles(prev => (prev.length === 0 ? prev : []));
+      setOriginalCloudProfileIds(prev => (prev.size === 0 ? prev : new Set()));
+      return;
+    }
+
+    if (hookCloudProfilesLoading) {
+      return;
+    }
+
+    const drafts = hookCloudProfiles.map(toCloudProfileDraft);
+    setCloudProfiles(prev => (areCloudProfilesEqual(prev, drafts) ? prev : drafts));
+
+    const nextIds = new Set(hookCloudProfiles.map(profile => profile.id));
+    setOriginalCloudProfileIds(prev => (areSetsEqual(prev, nextIds) ? prev : nextIds));
+  }, [hookCloudProfiles, hookCloudProfilesLoading, isAuthenticated]);
+
   // --- Local profile handlers (draft mutations, persisted on Save) ---
   const handleAddProfile = () => {
     setLocalProfiles(prev => [...prev, {
@@ -202,6 +286,58 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
   const handleProfileChange = (index: number, updated: LocalLLMProfile) => {
     setLocalProfiles(prev => prev.map((p, i) => i === index ? updated : p));
+  };
+
+  const handleAddCloudProfile = () => {
+    setCloudProfiles(prev => [...prev, {
+      id: '',
+      displayName: '',
+      provider: 's3',
+      enabled: true,
+      hasSecretMaterial: false,
+      target: {
+        bucketName: '',
+        region: '',
+        endpoint: null,
+        forcePathStyle: false,
+        keyPrefix: null,
+      },
+      status: {
+        state: 'missing_secret',
+        lastValidatedAt: null,
+        lastErrorCode: null,
+        lastValidationMessage: null,
+      },
+      secretSummary: {},
+      secretInput: {},
+    }]);
+  };
+
+  const handleDeleteCloudProfile = (index: number) => {
+    setCloudProfiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleCloudProfileChange = (index: number, updated: CloudConnectionProfileDraft) => {
+    setCloudProfiles(prev => prev.map((profile, currentIndex) => currentIndex === index ? updated : profile));
+  };
+
+  const handleTestCloudProfile = async (index: number) => {
+    const profile = cloudProfiles[index];
+    if (!profile?.id) {
+      return;
+    }
+
+    setTestingCloudProfileId(profile.id);
+    try {
+      const result = await testCloudProfile(profile.id, false);
+      if (result.profile) {
+        handleCloudProfileChange(index, toCloudProfileDraft(result.profile));
+      }
+    } catch (err) {
+      alert(`Erreur test cloud: ${err instanceof Error ? err.message : 'Test impossible'}`);
+    } finally {
+      setTestingCloudProfileId(null);
+    }
   };
 
   const handleProviderToggle = (provider: LLMProvider, enabled: boolean) => {
@@ -268,12 +404,13 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
         const savedConfigs = await Promise.all(savePromises);
         
         // STEP 3: Build final configs with server responses merged in
-        finalConfigs = currentLLMConfigs.map(config => {
+        finalConfigs = currentLLMConfigs.map((config): LLMConfigWithHasKey => {
           const savedResponse = savedConfigs.find(sc => sc.provider === config.provider);
           if (savedResponse) {
             return {
               ...config,
-              ...savedResponse,
+              enabled: savedResponse.enabled,
+              capabilities: savedResponse.capabilities as LLMConfigWithHasKey['capabilities'],
               localEndpoint: savedResponse.localEndpoint || '',
               apiKey: savedResponse.apiKey || '',
               hasApiKey: savedResponse.hasApiKey,
@@ -328,6 +465,30 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
       alert(`Erreur profils LLM local: ${profileErr instanceof Error ? profileErr.message : 'Sauvegarde échouée'}`);
     }
 
+    try {
+      for (const profile of cloudProfiles) {
+        const data = buildCloudProfilePayload(profile);
+        if (!profile.id) {
+          if (profile.displayName.trim() || profile.target.bucketName.trim()) {
+            await createCloudProfile(data, false);
+          }
+        } else {
+          await updateCloudProfile(profile.id, data, false);
+        }
+      }
+
+      for (const id of originalCloudProfileIds) {
+        if (!cloudProfiles.some(profile => profile.id === id)) {
+          await deleteCloudProfile(id, false);
+        }
+      }
+    } catch (cloudErr) {
+      console.error('[SettingsModal] Failed to save cloud profiles:', cloudErr);
+      alert(`Erreur profils cloud: ${cloudErr instanceof Error ? cloudErr.message : 'Sauvegarde échouée'}`);
+      setIsSaving(false);
+      return;
+    }
+
     await refreshRuntimeConfigState();
 
     setIsSaving(false);
@@ -338,7 +499,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm" aria-modal="true" role="dialog">
-      <div className="bg-gray-800 border border-gray-700 rounded-lg shadow-xl w-full max-w-md m-4">
+      <div className="bg-gray-800 border border-gray-700 rounded-lg shadow-xl w-full max-w-[37.125rem] m-4">
         {/* Custom Header with User Info */}
         <div className="flex flex-col p-4 border-b border-gray-700">
           <div className="flex items-center justify-between mb-2">
@@ -364,12 +525,57 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
             <nav className="-mb-px flex space-x-6" aria-label="Tabs">
               <button type="button" onClick={() => setActiveTab('llms')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'llms' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>{t('settings_llms_tab')}</button>
               {isAuthenticated && (
+                <button type="button" onClick={() => setActiveTab('cloud')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'cloud' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>Cloud</button>
+              )}
+              {isAuthenticated && (
                 <button type="button" onClick={() => setActiveTab('save')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'save' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>Enregistrement</button>
               )}
               <button type="button" onClick={() => setActiveTab('language')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'language' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>{t('settings_language_tab')}</button>
             </nav>
           </div>
           <div className="pt-4 max-h-[60vh] overflow-y-auto pr-2">
+            {activeTab === 'cloud' && (
+              <div className="space-y-6">
+                <div className="bg-indigo-900/20 border border-indigo-600/30 rounded-lg p-4">
+                  <h4 className="text-sm font-semibold text-indigo-400 mb-3">Profils cloud securises</h4>
+                  <p className="text-sm text-gray-400 mb-4">
+                    Les secrets S3/GCS sont centralises ici puis references par les agents via un profil, sans re-saisie dans la persistence agent.
+                  </p>
+
+                  {hookCloudProfilesLoading ? (
+                    <p className="text-sm text-gray-400 animate-pulse">Chargement des profils cloud...</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {cloudProfiles.length === 0 && (
+                        <div className="rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-3 text-sm text-gray-400">
+                          Aucun profil cloud configure.
+                        </div>
+                      )}
+
+                      {cloudProfiles.map((profile, index) => (
+                        <CloudConnectionProfileCard
+                          key={profile.id || `cloud-new-${index}`}
+                          profile={profile}
+                          onChange={(updated) => handleCloudProfileChange(index, updated)}
+                          onDelete={() => handleDeleteCloudProfile(index)}
+                          onTest={profile.id ? () => handleTestCloudProfile(index) : undefined}
+                          isTesting={testingCloudProfileId === profile.id}
+                        />
+                      ))}
+
+                      <button
+                        type="button"
+                        onClick={handleAddCloudProfile}
+                        className="flex items-center gap-2 px-3 py-2 text-sm text-indigo-400 hover:text-indigo-300 hover:bg-gray-700/50 rounded-md border border-dashed border-indigo-600/50 hover:border-indigo-400 transition-colors w-full justify-center"
+                      >
+                        <PlusIcon width={14} height={14} />
+                        Ajouter un profil cloud
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {activeTab === 'language' && (
               <div className="space-y-4">
                 <div className="bg-indigo-900/20 border border-indigo-600/30 rounded-lg p-4">

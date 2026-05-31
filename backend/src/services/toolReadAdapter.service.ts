@@ -1,9 +1,9 @@
 import path from 'path';
 import mongoose from 'mongoose';
 import { AgentPrototype } from '../models/AgentPrototype.model';
-import { UserFunction, type IUserFunction } from '../models/UserFunction.model';
-import type { FunctionReadModel } from './function.service';
 import { UserToolQueryService, type ToolTransitionReadModel } from './userToolQuery.service';
+import type { LegacyFunctionReadModel as FunctionReadModel } from '../types/legacyFunctionReadModel';
+import { isSharedCustomFunctionName } from '../utils/sharedExampleAccess';
 
 interface LegacyFunctionFilter {
     workflowId?: string;
@@ -82,43 +82,35 @@ export class ToolReadAdapterService {
             return [];
         }
 
-        const legacyFunctions = await UserFunction.find({
-            _id: { $in: tools.map((tool) => new mongoose.Types.ObjectId(tool.id)) },
-            $or: [
-                { userId: null },
-                { userId: new mongoose.Types.ObjectId(ownerUserId) }
-            ]
-        }).lean<IUserFunction[]>();
-
-        const legacyById = new Map(legacyFunctions.map((legacyFunction) => [legacyFunction._id.toString(), legacyFunction]));
-
         return tools.map((tool) => {
-            const legacy = legacyById.get(tool.id);
             const runtimeDependencies = tool.runtime === 'python'
                 ? tool.dependencies?.python ?? []
                 : tool.dependencies?.npm ?? [];
             const versionFromTag = this.parseLegacyVersion(tool.currentVersion?.versionTag);
-            const codePath = legacy?.codePath ?? tool.currentVersion?.sourcePath ?? null;
+            const codePath = tool.currentVersion?.sourcePath ?? null;
+            const userId = tool.origin === 'native' || (tool.isReadonly && isSharedCustomFunctionName(tool.name))
+                ? null
+                : ownerUserId;
 
             const legacyReadModel = {
-                ...(legacy ? legacy : {}),
                 _id: tool.id,
                 name: tool.name,
+                displayName: tool.displayName,
                 description: tool.description,
                 language: tool.runtime,
                 origin: tool.origin,
-                userId: tool.origin === 'native' ? null : ownerUserId,
+                userId,
                 workflowId: tool.workflowId ?? null,
                 inputSchema: tool.inputSchema,
                 outputSchema: tool.outputSchema,
                 codePath,
                 resolvedCodePath: this.resolveCodePath(codePath, tool),
                 codePathRoot: this.resolveCodePathRoot(codePath, tool),
-                codeInline: legacy?.codeInline ?? tool.currentVersion?.sourceInline ?? null,
+                codeInline: tool.currentVersion?.sourceInline ?? null,
                 dependencies: runtimeDependencies,
                 isEnabled: tool.isEnabled,
                 isReadonly: tool.isReadonly,
-                version: legacy?.version ?? versionFromTag,
+                version: versionFromTag,
                 tags: tool.tags,
                 workspaceContext: tool.workspaceContext,
                 createdAt: tool.createdAt,

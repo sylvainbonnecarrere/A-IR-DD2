@@ -83,8 +83,6 @@ export type { IAgentTemplate, ITemplate } from './AgentTemplate.model';
 // MODÈLES TOOLS V2
 // ============================================
 
-export { UserFunction } from './UserFunction.model';
-export type { IUserFunction, FunctionLanguage, FunctionOrigin } from './UserFunction.model';
 export { Workspace } from './Workspace.model';
 export type {
     IWorkspace,
@@ -139,6 +137,8 @@ export type {
 
 export { LLMConfig } from './LLMConfig.model';
 export type { ILLMConfig } from './LLMConfig.model';
+export { CloudConnectionProfile } from './CloudConnectionProfile.model';
+export type { ICloudConnectionProfile } from './CloudConnectionProfile.model';
 
 // ============================================
 // MODÈLES MEDIA STORAGE

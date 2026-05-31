@@ -12,12 +12,14 @@ import type {
     RuntimeCompatibilityContext,
     SandboxRunResult,
     SyntaxCheckResult,
+    ToolDetailResponse,
     ToolTransitionRecord,
     ToolsListResponse,
     ToolWorkspaceResponse,
     UpdateFunctionPayload,
     UserFunction,
 } from '../types/function.types';
+import type { ToolSelection } from '../types';
 
 const parseRuntimeCompatibilityFromHeaders = (headers: Record<string, unknown> | undefined): RuntimeCompatibilityContext | null => {
     if (!headers) {
@@ -107,6 +109,7 @@ const mapToolToUserFunction = (tool: ToolTransitionRecord): UserFunction => {
         version: parseVersionNumber(tool.currentVersion.versionTag),
         versionTag: tool.currentVersion.versionTag,
         tags: tool.tags,
+        readinessStatus: tool.readinessStatus,
         workspaceContext: workspaceContext ? {
             workspaceId: workspaceContext.workspaceId,
             logicalRoot: workspaceContext.logicalRoot,
@@ -119,6 +122,11 @@ const mapToolToUserFunction = (tool: ToolTransitionRecord): UserFunction => {
         updatedAt: String(tool.updatedAt),
     };
 };
+
+const mapToolDetailResponseToUserFunction = (response: ToolDetailResponse): UserFunction => ({
+    ...mapToolToUserFunction(response.tool),
+    runtimeCompatibility: response.runtimeCompatibility,
+});
 
 export interface LoadPhilFunctionsResult {
     functions: UserFunction[];
@@ -155,23 +163,35 @@ class ToolRepository {
     }
 
     async createFunction(payload: CreateFunctionPayload) {
-        return apiClient.post<UserFunction>('/api/functions', payload);
+        const response = await apiClient.post<ToolDetailResponse>('/api/tools', payload);
+        return {
+            ...response,
+            data: mapToolDetailResponseToUserFunction(response.data)
+        };
     }
 
     async updateFunction(id: string, payload: UpdateFunctionPayload) {
-        return apiClient.put<UserFunction>(`/api/functions/${id}`, payload);
+        const response = await apiClient.put<ToolDetailResponse>(`/api/tools/${id}`, payload);
+        return {
+            ...response,
+            data: mapToolDetailResponseToUserFunction(response.data)
+        };
     }
 
     async deleteFunction(id: string) {
-        return apiClient.delete(`/api/functions/${id}`);
+        return apiClient.delete(`/api/tools/${id}`);
     }
 
     async toggleFunction(id: string, allowBashPy = false) {
-        return apiClient.patch<{ id: string; isEnabled: boolean }>(`/api/functions/${id}/toggle`, { allowBashPy });
+        return apiClient.patch<{ id: string; isEnabled: boolean }>(`/api/tools/${id}/toggle`, { allowBashPy });
     }
 
-    async runInSandbox(functionId: string, testArgs: Record<string, unknown>) {
-        return apiClient.post<SandboxRunResult>('/api/sandbox/run', { functionId, testArgs });
+    async runInSandbox(functionId: string | undefined, testArgs: Record<string, unknown>, toolSelection?: ToolSelection) {
+        return apiClient.post<SandboxRunResult>('/api/sandbox/run', {
+            ...(toolSelection ? { toolSelection } : {}),
+            ...(!toolSelection && functionId ? { functionId } : {}),
+            testArgs,
+        });
     }
 
     async checkSyntax(language: 'python' | 'typescript', code: string) {

@@ -10,6 +10,8 @@ import path from 'path';
 import fs from 'fs/promises';
 import { MediaStorageService, MediaStorageError } from '../services/mediaStorage.service';
 import { DEFAULT_PERSISTENCE_CONFIG, MAX_DATABASE_MEDIA_SIZE } from '../types/persistence';
+import { CloudConnectionProfile } from '../models/CloudConnectionProfile.model';
+import { S3StorageStrategy } from '../services/s3Storage.service';
 
 // Répertoire temporaire pour tests
 const TEST_STORAGE_ROOT = path.join(process.cwd(), 'storage-test-temp');
@@ -36,6 +38,10 @@ describe('MediaStorageService - Validation et stockage', () => {
         } catch (error) {
             console.warn('Cleanup warning:', error);
         }
+    });
+
+    afterEach(() => {
+        jest.restoreAllMocks();
     });
 
     // ============================================
@@ -415,20 +421,23 @@ describe('MediaStorageService - Validation et stockage', () => {
     // CAS 6: Mode cloud (stub)
     // ============================================
 
-    describe('Cas 6: Mode cloud (non implémenté)', () => {
-        it('doit retourner un placeholder pour le mode cloud', async () => {
+    describe('Cas 6: Mode cloud', () => {
+        it('doit uploader le media avec le profil cloud securise et retourner un payload exploitable par le catalogue', async () => {
             const testBuffer = Buffer.from('Cloud test');
 
             const config = {
                 ...DEFAULT_PERSISTENCE_CONFIG,
                 saveMedia: true,
-                mediaStorage: 'cloud' as const
+                mediaStorage: 'cloud' as const,
+                cloudConnectionProfileId: 'cloud-profile-1'
             };
 
             const metadata = {
-                originalName: 'cloud-file.png',
+                originalName: 'cloud file.png',
                 mimeType: 'image/png',
-                size: testBuffer.length
+                size: testBuffer.length,
+                generatedBy: 'Cloud Agent',
+                prompt: 'store in cloud'
             };
 
             const context = {
@@ -437,19 +446,56 @@ describe('MediaStorageService - Validation et stockage', () => {
                 agentInstanceId: 'inst-cloud'
             };
 
-            // Le mode cloud devrait soit:
-            // - Lancer une erreur "non implémenté"
-            // - Retourner un résultat avec storageMode: 'cloud' et url placeholder
-            try {
-                const result = await mediaService.saveMedia(testBuffer, metadata, config, context);
-                expect(result.storageMode).toBe('cloud');
-                // Si implémenté, vérifier qu'on a bien une URL
-                expect(result.url).toBeDefined();
-            } catch (error) {
-                // Si non implémenté, vérifier que l'erreur est appropriée
-                expect(error).toBeInstanceOf(MediaStorageError);
-                expect((error as MediaStorageError).code).toMatch(/NOT_IMPLEMENTED|CLOUD_NOT_CONFIGURED/);
-            }
+            jest.spyOn(CloudConnectionProfile, 'findOne').mockImplementation(() => Promise.resolve({
+                enabled: true,
+                statusState: 'configured',
+                toDecryptedCloudStorageConfig: () => ({
+                    provider: 's3' as const,
+                    s3: {
+                        accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+                        secretAccessKey: 'super-secret-key',
+                        bucketName: 'media-bucket',
+                        region: 'eu-west-3',
+                        keyPrefix: 'tenant/'
+                    }
+                })
+            }) as any);
+            jest.spyOn(S3StorageStrategy.prototype, 'initialize').mockResolvedValue(undefined);
+            const uploadSpy = jest.spyOn(S3StorageStrategy.prototype, 'upload').mockImplementation(async (key) => ({
+                success: true,
+                key: `tenant/${key}`,
+                etag: 'etag-cloud-1'
+            }));
+
+            const result = await mediaService.saveMedia(testBuffer, metadata, config, context);
+
+            expect(result.storageMode).toBe('cloud');
+            expect(result.fileName).toMatch(/^cloud_file-\d+-[a-f0-9]{8}\.png$/);
+            expect(result.size).toBe(testBuffer.length);
+            expect(result.checksum).toBeDefined();
+            expect(result.metadata).toEqual(expect.objectContaining({
+                generatedBy: 'Cloud Agent',
+                prompt: 'store in cloud',
+                cloudConnectionProfileId: 'cloud-profile-1',
+                cloudProvider: 's3',
+                cloudBucket: 'media-bucket',
+                cloudKey: expect.stringMatching(/^tenant\/users\/user-cloud\/workflows\/wf-cloud\/agents\/inst-cloud\/\d{4}-\d{2}\/cloud_file-\d+-[a-f0-9]{8}\.png$/),
+                etag: 'etag-cloud-1'
+            }));
+            expect(uploadSpy).toHaveBeenCalledWith(
+                expect.stringMatching(/^users\/user-cloud\/workflows\/wf-cloud\/agents\/inst-cloud\/\d{4}-\d{2}\/cloud_file-\d+-[a-f0-9]{8}\.png$/),
+                testBuffer,
+                'image/png',
+                expect.objectContaining({
+                    originalName: 'cloud file.png',
+                    generatedBy: 'Cloud Agent',
+                    prompt: 'store in cloud',
+                    workflowId: 'wf-cloud',
+                    agentInstanceId: 'inst-cloud',
+                    userId: 'user-cloud',
+                    checksum: expect.any(String)
+                })
+            );
         });
     });
 });

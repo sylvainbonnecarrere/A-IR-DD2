@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { WebSearchParamsSchema } from './web-search-params.schema';
 
 // ============================================
 // TYPES DE CONTENU POLYMORPHE
@@ -138,6 +139,7 @@ export const AgentInstanceCreateSchema = z.object({
     executionId: z.string(),
     status: ExecutionStatusEnum.default('running'),
     content: z.array(AgentInstanceContentSchema).default([]),
+    webSearchParams: WebSearchParamsSchema.optional(),
     userNotes: z.string().max(2000).optional(),
     tags: z.array(z.string().max(50)).optional()
 });
@@ -148,6 +150,7 @@ export const AgentInstanceCreateSchema = z.object({
 export const AgentInstanceUpdateSchema = z.object({
     status: ExecutionStatusEnum.optional(),
     content: z.array(AgentInstanceContentSchema).optional(),
+    webSearchParams: WebSearchParamsSchema.optional(),
     completedAt: z.date().optional(),
     duration: z.number().min(0).optional(),
     userNotes: z.string().max(2000).optional(),
@@ -180,6 +183,7 @@ export const AgentInstanceFullSchema = AgentInstanceCreateSchema.extend({
     llmProvider: z.string(),
     llmModel: z.string(),
     capabilities: z.array(z.string()),
+    webSearchParams: WebSearchParamsSchema.optional(),
     robotId: z.string(),
     // Canvas properties
     position: z.object({

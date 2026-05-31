@@ -1,6 +1,29 @@
 # Script de Validation de Synchronisation MongoDB ↔ Mongoose
 # Vérifie que les collections utilisent bien les conventions snake_case
 
+$envFile = Join-Path $PSScriptRoot '..\.env'
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^\s*#' -or $_ -notmatch '=') {
+            return
+        }
+
+        $name, $value = $_ -split '=', 2
+        if (-not [string]::IsNullOrWhiteSpace($name) -and $null -eq (Get-Item "env:$name" -ErrorAction SilentlyContinue)) {
+            [System.Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim(), 'Process')
+        }
+    }
+}
+
+$mongoUser = $env:MONGO_USER
+$mongoPassword = $env:MONGO_PASSWORD
+$mongoDatabase = if ($env:MONGO_INITDB_DATABASE) { $env:MONGO_INITDB_DATABASE } else { 'a-ir-dd2-dev' }
+
+if ([string]::IsNullOrWhiteSpace($mongoUser) -or [string]::IsNullOrWhiteSpace($mongoPassword)) {
+    Write-Host "[X] Variables MongoDB manquantes. Renseignez MONGO_USER et MONGO_PASSWORD dans backend/.env." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "Test de Synchronisation MongoDB <-> Mongoose" -ForegroundColor Cyan
 Write-Host ""
 
@@ -131,8 +154,8 @@ Write-Host "6 - Verification collections MongoDB..." -ForegroundColor Yellow
 Write-Host ""
 
 $mongoCheck = @"
-docker exec -it a-ir-dd2-mongodb mongosh -u admin -p SecurePassword123! --authenticationDatabase admin --eval "
-    use a-ir-dd2-dev;
+docker exec -it a-ir-dd2-mongodb mongosh -u $mongoUser -p $mongoPassword --authenticationDatabase admin --eval "
+    use $mongoDatabase;
     print('Collections existantes :');
     db.getCollectionNames().forEach(function(col) { print('   - ' + col); });
     print('');

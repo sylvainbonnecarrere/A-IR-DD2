@@ -12,6 +12,21 @@ jest.mock('../../hooks/useAuth', () => ({
     }))
 }));
 
+jest.mock('../../hooks/useLocalization', () => ({
+    useLocalization: jest.fn(() => ({
+        t: (key: string, fallbackOrParams?: string | Record<string, string | number>, params?: Record<string, string | number>) => {
+            if (typeof fallbackOrParams === 'string') {
+                return Object.entries(params ?? {}).reduce(
+                    (value, [paramKey, paramValue]) => value.replace(`{${paramKey}}`, String(paramValue)),
+                    fallbackOrParams,
+                );
+            }
+
+            return key;
+        },
+    })),
+}));
+
 jest.mock('../../contexts/NotificationContext', () => ({
     useNotifications: jest.fn(() => ({
         addNotification: mockAddNotification
@@ -168,6 +183,85 @@ describe('PhilFunctionsPage runtime compatibility banner', () => {
                 workflowId: 'wf-1'
             }));
         });
+    });
+
+    it('renders readiness status for native tools in the library and detail panel', () => {
+        mockUseFunctionStore.mockImplementation(() => createStoreState({
+            selectedFunctionId: 'fn-native',
+            getFilteredFunctions: jest.fn(() => ([{
+                _id: 'fn-native',
+                toolId: 'tool-native',
+                name: 'web_search_py',
+                description: 'Recherche web native',
+                language: 'python',
+                origin: 'native',
+                userId: null,
+                workflowId: null,
+                inputSchema: {},
+                outputSchema: {},
+                codePath: 'backend/python/native/web_search_py.py',
+                resolvedCodePath: 'backend/python/native/web_search_py.py',
+                codePathRoot: 'native_repo',
+                codeInline: null,
+                dependencies: [],
+                isEnabled: true,
+                isReadonly: true,
+                version: 1,
+                readinessStatus: {
+                    requirement: 'none',
+                    state: 'ready',
+                    prepared: true,
+                    runnable: true,
+                    dependencyReadiness: 'not_required',
+                    runtimeReady: true,
+                    summary: 'Aucune preparation supplementaire requise avant execution.',
+                    actionLabel: 'Executable immediatement'
+                },
+                tags: ['search'],
+                createdAt: '2026-03-19T10:00:00.000Z',
+                updatedAt: '2026-03-19T10:00:00.000Z'
+            }])),
+            getSelectedFunction: jest.fn(() => ({
+                _id: 'fn-native',
+                toolId: 'tool-native',
+                name: 'web_search_py',
+                description: 'Recherche web native',
+                language: 'python',
+                origin: 'native',
+                userId: null,
+                workflowId: null,
+                inputSchema: {},
+                outputSchema: {},
+                codePath: 'backend/python/native/web_search_py.py',
+                resolvedCodePath: 'backend/python/native/web_search_py.py',
+                codePathRoot: 'native_repo',
+                codeInline: null,
+                dependencies: [],
+                isEnabled: true,
+                isReadonly: true,
+                version: 1,
+                readinessStatus: {
+                    requirement: 'none',
+                    state: 'ready',
+                    prepared: true,
+                    runnable: true,
+                    dependencyReadiness: 'not_required',
+                    runtimeReady: true,
+                    summary: 'Aucune preparation supplementaire requise avant execution.',
+                    actionLabel: 'Executable immediatement'
+                },
+                tags: ['search'],
+                createdAt: '2026-03-19T10:00:00.000Z',
+                updatedAt: '2026-03-19T10:00:00.000Z'
+            }))
+        }));
+
+        render(<PhilFunctionsPage />);
+
+        expect(screen.getByText('execution immediate')).toBeInTheDocument();
+        expect(screen.getByText('Readiness')).toBeInTheDocument();
+        expect(screen.getByText('Executable immediatement')).toBeInTheDocument();
+        expect(screen.getByText('ready')).toBeInTheDocument();
     });
 
     it('disables custom function creation when no workflow is selected', () => {

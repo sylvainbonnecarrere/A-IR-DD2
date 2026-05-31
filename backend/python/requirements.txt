@@ -7,6 +7,7 @@ beautifulsoup4>=4.12.0
 lxml>=5.0.0
 
 # web_search_py.py
+ddgs>=9.0.0
 duckduckgo-search>=6.0.0
 
 # environment / config (function_context.py, runner.py)

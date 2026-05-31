@@ -1,4 +1,5 @@
-import type { IUserFunction } from '../../models/UserFunction.model';
+import type { IUserToolPolicy } from '../../models/UserTool.model';
+
 import type {
     IUserToolRunArtifact,
     IUserToolRunPolicySnapshot,
@@ -17,9 +18,20 @@ export type SandboxExecutionFailureKind =
     | 'runner_image_missing'
     | 'runner_mount_failed'
     | 'runner_permission_denied'
+    | 'wrapper_syntax_error'
+    | 'user_code_syntax_error'
+    | 'dependency_missing'
     | 'sandbox_runtime_error'
     | 'sandbox_invalid_output'
     | 'sandbox_non_zero_exit'
+    | 'unknown';
+
+export type SandboxExecutionFailureSubsystem =
+    | 'runner'
+    | 'wrapper'
+    | 'user_code'
+    | 'dependency'
+    | 'sandbox_runtime'
     | 'unknown';
 
 export interface SandboxExecutionMetadata {
@@ -28,18 +40,49 @@ export interface SandboxExecutionMetadata {
     timeoutMs?: number;
     maxMemoryMb?: number;
     failureKind?: SandboxExecutionFailureKind;
+    failureSubsystem?: SandboxExecutionFailureSubsystem;
+    errorType?: string;
+    traceback?: string;
     artifacts?: IUserToolRunArtifact[];
 }
 
 export interface SandboxExecutionResourceUsage extends IUserToolRunResourceUsage {}
 
+export interface SandboxSyntaxCheckResult {
+    valid: boolean;
+    errors: Array<{ line?: number; message: string }>;
+}
+
+export interface LegacyExecutionFunctionRef {
+    _id: string | { toString(): string };
+    name: string;
+    language: 'python' | 'typescript';
+    origin: 'native' | 'custom';
+    codeInline?: string | null;
+    codePath?: string | null;
+    workflowId?: string | { toString(): string } | null;
+}
+
+export interface ExecutionFunctionRef extends LegacyExecutionFunctionRef {
+    dependencies?: {
+        python?: string[];
+        npm?: string[];
+    } | string[] | null;
+    version?: number | string;
+    toolVersionTag?: string;
+    toolContentHash?: string;
+    policySnapshot?: IUserToolPolicy;
+}
+
 export interface SandboxExecutionRequest {
     executionId: string;
     userId: string;
-    function: Pick<IUserFunction, '_id' | 'name' | 'language' | 'origin' | 'codeInline' | 'codePath'>;
+    function: LegacyExecutionFunctionRef;
+    toolVersionTag?: string;
     runtime: UserToolRunRuntime;
     launchContext: UserToolRunLaunchContext;
     args: Record<string, unknown>;
+    privateContext?: Record<string, unknown>;
     policySnapshot: IUserToolRunPolicySnapshot;
     workspace: WorkspaceProvisioningResult | null;
     sourceCode?: string;

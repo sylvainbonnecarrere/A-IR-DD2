@@ -1,12 +1,15 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useFunctionStore } from '../stores/useFunctionStore';
 import { useAuth } from '../hooks/useAuth';
+import type { ToolSelection } from '../types';
 import type { FunctionLanguage, FunctionOrigin } from '../types/function.types';
-import { buildSelectableToolCatalog } from '../services/toolSelectionResolver';
+import { buildSelectableToolCatalog, buildToolSelectionsFromFunctions, deriveSelectedToolIds } from '../services/toolSelectionResolver';
 
 interface FunctionSelectorProps {
-  selectedIds: string[];
-  onChange: (ids: string[]) => void;
+  selectedIds?: string[];
+  onChange?: (ids: string[]) => void;
+  selectedToolSelections?: ToolSelection[];
+  onChangeToolSelections?: (toolSelections: ToolSelection[]) => void;
   readOnly?: boolean;
   /** When true, only shows enabled functions (used in readOnly mode, or if you want strict filtering) */
   filterDisabled?: boolean;
@@ -22,14 +25,25 @@ const ORIGIN_BADGE: Record<FunctionOrigin, string> = {
   custom: 'bg-cyan-900/60 text-cyan-300 border border-cyan-700',
 };
 
-export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds, onChange, readOnly = false, filterDisabled = false }) => {
+export const FunctionSelector: React.FC<FunctionSelectorProps> = ({
+  selectedIds = [],
+  onChange,
+  selectedToolSelections,
+  onChangeToolSelections,
+  readOnly = false,
+  filterDisabled = false,
+}) => {
   const { functions, isLoading, loadFunctions, runtimeCompatibility } = useFunctionStore();
   const { isAuthenticated } = useAuth();
   const [search, setSearch] = useState('');
+  const currentSelectedIds = useMemo(
+    () => selectedToolSelections ? deriveSelectedToolIds(selectedToolSelections) : selectedIds,
+    [selectedIds, selectedToolSelections]
+  );
 
   const selectableCatalog = useMemo(
-    () => buildSelectableToolCatalog(functions, selectedIds),
-    [functions, selectedIds]
+    () => buildSelectableToolCatalog(functions, currentSelectedIds),
+    [functions, currentSelectedIds]
   );
 
   useEffect(() => {
@@ -65,12 +79,17 @@ export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds,
 
     const canonicalId = fn.toolId ?? fn._id;
     const knownIds = new Set([canonicalId, fn._id]);
-    const isAlreadySelected = selectedIds.some(selectedId => knownIds.has(selectedId));
+    const isAlreadySelected = currentSelectedIds.some(selectedId => knownIds.has(selectedId));
+    const nextSelectedIds = isAlreadySelected
+      ? currentSelectedIds.filter(selectedId => !knownIds.has(selectedId))
+      : [...currentSelectedIds, canonicalId];
 
-    onChange(
-      isAlreadySelected
-        ? selectedIds.filter(selectedId => !knownIds.has(selectedId))
-        : [...selectedIds, canonicalId]
+    onChange?.(
+      nextSelectedIds
+    );
+
+    onChangeToolSelections?.(
+      buildToolSelectionsFromFunctions(nextSelectedIds, functions)
     );
   };
 
@@ -98,7 +117,7 @@ export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds,
       {/* Header */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-400">
-          <span className="text-cyan-400 font-semibold">{selectedIds.length}</span> fonction{selectedIds.length !== 1 ? 's' : ''} sélectionnée{selectedIds.length !== 1 ? 's' : ''}
+          <span className="text-cyan-400 font-semibold">{currentSelectedIds.length}</span> fonction{currentSelectedIds.length !== 1 ? 's' : ''} sélectionnée{currentSelectedIds.length !== 1 ? 's' : ''}
           {!readOnly && !filterDisabled && (
             <span className="ml-2 text-[10px] text-gray-500">
               ({functions.filter(f => f.isEnabled).length} activée{functions.filter(f => f.isEnabled).length !== 1 ? 's' : ''} sur {functions.length})
@@ -106,10 +125,13 @@ export const FunctionSelector: React.FC<FunctionSelectorProps> = ({ selectedIds,
           )}
           {readOnly && <span className="ml-2 text-[10px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">lecture seule</span>}
         </p>
-        {!readOnly && selectedIds.length > 0 && (
+        {!readOnly && currentSelectedIds.length > 0 && (
           <button
             type="button"
-            onClick={() => onChange([])}
+            onClick={() => {
+              onChange?.([]);
+              onChangeToolSelections?.([]);
+            }}
             className="text-xs text-gray-500 hover:text-red-400 transition-colors"
           >
             Tout désélectionner

@@ -6,10 +6,19 @@
 
 set -e
 
+MONGO_ROOT_USERNAME="${MONGO_INITDB_ROOT_USERNAME:-${MONGO_USER:-}}"
+MONGO_ROOT_PASSWORD="${MONGO_INITDB_ROOT_PASSWORD:-${MONGO_PASSWORD:-}}"
+
+if [ -z "$MONGO_ROOT_USERNAME" ] || [ -z "$MONGO_ROOT_PASSWORD" ]; then
+  echo "MongoDB init error: missing root credentials in environment."
+  echo "Expected MONGO_INITDB_ROOT_USERNAME/MONGO_INITDB_ROOT_PASSWORD or MONGO_USER/MONGO_PASSWORD."
+  exit 1
+fi
+
 echo "MongoDB initialization script starting..."
 
 # Wait for MongoDB to be ready
-until mongosh --username admin --password SecurePassword123! --authenticationDatabase admin --eval "db.version()" &>/dev/null; do
+until mongosh --username "$MONGO_ROOT_USERNAME" --password "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.version()" &>/dev/null; do
   echo "Waiting for MongoDB to be ready..."
   sleep 2
 done
@@ -17,6 +26,6 @@ done
 echo "MongoDB is ready!"
 
 # Run the collections initialization script
-mongosh --username admin --password SecurePassword123! --authenticationDatabase admin < /docker-entrypoint-initdb.d/init-collections.js
+mongosh --username "$MONGO_ROOT_USERNAME" --password "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin < /docker-entrypoint-initdb.d/init-collections.js
 
 echo "MongoDB initialization complete!"

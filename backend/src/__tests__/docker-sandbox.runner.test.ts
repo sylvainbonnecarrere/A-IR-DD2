@@ -91,7 +91,7 @@ describe('DockerSandboxRunner', () => {
             'run',
             '--rm',
             '--interactive',
-            '--network=none',
+            '--network=bridge',
             '--cap-drop=ALL',
             '--security-opt',
             'no-new-privileges',
@@ -99,14 +99,38 @@ describe('DockerSandboxRunner', () => {
             '/sandbox/tmp:size=64m,noexec,nosuid,nodev',
             '--workdir',
             '/persistent-workspace/source',
-            'airdd2-runtime-node:bookworm-slim'
+            'airdd2-runtime-node:22.22.2-ubuntu-noble'
         ]));
         expect(call.args.join(' ')).toContain('type=bind,src=C:/sandbox/workspace-root,dst=/persistent-workspace');
         expect(call.timeoutMs).toBe(12000);
         expect(JSON.parse(call.stdin ?? '{}')).toEqual({
+            context: {
+                userId: 'user-1',
+                workflowId: undefined,
+                depth: 0,
+                maxDepth: 8,
+                sessionId: 'utr-test'
+            },
             args: { value: 'hello' },
             code: 'function run(args) { return { echoed: args.value }; }'
         });
+    });
+
+    it('keeps network disabled for tools whose policy forbids outbound access', async () => {
+        const processRunner = new FakeDockerProcessRunner();
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+
+        await runner.execute(createRequest({
+            policySnapshot: {
+                networkMode: 'none',
+                timeoutSeconds: 12,
+                maxMemoryMb: 192,
+                secretAliases: []
+            }
+        }));
+
+        const call = processRunner.calls[0];
+        expect(call.args).toEqual(expect.arrayContaining(['--network=none']));
     });
 
     it('classifies invalid non-JSON sandbox output as a runner contract error', async () => {
@@ -121,7 +145,65 @@ describe('DockerSandboxRunner', () => {
         expect(result.success).toBe(false);
         expect(result.metadata).toEqual(expect.objectContaining({
             exitCode: 0,
-            failureKind: 'sandbox_invalid_output'
+            failureKind: 'sandbox_invalid_output',
+            failureSubsystem: 'sandbox_runtime'
+        }));
+    });
+
+    it('classifies eval syntax failures as wrapper syntax errors', async () => {
+        const processRunner = new FakeDockerProcessRunner({
+            stdout: '',
+            stderr: "[eval]:12\nSyntaxError: Unexpected token ';'",
+            exitCode: 1
+        });
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+
+        const result = await runner.execute(createRequest());
+
+        expect(result.success).toBe(false);
+        expect(result.metadata).toEqual(expect.objectContaining({
+            exitCode: 1,
+            failureKind: 'wrapper_syntax_error',
+            failureSubsystem: 'wrapper'
+        }));
+    });
+
+    it('preserves dependency-missing failures emitted by the sandbox payload', async () => {
+        const processRunner = new FakeDockerProcessRunner({
+            stdout: JSON.stringify({
+                success: false,
+                output: null,
+                stdout: '',
+                stderr: 'ModuleNotFoundError: No module named requests',
+                failureKind: 'dependency_missing',
+                errorType: 'ModuleNotFoundError',
+                traceback: 'Traceback...'
+            }),
+            exitCode: 1
+        });
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+
+        const result = await runner.execute(createRequest({
+            function: {
+                _id: '507f1f77bcf86cd799439011' as any,
+                name: 'web_fetch_py',
+                language: 'python',
+                origin: 'native',
+                codeInline: undefined,
+                codePath: 'backend/python/native/web_fetch_py.py'
+            },
+            runtime: 'python',
+            sourceCode: undefined,
+            mode: 'python-native'
+        }));
+
+        expect(result.success).toBe(false);
+        expect(result.metadata).toEqual(expect.objectContaining({
+            exitCode: 1,
+            failureKind: 'dependency_missing',
+            failureSubsystem: 'dependency',
+            errorType: 'ModuleNotFoundError',
+            traceback: 'Traceback...'
         }));
     });
 
@@ -138,7 +220,8 @@ describe('DockerSandboxRunner', () => {
         expect(result.success).toBe(false);
         expect(result.metadata).toEqual(expect.objectContaining({
             exitCode: 125,
-            failureKind: 'runner_image_missing'
+            failureKind: 'runner_image_missing',
+            failureSubsystem: 'runner'
         }));
     });
 
@@ -155,7 +238,8 @@ describe('DockerSandboxRunner', () => {
         expect(result.success).toBe(false);
         expect(result.metadata).toEqual(expect.objectContaining({
             exitCode: 125,
-            failureKind: 'runner_mount_failed'
+            failureKind: 'runner_mount_failed',
+            failureSubsystem: 'runner'
         }));
     });
 
@@ -172,7 +256,8 @@ describe('DockerSandboxRunner', () => {
         expect(result.exitCode).toBe(124);
         expect(result.metadata).toEqual(expect.objectContaining({
             exitCode: 124,
-            failureKind: 'timeout'
+            failureKind: 'timeout',
+            failureSubsystem: 'sandbox_runtime'
         }));
     });
 
@@ -198,7 +283,7 @@ describe('DockerSandboxRunner', () => {
 
         const call = processRunner.calls[0];
         expect(call.args).toEqual(expect.arrayContaining([
-            'airdd2-runtime-python:3.12-slim',
+            'airdd2-runtime-python:3.12-ubuntu-noble',
             'python3',
             '-c'
         ]));
@@ -206,6 +291,46 @@ describe('DockerSandboxRunner', () => {
         expect(JSON.parse(call.stdin ?? '{}')).toEqual({
             functionName: 'read_py',
             args: { value: 'hello' }
+        });
+    });
+
+    it('checks Python syntax inside the Docker runtime image instead of relying on the host interpreter', async () => {
+        const processRunner = new FakeDockerProcessRunner({
+            stdout: JSON.stringify({ valid: true, errors: [] })
+        });
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+
+        const result = await runner.checkPythonSyntax('def run(args):\n    return {"ok": True}');
+
+        expect(result).toEqual({ valid: true, errors: [] });
+        const call = processRunner.calls[0];
+        expect(call.command).toBe('docker');
+        expect(call.args).toEqual(expect.arrayContaining([
+            'run',
+            '--rm',
+            '--interactive',
+            '--network=none',
+            'airdd2-runtime-python:3.12-ubuntu-noble',
+            'python3',
+            '-c'
+        ]));
+        expect(call.stdin).toBe('def run(args):\n    return {"ok": True}');
+    });
+
+    it('returns normalized syntax errors when the sandbox parser rejects Python code', async () => {
+        const processRunner = new FakeDockerProcessRunner({
+            stdout: JSON.stringify({
+                valid: false,
+                errors: [{ line: 2, message: 'expected an indented block' }]
+            })
+        });
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+
+        const result = await runner.checkPythonSyntax('def run(args):\nreturn {"ok": True}');
+
+        expect(result).toEqual({
+            valid: false,
+            errors: [{ line: 2, message: 'expected an indented block' }]
         });
     });
 });

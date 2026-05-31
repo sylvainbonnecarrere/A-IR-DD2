@@ -14,31 +14,45 @@ function getLegacyFunctionId(legacy: LegacyFunctionLike): mongoose.Types.ObjectI
     return value;
 }
 
-export async function syncUserToolMirrorFromLegacyFunction(legacy: LegacyFunctionLike): Promise<void> {
-    const legacyId = getLegacyFunctionId(legacy);
-    const fields = mapLegacyFunctionToUserToolFields(legacy);
-    const createdAt = legacy.createdAt instanceof Date ? legacy.createdAt : new Date(legacy.createdAt ?? Date.now());
-    const updatedAt = legacy.updatedAt instanceof Date ? legacy.updatedAt : new Date(legacy.updatedAt ?? Date.now());
+export class LegacyFunctionToolProjectionService {
+    async upsertFromLegacyFunction(legacy: LegacyFunctionLike): Promise<void> {
+        const legacyId = getLegacyFunctionId(legacy);
+        const existingTool = await UserTool.findById(legacyId).lean();
+        const fields = mapLegacyFunctionToUserToolFields(legacy, existingTool);
+        const createdAt = legacy.createdAt instanceof Date ? legacy.createdAt : new Date(legacy.createdAt ?? Date.now());
+        const updatedAt = legacy.updatedAt instanceof Date ? legacy.updatedAt : new Date(legacy.updatedAt ?? Date.now());
 
-    await UserTool.updateOne(
-        { _id: legacyId },
-        {
-            $set: {
-                ...fields,
-                updatedAt
+        await UserTool.updateOne(
+            { _id: legacyId },
+            {
+                $set: {
+                    ...fields,
+                    updatedAt
+                },
+                $setOnInsert: {
+                    createdAt
+                }
             },
-            $setOnInsert: {
-                createdAt
-            }
-        },
-        { upsert: true }
-    );
+            { upsert: true }
+        );
+    }
+
+    async deleteByLegacyFunctionId(functionId: string): Promise<void> {
+        if (!mongoose.Types.ObjectId.isValid(functionId)) {
+            return;
+        }
+
+        await UserTool.deleteOne({ _id: new mongoose.Types.ObjectId(functionId) });
+    }
+}
+
+export const legacyFunctionToolProjectionService = new LegacyFunctionToolProjectionService();
+
+// Compatibility wrappers kept only for tests and the contained legacy service.
+export async function syncUserToolMirrorFromLegacyFunction(legacy: LegacyFunctionLike): Promise<void> {
+    return legacyFunctionToolProjectionService.upsertFromLegacyFunction(legacy);
 }
 
 export async function deleteUserToolMirror(functionId: string): Promise<void> {
-    if (!mongoose.Types.ObjectId.isValid(functionId)) {
-        return;
-    }
-
-    await UserTool.deleteOne({ _id: new mongoose.Types.ObjectId(functionId) });
+    return legacyFunctionToolProjectionService.deleteByLegacyFunctionId(functionId);
 }

@@ -15,6 +15,30 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { ISettingsStorage, getSettingsStorage, MockSettingsStorage, UserSettingsData } from '../../utils/SettingsStorage';
 import React from 'react';
+import type { AuthContextType } from '../../contexts/types/auth.types';
+
+function createAuthContextMock(overrides: Partial<AuthContextType> = {}): AuthContextType {
+    return {
+        user: null,
+        accessToken: 'mock-token-123',
+        refreshToken: 'mock-refresh-token',
+        isAuthenticated: true,
+        isLoading: false,
+        sessionStatus: 'ready',
+        error: null,
+        llmApiKeys: null,
+        runtimeLLMConfigs: [],
+        localLLMProfiles: [],
+        login: async () => { },
+        register: async () => { },
+        logout: () => { },
+        refreshAccessToken: async () => { },
+        clearError: () => { },
+        refreshLLMApiKeys: async () => { },
+        refreshRuntimeConfigState: async () => null,
+        ...overrides,
+    };
+}
 
 /**
  * Test Suite 1: SettingsStorage Factory
@@ -36,18 +60,7 @@ describe('J4.3 - SettingsStorage Factory', () => {
     });
 
     it('should return AuthenticatedSettingsStorage for authenticated user', () => {
-        const authContext = {
-            isAuthenticated: true,
-            accessToken: 'mock-token-123',
-            user: null,
-            login: async () => { },
-            register: async () => { },
-            logout: () => { },
-            refreshToken: async () => { },
-            llmApiKeys: null,
-            isLoading: false,
-            error: null
-        };
+        const authContext = createAuthContextMock();
 
         const storage = getSettingsStorage(authContext);
         expect(storage).toBeDefined();
@@ -191,18 +204,7 @@ describe('J4.3 - Authenticated Mode Settings Persistence', () => {
             json: async () => mockResponse
         });
 
-        const authContext = {
-            isAuthenticated: true,
-            accessToken: 'mock-bearer-token',
-            user: null,
-            login: async () => { },
-            register: async () => { },
-            logout: () => { },
-            refreshToken: async () => { },
-            llmApiKeys: null,
-            isLoading: false,
-            error: null
-        };
+        const authContext = createAuthContextMock({ accessToken: 'mock-bearer-token' });
 
         // Simulate storage (would be real in integration test)
         const storage = new MockSettingsStorage(mockResponse);
@@ -303,18 +305,7 @@ describe('J4.3 - Storage Mode Switching', () => {
         expect(guestVerify.llmConfigs['OpenAI'].enabled).toBe(true);
 
         // Simulate user logging in
-        const authContext = {
-            isAuthenticated: true,
-            accessToken: 'new-token-456',
-            user: null,
-            login: async () => { },
-            register: async () => { },
-            logout: () => { },
-            refreshToken: async () => { },
-            llmApiKeys: null,
-            isLoading: false,
-            error: null
-        };
+        const authContext = createAuthContextMock({ accessToken: 'new-token-456' });
 
         // In real scenario, app would:
         // 1. Switch to AuthStorage
@@ -433,18 +424,7 @@ describe('J4.3 - SettingsModal Storage Integration', () => {
         expect(guestStorage).toBeDefined();
 
         // Auth mode test
-        const authContext = {
-            isAuthenticated: true,
-            accessToken: 'token',
-            user: null,
-            login: async () => { },
-            register: async () => { },
-            logout: () => { },
-            refreshToken: async () => { },
-            llmApiKeys: null,
-            isLoading: false,
-            error: null
-        };
+        const authContext = createAuthContextMock({ accessToken: 'token' });
         const authStorage = getSettingsStorage(authContext);
         expect(authStorage).toBeDefined();
     });
@@ -494,18 +474,7 @@ describe('J4.3 - Backward Compatibility', () => {
 
     it('should not break if UserSettings DB not initialized', async () => {
         // Mock scenario where UserSettings collection doesn't exist yet
-        const authContext = {
-            isAuthenticated: true,
-            accessToken: 'token',
-            user: null,
-            login: async () => { },
-            register: async () => { },
-            logout: () => { },
-            refreshToken: async () => { },
-            llmApiKeys: null,
-            isLoading: false,
-            error: null
-        };
+        const authContext = createAuthContextMock({ accessToken: 'token' });
 
         const storage = getSettingsStorage(authContext);
         expect(storage).toBeDefined();

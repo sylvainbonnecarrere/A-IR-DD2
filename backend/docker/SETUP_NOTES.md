@@ -13,8 +13,8 @@ Professional Docker setup for MongoDB in A-IR-DD2 with **Code-First initializati
 - **Container name**: a-ir-dd2-mongodb
 - **Port**: 27017 (mapped)
 - **Authentication**: 
-  - Username: `admin`
-  - Password: `SecurePassword123!`
+  - Username: value of `MONGO_USER` in `backend/.env`
+  - Password: value of `MONGO_PASSWORD` in `backend/.env`
   - Database: `a-ir-dd2-dev`
 - **Volumes**:
   - `mongodb_data:/data/db` - Persistent data storage only
@@ -110,9 +110,9 @@ Template for backend `.env` configuration:
 
 ```env
 # MongoDB Connection
-MONGODB_URI=mongodb://admin:SecurePassword123!@localhost:27017/a-ir-dd2-dev?authSource=admin
-MONGO_USER=admin
-MONGO_PASSWORD=SecurePassword123!
+MONGODB_URI=mongodb://<set-mongo-admin-user>:<set-mongo-strong-password>@localhost:27017/a-ir-dd2-dev?authSource=admin
+MONGO_USER=<set-mongo-admin-user>
+MONGO_PASSWORD=<set-mongo-strong-password>
 
 # Backend
 PORT=3001
@@ -299,16 +299,16 @@ Expected output:
 ```bash
 # Collections created?
 docker exec -it a-ir-dd2-mongodb mongosh \
-  --username admin \
-  --password SecurePassword123! \
+  --username "$MONGO_USER" \
+  --password "$MONGO_PASSWORD" \
   --authenticationDatabase admin \
   a-ir-dd2-dev \
   --eval "show collections"
 
 # Test user created?
 docker exec -it a-ir-dd2-mongodb mongosh \
-  --username admin \
-  --password SecurePassword123! \
+  --username "$MONGO_USER" \
+  --password "$MONGO_PASSWORD" \
   --authenticationDatabase admin \
   a-ir-dd2-dev \
   --eval "db.users.countDocuments()"
@@ -321,8 +321,8 @@ docker exec -it a-ir-dd2-mongodb mongosh \
 ### View All Collections
 ```bash
 docker exec -it a-ir-dd2-mongodb mongosh \
-  --username admin \
-  --password SecurePassword123! \
+  --username "$MONGO_USER" \
+  --password "$MONGO_PASSWORD" \
   --authenticationDatabase admin \
   a-ir-dd2-dev \
   --eval "db.getCollectionNames()"
@@ -331,8 +331,8 @@ docker exec -it a-ir-dd2-mongodb mongosh \
 ### Query Test User
 ```bash
 docker exec -it a-ir-dd2-mongodb mongosh \
-  --username admin \
-  --password SecurePassword123! \
+  --username "$MONGO_USER" \
+  --password "$MONGO_PASSWORD" \
   --authenticationDatabase admin \
   a-ir-dd2-dev \
   --eval "db.users.findOne({ email: 'test@example.com' })"
@@ -341,8 +341,8 @@ docker exec -it a-ir-dd2-mongodb mongosh \
 ### Check Indexes on a Collection
 ```bash
 docker exec -it a-ir-dd2-mongodb mongosh \
-  --username admin \
-  --password SecurePassword123! \
+  --username "$MONGO_USER" \
+  --password "$MONGO_PASSWORD" \
   --authenticationDatabase admin \
   a-ir-dd2-dev \
   --eval "db.users.getIndexes()"

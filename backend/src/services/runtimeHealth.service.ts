@@ -1,6 +1,8 @@
 import { spawn } from 'child_process';
+import path from 'path';
 import { stat } from 'fs/promises';
 import config from '../config/environment';
+import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
 import type {
     RuntimeBinaryHealth,
     RuntimeCapabilities,
@@ -10,9 +12,53 @@ import type {
     RuntimeHealthReport,
     RuntimeHealthStatus,
     RuntimeImageHealth,
+    RuntimeNativePythonDependencyProbe,
+    RuntimeNativePythonHealth,
     RuntimeRunnerHealth,
     RuntimeSecurityLevel
 } from '../types/runtimeHealth.types';
+
+interface NativePythonImportTarget {
+    toolName: string;
+    dependencies: Array<{
+        dependency: string;
+        module: string;
+    }>;
+}
+
+function resolveCriticalPythonImportDependency(
+    entry: string | { module: string; dependency?: string },
+    availableDependencies: string[],
+    fallbackDependency?: string
+): { module: string; dependency: string } {
+    const normalizeDependencyKey = (value: string) => value.toLowerCase().replace(/[-_.]+/g, '');
+
+    if (typeof entry === 'string') {
+        const exactDependency = availableDependencies.find((dependency) => dependency === entry);
+        const normalizedDependency = availableDependencies.find(
+            (dependency) => normalizeDependencyKey(dependency) === normalizeDependencyKey(entry)
+        );
+
+        return {
+            module: entry,
+            dependency: exactDependency ?? normalizedDependency ?? fallbackDependency ?? entry
+        };
+    }
+
+    return {
+        module: entry.module,
+        dependency: entry.dependency ?? fallbackDependency ?? entry.module
+    };
+}
+
+const nativePythonImportTargets: NativePythonImportTarget[] = nativeFunctionsSeed
+    .filter((fn) => fn.origin === 'native' && fn.language === 'python' && (fn.healthCheck?.criticalPythonImports?.length ?? 0) > 0)
+    .map((fn) => ({
+        toolName: fn.name,
+        dependencies: (fn.healthCheck?.criticalPythonImports ?? []).map((entry, index) => (
+            resolveCriticalPythonImportDependency(entry, fn.dependencies, fn.dependencies[index])
+        ))
+    }));
 
 interface CommandExecutionResult {
     exitCode: number;
@@ -32,6 +78,7 @@ interface RuntimeHealthConfig {
     dockerExecutable: string;
     nodeRuntimeImage: string;
     pythonRuntimeImage: string;
+    backendPythonRoot: string;
     probeTimeoutMs: number;
 }
 
@@ -156,6 +203,7 @@ export class RuntimeHealthService {
             dockerExecutable: config.runtime.dockerExecutable,
             nodeRuntimeImage: config.runtime.nodeRuntimeImage,
             pythonRuntimeImage: config.runtime.pythonRuntimeImage,
+            backendPythonRoot: path.resolve(__dirname, '../../python'),
             probeTimeoutMs: config.runtime.probeTimeoutMs,
             ...options.runtimeConfig
         };
@@ -168,6 +216,13 @@ export class RuntimeHealthService {
         const docker = await this.probeDocker(checkedAt);
         const nodeImage = await this.probeRuntimeImage(this.runtimeConfig.nodeRuntimeImage, 'Node.js runtime image', 'node_runtime_image', checkedAt, docker.available);
         const pythonImage = await this.probeRuntimeImage(this.runtimeConfig.pythonRuntimeImage, 'Python runtime image', 'python_runtime_image', checkedAt, docker.available);
+        const nativePython = await this.probeNativePythonImports(
+            checkedAt,
+            python.available,
+            docker.available,
+            docker.runtime.executionReady,
+            pythonImage.runtime.available
+        );
         const firecrackerRunner = await this.probeFirecrackerRunner();
         const dockerSandboxRunner: RuntimeRunnerHealth = {
             runner: 'docker_sandbox',
@@ -185,7 +240,8 @@ export class RuntimeHealthService {
             docker.dockerComponent,
             docker.rootlessComponent,
             nodeImage.component,
-            pythonImage.component
+            pythonImage.component,
+            nativePython.component
         ];
 
         const overallStatus = this.computeOverallStatus(components);
@@ -206,6 +262,7 @@ export class RuntimeHealthService {
             checkedAt,
             summary: this.buildSummary(overallStatus, components),
             components,
+            nativePython: nativePython.runtime,
             runtime: {
                 node: node.runtime,
                 python: python.runtime,
@@ -234,6 +291,101 @@ export class RuntimeHealthService {
             typescript: {
                 available: node.available,
                 engine: 'node-subprocess'
+            }
+        };
+    }
+
+    private async probeNativePythonImports(
+        checkedAt: string,
+        pythonAvailable: boolean,
+        dockerAvailable: boolean,
+        executionReady: boolean,
+        pythonImageAvailable: boolean
+    ): Promise<{ runtime: RuntimeNativePythonHealth; component: RuntimeHealthComponent }> {
+        if (nativePythonImportTargets.length === 0) {
+            const runtime: RuntimeNativePythonHealth = {
+                available: true,
+                status: 'healthy',
+                summary: 'Aucun import critique declare pour les natives Python produit.',
+                probes: []
+            };
+
+            return {
+                runtime,
+                component: {
+                    key: 'python_native_imports',
+                    label: 'Imports critiques Python natifs',
+                    status: 'healthy',
+                    required: false,
+                    summary: runtime.summary,
+                    checkedAt,
+                    metadata: {
+                        probeCount: 0,
+                        available: true
+                    }
+                }
+            };
+        }
+
+        if (!pythonAvailable || !dockerAvailable || !executionReady || !pythonImageAvailable) {
+            const summary = !pythonAvailable
+                ? 'Probe imports natifs Python non execute: runtime Python indisponible.'
+                : !dockerAvailable
+                    ? 'Probe imports natifs Python non execute: Docker indisponible.'
+                    : !executionReady
+                        ? 'Probe imports natifs Python non execute: runtime Docker non pret.'
+                        : 'Probe imports natifs Python non execute: image Python runtime indisponible.';
+            const runtime: RuntimeNativePythonHealth = {
+                available: false,
+                status: 'degraded',
+                summary,
+                probes: []
+            };
+
+            return {
+                runtime,
+                component: {
+                    key: 'python_native_imports',
+                    label: 'Imports critiques Python natifs',
+                    status: 'degraded',
+                    required: false,
+                    summary,
+                    checkedAt,
+                    metadata: {
+                        probeCount: nativePythonImportTargets.length,
+                        available: false
+                    }
+                }
+            };
+        }
+
+        const probes = await Promise.all(nativePythonImportTargets.map((target) => this.runNativePythonImportProbe(target, checkedAt)));
+        const missingTools = probes.filter((probe) => probe.status !== 'healthy').map((probe) => probe.toolName);
+        const status: RuntimeHealthStatus = missingTools.length > 0 ? 'degraded' : 'healthy';
+        const summary = missingTools.length > 0
+            ? `Imports critiques manquants ou cassés pour: ${missingTools.join(', ')}`
+            : 'Imports critiques declares pour les natives Python verifies avec succes dans l\'image runtime.';
+        const runtime: RuntimeNativePythonHealth = {
+            available: missingTools.length === 0,
+            status,
+            summary,
+            probes
+        };
+
+        return {
+            runtime,
+            component: {
+                key: 'python_native_imports',
+                label: 'Imports critiques Python natifs',
+                status,
+                required: false,
+                summary,
+                checkedAt,
+                metadata: {
+                    probeCount: probes.length,
+                    failingTools: missingTools,
+                    available: runtime.available
+                }
             }
         };
     }
@@ -514,6 +666,87 @@ export class RuntimeHealthService {
         };
     }
 
+    private async runNativePythonImportProbe(target: NativePythonImportTarget, checkedAt: string): Promise<RuntimeNativePythonDependencyProbe> {
+        const script = buildNativePythonImportProbeScript(target.toolName, target.dependencies.map((dependency) => dependency.module));
+        const args = [
+            'run',
+            '--rm',
+            '--network',
+            'none',
+            '--mount',
+            `type=bind,src=${this.runtimeConfig.backendPythonRoot},dst=/opt/airdd2/backend-python,readonly`,
+            '--env',
+            'AIRDD2_NATIVE_ROOT=/opt/airdd2/backend-python',
+            '--entrypoint',
+            'python3',
+            this.runtimeConfig.pythonRuntimeImage,
+            '-c',
+            script
+        ];
+        const result = await this.runner.run(this.runtimeConfig.dockerExecutable, args, this.runtimeConfig.probeTimeoutMs);
+        const parsed = this.parseNativePythonImportProbeResult(result.stdout);
+        const errorsByModule = new Map<string, string>();
+
+        for (const entry of parsed.missing) {
+            if (typeof entry.module === 'string') {
+                errorsByModule.set(entry.module, typeof entry.error === 'string' ? entry.error : 'Import critique indisponible');
+            }
+        }
+
+        const imports = target.dependencies.map((dependency) => {
+            const detail = errorsByModule.get(dependency.module);
+            return {
+                dependency: dependency.dependency,
+                module: dependency.module,
+                available: !detail,
+                detail
+            };
+        });
+
+        if (result.exitCode === 0 && !result.timedOut && imports.every((entry) => entry.available)) {
+            return {
+                toolName: target.toolName,
+                status: 'healthy',
+                summary: `Imports critiques verifies pour ${target.toolName}.`,
+                checkedAt,
+                imports
+            };
+        }
+
+        const failureDetail = this.describeFailure(result);
+        const normalizedImports = imports.map((entry) => entry.available ? entry : entry).map((entry) => ({
+            ...entry,
+            detail: entry.detail ?? failureDetail
+        }));
+        const missingModules = normalizedImports.filter((entry) => !entry.available).map((entry) => entry.module);
+
+        return {
+            toolName: target.toolName,
+            status: 'degraded',
+            summary: missingModules.length > 0
+                ? `Imports critiques indisponibles pour ${target.toolName}: ${missingModules.join(', ')}`
+                : `Probe imports critiques echouee pour ${target.toolName}: ${failureDetail}`,
+            checkedAt,
+            imports: normalizedImports
+        };
+    }
+
+    private parseNativePythonImportProbeResult(stdout: string): { missing: Array<{ module?: unknown; error?: unknown }> } {
+        const normalized = stdout.trim();
+        if (!normalized) {
+            return { missing: [] };
+        }
+
+        try {
+            const parsed = JSON.parse(normalized) as { missing?: Array<{ module?: unknown; error?: unknown }> };
+            return {
+                missing: Array.isArray(parsed.missing) ? parsed.missing : []
+            };
+        } catch {
+            return { missing: [] };
+        }
+    }
+
     private async detectDockerExecutionProfile(): Promise<DockerExecutionProfile> {
         const contextNameResult = await this.runner.run(
             this.runtimeConfig.dockerExecutable,
@@ -673,4 +906,31 @@ async function defaultKvmAvailable(): Promise<boolean> {
     } catch {
         return false;
     }
+}
+
+function buildNativePythonImportProbeScript(toolName: string, modules: string[]): string {
+    const encodedModules = JSON.stringify(modules);
+    const encodedToolName = JSON.stringify(toolName);
+    return [
+        'import os, pathlib',
+        'import importlib, json, sys',
+        `tool_name = ${encodedToolName}`,
+        `modules = ${encodedModules}`,
+        'def sanitize_segment(value):',
+        '    return "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in str(value or ""))',
+        'native_root = pathlib.Path(os.environ.get("AIRDD2_NATIVE_ROOT", "/opt/airdd2/backend-python"))',
+        'provisioned_root = native_root / ".provisioned" / "native-tools" / sanitize_segment(tool_name)',
+        'if provisioned_root.exists():',
+        '    for site_packages in sorted(provisioned_root.glob("*/site-packages")):',
+        '        if site_packages.is_dir():',
+        '            sys.path.insert(0, str(site_packages))',
+        'missing = []',
+        'for module in modules:',
+        '    try:',
+        '        importlib.import_module(module)',
+        '    except Exception as exc:',
+        '        missing.append({"module": module, "error": f"{type(exc).__name__}: {exc}"})',
+        'print(json.dumps({"missing": missing}))',
+        'sys.exit(0 if not missing else 2)'
+    ].join('\n');
 }

@@ -6,6 +6,7 @@ import { UserToolRun } from '../models/UserToolRun.model';
 import UserSettings from '../models/UserSettings.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
 import type { RuntimeCompatibilityContext } from '../services/runtimeCompatibility.service';
+import { buildChatMessagesByInstance } from './chatMessageProjection';
 import { transformAgentInstanceForFrontend } from './transforms';
 
 interface SnapshotWorkflowLike {
@@ -190,9 +191,15 @@ function transformWorkflowEdgeForFrontend(edge: any) {
 }
 
 function transformAgentPrototypeForFrontend(proto: any) {
-    const toolIds = Array.isArray(proto.tools)
+    const legacyToolIds = Array.isArray(proto.tools)
         ? proto.tools.map((toolId: any) => toolId?.toString?.() || String(toolId))
         : [];
+    const selectedToolIds = Array.isArray(proto.toolSelections)
+        ? proto.toolSelections
+            .map((selection: any) => selection?.toolId)
+            .filter((toolId: unknown): toolId is string => typeof toolId === 'string' && toolId.trim().length > 0)
+        : [];
+    const functionIds = selectedToolIds.length > 0 ? selectedToolIds : legacyToolIds;
 
     return {
         id: proto._id?.toString() || proto.id,
@@ -203,8 +210,11 @@ function transformAgentPrototypeForFrontend(proto: any) {
         role: proto.role,
         systemPrompt: proto.systemPrompt,
         capabilities: Array.isArray(proto.capabilities) ? proto.capabilities : [],
-        tools: toolIds,
-        functionIds: toolIds,
+        tools: [],
+        functionIds,
+        toolSelections: Array.isArray(proto.toolSelections)
+            ? proto.toolSelections
+            : functionIds.map((toolId: string) => ({ toolId })),
         historyConfig: proto.historyConfig,
         outputConfig: proto.outputConfig,
         robotId: proto.robotId,
@@ -236,31 +246,6 @@ function transformUserToolRunForFrontend(run: any) {
     };
 }
 
-function buildChatMessagesByInstance(entries: any[]) {
-    const journalByInstance: Record<string, any[]> = {};
-
-    for (const entry of entries) {
-        const instanceId = entry.agentInstanceId?.toString() || '';
-        if (!journalByInstance[instanceId]) {
-            journalByInstance[instanceId] = [];
-        }
-        journalByInstance[instanceId].push({
-            sender: entry.payload?.role || 'agent',
-            text: entry.payload?.content || '',
-            timestamp: entry.timestamp,
-            image: entry.payload?.imageBase64,
-            mimeType: entry.payload?.mimeType,
-            fileName: entry.payload?.fileName,
-            llmProvider: entry.payload?.llmProvider,
-            modelUsed: entry.payload?.modelUsed,
-            tokensUsed: entry.payload?.tokensUsed,
-            toolCalls: entry.payload?.toolCalls
-        });
-    }
-
-    return journalByInstance;
-}
-
 export async function buildWorkspaceSnapshot({
     userId,
     workflow,
@@ -290,14 +275,15 @@ export async function buildWorkspaceSnapshot({
     const [agentInstances, edges, journalEntries, agentPrototypes, llmConfigs, userSettings, toolRuns] = await Promise.all([
         workflowId ? AgentInstance.find({ workflowId }) : Promise.resolve([]),
         workflowId ? WorkflowEdge.find({ workflowId }) : Promise.resolve([]),
-        workflowId ? AgentJournal.find({ workflowId, type: 'chat' }).sort({ timestamp: 1 }) : Promise.resolve([]),
+        workflowId ? AgentJournal.find({ workflowId, type: { $in: ['chat', 'tool_invocation'] } }).sort({ timestamp: 1 }) : Promise.resolve([]),
         AgentPrototype.find({ userId, ...prototypeWorkflowFilter }).sort({ name: 1 }),
         LLMConfig.find({ userId }),
         UserSettings.findOne({ userId }),
         UserToolRun.find(userToolRunFilter).sort({ createdAt: -1 }).limit(200)
     ]);
 
-    const chatMessagesByInstance = buildChatMessagesByInstance(journalEntries);
+    const toolRunsByExecutionId = new Map(toolRuns.map((run: any) => [run.executionId, run]));
+    const chatMessagesByInstance = buildChatMessagesByInstance(journalEntries, toolRunsByExecutionId);
     const transformedInstances = agentInstances.map((instance: any) => {
         const transformed = transformAgentInstanceForFrontend(instance);
         const instanceId = transformed.id;

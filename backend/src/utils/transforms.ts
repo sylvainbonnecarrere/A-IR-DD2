@@ -23,6 +23,8 @@
  *
  * @param instance - Mongoose document or plain object
  */
+import { sanitizePersistenceConfigForInstanceEgress } from '../types/persistence';
+
 export function transformAgentInstanceForFrontend(instance: any) {
     const instanceObj = instance.toObject?.() || instance;
     const {
@@ -33,6 +35,7 @@ export function transformAgentInstanceForFrontend(instance: any) {
         systemPrompt,
         capabilities,
         tools,
+        legacyTools,
         toolSelections,
         historyConfig,
         outputConfig,
@@ -40,11 +43,13 @@ export function transformAgentInstanceForFrontend(instance: any) {
         localLLMProfileId,
         robotId,
         position,
+        content: _legacyContent,
         ...rest
     } = instanceObj;
 
     // ⭐ FIX QA: Extract persistenceConfig from rest to include explicitly
     const { persistenceConfig, ...remaining } = rest;
+    const projectedProviderTools = Array.isArray(legacyTools) ? legacyTools : undefined;
     
     return {
         id: _id?.toString(),
@@ -53,23 +58,26 @@ export function transformAgentInstanceForFrontend(instance: any) {
         llmModel,
         systemPrompt,
         capabilities: capabilities || [],
-        tools: tools || [],
+        tools: projectedProviderTools || [],
         toolSelections: toolSelections || [],
         historyConfig: historyConfig || {},
         outputConfig: outputConfig || {},
         robotId,
         position,
         // ⭐ FIX QA: Include persistenceConfig for media storage options
-        persistenceConfig: persistenceConfig || {
-            saveChat: true,
-            saveErrors: true,
-            saveHistorySummary: false,
-            saveLinks: false,
-            saveTasks: false,
-            saveMedia: false,
-            mediaStorage: 'db'
-            // cloudStorageConfig: intentionally omitted (null would fail Zod validation)
-        },
+        persistenceConfig: persistenceConfig
+            ? sanitizePersistenceConfigForInstanceEgress(persistenceConfig)
+            : {
+                saveChat: true,
+                saveErrors: true,
+                saveHistorySummary: false,
+                saveLinks: false,
+                saveTasks: false,
+                saveMedia: false,
+                allowWorkspaceWrite: false,
+                mediaStorage: 'db'
+                // cloudStorageConfig: intentionally omitted (null would fail Zod validation)
+            },
         // ⭐ CRITICAL: Reconstruct configuration_json for frontend
         configuration_json: {
             role: role || 'assistant',
@@ -77,10 +85,11 @@ export function transformAgentInstanceForFrontend(instance: any) {
             llmProvider: llmProvider || 'openai',
             systemPrompt: systemPrompt || '',
             capabilities: Array.isArray(capabilities) ? capabilities : [],
-            tools: Array.isArray(tools) ? tools : [],
+            ...(projectedProviderTools !== undefined ? { tools: projectedProviderTools } : {}),
             toolSelections: Array.isArray(toolSelections) ? toolSelections : [],
             historyConfig: historyConfig || {},
             outputConfig: outputConfig || {},
+            ...(remaining.webSearchParams !== undefined && { webSearchParams: remaining.webSearchParams }),
             position: position || { x: 0, y: 0 },
             functionInheritance: functionInheritance || { inheritFromPrototype: true, overrideFunctionIds: [], overrideToolSelections: [] },
             // ⭐ LOCAL LLM: Include localLLMProfileId for correct endpoint resolution after reload

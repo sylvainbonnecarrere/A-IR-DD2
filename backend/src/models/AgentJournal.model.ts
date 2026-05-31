@@ -27,7 +27,8 @@ import {
     ErrorJournalPayload,
     MediaJournalPayload,
     TaskJournalPayload,
-    SystemJournalPayload
+    SystemJournalPayload,
+    ToolInvocationJournalPayload
 } from '../types/persistence';
 
 // ============================================
@@ -48,7 +49,7 @@ export interface IAgentJournal extends Document {
     
     // Contenu polymorphe
     payload: ChatJournalPayload | ErrorJournalPayload | MediaJournalPayload | 
-             TaskJournalPayload | SystemJournalPayload;
+             TaskJournalPayload | SystemJournalPayload | ToolInvocationJournalPayload;
     
     // Groupement optionnel
     sessionId?: string;
@@ -86,6 +87,7 @@ const ChatPayloadSchema = new Schema({
     }],
     // ⭐ FIX QA: Support images inline dans les messages chat
     imageBase64: { type: String },  // Image data en base64 
+    fileContent: { type: String },  // Contenu texte de fichier importé
     mimeType: { type: String },     // ex: image/png, image/jpeg
     fileName: { type: String }      // Nom original du fichier
 }, { _id: false });
@@ -182,7 +184,7 @@ const AgentJournalSchema = new Schema<IAgentJournal>({
     // Classification
     type: {
         type: String,
-        enum: ['chat', 'error', 'media', 'task', 'system'] as JournalEntryType[],
+        enum: ['chat', 'error', 'media', 'task', 'system', 'tool_invocation'] as JournalEntryType[],
         required: true
     },
     severity: {
@@ -308,7 +310,7 @@ interface IAgentJournalModel extends Model<IAgentJournal> {
         }
     ): Promise<{ data: IAgentJournal[]; total: number; pages: number }>;
     
-    deleteByInstance(agentInstanceId: string | mongoose.Types.ObjectId): Promise<number>;
+    deleteByInstance(agentInstanceId: string | mongoose.Types.ObjectId, session?: mongoose.ClientSession): Promise<number>;
     deleteByWorkflow(workflowId: string | mongoose.Types.ObjectId): Promise<number>;
     
     createChatEntry(
@@ -383,9 +385,15 @@ AgentJournalSchema.statics.findByInstance = async function(
  * Supprimer tous les journaux d'une instance
  */
 AgentJournalSchema.statics.deleteByInstance = async function(
-    agentInstanceId: string | mongoose.Types.ObjectId
+    agentInstanceId: string | mongoose.Types.ObjectId,
+    session?: mongoose.ClientSession,
 ): Promise<number> {
-    const result = await this.deleteMany({ agentInstanceId });
+    const query = this.deleteMany({ agentInstanceId });
+    if (session) {
+        query.session(session);
+    }
+
+    const result = await query;
     return result.deletedCount || 0;
 };
 
