@@ -100,6 +100,20 @@ describe('HydrationOverlay Component', () => {
             expect(onHidden).toHaveBeenCalled();
         }, { timeout: 1000 });
     });
+
+    it('should become visible again immediately when loading restarts', async () => {
+        const { rerender } = render(<HydrationOverlay isLoading={true} />);
+
+        rerender(<HydrationOverlay isLoading={false} />);
+
+        await waitFor(() => {
+            expect(screen.queryByText('Chargement du workspace...')).not.toBeInTheDocument();
+        }, { timeout: 1000 });
+
+        rerender(<HydrationOverlay isLoading={true} />);
+
+        expect(screen.getByText('Chargement du workspace...')).toBeInTheDocument();
+    });
 });
 
 describe('useWorkflowStore - isDirty/lastSynced', () => {

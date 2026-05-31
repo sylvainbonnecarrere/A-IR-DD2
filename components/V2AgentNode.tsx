@@ -24,8 +24,10 @@ import { useAuth } from '../hooks/useAuth';
 import { resolveAgentRuntimeConfig } from '../services/runtimeConfigResolver';
 import { buildBosHydrationFingerprint, hydrateToolMessagesFromPersistedRuns } from '../services/bosRunProjectionService';
 import { persistInstanceWebSearchParams } from '../services/webSearchParamsConfigService';
+import type { ReactFlowAgentNodeData } from '../services/workflowNodeReactFlowAdapter';
 import type { UserFunction } from '../types/function.types';
 import { executeAgentToolCall, parseToolCallArguments } from '../services/agentToolExecution';
+import { normalizePersistedToolTranscriptMessages } from '../services/persistedChatMessages';
 import { shouldSuppressVisualToolResult } from '../utils/toolResultVisibility';
 import { AGENT_NODE_HANDLES } from './workflow/connectionContracts';
 import { prepareConversationHistoryForAPI } from '../services/historySynthesisService';
@@ -105,13 +107,7 @@ const WebSearchIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export interface V2AgentNodeData {
-  robotId: string;
-  label: string;
-  agent: Agent; // The prototype
-  agentInstance?: AgentInstance; // The instance data
-  workflowId?: string; // For journal persistence
-}
+export type V2AgentNodeData = ReactFlowAgentNodeData;
 
 function toPlainObject(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -444,6 +440,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const bosHydrationFingerprintRef = useRef<string>('');
+  const hydrationControlsReadyRef = useRef(false);
   const pendingLocalToolMessageIdsRef = useRef<Record<string, string>>({});
   const journalWorkflowId = data.workflowId || agentInstance?.workflowId;
   const { persistJournalEntry, persistToolInvocation, resetToolInvocationDedup } = useAgentJournalPersistence({
@@ -455,6 +452,33 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   const messages = getNodeMessages(id);
   const isLoading = isNodeExecuting(id);
   const agentRuntime = resolveAgentRuntimeConfig(effectiveAgent, llmConfigs, localLLMProfiles);
+
+  useEffect(() => {
+    const normalizedMessages = normalizePersistedToolTranscriptMessages(messages);
+    if (normalizedMessages !== messages) {
+      setNodeMessages(id, normalizedMessages);
+    }
+  }, [id, messages, setNodeMessages]);
+
+  useEffect(() => {
+    if (hydrationControlsReadyRef.current) {
+      return;
+    }
+
+    hydrationControlsReadyRef.current = true;
+
+    try {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        try {
+          window.dispatchEvent(new Event('hydration:components:ready'));
+        } catch {
+          // ignore readiness signal failures
+        }
+      }));
+    } catch {
+      // ignore readiness signal failures
+    }
+  }, [id]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -1632,6 +1656,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
   return (
     <div
+      data-arc-agent-node="shell"
       className={`
       bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 
       border border-gray-600 rounded-lg shadow-lg 
@@ -1694,7 +1719,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
             </div>
           </div>
 
-          <div className="flex items-center space-x-1 flex-none">
+          <div data-arc-agent-node="header-controls" className="flex items-center space-x-1 flex-none">
           <Button
             variant="ghost"
             className="p-1 h-6 w-6 text-gray-400 hover:text-blue-400 

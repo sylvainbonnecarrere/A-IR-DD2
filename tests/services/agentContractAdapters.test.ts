@@ -35,6 +35,32 @@ describe('agentContractAdapters legacy contract guards', () => {
         expect(agent.functionIds).toEqual(['tool.weather']);
     });
 
+    it('sanitizes provider tools and falls back to the provided timestamps when prototype metadata is missing', () => {
+        const agent = mapPersistedPrototypeToAgent({
+            _id: 'prototype-tools',
+            name: 'Prototype tools',
+            toolSelections: [{ toolId: 'tool.search' }],
+            tools: [
+                { name: ' web_search_py ', description: 'Search the web', parameters: { type: 'object' }, outputSchema: { type: 'object' } },
+                { name: '   ', description: 'Ignored', parameters: { type: 'object' } },
+                'legacy-ignored',
+            ],
+        }, fallbackTimestamp);
+
+        expect(agent.toolSelections).toEqual([{ toolId: 'tool.search' }]);
+        expect(agent.functionIds).toEqual(['tool.search']);
+        expect(agent.tools).toEqual([
+            {
+                name: 'web_search_py',
+                description: 'Search the web',
+                parameters: { type: 'object' },
+                outputSchema: { type: 'object' },
+            },
+        ]);
+        expect(agent.created_at).toBe(fallbackTimestamp);
+        expect(agent.updated_at).toBe(fallbackTimestamp);
+    });
+
     it('hydrates persisted instances with canonical configuration fallbacks', () => {
         const prototype = mapPersistedPrototypeToAgent({
             id: 'prototype-1',
@@ -89,6 +115,44 @@ describe('agentContractAdapters legacy contract guards', () => {
         }));
     });
 
+    it('hydrates instance configuration from prototype defaults and nested position when legacy fields are absent', () => {
+        const prototype = mapPersistedPrototypeToAgent({
+            id: 'prototype-fallback',
+            name: 'Prototype fallback',
+            role: 'coordinator',
+            systemPrompt: 'Prototype instructions',
+            llmProvider: LLMProvider.Gemini,
+            model: 'gemini-2.0-flash',
+            toolSelections: [{ toolId: 'tool.catalog' }],
+            localLLMProfileId: 'local-profile-1',
+            creator_id: RobotId.Bos,
+        }, fallbackTimestamp);
+
+        const instance = mapPersistedInstanceToAgentInstance({
+            _id: 'instance-fallback',
+            prototypeId: 'prototype-fallback',
+            configuration_json: {
+                position: { x: 91, y: 182 },
+            },
+        }, undefined, prototype);
+
+        expect(instance).toEqual(expect.objectContaining({
+            id: 'instance-fallback',
+            prototypeId: 'prototype-fallback',
+            name: 'Prototype fallback',
+            position: { x: 91, y: 182 },
+            configuration_json: expect.objectContaining({
+                role: 'coordinator',
+                model: 'gemini-2.0-flash',
+                llmProvider: LLMProvider.Gemini,
+                systemPrompt: 'Prototype instructions',
+                toolSelections: [{ toolId: 'tool.catalog' }],
+                localLLMProfileId: 'local-profile-1',
+                position: { x: 91, y: 182 },
+            }),
+        }));
+    });
+
     it('projects legacy instance records to V2 nodes with canonical robot identity', () => {
         const node = mapPersistedInstanceToV2Node({
             _id: 'instance-2',
@@ -119,6 +183,25 @@ describe('agentContractAdapters legacy contract guards', () => {
                     workflowId: 'workflow-1',
                 }),
             }),
+        }));
+    });
+
+    it('keeps the persisted workflow identity in projected V2 node data when the explicit workflowId is omitted', () => {
+        const node = mapPersistedInstanceToV2Node({
+            _id: 'instance-3',
+            workflowId: 'workflow-from-record',
+            name: 'Node with persisted workflow',
+            role: 'assistant',
+            systemPrompt: 'Prompt',
+            llmProvider: LLMProvider.Gemini,
+            model: 'gemini-2.0-flash',
+            position: { x: 8, y: 9 },
+        }, undefined, undefined, fallbackTimestamp);
+
+        expect(node.data.workflowId).toBe('workflow-from-record');
+        expect(node.data.agentInstance).toEqual(expect.objectContaining({
+            id: 'instance-3',
+            workflowId: 'workflow-from-record',
         }));
     });
 });

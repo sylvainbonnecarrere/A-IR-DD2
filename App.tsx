@@ -94,7 +94,6 @@ export function AppContent() {
   const [switchProgress, setSwitchProgress] = useState(0);
   const [switchWorkflowName, setSwitchWorkflowName] = useState('');
   const isSwitchingRef = useRef(false);  // Guard anti-re-entrance (pas de useState pour éviter re-render)
-  const [awaitingHydratedCanvasReady, setAwaitingHydratedCanvasReady] = useState(false);
 
   // Robot Navigation State
   const [currentPath, setCurrentPath] = useState('/bos/dashboard');
@@ -184,9 +183,11 @@ export function AppContent() {
   }), [designCurrentWorkflowId, designWorkflows, getCurrentWorkflowId]);
 
   const {
-    sessionReadyForWorkspaceHydration,
-    awaitingStableAuthenticatedSession,
-    isHydrating,
+    beginBlockingHydrationVisualGate,
+    completeBlockingHydrationVisualGate,
+    awaitingBlockingHydrationVisualGate,
+    isBlockingHydration,
+    isPreparingBlockingHydration,
     hydrationProgress,
     hydrationMessage,
     hydrateInteractiveWorkspaceState,
@@ -197,6 +198,8 @@ export function AppContent() {
     isAuthenticated,
     isSwitchingRef,
     refreshRuntimeConfigState,
+    requiresBosMediaButtonHydrationReadiness: currentRouteUsesWorkflowCanvas,
+    requiresCanvasHydrationReadiness: currentRouteUsesWorkflowCanvas,
     sessionStatus,
     userId: user?.id ?? null,
   });
@@ -240,7 +243,7 @@ export function AppContent() {
       console.warn('[SwitchWorkflow] ⚠️ Switch already in progress, ignoring');
       return;
     }
-    if (isHydrating) {
+    if (isBlockingHydration) {
       console.warn('[SwitchWorkflow] ⚠️ Initial hydration in progress, ignoring');
       return;
     }
@@ -316,7 +319,7 @@ export function AppContent() {
       }, 300);
       isSwitchingRef.current = false;
     }
-  }, [accessToken, hydrateInteractiveWorkspaceState, t, isHydrating]);
+  }, [accessToken, hydrateInteractiveWorkspaceState, t, isBlockingHydration]);
 
   /**
    * ⭐ V2: Listen for workflow:switch custom events from BosWorkflowManagementPage
@@ -371,19 +374,49 @@ export function AppContent() {
   }, [authLocalLLMProfiles, isAuthenticated, runtimeStoreLocalLLMProfiles.length, updateLocalLLMProfiles]);
 
   useEffect(() => {
-    if (isHydrating && currentRouteUsesWorkflowCanvas) {
-      setAwaitingHydratedCanvasReady(true);
+    if (isBlockingHydration && currentRouteUsesWorkflowCanvas) {
+      beginBlockingHydrationVisualGate();
       return;
     }
 
     if (!currentRouteUsesWorkflowCanvas) {
-      setAwaitingHydratedCanvasReady(false);
+      completeBlockingHydrationVisualGate();
     }
-  }, [currentRouteUsesWorkflowCanvas, isHydrating]);
+  }, [beginBlockingHydrationVisualGate, completeBlockingHydrationVisualGate, currentRouteUsesWorkflowCanvas, isBlockingHydration]);
+
+  const shouldShowHydrationOverlay = isPreparingBlockingHydration || isBlockingHydration || awaitingBlockingHydrationVisualGate;
+  const hydrationOverlayProgress = isPreparingBlockingHydration
+    ? 5
+    : isBlockingHydration
+    ? hydrationProgress
+    : awaitingBlockingHydrationVisualGate
+      ? 100
+      : 0;
+  const hydrationOverlayMessage = isPreparingBlockingHydration
+    ? 'Restauration de la session...'
+    : isBlockingHydration
+    ? hydrationMessage
+    : awaitingBlockingHydrationVisualGate
+      ? 'Preparation de la carte...'
+      : 'Chargement du workspace...';
 
   const handleWorkflowCanvasReady = useCallback(() => {
-    setAwaitingHydratedCanvasReady(false);
-  }, []);
+    completeBlockingHydrationVisualGate();
+
+    // Signal global UI readiness for hydration finalization.
+    // Use double rAF to ensure child components have mounted and measured their DOM.
+    try {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        try {
+          window.dispatchEvent(new Event('hydration:components:ready'));
+        } catch (e) {
+          // ignore - non-critical
+        }
+      }));
+    } catch (e) {
+      // ignore
+    }
+  }, [completeBlockingHydrationVisualGate]);
 
   // ⭐ V2: L'ancien watcher PHASE 2 (resetAll sur currentWorkflowId change) est supprimé.
   // switchToWorkflow() orchestre désormais le reset + rechargement complet.
@@ -981,11 +1014,11 @@ export function AppContent() {
           progress={switchProgress}
         />
 
-        {/* ⭐ ÉTAPE 5: Hydration Overlay - Blur Racing Style (login only) */}
+        {/* ⭐ ÉTAPE 5: Hydration Overlay - transitions lourdes uniquement */}
         <HydrationOverlay 
-          isLoading={isHydrating || awaitingStableAuthenticatedSession || awaitingHydratedCanvasReady}
-          progress={isHydrating ? hydrationProgress : awaitingHydratedCanvasReady ? 100 : 10}
-          message={isHydrating ? hydrationMessage : awaitingHydratedCanvasReady ? 'Preparation de la carte...' : 'Stabilisation de la session...'}
+          isLoading={shouldShowHydrationOverlay}
+          progress={hydrationOverlayProgress}
+          message={hydrationOverlayMessage}
         />
 
         <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">

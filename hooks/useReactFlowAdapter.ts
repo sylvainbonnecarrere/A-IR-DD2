@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges, Connection } from 'reactflow';
-import { WorkflowNode, ChatMessage, NodePositionUpdateOptions } from '../types';
+import { WorkflowNode, NodePositionUpdateOptions } from '../types';
+import { projectWorkflowNodesToReactFlowNodes } from '../services/workflowNodeReactFlowAdapter';
 
 interface UseReactFlowAdapterProps {
   nodes: WorkflowNode[];
@@ -23,17 +24,11 @@ export const useReactFlowAdapter = ({
 }: UseReactFlowAdapterProps): ReactFlowState => {
   // Convertir WorkflowNode[] vers Node[] React Flow
   const reactFlowNodes = useMemo(() => {
-    return workflowNodes.map((workflowNode) => ({
-      id: workflowNode.id,
-      type: 'customAgent', // Type personnalisé pour nos AgentNodes
-      position: workflowNode.position,
-      data: {
-        // Passer toutes les données du WorkflowNode vers le CustomAgentNode
-        workflowNode,
-        label: workflowNode.agent.name,
-        isMinimized: workflowNode.isMinimized,
-        messages: workflowNode.messages,
-      },
+    return projectWorkflowNodesToReactFlowNodes({
+      workflowNodes,
+      workflowId: 'default-workflow',
+    }).map((node) => ({
+      ...node,
       draggable: true,
     }));
   }, [workflowNodes]);

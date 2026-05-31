@@ -39,6 +39,20 @@ const BosWorkflowManagementPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [switchSuccess, setSwitchSuccess] = useState<string | null>(null);
   const activeWorkflow = workflows.find((workflow) => workflow._id === currentWorkflowId) ?? workflows[0] ?? null;
+
+  useEffect(() => {
+    try {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        try {
+          window.dispatchEvent(new Event('hydration:components:ready'));
+        } catch {
+          // ignore readiness signal failures
+        }
+      }));
+    } catch {
+      // ignore readiness signal failures
+    }
+  }, [activeWorkflow?._id]);
   
   /**
    * ⭐ V5: Observer pattern — Listen for workflow switch results from App.tsx

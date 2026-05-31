@@ -12,6 +12,7 @@ import BosWorkflowManagementPage from './BosWorkflowManagementPage';
 import BosMediaModal from './modals/BosMediaModal';
 import { useLocalization } from '../hooks/useLocalization';
 import { useDesignStore } from '../stores/useDesignStore';
+import { publishHydrationComponentReady } from '../utils/hydrationComponentReadiness';
 
 interface RobotPageRouterProps {
   currentPath: string;
@@ -145,6 +146,30 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     () => workflows.find((workflow) => workflow._id === currentWorkflowId) ?? workflows[0] ?? null,
     [currentWorkflowId, workflows],
   );
+
+  React.useEffect(() => {
+    const showsBosMediaButton = currentPath.startsWith('/bos/dashboard')
+      || (currentPath.startsWith('/bos') && !currentPath.startsWith('/bos/workflows/manage'));
+
+    if (!showsBosMediaButton) {
+      return;
+    }
+
+    try {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        try {
+          publishHydrationComponentReady({
+            source: 'bos-media-button',
+            workflowId: activeWorkflow?._id ?? currentWorkflowId ?? null,
+          });
+        } catch {
+          // ignore readiness signal failures
+        }
+      }));
+    } catch {
+      // ignore readiness signal failures
+    }
+  }, [activeWorkflow?._id, currentPath]);
 
   // Navigation helper to go to workflow map (Bos Dashboard)
   const handleNavigateToWorkflow = () => {

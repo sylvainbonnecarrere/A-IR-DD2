@@ -6,6 +6,7 @@ let designStoreState: Record<string, any>;
 let workflowStoreState: Record<string, unknown>;
 let capturedOnNodesChange: ((changes: unknown[]) => void) | null = null;
 let capturedOnNodeDragStop: ((event: unknown, node: Record<string, unknown>) => void) | null = null;
+let capturedWorkflowCanvasContextValue: Record<string, any> | null = null;
 let renderedNodes: Record<string, any>[] = [];
 
 jest.mock('reactflow', () => {
@@ -82,6 +83,13 @@ jest.mock('../../stores/useWorkflowStore', () => ({
     }),
 }));
 
+jest.mock('../../contexts/WorkflowCanvasContext', () => ({
+    WorkflowCanvasProvider: ({ children, value }: { children?: React.ReactNode; value: Record<string, any> }) => {
+        capturedWorkflowCanvasContextValue = value;
+        return <>{children}</>;
+    },
+}));
+
 jest.mock('../../components/OptimizedWorkflowBackground', () => ({
     OptimizedWorkflowBackground: () => null,
 }));
@@ -110,6 +118,7 @@ describe('WorkflowCanvas minimize->move->restore', () => {
     beforeEach(() => {
         capturedOnNodesChange = null;
         capturedOnNodeDragStop = null;
+        capturedWorkflowCanvasContextValue = null;
         renderedNodes = [];
         designStoreState = {
             nodes: [
@@ -219,17 +228,12 @@ describe('WorkflowCanvas minimize->move->restore', () => {
 
         render(<WorkflowCanvas workflowName="QA Workflow" onUpdateNodePosition={onUpdateNodePosition} onToggleNodeMinimize={onToggleNodeMinimize} />);
 
-        // Ensure the test API is available
-        // @ts-ignore
-        expect(window.__ARC_TEST_API__).toBeDefined();
+        expect(capturedWorkflowCanvasContextValue?.onToggleNodeMinimize).toBeDefined();
 
-        // Trigger the wrapper which will call the app toggle (mock above) then perform perimeter check
-        // @ts-ignore
         await act(async () => {
-            // The wrapper uses requestAnimationFrame twice; emulate by advancing microtasks
-            // Trigger the minimize wrapper
-            // @ts-ignore
-            window.__ARC_TEST_API__.triggerToggle('node-2');
+            capturedWorkflowCanvasContextValue?.onToggleNodeMinimize?.('node-2');
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            await new Promise((resolve) => setTimeout(resolve, 0));
         });
 
         // The wrapper should call onUpdateNodePosition with persist: false when correcting restore

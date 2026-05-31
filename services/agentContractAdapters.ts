@@ -377,7 +377,7 @@ export function mapPersistedInstanceToV2Node(
       label: hydratedInstance.name,
       agent: legacyNode.agent,
       agentInstance: hydratedInstance,
-      workflowId,
+      workflowId: hydratedInstance.workflowId ?? workflowId,
       isMinimized: hydratedInstance.isMinimized,
       isMaximized: hydratedInstance.isMaximized,
     },

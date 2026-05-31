@@ -284,4 +284,67 @@ describe('V2AgentNode Bos hydration', () => {
             expect(mockHydrateToolMessagesFromPersistedRuns).not.toHaveBeenCalled();
         });
     });
+
+    it('normalizes already-loaded legacy agent tool transcripts into structured tool messages', async () => {
+        runtimeStoreState = {
+            ...runtimeStoreState,
+            getNodeMessages: jest.fn(() => ([
+                {
+                    id: 'legacy-agent-tool-1',
+                    sender: 'agent',
+                    text: 'hello_test({"user_name":"Joe"}) [utr-6a1989ce121cd1727a9b6ed8]',
+                    timestamp: new Date('2026-05-31T17:08:50.000Z'),
+                },
+                {
+                    id: 'legacy-agent-tool-result-1',
+                    sender: 'agent',
+                    text: '[executionId=utr-6a1989ce121cd1727a9b6ed8] {\n  "result": "Ton nom, Joe, est maintenant enregistré dans ma mémoire"\n}',
+                    timestamp: new Date('2026-05-31T17:08:50.001Z'),
+                },
+            ])),
+        };
+        mockBuildBosHydrationFingerprint.mockReturnValue('');
+
+        render(
+            <V2AgentNode
+                id="node-1"
+                selected={false}
+                xPos={0}
+                yPos={0}
+                zIndex={1}
+                dragging={false}
+                data={{
+                    robotId: 'bos',
+                    label: 'Bos',
+                    agent: baseAgent,
+                }}
+                type="default"
+                isConnectable={true}
+            />
+        );
+
+        await waitFor(() => {
+            expect(mockSetNodeMessages).toHaveBeenCalledWith(
+                'node-1',
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        id: 'legacy-agent-tool-1',
+                        sender: 'tool',
+                        toolCallRecord: expect.objectContaining({
+                            id: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
+                            functionName: 'hello_test',
+                            executionId: 'utr-6a1989ce121cd1727a9b6ed8',
+                            arguments: { user_name: 'Joe' },
+                        }),
+                    }),
+                    expect.objectContaining({
+                        id: 'legacy-agent-tool-result-1',
+                        sender: 'tool_result',
+                        toolCallId: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
+                        toolName: 'hello_test',
+                    }),
+                ])
+            );
+        });
+    });
 });

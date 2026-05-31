@@ -1,5 +1,11 @@
 import type { AgentInstance, V2WorkflowNode } from '../../types';
-import { findAvailableWorkflowNodePosition, findCollisionFreeWorkflowNodePosition } from '../../utils/workflowNodePlacement';
+import {
+    WORKFLOW_NODE_PLACEMENT_COLUMNS,
+    WORKFLOW_NODE_PLACEMENT_ORIGIN,
+    WORKFLOW_NODE_PLACEMENT_SPACING,
+    findAvailableWorkflowNodePosition,
+    findCollisionFreeWorkflowNodePosition,
+} from '../../utils/workflowNodePlacement';
 import { buildNode, buildAgentInstance } from './builders/WorkflowNodeBuilder';
 
 describe('workflowNodePlacement', () => {
@@ -77,7 +83,7 @@ describe('workflowNodePlacement', () => {
             ],
         });
 
-        expect(position).toEqual({ x: 428, y: 20 });
+        expect(position).toEqual({ x: 448, y: 20 });
     });
 
     it('treats edge-to-edge contact as a collision and resolves with directional gap', () => {
@@ -97,12 +103,12 @@ describe('workflowNodePlacement', () => {
             ],
         });
 
-        // subjectSize undefined => gap = round(360/8)=45 -> expected x = 20 + 360 + 45 = 425
-        expect(position).toEqual({ x: 425, y: 20 });
+        // subjectSize undefined => gap = round(360/8)=45 and padding=20 -> x = 20 + 360 + 20 + 45 = 445
+        expect(position).toEqual({ x: 445, y: 20 });
     });
 
-    it('allows a small proximity gap that does not overlap edge-to-edge', () => {
-        const desired = { x: 390, y: 20 }; // 10px gap from occupiedRight=380
+    it('treats a small visual proximity gap as collision when padded bounds still overlap', () => {
+        const desired = { x: 390, y: 20 }; // 10px visual gap from occupiedRight=380, but padded bounds still overlap
 
         const position = findCollisionFreeWorkflowNodePosition({
             workflowId: 'workflow-1',
@@ -120,6 +126,87 @@ describe('workflowNodePlacement', () => {
             ],
         });
 
-        expect(position).toEqual(desired);
+        expect(position).toEqual({ x: 445, y: 20 });
+    });
+
+    it('ignores occupied rects belonging to the same node and instance during move validation', () => {
+        const desiredPosition = { x: 20, y: 20 };
+
+        const position = findCollisionFreeWorkflowNodePosition({
+            workflowId: 'workflow-1',
+            nodeId: 'node-1',
+            instanceId: 'instance-1',
+            currentPosition: desiredPosition,
+            desiredPosition,
+            nodes: [],
+            agentInstances: [],
+            occupiedNodeRects: [
+                {
+                    nodeId: 'node-1',
+                    instanceId: 'instance-1',
+                    workflowId: 'workflow-1',
+                    position: desiredPosition,
+                    width: 360,
+                    height: 460,
+                },
+            ],
+        });
+
+        expect(position).toEqual(desiredPosition);
+    });
+
+    it('searches around the desired position when directional resolution cannot run', () => {
+        const desiredPosition = { x: 2000, y: 2000 };
+
+        const position = findCollisionFreeWorkflowNodePosition({
+            workflowId: 'workflow-1',
+            desiredPosition,
+            maxSearchRadius: 9,
+            subjectSize: { width: 1, height: 1 },
+            nodes: [],
+            agentInstances: [],
+            occupiedNodeRects: [
+                {
+                    nodeId: 'occupied-node',
+                    workflowId: 'workflow-1',
+                    position: desiredPosition,
+                    width: 1,
+                    height: 1,
+                },
+            ],
+        });
+
+        expect(position).not.toEqual(desiredPosition);
+        expect(position.x).toBeGreaterThanOrEqual(1955);
+        expect(position.x).toBeLessThanOrEqual(2045);
+        expect(position.y).toBeGreaterThanOrEqual(1955);
+        expect(position.y).toBeLessThanOrEqual(2045);
+    });
+
+    it('falls back to the overflow slot when override collisions block the desired slot and catalog fallback matches it', () => {
+        const desiredPosition = { x: WORKFLOW_NODE_PLACEMENT_ORIGIN.x, y: WORKFLOW_NODE_PLACEMENT_ORIGIN.y };
+        const overflowRow = Math.floor(48 / WORKFLOW_NODE_PLACEMENT_COLUMNS);
+
+        const position = findCollisionFreeWorkflowNodePosition({
+            workflowId: 'workflow-1',
+            desiredPosition,
+            maxSearchRadius: 0,
+            nodes: [],
+            agentInstances: [],
+            occupiedNodeRects: [
+                {
+                    nodeId: 'occupied-node',
+                    workflowId: 'workflow-1',
+                    position: desiredPosition,
+                    width: 360,
+                    height: 460,
+                },
+            ],
+        });
+
+        expect(position).toEqual({
+            x: WORKFLOW_NODE_PLACEMENT_ORIGIN.x,
+            y: WORKFLOW_NODE_PLACEMENT_ORIGIN.y + overflowRow * WORKFLOW_NODE_PLACEMENT_SPACING.y,
+        });
     });
 });

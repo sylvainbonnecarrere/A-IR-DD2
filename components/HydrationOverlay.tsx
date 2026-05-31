@@ -55,7 +55,13 @@ export const HydrationOverlay: React.FC<HydrationOverlayProps> = ({
     const particles = useMemo(() => generateParticles(30), []);
 
     useEffect(() => {
-        if (!isLoading && isVisible) {
+        if (isLoading) {
+            setIsVisible(true);
+            setIsFadingOut(false);
+            return;
+        }
+
+        if (isVisible) {
             // Start fade out animation
             setIsFadingOut(true);
             const timer = setTimeout(() => {
@@ -64,12 +70,10 @@ export const HydrationOverlay: React.FC<HydrationOverlayProps> = ({
                 onHidden?.();
             }, 500); // Match CSS transition duration
             return () => clearTimeout(timer);
-        } else if (isLoading && !isVisible) {
-            setIsVisible(true);
         }
     }, [isLoading, isVisible, onHidden]);
 
-    if (!isVisible) return null;
+    if (!isLoading && !isVisible) return null;
 
     return (
         <>
@@ -398,7 +402,7 @@ export const HydrationOverlay: React.FC<HydrationOverlayProps> = ({
                 }
             `}</style>
 
-            <div className={`hydration-overlay ${isFadingOut ? 'fading-out' : ''}`}>
+            <div className={`hydration-overlay ${!isLoading && isFadingOut ? 'fading-out' : ''}`}>
                 {/* Scanlines Effect */}
                 <div className="hydration-scanlines" />
 

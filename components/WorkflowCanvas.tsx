@@ -30,6 +30,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { isValidWorkflowConnection } from './workflow/connectionContracts';
 import { registerReactFlowWarningProbe } from '../utils/reactFlowWarningDiagnostics';
 import { findCollisionFreeWorkflowNodePosition } from '../utils/workflowNodePlacement';
+import { projectWorkflowNodesToReactFlowNodes, type CanvasWorkflowNode } from '../services/workflowNodeReactFlowAdapter';
+import { publishHydrationComponentReady, recordHydrationLayoutMark } from '../utils/hydrationComponentReadiness';
 
 interface WorkflowCanvasProps {
   nodes?: WorkflowNode[];
@@ -66,12 +68,7 @@ const REACT_FLOW_STYLE = Object.freeze({ background: 'transparent' });
 const DEFAULT_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 0.7 });
 const PRO_OPTIONS = Object.freeze({ hideAttribution: true });
 let workflowCanvasMountSequence = 0;
-type CanvasWorkflowNode = WorkflowNode | V2WorkflowNode;
 type ReactFlowNodeWithMeasuredSize = Node & { measured?: { height?: number; width?: number } };
-
-function isV2WorkflowNode(node: CanvasWorkflowNode): node is V2WorkflowNode {
-  return 'data' in node;
-}
 
 // Composant interne avec accès à useReactFlow
 const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCanvasProps) {
@@ -102,6 +99,12 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   const { isAuthenticated } = useAuth();
   const workflowCanvasMountIdRef = useRef(0);
   const canvasReadySignatureRef = useRef<string | null>(null);
+  const canvasRootRef = useRef<HTMLDivElement | null>(null);
+  const layoutStabilityTimerRef = useRef<number | null>(null);
+  const layoutShiftCountRef = useRef(0);
+  const initialViewportSettledRef = useRef(false);
+  const [layoutStabilityRevision, setLayoutStabilityRevision] = useState(0);
+  const [initialViewportSettledRevision, setInitialViewportSettledRevision] = useState(0);
   if (workflowCanvasMountIdRef.current === 0) {
     workflowCanvasMountIdRef.current = ++workflowCanvasMountSequence;
   }
@@ -127,6 +130,19 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
   // Ref pour tracker si on a déjà centré la vue au chargement initial
   const hasInitialCentered = useRef(false);
+
+  const markInitialViewportSettled = useCallback((note: string) => {
+    initialViewportSettledRef.current = true;
+    setInitialViewportSettledRevision((currentRevision) => currentRevision + 1);
+    recordHydrationLayoutMark({
+      source: 'workflow-canvas:viewport-settled',
+      workflowId,
+      note,
+      count: layoutShiftCountRef.current,
+      width: canvasRootRef.current?.clientWidth,
+      height: canvasRootRef.current?.clientHeight,
+    });
+  }, [workflowId]);
 
   // useRef pour TOUT stocker sans déclencher de re-render
   const stableRefs = useRef({
@@ -167,6 +183,26 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     defaultViewportStable: true,
     proOptionsStable: true,
   });
+
+  const isCanvasDomReady = useCallback(() => {
+    const rootEl = canvasRootRef.current;
+    if (!rootEl) {
+      return false;
+    }
+
+    if (reactFlowNodes.length === 0) {
+      return rootEl.clientWidth > 0 && rootEl.clientHeight > 0;
+    }
+
+    const nodeShells = Array.from(rootEl.querySelectorAll('[data-arc-agent-node="shell"]')) as HTMLElement[];
+    const nodeControls = Array.from(rootEl.querySelectorAll('[data-arc-agent-node="header-controls"]')) as HTMLElement[];
+
+    if (nodeShells.length !== reactFlowNodes.length || nodeControls.length !== reactFlowNodes.length) {
+      return false;
+    }
+
+    return nodeShells.every((nodeElement) => nodeElement.offsetWidth > 0 && nodeElement.offsetHeight > 0);
+  }, [reactFlowNodes.length]);
 
   useEffect(() => {
     if (process.env.NODE_ENV === 'production') {
@@ -423,78 +459,88 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   // Ref stable pour agents (évite les dépendances cycliques)
   stableRefs.current.agents = agents;
 
+  useLayoutEffect(() => {
+    const rootEl = canvasRootRef.current;
+    if (!rootEl || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const scheduleStableMark = (width: number, height: number) => {
+      if (layoutStabilityTimerRef.current !== null) {
+        window.clearTimeout(layoutStabilityTimerRef.current);
+      }
+
+      layoutStabilityTimerRef.current = window.setTimeout(() => {
+        recordHydrationLayoutMark({
+          source: 'workflow-canvas:layout-stable',
+          workflowId,
+          width,
+          height,
+          count: layoutShiftCountRef.current,
+        });
+        setLayoutStabilityRevision((currentRevision) => currentRevision + 1);
+      }, 120);
+    };
+
+    if (typeof ResizeObserver === 'undefined') {
+      scheduleStableMark(rootEl.clientWidth, rootEl.clientHeight);
+      return () => {
+        if (layoutStabilityTimerRef.current !== null) {
+          window.clearTimeout(layoutStabilityTimerRef.current);
+        }
+      };
+    }
+
+    let lastWidth = -1;
+    let lastHeight = -1;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+
+      const width = Math.round(entry.contentRect.width);
+      const height = Math.round(entry.contentRect.height);
+      if (width === lastWidth && height === lastHeight) {
+        return;
+      }
+
+      lastWidth = width;
+      lastHeight = height;
+      layoutShiftCountRef.current += 1;
+      recordHydrationLayoutMark({
+        source: 'workflow-canvas:layout-change',
+        workflowId,
+        width,
+        height,
+        count: layoutShiftCountRef.current,
+      });
+      scheduleStableMark(width, height);
+    });
+
+    observer.observe(rootEl);
+    scheduleStableMark(rootEl.clientWidth, rootEl.clientHeight);
+
+    return () => {
+      observer.disconnect();
+      if (layoutStabilityTimerRef.current !== null) {
+        window.clearTimeout(layoutStabilityTimerRef.current);
+      }
+    };
+  }, [workflowId]);
+
   // Récupérer les instances depuis le store pour synchronisation
   const { agentInstances, getResolvedInstance } = useDesignStore();
 
   // SOLUTION ANTI-BOUCLE: useEffect unique et stable pour éviter les conflits
   useLayoutEffect(() => {
     if (actualNodes && actualNodes.length > 0) {
-      const newReactFlowNodes: Node[] = actualNodes.map((wfNode, index) => {
-        // ⭐ SUPPORT BOTH NODE TYPES: V2WorkflowNode (from store) and WorkflowNode (legacy)
-        // V2WorkflowNode has wfNode.data.agentInstance (already resolved from store)
-        // WorkflowNode has wfNode.instanceId (legacy, needs resolution from store)
-        
-        let agentInstance = null;
-        let agent = null;
-        let robotId = 'unknown';
-        let position = { x: 100 + index * 200, y: 100 + index * 150 };
-        let nodeWorkflowId = workflowId;
-        
-        // Check if it's a V2WorkflowNode (has data property)
-        if (isV2WorkflowNode(wfNode)) {
-          position = wfNode.position || position;
-
-          if (wfNode.data) {
-            // V2WorkflowNode from store - use data directly
-            agentInstance = wfNode.data.agentInstance || null;
-            agent = wfNode.data.agent || null;
-            robotId = wfNode.data.robotId || 'unknown';
-            nodeWorkflowId = wfNode.data.workflowId || workflowId;
-
-            // ⭐ FIX: Si agentInstance existe mais n'a pas de workflowId, l'ajouter
-            if (agentInstance && !agentInstance.workflowId) {
-              agentInstance = { ...agentInstance, workflowId: nodeWorkflowId };
-            }
-          }
-        } else {
-          // WorkflowNode (legacy) - has instanceId, need to resolve from store
-          const resolved = wfNode.instanceId ? getResolvedInstance(wfNode.instanceId) : null;
-          
-          if (!resolved && wfNode.instanceId) {
-            // ⭐ FIX: Chercher aussi directement dans agentInstances par ID
-            const directInstance = agentInstances.find(i => i.id === wfNode.instanceId);
-            if (directInstance) {
-              agentInstance = { ...directInstance, workflowId: directInstance.workflowId || workflowId };
-              // debug: instance resolved directly from agentInstances
-              // eslint-disable-next-line no-console
-              console.debug('[WorkflowCanvas] Found instance directly:', wfNode.instanceId);
-            } else {
-              console.warn(`[WorkflowCanvas] Instance not found for instanceId: ${wfNode.instanceId}. Available instances:`, 
-                agentInstances.map(i => ({ id: i.id, prototypeId: i.prototypeId }))
-              );
-            }
-          } else if (resolved) {
-            agentInstance = { ...resolved.instance, workflowId: resolved.instance.workflowId || workflowId };
-          }
-          
-          agent = wfNode.agent || null;
-          robotId = wfNode.agent?.id || 'unknown';
-          position = wfNode.position || position;
-        }
-
-        return {
-          id: wfNode.id || `node-${index}`,
-          type: 'customAgent',
-          position,
-          data: {
-            robotId,
-            label: agentInstance?.name || agent?.name || 'Agent',
-            agent, // ⭐ FIX: Utiliser agent résolu ou celui du legacy node
-            agentInstance, // Instance mise à jour depuis le store (peut être null)
-            workflowId: nodeWorkflowId, // ⭐ FIX: Utiliser le workflowId du node
-            // ⭐ REMOVED: isMinimized, isMaximized - now managed by useRuntimeStore (transient UI state)
-          },
-        };
+      const newReactFlowNodes: Node[] = projectWorkflowNodesToReactFlowNodes({
+        workflowNodes: actualNodes,
+        workflowId,
+        agents,
+        agentInstances,
+        resolveInstance: getResolvedInstance,
       });
 
       // Comparaison intelligente pour éviter les mises à jour inutiles
@@ -534,6 +580,10 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             currentNode.position.y !== newNode.position.y ||
             currentNode.data.robotId !== newNode.data.robotId ||
             currentNode.data.label !== newNode.data.label ||
+            currentNode.data.workflowId !== newNode.data.workflowId ||
+            currentNode.data.agent?.id !== newNode.data.agent?.id ||
+            currentNode.data.agentInstance?.id !== newNode.data.agentInstance?.id ||
+            currentNode.data.agentInstance?.workflowId !== newNode.data.agentInstance?.workflowId ||
             // ⭐ REMOVED: isMinimized, isMaximized checks - managed by useRuntimeStore
             // Détecter les changements dans l'instance (nom, config)
             currentNode.data.agentInstance?.name !== newNode.data.agentInstance?.name ||
@@ -546,35 +596,101 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     } else {
       setReactFlowNodes(currentNodes => currentNodes.length > 0 ? [] : currentNodes);
     }
-  }, [actualNodes, agentInstances, getResolvedInstance]); // Ajouter agentInstances pour reactivity
+  }, [actualNodes, agentInstances, agents, getResolvedInstance, reactFlowInstance, workflowId]);
 
   // useEffect pour centrer la vue sur les nodes existants au chargement initial UNIQUEMENT
   useEffect(() => {
-    if (reactFlowNodes.length > 0 && reactFlowInstance && !hasInitialCentered.current) {
-      hasInitialCentered.current = true; // Marquer comme fait
-      setTimeout(() => {
-        // Prendre le premier node pour centrer la vue
-        const firstNode = reactFlowInstance.getNode(reactFlowNodes[0].id);
-        if (firstNode) {
-          const nodeWidth = firstNode.width || 400;
-          const nodeHeight = firstNode.height || 550;
-          const centerX = firstNode.position.x + (nodeWidth / 2);
-          const centerY = firstNode.position.y + (nodeHeight / 2);
-
-          reactFlowInstance.setCenter(centerX, centerY, {
-            zoom: 0.7,
-            duration: 0, // Pas d'animation au chargement initial
-          });
-        }
-      }, 300); // Délai pour que React Flow calcule les dimensions
+    if (!reactFlowInstance) {
+      return undefined;
     }
-  }, [reactFlowNodes.length, reactFlowInstance]); // Se déclenche au chargement initial uniquement
+
+    if (reactFlowNodes.length === 0) {
+      if (!initialViewportSettledRef.current) {
+        markInitialViewportSettled('empty-canvas');
+      }
+      return undefined;
+    }
+
+    if (hasInitialCentered.current) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+    let frameId = 0;
+
+    const centerInitialViewport = () => {
+      if (cancelled) {
+        return;
+      }
+
+      const firstNode = reactFlowInstance.getNode(reactFlowNodes[0].id) as ReactFlowNodeWithMeasuredSize | undefined;
+      const nodeWidth = firstNode?.measured?.width ?? firstNode?.width ?? 0;
+      const nodeHeight = firstNode?.measured?.height ?? firstNode?.height ?? 0;
+
+      if (!firstNode || nodeWidth <= 0 || nodeHeight <= 0) {
+        if (attempts >= 12) {
+          hasInitialCentered.current = true;
+          markInitialViewportSettled('fallback-without-dimensions');
+          return;
+        }
+
+        attempts += 1;
+        frameId = window.requestAnimationFrame(centerInitialViewport);
+        return;
+      }
+
+      hasInitialCentered.current = true;
+      const centerX = firstNode.position.x + (nodeWidth / 2);
+      const centerY = firstNode.position.y + (nodeHeight / 2);
+      reactFlowInstance.setCenter(centerX, centerY, {
+        zoom: 0.7,
+        duration: 0,
+      });
+
+      frameId = window.requestAnimationFrame(() => {
+        if (cancelled) {
+          return;
+        }
+        markInitialViewportSettled('initial-node-center');
+      });
+    };
+
+    frameId = window.requestAnimationFrame(centerInitialViewport);
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [markInitialViewportSettled, reactFlowInstance, reactFlowNodes]); // Se déclenche au chargement initial uniquement
 
   // useEffect pour initialiser la MiniMap immédiatement (pas de délai pour éviter desync)
   useEffect(() => {
     // Initialiser immédiatement pour éviter la désynchronisation
     setInternalState(prev => ({ ...prev, minimapReady: true }));
   }, []);
+
+  // Emit hydration readiness when the floating prototyping button is present
+  const floatingPrototypeSignalSentRef = useRef(false);
+  useEffect(() => {
+    if (!onAddToWorkflow || !onNavigate) return;
+    if (floatingPrototypeSignalSentRef.current) return;
+    floatingPrototypeSignalSentRef.current = true;
+
+    try {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        try {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('hydration:components:ready'));
+          }
+        } catch (e) {
+          // ignore
+        }
+      }));
+    } catch (e) {
+      // ignore
+    }
+  }, [onAddToWorkflow, onNavigate]);
 
   useEffect(() => {
     if (!onCanvasReady) {
@@ -583,8 +699,11 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
     const visualNodesAreReady = actualNodes.length === reactFlowNodes.length
       && reactFlowNodes.every((node) => Boolean(node.data?.label));
+    const domNodesAreReady = isCanvasDomReady();
+    const layoutIsStable = layoutStabilityRevision > 0;
+    const viewportIsSettled = initialViewportSettledRef.current;
 
-    if (!visualNodesAreReady) {
+    if (!visualNodesAreReady || !domNodesAreReady || !layoutIsStable || !viewportIsSettled) {
       return undefined;
     }
 
@@ -595,11 +714,19 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
     const frameId = window.requestAnimationFrame(() => {
       canvasReadySignatureRef.current = signature;
+      publishHydrationComponentReady({
+        source: 'workflow-canvas-stable',
+        workflowId,
+        nodeCount: reactFlowNodes.length,
+        layoutShiftCount: layoutShiftCountRef.current,
+        width: canvasRootRef.current?.clientWidth,
+        height: canvasRootRef.current?.clientHeight,
+      });
       onCanvasReady();
     });
 
     return () => window.cancelAnimationFrame(frameId);
-  }, [actualNodes, onCanvasReady, reactFlowNodes, workflowId]);
+  }, [actualNodes, initialViewportSettledRevision, isCanvasDomReady, layoutStabilityRevision, onCanvasReady, reactFlowNodes, workflowId]);
 
   // Handlers stables avec useCallback
   const onConnect = useCallback((connection: Connection) => {
@@ -687,7 +814,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
   return (
     <WorkflowCanvasProvider value={contextValue}>
-      <div className="h-full w-full relative overflow-hidden">
+      <div ref={canvasRootRef} className="h-full w-full relative overflow-hidden">
         {/* Background optimisé avec thème jour/nuit */}
         <OptimizedWorkflowBackground />
 

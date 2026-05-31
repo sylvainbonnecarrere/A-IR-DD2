@@ -157,6 +157,56 @@ describe('FullscreenChatModal tool projection hydration', () => {
     ));
   });
 
+  it('rehydrates legacy persisted tool/result pairs into a ToolCallBlock-compatible message', async () => {
+    (apiClient.get as jest.Mock).mockResolvedValueOnce({
+      data: {
+        id: 'instance-1',
+        chatMessages: [
+          {
+            id: 'legacy-tool-msg',
+            sender: 'agent',
+            text: 'hello_test({"user_name":"Joe"}) [utr-6a1989ce121cd1727a9b6ed8]',
+            timestamp: '2026-05-01T09:00:00.000Z',
+          },
+          {
+            id: 'legacy-tool-result-msg',
+            sender: 'agent',
+            text: '[executionId=utr-6a1989ce121cd1727a9b6ed8] {\n  "result": "Ton nom, Joe, est maintenant enregistré dans ma mémoire"\n}',
+            timestamp: '2026-05-01T09:00:00.100Z',
+          }
+        ]
+      }
+    });
+
+    render(<FullscreenChatModal />);
+
+    await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/api/agent-instances/instance-1'));
+    await waitFor(() => expect(runtimeStoreState.setNodeMessages).toHaveBeenCalledWith(
+      'node-instance-1',
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'legacy-tool-msg',
+          sender: 'tool',
+          toolCallRecord: expect.objectContaining({
+            id: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
+            functionName: 'hello_test',
+            executionId: 'utr-6a1989ce121cd1727a9b6ed8',
+            arguments: { user_name: 'Joe' },
+            result: {
+              result: 'Ton nom, Joe, est maintenant enregistré dans ma mémoire',
+            },
+            timestamp: expect.any(Date),
+          })
+        }),
+        expect.objectContaining({
+          id: 'legacy-tool-result-msg',
+          sender: 'tool_result',
+          toolCallId: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
+        })
+      ])
+    ));
+  });
+
   it('shows the synthesis icon in the chat loader when history synthesis is active', () => {
     runtimeStoreState.isNodeExecuting = jest.fn(() => true);
     mockUseAgentChat.mockReturnValue({

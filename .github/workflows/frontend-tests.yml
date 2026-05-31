@@ -1,0 +1,70 @@
+name: Frontend Tests
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  frontend-component-tests:
+    name: Frontend Component Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run component Jest suite
+        run: npm run test:components:ci
+
+  frontend-hydration-integration:
+    name: Frontend Hydration Integration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run hydration integration tests
+        run: npm run test:integration:hydration
+
+  frontend-canvas-non-regression:
+    name: Frontend Canvas Non-Regression
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run canvas non-regression suite
+        run: npm run test:canvas:non-regression
