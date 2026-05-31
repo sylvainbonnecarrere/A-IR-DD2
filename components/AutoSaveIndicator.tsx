@@ -45,6 +45,23 @@ export const AutoSaveIndicator: React.FC<AutoSaveIndicatorProps> = ({
   // Don't render if auto-save is disabled
   if (!isEnabled) return null;
 
+  // Signal UI hydration readiness when this control first appears
+  React.useEffect(() => {
+    try {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        try {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('hydration:components:ready'));
+          }
+        } catch (e) {
+          // ignore
+        }
+      }));
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
   // Don't render idle state (too noisy)
   if (status === 'idle' && !lastSavedAt) return null;
 

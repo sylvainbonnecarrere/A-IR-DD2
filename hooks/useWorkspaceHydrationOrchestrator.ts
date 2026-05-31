@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
 import type { Agent } from '../types';
 import type { AuthSessionStatus } from '../contexts/types/auth.types';
@@ -19,6 +19,11 @@ import {
     logWorkspaceBootstrapIssue,
     type WorkspaceSnapshot,
 } from '../services/workspaceBootstrapService';
+import {
+    HYDRATION_COMPONENT_READY_EVENT,
+    type HydrationComponentReadyDetail,
+    type HydrationReadySource,
+} from '../utils/hydrationComponentReadiness';
 import { hydrateToolMessagesFromPersistedRuns } from '../services/bosRunProjectionService';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
@@ -27,6 +32,12 @@ import { useFunctionStore } from '../stores/useFunctionStore';
 
 const RESUME_WORKSPACE_REFRESH_THROTTLE_MS = 5000;
 const DEFAULT_HYDRATION_MESSAGE = 'Chargement de votre workspace...';
+
+export type WorkspaceHydrationPhase =
+    | 'idle'
+    | 'blocking-bootstrap'
+    | 'blocking-bootstrap-finalize'
+    | 'silent-resume-revalidate';
 
 const waitForHydrationVisualSettlement = async (): Promise<void> => {
     if (typeof window === 'undefined') {
@@ -54,11 +65,6 @@ interface HydrateInteractiveWorkspaceOptions {
     onSnapshotApplied?: () => void;
 }
 
-interface WorkspaceReloadRequest {
-    reason: string;
-    mode: 'initial-auth' | 'resume';
-}
-
 interface UseWorkspaceHydrationOrchestratorParams {
     accessToken: string | null;
     authError: string | null;
@@ -66,20 +72,27 @@ interface UseWorkspaceHydrationOrchestratorParams {
     isAuthenticated: boolean;
     isSwitchingRef: MutableRefObject<boolean>;
     refreshRuntimeConfigState: () => Promise<RuntimeBootstrapState | null>;
+    requiresBosMediaButtonHydrationReadiness?: boolean;
+    requiresCanvasHydrationReadiness?: boolean;
     sessionStatus: AuthSessionStatus;
     userId: string | null;
 }
 
 interface UseWorkspaceHydrationOrchestratorResult {
-    awaitingStableAuthenticatedSession: boolean;
+    beginBlockingHydrationVisualGate: () => void;
+    completeBlockingHydrationVisualGate: () => void;
+    awaitingBlockingHydrationVisualGate: boolean;
     hydrateInteractiveWorkspaceState: (
         workspace: WorkspaceSnapshot,
         options?: HydrateInteractiveWorkspaceOptions,
     ) => Promise<string | null>;
     hydrationMessage: string;
+    hydrationPhase: WorkspaceHydrationPhase;
     hydrationProgress: number;
+    isBlockingHydration: boolean;
+    isPreparingBlockingHydration: boolean;
     isHydrating: boolean;
-    reloadWorkspaceSnapshot: (request: WorkspaceReloadRequest) => Promise<void> | undefined;
+    resumeWorkspaceSilently: (reason: string) => Promise<void> | undefined;
     sessionReadyForWorkspaceHydration: boolean;
 }
 
@@ -90,6 +103,8 @@ export const useWorkspaceHydrationOrchestrator = ({
     isAuthenticated,
     isSwitchingRef,
     refreshRuntimeConfigState,
+    requiresBosMediaButtonHydrationReadiness = false,
+    requiresCanvasHydrationReadiness = false,
     sessionStatus,
     userId,
 }: UseWorkspaceHydrationOrchestratorParams): UseWorkspaceHydrationOrchestratorResult => {
@@ -98,7 +113,7 @@ export const useWorkspaceHydrationOrchestrator = ({
     const updateLLMConfigs = useRuntimeStore((state) => state.updateLLMConfigs);
     const updateLocalLLMProfiles = useRuntimeStore((state) => state.updateLocalLLMProfiles);
 
-    const { sessionReadyForWorkspaceHydration, awaitingStableAuthenticatedSession } = getWorkspaceSessionGateState({
+    const { sessionReadyForWorkspaceHydration } = getWorkspaceSessionGateState({
         isAuthenticated,
         accessToken,
         sessionStatus,
@@ -106,17 +121,103 @@ export const useWorkspaceHydrationOrchestrator = ({
         authLoading,
     });
 
-    const [isHydrating, setIsHydrating] = useState(false);
+    const [hydrationPhase, setHydrationPhase] = useState<WorkspaceHydrationPhase>('idle');
     const [hydrationProgress, setHydrationProgress] = useState(0);
     const [hydrationMessage, setHydrationMessage] = useState(DEFAULT_HYDRATION_MESSAGE);
-    const isHydratingRef = useRef(false);
+    const [awaitingBlockingHydrationVisualGate, setAwaitingBlockingHydrationVisualGate] = useState(false);
     const workspaceReloadPromiseRef = useRef<Promise<void> | null>(null);
     const hydratedWorkspaceIdentityRef = useRef<string | null>(null);
     const lastResumeWorkspaceRefreshAtRef = useRef(0);
+    const currentHydrationIdentity = !authLoading && isAuthenticated && userId ? `auth:${userId}` : null;
+    const blockingHydrationExpectedSources: HydrationReadySource[] = [];
+    if (requiresCanvasHydrationReadiness) {
+        blockingHydrationExpectedSources.push('workflow-canvas-stable');
+    }
+    if (requiresBosMediaButtonHydrationReadiness) {
+        blockingHydrationExpectedSources.push('bos-media-button');
+    }
+    const isPreparingBlockingHydration = Boolean(
+        currentHydrationIdentity
+        && hydratedWorkspaceIdentityRef.current !== currentHydrationIdentity
+        && sessionStatus === 'restoring-session',
+    );
+    const isBlockingHydration = hydrationPhase === 'blocking-bootstrap' || hydrationPhase === 'blocking-bootstrap-finalize';
+    const isHydrating = isBlockingHydration;
 
-    useEffect(() => {
-        isHydratingRef.current = isHydrating;
-    }, [isHydrating]);
+    const beginBlockingHydrationVisualGate = useCallback(() => {
+        setAwaitingBlockingHydrationVisualGate(true);
+    }, []);
+
+    const completeBlockingHydrationVisualGate = useCallback(() => {
+        setAwaitingBlockingHydrationVisualGate(false);
+    }, []);
+
+    const applyRuntimeBootstrapState = useCallback((runtimeState: RuntimeBootstrapState | null) => {
+        if (!runtimeState) {
+            return;
+        }
+
+        updateLLMConfigs(runtimeState.runtimeLLMConfigs);
+        updateLocalLLMProfiles(runtimeState.localLLMProfiles);
+    }, [updateLLMConfigs, updateLocalLLMProfiles]);
+
+    const waitForBlockingHydrationComponentReadiness = useCallback(async () => {
+        try {
+            if (typeof window === 'undefined') {
+                return;
+            }
+
+            if (blockingHydrationExpectedSources.length === 0) {
+                return;
+            }
+
+            await new Promise<void>((resolve) => {
+                const seenSources = new Set<HydrationReadySource>();
+                let settled = false;
+                let settleTimerId = 0;
+                const onReady = (event: Event) => {
+                    const detail = (event as CustomEvent<HydrationComponentReadyDetail>).detail;
+                    const source = detail?.source;
+
+                    if (!source || !blockingHydrationExpectedSources.includes(source)) {
+                        return;
+                    }
+
+                    seenSources.add(source);
+                    if (!blockingHydrationExpectedSources.every((expectedSource) => seenSources.has(expectedSource))) {
+                        return;
+                    }
+
+                    if (settled) return;
+                    window.clearTimeout(settleTimerId);
+                    settleTimerId = window.setTimeout(() => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timeoutId);
+                        try { window.removeEventListener(HYDRATION_COMPONENT_READY_EVENT, onReady as EventListener); } catch {}
+                        resolve();
+                    }, 160);
+                };
+
+                const timeoutId = window.setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    window.clearTimeout(settleTimerId);
+                    try { window.removeEventListener(HYDRATION_COMPONENT_READY_EVENT, onReady as EventListener); } catch {}
+                    resolve();
+                }, 1600);
+
+                try {
+                    window.addEventListener(HYDRATION_COMPONENT_READY_EVENT, onReady as EventListener);
+                } catch {
+                    clearTimeout(timeoutId);
+                    resolve();
+                }
+            });
+        } catch (error) {
+            console.debug('[HydrationOrchestrator] UI readiness wait failed or timed out', error);
+        }
+    }, [blockingHydrationExpectedSources]);
 
     const applyWorkspaceSnapshot = useCallback(async (workspace: WorkspaceSnapshot, options?: { preserveRuntimeMessages?: boolean }) => {
         const snapshotWorkflowId = workspace.workflow?.id;
@@ -195,7 +296,7 @@ export const useWorkspaceHydrationOrchestrator = ({
         return snapshotWorkflowId;
     }, [applyWorkspaceSnapshot]);
 
-    const reloadWorkspaceSnapshot = useCallback(async ({ reason, mode }: WorkspaceReloadRequest) => {
+    const runBlockingBootstrapHydration = useCallback(async (reason: string) => {
         if (!isAuthenticated || !sessionReadyForWorkspaceHydration || !userId) {
             return;
         }
@@ -205,122 +306,86 @@ export const useWorkspaceHydrationOrchestrator = ({
         }
 
         const reloadPromise = (async () => {
-            const showOverlay = mode === 'initial-auth';
-
-            if (showOverlay) {
-                setHydrationMessage(DEFAULT_HYDRATION_MESSAGE);
-                setIsHydrating(true);
-                sessionStorage.setItem('_arc_hydrating', 'true');
-                setHydrationProgress(10);
-            }
+            setHydrationPhase('blocking-bootstrap');
+            setHydrationMessage(DEFAULT_HYDRATION_MESSAGE);
+            sessionStorage.setItem('_arc_hydrating', 'true');
+            setHydrationProgress(10);
 
             try {
-                if (mode === 'initial-auth') {
-                    useDesignStore.getState().resetAll();
-                    useRuntimeStore.getState().resetForWorkflowSwitch();
+                useDesignStore.getState().resetAll();
+                useRuntimeStore.getState().resetForWorkflowSwitch();
 
-                    const allGuestKeys = getAllGuestKeys();
-                    allGuestKeys.forEach((key) => localStorage.removeItem(key));
+                const allGuestKeys = getAllGuestKeys();
+                allGuestKeys.forEach((key) => localStorage.removeItem(key));
 
-                    sessionStorage.clear();
-                    sessionStorage.setItem('_arc_hydrating', 'true');
-                    setHydrationProgress(30);
-                }
+                sessionStorage.clear();
+                sessionStorage.setItem('_arc_hydrating', 'true');
+                setHydrationProgress(30);
+                setHydrationMessage('Synchronisation de la session runtime...');
+                setHydrationProgress(55);
 
-                if (showOverlay) {
-                    setHydrationMessage('Synchronisation de la session runtime...');
-                    setHydrationProgress(55);
-                }
-
-                let workspace: WorkspaceSnapshot;
-
-                if (mode === 'initial-auth') {
-                    const { workspace: hydratedWorkspace, runtimeState, runtimeIssue } = await loadAuthenticatedWorkspaceBootstrap({
-                        loadRuntimeState: () => refreshRuntimeConfigState(),
-                    });
-
-                    if (runtimeIssue) {
-                        logWorkspaceBootstrapIssue('[App]', runtimeIssue, {
-                            reason,
-                            mode,
-                            userId,
-                        });
-                    }
-
-                    if (runtimeState) {
-                        updateLLMConfigs(runtimeState.runtimeLLMConfigs);
-                        updateLocalLLMProfiles(runtimeState.localLLMProfiles);
-                    }
-
-                    workspace = hydratedWorkspace;
-                } else {
-                    const runtimeState = await refreshRuntimeConfigState();
-                    if (runtimeState) {
-                        updateLLMConfigs(runtimeState.runtimeLLMConfigs);
-                        updateLocalLLMProfiles(runtimeState.localLLMProfiles);
-                    }
-
-                    workspace = await fetchWorkspaceSnapshot();
-                }
-
-                if (showOverlay) {
-                    setHydrationMessage('Restauration du canvas...');
-                    setHydrationProgress(75);
-                }
-
-                await hydrateInteractiveWorkspaceState(workspace, {
-                    preserveRuntimeMessages: mode === 'resume',
-                    onSnapshotApplied: showOverlay
-                        ? () => {
-                            setHydrationMessage('Chargement du catalogue d\'outils...');
-                            setHydrationProgress(90);
-                        }
-                        : undefined,
+                const { workspace, runtimeState, runtimeIssue } = await loadAuthenticatedWorkspaceBootstrap({
+                    loadRuntimeState: () => refreshRuntimeConfigState(),
                 });
 
-                if (showOverlay) {
-                    setHydrationMessage('Synchronisation du catalogue workflows...');
-                    setHydrationProgress(92);
-                    await useDesignStore.getState().loadUserWorkflows();
+                if (runtimeIssue) {
+                    logWorkspaceBootstrapIssue('[App]', runtimeIssue, {
+                        reason,
+                        mode: 'initial-auth',
+                        userId,
+                    });
                 }
 
-                if (showOverlay) {
-                    setHydrationMessage('Finalisation du canvas...');
-                    setHydrationProgress(95);
-                    await waitForHydrationVisualSettlement();
-                    setHydrationProgress(100);
-                }
+                applyRuntimeBootstrapState(runtimeState);
+
+                setHydrationMessage('Restauration du canvas...');
+                setHydrationProgress(75);
+
+                await hydrateInteractiveWorkspaceState(workspace, {
+                    preserveRuntimeMessages: false,
+                    onSnapshotApplied: () => {
+                        setHydrationMessage('Chargement du catalogue d\'outils...');
+                        setHydrationProgress(90);
+                    },
+                });
+
+                setHydrationMessage('Synchronisation du catalogue workflows...');
+                setHydrationProgress(92);
+                await useDesignStore.getState().loadUserWorkflows();
+
+                setHydrationPhase('blocking-bootstrap-finalize');
+                setHydrationMessage('Finalisation du canvas...');
+                setHydrationProgress(95);
+                await waitForHydrationVisualSettlement();
+                setHydrationProgress(100);
+                await waitForBlockingHydrationComponentReadiness();
 
                 hydratedWorkspaceIdentityRef.current = `auth:${userId}`;
 
                 console.log('[App] Workspace reload complete:', {
                     reason,
-                    mode,
+                    mode: 'initial-auth',
                     userId,
                 });
             } catch (err) {
                 const issue = createWorkspaceBootstrapIssue('workspace', err);
                 logWorkspaceBootstrapIssue('[App]', issue, {
                     reason,
-                    mode,
+                    mode: 'initial-auth',
                     userId,
                 });
 
-                if (showOverlay) {
-                    setHydrationMessage(
-                        issue.transient
-                            ? 'Backend indisponible. Relancez la session quand le service est revenu.'
-                            : authError || 'Restauration de session impossible. Reconnexion requise.',
-                    );
-                }
+                setHydrationMessage(
+                    issue.transient
+                        ? 'Backend indisponible. Relancez la session quand le service est revenu.'
+                        : authError || 'Restauration de session impossible. Reconnexion requise.',
+                );
             } finally {
-                if (showOverlay) {
-                    setTimeout(() => {
-                        setIsHydrating(false);
-                        setHydrationProgress(0);
-                        sessionStorage.removeItem('_arc_hydrating');
-                    }, 500);
-                }
+                setTimeout(() => {
+                    setHydrationPhase('idle');
+                    setHydrationProgress(0);
+                    sessionStorage.removeItem('_arc_hydrating');
+                }, 500);
             }
         })().finally(() => {
             workspaceReloadPromiseRef.current = null;
@@ -328,14 +393,63 @@ export const useWorkspaceHydrationOrchestrator = ({
 
         workspaceReloadPromiseRef.current = reloadPromise;
         return reloadPromise;
-    }, [authError, hydrateInteractiveWorkspaceState, isAuthenticated, refreshRuntimeConfigState, sessionReadyForWorkspaceHydration, updateLLMConfigs, updateLocalLLMProfiles, userId]);
+    }, [applyRuntimeBootstrapState, authError, hydrateInteractiveWorkspaceState, isAuthenticated, refreshRuntimeConfigState, sessionReadyForWorkspaceHydration, userId, waitForBlockingHydrationComponentReadiness]);
 
-    useEffect(() => {
+    const resumeWorkspaceSilently = useCallback(async (reason: string) => {
+        if (!isAuthenticated || !sessionReadyForWorkspaceHydration || !userId) {
+            return;
+        }
+
+        if (workspaceReloadPromiseRef.current) {
+            return workspaceReloadPromiseRef.current;
+        }
+
+        const reloadPromise = (async () => {
+            setHydrationPhase('silent-resume-revalidate');
+
+            try {
+                const runtimeState = await refreshRuntimeConfigState();
+                applyRuntimeBootstrapState(runtimeState);
+
+                const workspace = await fetchWorkspaceSnapshot();
+                await hydrateInteractiveWorkspaceState(workspace, {
+                    preserveRuntimeMessages: true,
+                });
+
+                hydratedWorkspaceIdentityRef.current = `auth:${userId}`;
+
+                console.log('[App] Workspace reload complete:', {
+                    reason,
+                    mode: 'resume',
+                    userId,
+                });
+            } catch (err) {
+                const issue = createWorkspaceBootstrapIssue('workspace', err);
+                logWorkspaceBootstrapIssue('[App]', issue, {
+                    reason,
+                    mode: 'resume',
+                    userId,
+                });
+            } finally {
+                setHydrationPhase((currentPhase) => (
+                    currentPhase === 'silent-resume-revalidate' ? 'idle' : currentPhase
+                ));
+            }
+        })().finally(() => {
+            workspaceReloadPromiseRef.current = null;
+        });
+
+        workspaceReloadPromiseRef.current = reloadPromise;
+        return reloadPromise;
+    }, [applyRuntimeBootstrapState, hydrateInteractiveWorkspaceState, isAuthenticated, refreshRuntimeConfigState, sessionReadyForWorkspaceHydration, userId]);
+
+    useLayoutEffect(() => {
         if (!isAuthenticated) {
             hydratedWorkspaceIdentityRef.current = null;
-            setIsHydrating(false);
+            setHydrationPhase('idle');
             setHydrationProgress(0);
             setHydrationMessage(DEFAULT_HYDRATION_MESSAGE);
+            setAwaitingBlockingHydrationVisualGate(false);
             sessionStorage.removeItem('_arc_hydrating');
             return;
         }
@@ -349,11 +463,8 @@ export const useWorkspaceHydrationOrchestrator = ({
             return;
         }
 
-        void reloadWorkspaceSnapshot({
-            reason: 'initial-auth-hydration',
-            mode: 'initial-auth',
-        });
-    }, [isAuthenticated, reloadWorkspaceSnapshot, sessionReadyForWorkspaceHydration, userId]);
+        void runBlockingBootstrapHydration('initial-auth-hydration');
+    }, [isAuthenticated, runBlockingBootstrapHydration, sessionReadyForWorkspaceHydration, userId]);
 
     useEffect(() => {
         if (!sessionReadyForWorkspaceHydration || !userId) {
@@ -363,7 +474,7 @@ export const useWorkspaceHydrationOrchestrator = ({
         const requestResumeWorkspaceRefresh = (reason: string) => {
             const now = Date.now();
 
-            if (isHydratingRef.current || isSwitchingRef.current) {
+            if (workspaceReloadPromiseRef.current || isSwitchingRef.current) {
                 return;
             }
 
@@ -373,10 +484,7 @@ export const useWorkspaceHydrationOrchestrator = ({
 
             lastResumeWorkspaceRefreshAtRef.current = now;
 
-            void reloadWorkspaceSnapshot({
-                reason,
-                mode: 'resume',
-            });
+            void resumeWorkspaceSilently(reason);
         };
 
         const handleFocus = () => requestResumeWorkspaceRefresh('window-focus');
@@ -399,15 +507,20 @@ export const useWorkspaceHydrationOrchestrator = ({
             window.removeEventListener('pageshow', handlePageShow);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [isSwitchingRef, reloadWorkspaceSnapshot, sessionReadyForWorkspaceHydration, userId]);
+    }, [isSwitchingRef, resumeWorkspaceSilently, sessionReadyForWorkspaceHydration, userId]);
 
     return {
-        awaitingStableAuthenticatedSession,
+        beginBlockingHydrationVisualGate,
+        completeBlockingHydrationVisualGate,
+        awaitingBlockingHydrationVisualGate,
         hydrateInteractiveWorkspaceState,
         hydrationMessage,
+        hydrationPhase,
         hydrationProgress,
+        isBlockingHydration,
+        isPreparingBlockingHydration,
         isHydrating,
-        reloadWorkspaceSnapshot,
+        resumeWorkspaceSilently,
         sessionReadyForWorkspaceHydration,
     };
 };

@@ -154,6 +154,26 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     const shouldRender = isAuthenticated && isManualSave;
     const hasValidWorkflowId = !!workflowId && workflowId !== 'default-workflow';
 
+    // Signal UI hydration readiness when this control first appears
+    useEffect(() => {
+        if (!shouldRender) return;
+
+        try {
+            // double rAF to ensure DOM children are mounted/measured
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                try {
+                    if (typeof window !== 'undefined') {
+                        window.dispatchEvent(new Event('hydration:components:ready'));
+                    }
+                } catch (e) {
+                    // non-fatal
+                }
+            }));
+        } catch (e) {
+            // ignore
+        }
+    }, [shouldRender]);
+
     /**
      * ⭐ REFACTORED: Persister les journaux avec protections anti-boucle infinie
      * - Circuit breaker après MAX_ERRORS_BEFORE_ABORT erreurs
