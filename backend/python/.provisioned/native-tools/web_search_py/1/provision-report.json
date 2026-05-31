@@ -1,0 +1,17 @@
+{
+  "toolId": "69b1455e8ac9fe4d5dd39dcf",
+  "toolName": "web_search_py",
+  "toolVersionTag": "1",
+  "status": "ready",
+  "provisionedAt": "2026-05-13T08:19:16.076Z",
+  "dependencies": [
+    "duckduckgo-search"
+  ],
+  "criticalModules": [
+    "duckduckgo_search"
+  ],
+  "sitePackagesPath": "C:\\AITest\\A-IR-DD2\\PersistAIRDD2\\A-IR-DD2\\backend\\python\\.provisioned\\native-tools\\web_search_py\\1\\site-packages",
+  "reportPath": "C:\\AITest\\A-IR-DD2\\PersistAIRDD2\\A-IR-DD2\\backend\\python\\.provisioned\\native-tools\\web_search_py\\1\\provision-report.json",
+  "stdout": "Collecting duckduckgo-search\n  Downloading duckduckgo_search-8.1.1-py3-none-any.whl.metadata (16 kB)\nCollecting click>=8.1.8 (from duckduckgo-search)\n  Downloading click-8.3.3-py3-none-any.whl.metadata (2.6 kB)\nCollecting primp>=0.15.0 (from duckduckgo-search)\n  Downloading primp-1.2.3-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.6 kB)\nCollecting lxml>=5.3.0 (from duckduckgo-search)\n  Downloading lxml-6.1.0-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl.metadata (4.0 kB)\nDownloading duckduckgo_search-8.1.1-py3-none-any.whl (18 kB)\nDownloading click-8.3.3-py3-none-any.whl (110 kB)\nDownloading lxml-6.1.0-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl (5.2 MB)\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.2/5.2 MB 8.8 MB/s eta 0:00:00\nDownloading primp-1.2.3-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.5 MB)\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 10.6 MB/s eta 0:00:00\nInstalling collected packages: primp, lxml, click, duckduckgo-search\nSuccessfully installed click-8.3.3 duckduckgo-search-8.1.1 lxml-6.1.0 primp-1.2.3\n",
+  "stderr": ""
+}

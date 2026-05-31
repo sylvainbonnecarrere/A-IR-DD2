@@ -19,9 +19,10 @@
  */
 
 import React from 'react';
-import { PersistenceConfig, MediaStorageType, CloudStorageConfig, defaultPersistenceConfig } from '../../types';
+import { PersistenceConfig, MediaStorageType, normalizeMediaStorageType, normalizePersistenceConfig } from '../../types';
 import { useLocalization } from '../../contexts/LocalizationContext';
-import { CloudStorageConfigForm } from './CloudStorageConfigForm';
+import { useAuth } from '../../hooks/useAuth';
+import { useCloudConnectionProfiles } from '../../hooks/useCloudConnectionProfiles';
 
 interface AgentPersistenceFormProps {
   config: PersistenceConfig;
@@ -104,17 +105,18 @@ const MediaStorageSelector: React.FC<{
   onChange: (value: MediaStorageType) => void;
   disabled?: boolean;
 }> = ({ value, onChange, disabled }) => {
+  const selectedValue = normalizeMediaStorageType(value as any);
   const options: { value: MediaStorageType; label: string; description: string; icon: string }[] = [
     {
       value: 'db',
       label: 'Base de données',
-      description: 'Stockage GridFS (MongoDB) - Recommandé',
+      description: 'Stockage durable en base via MongoDB / GridFS',
       icon: '🗄️'
     },
     {
-      value: 'local',
-      label: 'Stockage local',
-      description: 'Système de fichiers serveur',
+      value: 'workspace',
+      label: 'Workspace',
+      description: 'Publication dans le workspace runtime de l agent',
       icon: '💾'
     },
     {
@@ -139,7 +141,7 @@ const MediaStorageSelector: React.FC<{
             onClick={() => onChange(option.value)}
             className={`
               w-full flex items-center p-3 rounded-lg border-2 transition-all duration-200
-              ${value === option.value 
+              ${selectedValue === option.value 
                 ? 'border-indigo-500 bg-indigo-500/10' 
                 : 'border-gray-600 bg-gray-700/50 hover:border-gray-500'
               }
@@ -149,13 +151,13 @@ const MediaStorageSelector: React.FC<{
             <span className="text-2xl mr-3">{option.icon}</span>
             <div className="flex-1 text-left">
               <div className="flex items-center gap-2">
-                <span className={`text-sm font-medium ${value === option.value ? 'text-indigo-300' : 'text-gray-200'}`}>
+                <span className={`text-sm font-medium ${selectedValue === option.value ? 'text-indigo-300' : 'text-gray-200'}`}>
                   {option.label}
                 </span>
               </div>
               <p className="text-xs text-gray-400">{option.description}</p>
             </div>
-            {value === option.value && (
+            {selectedValue === option.value && (
               <svg className="w-5 h-5 text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
               </svg>
@@ -176,13 +178,54 @@ export const AgentPersistenceForm: React.FC<AgentPersistenceFormProps> = ({
   disabled = false
 }) => {
   const { t } = useLocalization();
+  const { isAuthenticated } = useAuth();
+  const { profiles: cloudProfiles, loading: cloudProfilesLoading } = useCloudConnectionProfiles();
+  const normalizedConfig = normalizePersistenceConfig(config);
+  const enabledCloudProfiles = cloudProfiles.filter((profile) => profile.enabled);
+  const selectedCloudProfile = enabledCloudProfiles.find(
+    (profile) => profile.id === normalizedConfig.cloudConnectionProfileId,
+  );
   
   // Helper pour mettre à jour un champ spécifique
   const updateField = <K extends keyof PersistenceConfig>(
     field: K,
     value: PersistenceConfig[K]
   ) => {
-    onChange({ ...config, [field]: value });
+    onChange(normalizePersistenceConfig({ ...normalizedConfig, [field]: value }));
+  };
+
+  const handleSaveMediaChange = (enabled: boolean) => {
+    onChange(normalizePersistenceConfig({
+      ...normalizedConfig,
+      saveMedia: enabled,
+      allowWorkspaceWrite: enabled
+        ? (normalizedConfig.mediaStorage === 'workspace' ? true : normalizedConfig.allowWorkspaceWrite)
+        : false,
+    }));
+  };
+
+  const handleMediaStorageChange = (value: MediaStorageType) => {
+    const shouldAutoSelectCloudProfile = value === 'cloud'
+      && !normalizedConfig.cloudConnectionProfileId
+      && enabledCloudProfiles.length === 1;
+
+    onChange(normalizePersistenceConfig({
+      ...normalizedConfig,
+      mediaStorage: value,
+      allowWorkspaceWrite: value === 'workspace' ? true : normalizedConfig.allowWorkspaceWrite,
+      cloudConnectionProfileId: shouldAutoSelectCloudProfile
+        ? enabledCloudProfiles[0].id
+        : normalizedConfig.cloudConnectionProfileId,
+      cloudStorageConfig: undefined,
+    }));
+  };
+
+  const handleCloudProfileSelection = (value: string) => {
+    onChange(normalizePersistenceConfig({
+      ...normalizedConfig,
+      cloudConnectionProfileId: value || undefined,
+      cloudStorageConfig: undefined,
+    }));
   };
 
   return (
@@ -213,7 +256,7 @@ export const AgentPersistenceForm: React.FC<AgentPersistenceFormProps> = ({
           id="saveChat"
           label="Sauvegarder le chat"
           tooltip="Persiste l'historique complet des messages échangés avec l'agent"
-          checked={config.saveChat}
+          checked={normalizedConfig.saveChat}
           onChange={(v) => updateField('saveChat', v)}
           disabled={disabled}
         />
@@ -222,7 +265,7 @@ export const AgentPersistenceForm: React.FC<AgentPersistenceFormProps> = ({
           id="saveErrors"
           label="Sauvegarder les erreurs"
           tooltip="Enregistre les erreurs rencontrées pour le débogage et l'analyse"
-          checked={config.saveErrors}
+          checked={normalizedConfig.saveErrors}
           onChange={(v) => updateField('saveErrors', v)}
           disabled={disabled}
         />
@@ -231,7 +274,7 @@ export const AgentPersistenceForm: React.FC<AgentPersistenceFormProps> = ({
           id="saveHistorySummary"
           label="Résumé périodique"
           tooltip="Génère et stocke un résumé de conversation pour économiser des tokens lors des sessions longues"
-          checked={config.saveHistorySummary}
+          checked={normalizedConfig.saveHistorySummary}
           onChange={(v) => updateField('saveHistorySummary', v)}
           disabled={disabled}
         />
@@ -250,7 +293,7 @@ export const AgentPersistenceForm: React.FC<AgentPersistenceFormProps> = ({
           id="saveLinks"
           label="Sauvegarder les liens"
           tooltip="Persiste les connexions et relations entre agents dans le workflow"
-          checked={config.saveLinks}
+          checked={normalizedConfig.saveLinks}
           onChange={(v) => updateField('saveLinks', v)}
           disabled={disabled}
           isPlaceholder={true}
@@ -260,7 +303,7 @@ export const AgentPersistenceForm: React.FC<AgentPersistenceFormProps> = ({
           id="saveTasks"
           label="Sauvegarder les tâches"
           tooltip="Enregistre les tâches assignées et leur état d'avancement"
-          checked={config.saveTasks}
+          checked={normalizedConfig.saveTasks}
           onChange={(v) => updateField('saveTasks', v)}
           disabled={disabled}
           isPlaceholder={true}
@@ -281,28 +324,103 @@ export const AgentPersistenceForm: React.FC<AgentPersistenceFormProps> = ({
           id="saveMedia"
           label="Sauvegarder les médias"
           tooltip="Persiste les images, fichiers et autres médias générés par l'agent"
-          checked={config.saveMedia}
-          onChange={(v) => updateField('saveMedia', v)}
+          checked={normalizedConfig.saveMedia}
+          onChange={handleSaveMediaChange}
           disabled={disabled}
         />
         
         {/* Afficher le sélecteur de mode uniquement si saveMedia est activé */}
-        {config.saveMedia && (
+        {normalizedConfig.saveMedia && (
           <>
+            <p className="mt-3 text-xs text-gray-400">
+              Le mode choisi définit la persistance primaire. Une écriture workspace peut rester autorisée en complément.
+            </p>
             <MediaStorageSelector
-              value={config.mediaStorage}
-              onChange={(v) => updateField('mediaStorage', v)}
+              value={normalizedConfig.mediaStorage}
+              onChange={handleMediaStorageChange}
               disabled={disabled}
             />
-            
-            {/* ⭐ Formulaire de configuration cloud si mode cloud sélectionné */}
-            {config.mediaStorage === 'cloud' && (
+
+            {normalizedConfig.mediaStorage === 'workspace' ? (
+              <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
+                Le workspace est la destination primaire. `allowWorkspaceWrite` reste actif par définition.
+              </div>
+            ) : (
               <div className="mt-4 pt-4 border-t border-gray-700">
-                <CloudStorageConfigForm
-                  config={config.cloudStorageConfig}
-                  onChange={(cloudConfig) => updateField('cloudStorageConfig', cloudConfig)}
+                <SwitchOption
+                  id="allowWorkspaceWrite"
+                  label="Autoriser aussi l'écriture workspace"
+                  tooltip="Permet de publier aussi une copie dans le workspace quand le prompt ou le flux le demande explicitement."
+                  checked={normalizedConfig.allowWorkspaceWrite}
+                  onChange={(v) => updateField('allowWorkspaceWrite', v)}
                   disabled={disabled}
                 />
+              </div>
+            )}
+            
+            {/* ⭐ Formulaire de configuration cloud si mode cloud sélectionné */}
+            {normalizedConfig.mediaStorage === 'cloud' && (
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-200">
+                    Les secrets cloud ne sont plus saisis dans l agent. Selectionnez un profil gere dans Parametres &gt; Cloud.
+                  </div>
+
+                  {!isAuthenticated ? (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                      Une session authentifiee est requise pour utiliser les profils cloud securises.
+                    </div>
+                  ) : cloudProfilesLoading ? (
+                    <p className="text-xs text-gray-400 animate-pulse">Chargement des profils cloud...</p>
+                  ) : enabledCloudProfiles.length === 0 ? (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                      Aucun profil cloud actif n est configure. Ouvrez Parametres &gt; Cloud pour creer un profil securise.
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label htmlFor="cloud-profile-selector" className="block text-sm font-medium text-gray-200 mb-2">
+                          Profil cloud
+                        </label>
+                        <select
+                          id="cloud-profile-selector"
+                          aria-label="Profil cloud"
+                          value={normalizedConfig.cloudConnectionProfileId || ''}
+                          onChange={(event) => handleCloudProfileSelection(event.target.value)}
+                          disabled={disabled}
+                          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <option value="">Selectionner un profil cloud...</option>
+                          {enabledCloudProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.displayName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {selectedCloudProfile && (
+                        <div className="rounded-lg border border-gray-700 bg-gray-800/60 px-3 py-3 text-xs text-gray-300 space-y-1">
+                          <p className="font-medium text-gray-100">{selectedCloudProfile.displayName}</p>
+                          <p>Bucket: {selectedCloudProfile.target.bucketName}</p>
+                          {selectedCloudProfile.provider === 's3' && selectedCloudProfile.target.region && (
+                            <p>Region: {selectedCloudProfile.target.region}</p>
+                          )}
+                          {selectedCloudProfile.provider === 'gcs' && selectedCloudProfile.target.projectId && (
+                            <p>Project: {selectedCloudProfile.target.projectId}</p>
+                          )}
+                          <p>Etat: {selectedCloudProfile.status.state}</p>
+                        </div>
+                      )}
+
+                      {normalizedConfig.cloudStorageConfig && (
+                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                          Une ancienne configuration cloud inline a ete detectee. Reconfigurez-la dans Parametres &gt; Cloud puis selectionnez un profil.
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </>

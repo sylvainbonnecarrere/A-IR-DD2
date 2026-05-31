@@ -11,7 +11,8 @@
  */
 
 import { getBackendUrl } from '../config/api.config';
-import { Agent } from '../types';
+import { Agent, normalizePersistenceConfig, sanitizePersistenceConfigForApi } from '../types';
+import { normalizeAgentToolReferences } from './toolSelectionResolver';
 import { buildGovernanceHeaders } from '../utils/governanceHeaders';
 
 const API_BASE = `${getBackendUrl()}/api/agent-prototypes`;
@@ -30,16 +31,58 @@ interface APIResponse<T = any> {
   error?: string;
 }
 
+export interface AgentPrototypeImpactInstance {
+  id: string;
+  name: string;
+  position: { x: number; y: number };
+}
+
+export interface AgentPrototypeImpact {
+  instanceCount: number;
+  nodeCount: number;
+  instances: AgentPrototypeImpactInstance[];
+  nodeIds: string[];
+}
+
+export function mergeAgentPrototypeImpacts(
+  ...impacts: Array<AgentPrototypeImpact | null | undefined>
+): AgentPrototypeImpact {
+  const instancesById = new Map<string, AgentPrototypeImpactInstance>();
+  const nodeIds = new Set<string>();
+
+  impacts.forEach((impact) => {
+    if (!impact) {
+      return;
+    }
+
+    impact.instances.forEach((instance) => {
+      if (!instancesById.has(instance.id)) {
+        instancesById.set(instance.id, instance);
+      }
+    });
+
+    impact.nodeIds.forEach((nodeId) => {
+      nodeIds.add(nodeId);
+    });
+  });
+
+  return {
+    instanceCount: instancesById.size,
+    nodeCount: nodeIds.size,
+    instances: Array.from(instancesById.values()),
+    nodeIds: Array.from(nodeIds.values()),
+  };
+}
+
 /**
  * Convertit le format Agent frontend vers le format API backend
  * Frontend: model, creator_id, capabilities (enum array)
  * Backend: llmModel, robotId, capabilities (string array)
  */
 function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string, workflowId?: string): Record<string, any> {
-  const toolSelections = agentData.toolSelections?.length ? agentData.toolSelections : undefined;
-  const functionIds = agentData.functionIds?.length
-    ? agentData.functionIds
-    : toolSelections?.map(selection => selection.toolId);
+  const normalizedToolReferences = normalizeAgentToolReferences(agentData.toolSelections, agentData.functionIds);
+  const toolSelections = normalizedToolReferences.toolSelections.length > 0 ? normalizedToolReferences.toolSelections : undefined;
+  const functionIds = normalizedToolReferences.functionIds.length > 0 ? normalizedToolReferences.functionIds : undefined;
 
   const payload: Record<string, any> = {
     name: agentData.name || '',
@@ -49,11 +92,13 @@ function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string,
     llmModel: agentData.model || '', // Frontend uses 'model', backend expects 'llmModel'
     capabilities: agentData.capabilities?.map(c => String(c)) || [],
     historyConfig: agentData.historyConfig || undefined,
+    webSearchParams: agentData.webSearchParams || undefined,
     // C3 FIX: Envoyer functionIds (V2) au lieu de tools (legacy)
     // tools legacy omis intentionnellement — le backend les stocke en legacyTools
     functionIds,
     toolSelections,
     outputConfig: agentData.outputConfig || undefined,
+    persistenceConfig: sanitizePersistenceConfigForApi(agentData.persistenceConfig),
     robotId: robotId // Frontend uses 'creator_id', backend expects 'robotId'
   };
   
@@ -76,13 +121,15 @@ function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string,
  * Frontend: model, creator_id, id
  */
 export function mapAPIResponseToAgent(apiData: any): Agent {
-  const toolSelections = Array.isArray(apiData.toolSelections)
-    ? apiData.toolSelections
-    : [];
-  const functionIds = apiData.functionIds
-    || toolSelections.map((selection: any) => selection.toolId).filter(Boolean)
-    || (apiData.tools || []).map((id: any) => id.toString()).filter(Boolean)
-    || [];
+  const legacyFunctionIds = Array.isArray(apiData.functionIds)
+    ? apiData.functionIds
+    : Array.isArray(apiData.tools)
+      ? apiData.tools.map((id: any) => id?.toString ? id.toString() : String(id)).filter(Boolean)
+      : [];
+  const normalizedToolReferences = normalizeAgentToolReferences(
+    Array.isArray(apiData.toolSelections) ? apiData.toolSelections : undefined,
+    legacyFunctionIds,
+  );
 
   return {
     id: apiData._id || apiData.id,
@@ -94,16 +141,24 @@ export function mapAPIResponseToAgent(apiData: any): Agent {
     capabilities: apiData.capabilities || [],
     historyConfig: apiData.historyConfig,
     tools: apiData.legacyTools || undefined, // legacy tools (non-ObjectId objects)
-    // C3/C4/C5 FIX: mapper functionIds depuis la réponse API
-    // apiData.functionIds est ajouté par les handlers backend (tools.map(id.toString()))
-    functionIds,
-    toolSelections,
+    functionIds: normalizedToolReferences.functionIds,
+    toolSelections: normalizedToolReferences.toolSelections,
     outputConfig: apiData.outputConfig,
+    webSearchParams: apiData.webSearchParams,
+    persistenceConfig: apiData.persistenceConfig ? normalizePersistenceConfig(apiData.persistenceConfig) : undefined,
     creator_id: apiData.robotId, // Backend uses 'robotId', frontend expects 'creator_id'
     created_at: apiData.createdAt || new Date().toISOString(),
     updated_at: apiData.updatedAt || new Date().toISOString(),
     localLLMProfileId: apiData.localLLMProfileId || undefined
   };
+}
+
+function mapAPIResponseListToAgents(apiData: unknown): Agent[] {
+  if (!Array.isArray(apiData)) {
+    return [];
+  }
+
+  return apiData.map((entry) => mapAPIResponseToAgent(entry));
 }
 
 /**
@@ -118,7 +173,7 @@ export async function createAgentPrototype(
   accessToken: string,
   robotId: string,
   workflowId?: string
-): Promise<APIResponse<any>> {
+): Promise<APIResponse<Agent>> {
   try {
     const payload = mapAgentToAPIPayload(agentData, robotId, workflowId);
     
@@ -139,7 +194,7 @@ export async function createAgentPrototype(
       };
     }
 
-    const data = await response.json();
+    const data = mapAPIResponseToAgent(await response.json());
     return { success: true, data };
   } catch (err) {
     console.error('[agentPrototypeAPI] Create error:', err);
@@ -163,7 +218,7 @@ export async function updateAgentPrototype(
   agentData: Partial<AgentPrototypePayload>,
   accessToken: string,
   robotId: string
-): Promise<APIResponse<any>> {
+): Promise<APIResponse<Agent>> {
   try {
     // Map only provided fields
     const payload: Record<string, any> = {};
@@ -174,10 +229,15 @@ export async function updateAgentPrototype(
     if (agentData.model !== undefined) payload.llmModel = agentData.model;
     if (agentData.capabilities !== undefined) payload.capabilities = agentData.capabilities.map(c => String(c));
     if (agentData.historyConfig !== undefined) payload.historyConfig = agentData.historyConfig;
+    if (agentData.webSearchParams !== undefined) payload.webSearchParams = agentData.webSearchParams;
     if (agentData.tools !== undefined) payload.tools = agentData.tools;
-    if (agentData.functionIds !== undefined) payload.functionIds = agentData.functionIds; // C3 FIX
-    if (agentData.toolSelections !== undefined) payload.toolSelections = agentData.toolSelections;
+    if (agentData.functionIds !== undefined || agentData.toolSelections !== undefined) {
+      const normalizedToolReferences = normalizeAgentToolReferences(agentData.toolSelections, agentData.functionIds);
+      payload.functionIds = normalizedToolReferences.functionIds;
+      payload.toolSelections = normalizedToolReferences.toolSelections;
+    }
     if (agentData.outputConfig !== undefined) payload.outputConfig = agentData.outputConfig;
+    if (agentData.persistenceConfig !== undefined) payload.persistenceConfig = sanitizePersistenceConfigForApi(agentData.persistenceConfig);
     if (agentData.localLLMProfileId !== undefined) payload.localLLMProfileId = agentData.localLLMProfileId;
     if (robotId) payload.robotId = robotId;
     
@@ -198,7 +258,7 @@ export async function updateAgentPrototype(
       };
     }
 
-    const data = await response.json();
+    const data = mapAPIResponseToAgent(await response.json());
     return { success: true, data };
   } catch (err) {
     console.error('[agentPrototypeAPI] Update error:', err);
@@ -244,6 +304,38 @@ export async function deleteAgentPrototype(
   }
 }
 
+export async function fetchAgentPrototypeImpact(
+  prototypeId: string,
+  accessToken: string,
+  workflowId?: string,
+): Promise<APIResponse<AgentPrototypeImpact>> {
+  try {
+    const query = workflowId ? `?workflowId=${encodeURIComponent(workflowId)}` : '';
+    const response = await fetch(`${API_BASE}/${prototypeId}/impact${query}`, {
+      method: 'GET',
+      headers: buildGovernanceHeaders(accessToken),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('[agentPrototypeAPI] Fetch impact failed:', response.status, errorData);
+      return {
+        success: false,
+        error: errorData.error || `HTTP ${response.status}`,
+      };
+    }
+
+    const data = await response.json();
+    return { success: true, data };
+  } catch (err) {
+    console.error('[agentPrototypeAPI] Fetch impact error:', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Network error',
+    };
+  }
+}
+
 /**
  * R\u00e9cup\u00e9rer les prototypes de l'utilisateur connect\u00e9 (filtr\u00e9s par workflow)
  * @param accessToken - JWT token
@@ -253,7 +345,7 @@ export async function deleteAgentPrototype(
 export async function fetchAgentPrototypes(
   accessToken: string,
   workflowId?: string
-): Promise<APIResponse<any[]>> {
+): Promise<APIResponse<Agent[]>> {
   try {
     // ⭐ SECURITY: URL-encode to prevent injection
     const url = workflowId ? `${API_BASE}?workflowId=${encodeURIComponent(workflowId)}` : API_BASE;
@@ -271,7 +363,7 @@ export async function fetchAgentPrototypes(
       };
     }
 
-    const data = await response.json();
+    const data = mapAPIResponseListToAgents(await response.json());
     return { success: true, data };
   } catch (err) {
     console.error('[agentPrototypeAPI] Fetch error:', err);

@@ -10,6 +10,7 @@ import { User } from '../models/User.model';
 import { Workflow } from '../models/Workflow.model';
 import { AgentPrototype } from '../models/AgentPrototype.model';
 import { AgentInstance } from '../models/AgentInstance.model';
+import { AgentJournal } from '../models/AgentJournal.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
 import workflowsRoutes from '../routes/workflows.routes';
 import agentPrototypesRoutes from '../routes/agent-prototypes.routes';
@@ -96,6 +97,123 @@ describe('Workflow CRUD Flow - Cycle de vie complet', () => {
             expect(response.body.name).toBe('Agent Assistant');
 
             instance1Id = response.body.id;
+        });
+
+        it('Étape 3b: Persister un message chat de rôle tool_result sur une instance', async () => {
+            const createFreshInstance = async () => {
+                const instance = await AgentInstance.create({
+                    workflowId,
+                    userId: testUser._id,
+                    prototypeId,
+                    executionId: `run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+                    status: 'running',
+                    name: 'Agent Assistant',
+                    role: 'Assistant général',
+                    systemPrompt: 'Tu es un assistant IA',
+                    llmProvider: 'Gemini',
+                    llmModel: 'gemini-2.0-flash-exp',
+                    capabilities: ['Chat'],
+                    historyConfig: {},
+                    outputConfig: {},
+                    tools: [],
+                    toolSelections: [],
+                    robotId: 'AR_001',
+                    position: { x: 120, y: 120 },
+                    isMinimized: false,
+                    isMaximized: false,
+                    zIndex: 0,
+                    content: [],
+                    metrics: {
+                        totalTokens: 0,
+                        totalErrors: 0,
+                        totalMediaGenerated: 0,
+                        callCount: 0,
+                    },
+                    persistenceConfig: {
+                        saveChat: true,
+                        saveErrors: true,
+                        saveHistorySummary: false,
+                        saveLinks: false,
+                        saveTasks: false,
+                        saveMedia: false,
+                        mediaStorage: 'db',
+                    },
+                });
+
+                return instance._id.toString();
+            };
+
+            const resolveActiveInstanceId = async () => {
+                if (instance1Id) {
+                    const persistedInstance = await AgentInstance.findById(instance1Id).lean();
+                    if (persistedInstance) {
+                        return instance1Id;
+                    }
+                }
+
+                return createFreshInstance();
+            };
+
+            let activeInstanceId = await resolveActiveInstanceId();
+            let response = await request(app)
+                .post(`/api/agent-instances/${activeInstanceId}/content`)
+                .set('Authorization', `Bearer ${accessToken}`)
+                .send({
+                    content: {
+                        type: 'chat',
+                        role: 'tool_result',
+                        message: 'La fonction web search est en cours d\'implémentation',
+                        metadata: {
+                            source: 'tool_executor',
+                            retryable: true,
+                        },
+                    },
+                });
+
+            if (response.status === 404) {
+                activeInstanceId = await createFreshInstance();
+                response = await request(app)
+                    .post(`/api/agent-instances/${activeInstanceId}/content`)
+                    .set('Authorization', `Bearer ${accessToken}`)
+                    .send({
+                        content: {
+                            type: 'chat',
+                            role: 'tool_result',
+                            message: 'La fonction web search est en cours d\'implémentation',
+                            metadata: {
+                                source: 'tool_executor',
+                                retryable: true,
+                            },
+                        },
+                    });
+            }
+
+            expect(response.status).toBe(201);
+
+            expect(response.body).toEqual(expect.objectContaining({
+                success: true,
+                contentCount: 1,
+                authority: 'agent_journals',
+            }));
+
+            const persistedJournal = await AgentJournal.findOne({
+                agentInstanceId: activeInstanceId,
+                type: 'chat',
+            }).lean();
+            const persistedInstance = await AgentInstance.findById(activeInstanceId).lean();
+
+            expect(persistedJournal).toEqual(expect.objectContaining({
+                type: 'chat',
+                payload: expect.objectContaining({
+                    role: 'tool_result',
+                    content: 'La fonction web search est en cours d\'implémentation',
+                }),
+            }));
+            expect(persistedInstance?.content || []).toHaveLength(0);
+            expect(persistedInstance?.metrics).toEqual(expect.objectContaining({
+                callCount: 1,
+                totalTokens: 0,
+            }));
         });
 
         // TODO: Étape 4 - Blocage: deuxième POST /from-prototype retourne 404 au lieu de 201

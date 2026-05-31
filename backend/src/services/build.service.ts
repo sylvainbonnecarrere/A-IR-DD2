@@ -2,10 +2,11 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
 import ts from 'typescript';
-import { UserFunction, type IUserFunction } from '../models/UserFunction.model';
 import { UserTool, type IUserTool, type IUserToolVersion } from '../models/UserTool.model';
+import { ToolPreparationPolicyService, type PreparationPolicyErrorCode } from './toolPreparationPolicy.service';
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
 import type { WorkspaceProvisioningResult } from './workspace/types';
+import { buildGlobalToolClauses, buildOwnedToolClause } from '../utils/sharedExampleAccess';
 
 export type BuildPreparationStatus = 'ready' | 'failed';
 
@@ -27,8 +28,22 @@ export interface BuildPreparationResult {
     error?: string;
 }
 
+interface BuildTarget {
+    _id: mongoose.Types.ObjectId | string;
+    name: string;
+    language: 'python' | 'typescript';
+    workflowId?: mongoose.Types.ObjectId | string | null;
+    dependencies?: {
+        python?: string[];
+        npm?: string[];
+    } | null;
+    codePath?: string;
+    codeInline?: string;
+    version: number;
+}
+
 interface BuildContext {
-    fn: IUserFunction;
+    fn: BuildTarget;
     workspace: WorkspaceProvisioningResult;
     sourcePath: string;
     toolKey: string;
@@ -39,7 +54,12 @@ interface BuildStrategy {
     prepare(context: BuildContext): Promise<BuildPreparationResult>;
 }
 
-export class BuildPreparationError extends Error {}
+export class BuildPreparationError extends Error {
+    constructor(message: string, public readonly code: PreparationPolicyErrorCode | 'BUILD_PREPARATION_ERROR' = 'BUILD_PREPARATION_ERROR') {
+        super(message);
+        this.name = 'BuildPreparationError';
+    }
+}
 
 function sanitizeSegment(value: string): string {
     return value.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -170,38 +190,18 @@ class PythonBuildStrategy implements BuildStrategy {
 
 export class BuildService {
     private readonly workspaceManager = createWorkspaceManager();
+    private readonly preparationPolicy = new ToolPreparationPolicyService();
+    private readonly backendPythonRoot = path.resolve(__dirname, '../../python');
 
     async prepareToolVersion(toolId: string, userId: string, versionTag?: string): Promise<BuildPreparationResult> {
         const { tool, version } = await this.loadBuildableTool(toolId, userId, versionTag);
 
-        if (!tool.workflowId) {
-            throw new BuildPreparationError('Only workflow-scoped custom tools can be prepared during J10.');
-        }
-
-        const workspace = await this.workspaceManager.ensureWorkflowWorkspace(userId, tool.workflowId.toString());
-        const toolKey = this.buildVersionedToolKey(tool.name, version.versionTag);
-        const sourcePath = await this.ensureToolVersionSourceMaterialized(tool, version, workspace, toolKey);
-        const sourceCode = await this.loadToolVersionSourceCode(version, sourcePath);
-        const strategy = this.resolveStrategy(tool.runtime);
-        const result = await strategy.prepare({
-            fn: this.mapToolVersionToLegacyFunction(tool, version),
-            workspace,
-            sourcePath,
-            toolKey,
-            sourceCode
+        return this.prepareResolvedToolVersion(tool, version, userId, {
+            buildKey: this.buildVersionedToolKey(tool.name, version.versionTag),
+            reportKey: this.buildVersionedToolKey(tool.name, version.versionTag),
+            includeVersionMetadata: true,
+            persistSourcePath: true
         });
-
-        result.toolId = tool._id.toString();
-        result.toolVersionTag = version.versionTag;
-        result.functionId = tool._id.toString();
-
-        const reportPath = this.resolveBuildReportPath(workspace, toolKey);
-        await fs.mkdir(path.dirname(reportPath), { recursive: true });
-        await fs.writeFile(reportPath, JSON.stringify(result, null, 2), 'utf-8');
-
-        await this.markToolVersionBuilt(tool, version.versionTag);
-
-        return result;
     }
 
     async getToolBuildStatus(toolId: string, userId: string, versionTag?: string): Promise<BuildPreparationResult | null> {
@@ -221,94 +221,103 @@ export class BuildService {
             return null;
         }
 
-        const reportPath = this.resolveBuildReportPath(workspace, this.buildVersionedToolKey(tool.name, version.versionTag));
-        if (!(await pathExists(reportPath))) {
-            return null;
-        }
-
-        const rawReport = await fs.readFile(reportPath, 'utf-8');
-        return JSON.parse(rawReport) as BuildPreparationResult;
+        return this.readBuildReport(workspace, this.buildVersionedToolKey(tool.name, version.versionTag));
     }
 
     async ensureBuildReadyForTool(toolId: string, userId: string, versionTag?: string): Promise<void> {
-        const { tool, version } = await this.loadBuildableTool(toolId, userId, versionTag);
-        const hasDeclaredDependencies = (tool.dependencies?.npm?.length ?? 0) > 0 || (tool.dependencies?.python?.length ?? 0) > 0;
-        if (!hasDeclaredDependencies) {
+        const tool = await this.loadOwnedOrNativeTool(toolId, userId);
+        if (!tool) {
+            throw new BuildPreparationError('Tool not found or access denied.', 'TOOL_NOT_FOUND');
+        }
+
+        const version = this.resolveToolVersion(tool, versionTag);
+        const policy = this.preparationPolicy.evaluateToolExecution(tool);
+        if (policy.requirement === 'none') {
+            return;
+        }
+
+        if (policy.requirement === 'platform_provision') {
+            await this.reconcileNativeProvisionedToolVersion(tool, version.versionTag);
+            const reconciledVersion = this.resolveToolVersion(tool, version.versionTag);
+            if (reconciledVersion.buildStatus !== 'built') {
+                throw new BuildPreparationError(policy.missingPreparationMessage ?? 'Platform provisioning is required before sandbox execution.', policy.errorCode);
+            }
             return;
         }
 
         const buildStatus = await this.getToolBuildStatus(toolId, userId, version.versionTag);
         if (!buildStatus || buildStatus.status !== 'ready') {
-            throw new BuildPreparationError('This tool version declares dependencies and must be prepared via the build workflow before sandbox execution.');
+            throw new BuildPreparationError(policy.missingPreparationMessage ?? 'This tool version must be prepared before sandbox execution.', policy.errorCode);
         }
     }
 
     async prepareFunction(functionId: string, userId: string): Promise<BuildPreparationResult> {
-        const fn = await this.loadBuildableFunction(functionId, userId);
+        const { tool, version } = await this.loadBuildableFunction(functionId, userId);
 
-        if (!fn.workflowId) {
-            throw new BuildPreparationError('Only workflow-scoped custom functions can be prepared during J5.');
-        }
-
-        const workspace = await this.workspaceManager.ensureWorkflowWorkspace(userId, fn.workflowId.toString());
-        const toolKey = sanitizeSegment(fn.name);
-        const sourcePath = await this.ensureSourceMaterialized(fn, workspace, toolKey, userId);
-        const sourceCode = await this.loadSourceCode(fn, sourcePath);
-        const strategy = this.resolveStrategy(fn.language);
-        const result = await strategy.prepare({ fn, workspace, sourcePath, toolKey, sourceCode });
-
-        const reportPath = this.resolveBuildReportPath(workspace, toolKey);
-        await fs.mkdir(path.dirname(reportPath), { recursive: true });
-        await fs.writeFile(reportPath, JSON.stringify(result, null, 2), 'utf-8');
-
-        await this.workspaceManager.ensureWorkflowWorkspace(userId, fn.workflowId.toString());
-
-        return result;
+        return this.prepareResolvedToolVersion(tool, version, userId, {
+            buildKey: sanitizeSegment(tool.name),
+            reportKey: sanitizeSegment(tool.name),
+            includeVersionMetadata: false,
+            persistSourcePath: true
+        });
     }
 
     async getBuildStatus(functionId: string, userId: string): Promise<BuildPreparationResult | null> {
-        const fn = await this.loadBuildableFunction(functionId, userId);
-        if (!fn.workflowId) {
+        const tool = await this.loadOwnedOrNativeTool(functionId, userId);
+        if (!tool || !tool.workflowId) {
             return null;
         }
 
         const workspace = await this.workspaceManager.getWorkspace({
             ownerUserId: userId,
             scopeType: 'workflow',
-            scopeId: fn.workflowId.toString()
+            scopeId: tool.workflowId.toString()
         });
 
         if (!workspace) {
             return null;
         }
 
-        const reportPath = this.resolveBuildReportPath(workspace, sanitizeSegment(fn.name));
-        if (!(await pathExists(reportPath))) {
-            return null;
+        const legacyReport = await this.readBuildReport(workspace, sanitizeSegment(tool.name));
+        if (legacyReport) {
+            return legacyReport;
         }
 
-        const rawReport = await fs.readFile(reportPath, 'utf-8');
-        return JSON.parse(rawReport) as BuildPreparationResult;
+        return this.readBuildReport(workspace, this.buildVersionedToolKey(tool.name, tool.currentVersion.versionTag));
     }
 
     async ensureBuildReadyForRun(functionId: string, userId: string): Promise<void> {
-        const fn = await this.loadOwnedOrNativeFunction(functionId, userId);
-        if (!fn || fn.origin !== 'custom' || !fn.workflowId) {
+        const tool = await this.loadOwnedOrNativeTool(functionId, userId);
+        if (!tool) {
             return;
         }
 
-        const hasDeclaredDependencies = (fn.dependencies?.npm?.length ?? 0) > 0 || (fn.dependencies?.python?.length ?? 0) > 0;
-        if (!hasDeclaredDependencies) {
+        const policy = this.preparationPolicy.evaluateToolExecution(tool);
+        if (policy.requirement === 'none') {
+            return;
+        }
+
+        if (policy.requirement === 'platform_provision') {
+            await this.reconcileNativeProvisionedToolVersion(tool, tool.currentVersion.versionTag);
+            if (this.resolveToolVersion(tool).buildStatus !== 'built') {
+                throw new BuildPreparationError(
+                    'This native function declares dependencies and requires platform provisioning before sandbox execution.',
+                    policy.errorCode
+                );
+            }
             return;
         }
 
         const buildStatus = await this.getBuildStatus(functionId, userId);
         if (!buildStatus || buildStatus.status !== 'ready') {
-            throw new BuildPreparationError('This function declares dependencies and must be prepared via the build workflow before sandbox execution.');
+            throw new BuildPreparationError(
+                'This function declares dependencies and must be prepared via the author build workflow before sandbox execution.',
+                policy.errorCode
+            );
         }
     }
 
-    private resolveStrategy(language: IUserFunction['language']): BuildStrategy {
+    private resolveStrategy(language: BuildTarget['language']): BuildStrategy {
         if (language === 'typescript') {
             return new TypescriptBuildStrategy();
         }
@@ -319,11 +328,12 @@ export class BuildService {
     private async loadBuildableTool(toolId: string, userId: string, versionTag?: string): Promise<{ tool: IUserTool; version: IUserToolVersion }> {
         const tool = await this.loadOwnedOrNativeTool(toolId, userId);
         if (!tool) {
-            throw new BuildPreparationError('Tool not found or access denied.');
+            throw new BuildPreparationError('Tool not found or access denied.', 'TOOL_NOT_FOUND');
         }
 
-        if (tool.scopeType !== 'user' || tool.isReadonly) {
-            throw new BuildPreparationError('Only custom editable tools can be prepared by the build workflow.');
+        const policy = this.preparationPolicy.evaluateToolAuthorBuild(tool);
+        if (!policy.allowed) {
+            throw new BuildPreparationError(policy.reason ?? 'Tool cannot be prepared by the author build workflow.', policy.errorCode);
         }
 
         return {
@@ -332,31 +342,74 @@ export class BuildService {
         };
     }
 
-    private async loadBuildableFunction(functionId: string, userId: string): Promise<IUserFunction> {
-        const fn = await this.loadOwnedOrNativeFunction(functionId, userId);
-        if (!fn) {
-            throw new BuildPreparationError('Function not found or access denied.');
+    private async loadBuildableFunction(functionId: string, userId: string): Promise<{ tool: IUserTool; version: IUserToolVersion }> {
+        const tool = await this.loadOwnedOrNativeTool(functionId, userId);
+        if (!tool) {
+            throw new BuildPreparationError('Function not found or access denied.', 'FUNCTION_NOT_FOUND');
         }
 
-        if (fn.origin !== 'custom' || fn.isReadonly) {
-            throw new BuildPreparationError('Only custom editable functions can be prepared by the build workflow.');
+        const policy = this.preparationPolicy.evaluateToolAuthorBuild(tool);
+        if (!policy.allowed) {
+            throw new BuildPreparationError(
+                this.toLegacyFunctionAuthorBuildMessage(policy.reason),
+                policy.errorCode
+            );
         }
 
-        return fn;
+        return {
+            tool,
+            version: tool.currentVersion
+        };
     }
 
-    private async loadOwnedOrNativeFunction(functionId: string, userId: string): Promise<IUserFunction | null> {
-        if (!mongoose.Types.ObjectId.isValid(functionId)) {
-            return null;
+    private async prepareResolvedToolVersion(
+        tool: IUserTool,
+        version: IUserToolVersion,
+        userId: string,
+        options: {
+            buildKey: string;
+            reportKey: string;
+            includeVersionMetadata: boolean;
+            persistSourcePath: boolean;
+        }
+    ): Promise<BuildPreparationResult> {
+        if (!tool.workflowId) {
+            throw new BuildPreparationError('Only workflow-scoped custom tools can be prepared during J10.');
         }
 
-        return UserFunction.findOne({
-            _id: functionId,
-            $or: [
-                { userId: null },
-                { userId: new mongoose.Types.ObjectId(userId) }
-            ]
-        }).exec();
+        const workspace = await this.workspaceManager.ensureWorkflowWorkspace(userId, tool.workflowId.toString());
+        const sourcePath = await this.ensureToolVersionSourceMaterialized(
+            tool,
+            version,
+            workspace,
+            options.buildKey,
+            options.persistSourcePath
+        );
+        const materializedVersion = this.resolveToolVersion(tool, version.versionTag);
+        const sourceCode = await this.loadToolVersionSourceCode(materializedVersion, sourcePath);
+        const strategy = this.resolveStrategy(tool.runtime);
+        const result = await strategy.prepare({
+            fn: this.mapToolVersionToBuildTarget(tool, materializedVersion),
+            workspace,
+            sourcePath,
+            toolKey: options.buildKey,
+            sourceCode
+        });
+
+        if (options.includeVersionMetadata) {
+            result.toolId = tool._id.toString();
+            result.toolVersionTag = materializedVersion.versionTag;
+        }
+
+        result.functionId = tool._id.toString();
+
+        const reportPath = this.resolveBuildReportPath(workspace, options.reportKey);
+        await fs.mkdir(path.dirname(reportPath), { recursive: true });
+        await fs.writeFile(reportPath, JSON.stringify(result, null, 2), 'utf-8');
+
+        await this.markToolVersionBuilt(tool, materializedVersion.versionTag);
+
+        return result;
     }
 
     private async loadOwnedOrNativeTool(toolId: string, userId: string): Promise<IUserTool | null> {
@@ -367,8 +420,8 @@ export class BuildService {
         return UserTool.findOne({
             _id: toolId,
             $or: [
-                { ownerUserId: null },
-                { ownerUserId: new mongoose.Types.ObjectId(userId) }
+                ...buildGlobalToolClauses(),
+                buildOwnedToolClause(userId)
             ]
         }).exec();
     }
@@ -386,69 +439,29 @@ export class BuildService {
         return matchedVersion;
     }
 
-    private mapToolVersionToLegacyFunction(tool: IUserTool, version: IUserToolVersion): IUserFunction {
+    private mapToolVersionToBuildTarget(tool: IUserTool, version: IUserToolVersion): BuildTarget {
         return {
             _id: tool._id,
             name: tool.name,
-            description: tool.description,
             language: tool.runtime,
-            origin: tool.scopeType === 'native' ? 'native' : 'custom',
-            tags: tool.tags,
-            userId: tool.ownerUserId,
             workflowId: tool.workflowId,
-            inputSchema: tool.inputSchema,
-            outputSchema: tool.outputSchema,
             codePath: version.sourcePath ?? undefined,
             codeInline: version.sourceInline ?? undefined,
             dependencies: tool.dependencies,
-            isEnabled: tool.isEnabled,
-            isReadonly: tool.isReadonly,
             version: this.parseVersionNumber(version.versionTag),
-            createdAt: tool.createdAt,
-            updatedAt: tool.updatedAt,
-        } as IUserFunction;
+        };
     }
 
     private buildVersionedToolKey(name: string, versionTag: string): string {
         return `${sanitizeSegment(name)}_${sanitizeSegment(versionTag || 'current')}`;
     }
 
-    private async ensureSourceMaterialized(
-        fn: IUserFunction,
-        workspace: WorkspaceProvisioningResult,
-        toolKey: string,
-        userId: string
-    ): Promise<string> {
-        const extension = fn.language === 'python' ? 'py' : 'ts';
-        const relativePath = fn.codePath && !path.isAbsolute(fn.codePath)
-            ? fn.codePath
-            : path.join('tools', `${toolKey}.${extension}`);
-        const sourcePath = path.resolve(workspace.runtimeRoots.sourceRoot, relativePath);
-
-        await fs.mkdir(path.dirname(sourcePath), { recursive: true });
-
-        if (typeof fn.codeInline === 'string') {
-            await fs.writeFile(sourcePath, fn.codeInline, 'utf-8');
-        } else if (!(await pathExists(sourcePath))) {
-            throw new BuildPreparationError('No inline code or existing source file available to prepare this function.');
-        }
-
-        if (fn.codePath !== relativePath) {
-            await UserFunction.updateOne(
-                { _id: fn._id, userId: new mongoose.Types.ObjectId(userId) },
-                { $set: { codePath: relativePath } }
-            );
-            fn.codePath = relativePath;
-        }
-
-        return sourcePath;
-    }
-
     private async ensureToolVersionSourceMaterialized(
         tool: IUserTool,
         version: IUserToolVersion,
         workspace: WorkspaceProvisioningResult,
-        toolKey: string
+        toolKey: string,
+        persistSourcePath: boolean
     ): Promise<string> {
         const extension = tool.runtime === 'python' ? 'py' : 'ts';
         const relativePath = version.sourcePath && !path.isAbsolute(version.sourcePath)
@@ -464,19 +477,11 @@ export class BuildService {
             throw new BuildPreparationError('No inline code or existing source file available to prepare this tool version.');
         }
 
+        if (persistSourcePath) {
+            this.assignToolVersionSourcePath(tool, version.versionTag, relativePath);
+        }
+
         return sourcePath;
-    }
-
-    private async loadSourceCode(fn: IUserFunction, sourcePath: string): Promise<string> {
-        if (typeof fn.codeInline === 'string') {
-            return fn.codeInline;
-        }
-
-        if (!(await pathExists(sourcePath))) {
-            throw new BuildPreparationError('Source file missing from workspace.');
-        }
-
-        return fs.readFile(sourcePath, 'utf-8');
     }
 
     private async loadToolVersionSourceCode(version: IUserToolVersion, sourcePath: string): Promise<string> {
@@ -495,6 +500,69 @@ export class BuildService {
         return path.join(workspace.runtimeRoots.buildRoot, 'tools', toolKey, 'build-report.json');
     }
 
+    private async readBuildReport(workspace: WorkspaceProvisioningResult, toolKey: string): Promise<BuildPreparationResult | null> {
+        const reportPath = this.resolveBuildReportPath(workspace, toolKey);
+        if (!(await pathExists(reportPath))) {
+            return null;
+        }
+
+        const rawReport = await fs.readFile(reportPath, 'utf-8');
+        return JSON.parse(rawReport) as BuildPreparationResult;
+    }
+
+    private resolveNativeProvisionReportPath(toolName: string, versionTag: string): string {
+        return path.join(
+            this.backendPythonRoot,
+            '.provisioned',
+            'native-tools',
+            sanitizeSegment(toolName),
+            sanitizeSegment(versionTag || 'current'),
+            'provision-report.json'
+        );
+    }
+
+    private async reconcileNativeProvisionedToolVersion(tool: IUserTool, versionTag: string): Promise<void> {
+        const resolvedVersion = this.resolveToolVersion(tool, versionTag);
+        if (resolvedVersion.buildStatus === 'built') {
+            return;
+        }
+
+        const reportPath = this.resolveNativeProvisionReportPath(tool.name, versionTag);
+        if (!(await pathExists(reportPath))) {
+            return;
+        }
+
+        try {
+            const rawReport = await fs.readFile(reportPath, 'utf-8');
+            const report = JSON.parse(rawReport) as {
+                status?: string;
+                toolVersionTag?: string;
+            };
+
+            if (report.status !== 'ready') {
+                return;
+            }
+
+            tool.versions = tool.versions.map((candidate) => (
+                candidate.versionTag === versionTag
+                    ? { ...candidate, buildStatus: 'built', validationStatus: 'valid' }
+                    : candidate
+            ));
+
+            if (tool.currentVersion.versionTag === versionTag) {
+                tool.currentVersion = {
+                    ...tool.currentVersion,
+                    buildStatus: 'built',
+                    validationStatus: 'valid'
+                };
+            }
+
+            await tool.save();
+        } catch {
+            return;
+        }
+    }
+
     private async markToolVersionBuilt(tool: IUserTool, versionTag: string): Promise<void> {
         tool.versions = tool.versions.map((candidate) => (
             candidate.versionTag === versionTag
@@ -510,6 +578,37 @@ export class BuildService {
         }
 
         await tool.save();
+    }
+
+    private assignToolVersionSourcePath(tool: IUserTool, versionTag: string, relativePath: string): void {
+        tool.versions = tool.versions.map((candidate) => (
+            candidate.versionTag === versionTag
+                ? { ...candidate, sourcePath: relativePath }
+                : candidate
+        ));
+
+        if (tool.currentVersion.versionTag === versionTag) {
+            tool.currentVersion = {
+                ...tool.currentVersion,
+                sourcePath: relativePath
+            };
+        }
+    }
+
+    private toLegacyFunctionAuthorBuildMessage(reason?: string): string {
+        if (!reason) {
+            return 'Function cannot be prepared by the author build workflow.';
+        }
+
+        if (reason.includes('Native readonly tools')) {
+            return 'Native readonly functions cannot be prepared by the author build workflow. They require platform provisioning instead.';
+        }
+
+        if (reason.includes('workflow-scoped custom tools')) {
+            return 'Only workflow-scoped custom functions can be prepared by the author build workflow.';
+        }
+
+        return reason.replace(/tool/gi, 'function');
     }
 
     private parseVersionNumber(versionTag?: string | null): number {

@@ -9,8 +9,42 @@
  * - Garantit toujours une config valide (jamais undefined)
  */
 
-import { HistoryConfig, LLMProvider } from '../types';
+import { HistoryConfig, HistoryLimitEnabledMap, HistoryLimitValues, LLMProvider } from '../types';
 import { LLM_MODELS } from '../llmModels';
+
+const HISTORY_LIMIT_KEYS: Array<keyof HistoryLimitValues> = ['char', 'word', 'token', 'sentence', 'message'];
+
+const DEFAULT_HISTORY_LIMITS: HistoryLimitValues = {
+  char: 5000,
+  word: 1000,
+  token: 800,
+  sentence: 30,
+  message: 6,
+};
+
+const DEFAULT_ENABLED_HISTORY_LIMITS: HistoryLimitEnabledMap = {
+  char: false,
+  word: false,
+  token: false,
+  sentence: true,
+  message: true,
+};
+
+const hasCompleteLimitValues = (limits: unknown): limits is HistoryLimitValues => {
+  if (!limits || typeof limits !== 'object') {
+    return false;
+  }
+
+  return HISTORY_LIMIT_KEYS.every((key) => typeof (limits as Record<string, unknown>)[key] === 'number');
+};
+
+const hasCompleteEnabledLimits = (enabledLimits: unknown): enabledLimits is HistoryLimitEnabledMap => {
+  if (!enabledLimits || typeof enabledLimits !== 'object') {
+    return false;
+  }
+
+  return HISTORY_LIMIT_KEYS.every((key) => typeof (enabledLimits as Record<string, unknown>)[key] === 'boolean');
+};
 
 /**
  * DEFAULT_HISTORY_CONFIG: Configuration de base complète pour l'historique
@@ -22,13 +56,8 @@ export const createDefaultHistoryConfig = (): HistoryConfig => ({
   model: 'gemini-2.0-flash', // Default model
   role: 'Archiviste Concis', // Archiviste role (neutral, factual summarization)
   systemPrompt: 'Résume la conversation suivante de manière factuelle et concise, en conservant les points clés et les décisions prises. Le résumé servira de mémoire pour un autre agent IA. Sois bref mais complet (max 500 mots).',
-  limits: {
-    char: 5000, // Limit de caractères avant déclenchement synthèse
-    word: 1000, // Limit de mots
-    token: 800, // Limit de tokens
-    sentence: 50, // Limit de phrases
-    message: 20 // Limit de messages avant synthèse requise
-  }
+  limits: { ...DEFAULT_HISTORY_LIMITS },
+  enabledLimits: { ...DEFAULT_ENABLED_HISTORY_LIMITS }
 });
 
 /**
@@ -89,7 +118,15 @@ export const initializeHistoryConfig = (
       token: existingConfig.limits?.token ?? defaults.limits.token,
       sentence: existingConfig.limits?.sentence ?? defaults.limits.sentence,
       message: existingConfig.limits?.message ?? defaults.limits.message
-    }
+    },
+
+    enabledLimits: {
+      char: existingConfig.enabledLimits?.char ?? defaults.enabledLimits.char,
+      word: existingConfig.enabledLimits?.word ?? defaults.enabledLimits.word,
+      token: existingConfig.enabledLimits?.token ?? defaults.enabledLimits.token,
+      sentence: existingConfig.enabledLimits?.sentence ?? defaults.enabledLimits.sentence,
+      message: existingConfig.enabledLimits?.message ?? defaults.enabledLimits.message,
+    },
   };
 };
 
@@ -109,8 +146,8 @@ export const validateAndRepairHistoryConfig = (
   const isPartial = 
     !config.llmProvider ||
     !config.model ||
-    !config.limits ||
-    typeof config.limits !== 'object';
+    !hasCompleteLimitValues(config.limits) ||
+    !hasCompleteEnabledLimits(config.enabledLimits);
 
   if (isPartial) {
     // Merge with defaults to restore completeness
@@ -157,6 +194,13 @@ export const prepareHistoryConfigForSave = (
       token: config.limits?.token ?? defaults.limits.token,
       sentence: config.limits?.sentence ?? defaults.limits.sentence,
       message: config.limits?.message ?? defaults.limits.message
-    }
+    },
+    enabledLimits: {
+      char: config.enabledLimits?.char ?? defaults.enabledLimits.char,
+      word: config.enabledLimits?.word ?? defaults.enabledLimits.word,
+      token: config.enabledLimits?.token ?? defaults.enabledLimits.token,
+      sentence: config.enabledLimits?.sentence ?? defaults.enabledLimits.sentence,
+      message: config.enabledLimits?.message ?? defaults.enabledLimits.message,
+    },
   };
 };

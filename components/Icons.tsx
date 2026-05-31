@@ -158,6 +158,15 @@ export const ErrorIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
+export const HistorySynthesisIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.13 4.14 2.84 5.21.77.48 1.16 1.03 1.16 1.79V17h4v-.99c0-.76.39-1.31 1.16-1.79A6 6 0 0 0 18 9a6 6 0 0 0-6-6Z"></path>
+        <path d="M9 21h6"></path>
+        <path d="M10 17h4"></path>
+        <path d="M9.5 8.5c.6-.93 1.46-1.5 2.5-1.5 1.93 0 3.5 1.57 3.5 3.5"></path>
+    </svg>
+);
+
 
 export const FileIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>

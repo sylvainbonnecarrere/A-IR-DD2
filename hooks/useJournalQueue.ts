@@ -23,7 +23,7 @@ export interface JournalQueueItem {
   id: string;
   workflowId: string;
   instanceId: string;
-  type: 'chat' | 'error' | 'media';
+  type: 'chat' | 'error' | 'media' | 'tool_invocation';
   payload: any;
   retryCount: number;
   maxRetries: number;
@@ -70,7 +70,7 @@ export const useJournalQueue = () => {
   const enqueueEntry = useCallback((
     workflowId: string,
     instanceId: string,
-    type: 'chat' | 'error' | 'media',
+    type: 'chat' | 'error' | 'media' | 'tool_invocation',
     payload: any,
     forceImmediate: boolean = false // ⭐ NEW: Force l'envoi même en mode manuel (pour le bouton Save)
   ) => {

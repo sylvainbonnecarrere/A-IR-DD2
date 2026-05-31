@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { UserTool, type IUserTool } from '../models/UserTool.model';
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
 import type { WorkspaceProvisioningResult } from './workspace/types';
+import { buildGlobalToolClauses, buildOwnedToolClause } from '../utils/sharedExampleAccess';
 
 interface ListToolsFilter {
     workflowId?: string;
@@ -44,6 +45,16 @@ export interface ToolTransitionReadModel {
     compatibilityAliases: {
         functionId: string;
     };
+    readinessStatus?: {
+        requirement: 'none' | 'author_build' | 'platform_provision';
+        state: 'ready' | 'not_ready' | 'waiting_for_provisioning' | 'waiting_for_build';
+        prepared: boolean;
+        runnable: boolean;
+        dependencyReadiness: 'satisfied' | 'missing' | 'not_required';
+        runtimeReady: boolean;
+        summary: string;
+        actionLabel: string;
+    };
     workspaceContext?: ToolWorkspaceContext;
     createdAt: Date;
     updatedAt: Date;
@@ -56,8 +67,8 @@ export class UserToolQueryService {
         const userObjectId = new mongoose.Types.ObjectId(ownerUserId);
         const query: Record<string, unknown> = {
             $or: [
-                { ownerUserId: null, scopeType: 'native' },
-                { ownerUserId: userObjectId, scopeType: 'user' }
+                ...buildGlobalToolClauses(),
+                buildOwnedToolClause(userObjectId)
             ]
         };
 
@@ -74,10 +85,11 @@ export class UserToolQueryService {
         }
 
         if (filters.workflowId) {
+            const workflowObjectId = new mongoose.Types.ObjectId(filters.workflowId);
             query.$or = [
-                { ownerUserId: null, scopeType: 'native' },
-                { ownerUserId: userObjectId, scopeType: 'user', workflowId: new mongoose.Types.ObjectId(filters.workflowId) },
-                { ownerUserId: userObjectId, scopeType: 'user', workflowId: null }
+                ...buildGlobalToolClauses(),
+                { ...buildOwnedToolClause(userObjectId), workflowId: workflowObjectId },
+                { ...buildOwnedToolClause(userObjectId), workflowId: null }
             ];
         }
 
@@ -97,8 +109,8 @@ export class UserToolQueryService {
         const tool = await UserTool.findOne({
             _id: new mongoose.Types.ObjectId(toolId),
             $or: [
-                { ownerUserId: null, scopeType: 'native' },
-                { ownerUserId: userObjectId, scopeType: 'user' }
+                ...buildGlobalToolClauses(),
+                buildOwnedToolClause(userObjectId)
             ]
         }).lean<IUserTool | null>();
 
@@ -120,8 +132,8 @@ export class UserToolQueryService {
         const tools = await UserTool.find({
             _id: { $in: validIds.map((toolId) => new mongoose.Types.ObjectId(toolId)) },
             $or: [
-                { ownerUserId: null, scopeType: 'native' },
-                { ownerUserId: userObjectId, scopeType: 'user' }
+                ...buildGlobalToolClauses(),
+                buildOwnedToolClause(userObjectId)
             ]
         }).lean<IUserTool[]>();
 

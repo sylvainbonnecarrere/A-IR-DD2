@@ -2,13 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { WebSocketManager } from './websocket/WebSocketManager';
-import { spawn } from 'child_process';
-import path from 'path';
 import helmet from 'helmet';
 import mongoSanitize from 'express-mongo-sanitize';
 import passport from './middleware/auth.middleware';
 import { connectDatabase } from './config/database';
 import config, { validateConfig } from './config/environment';
+import { LMSTUDIO_CONFIG } from './config/lmstudio.config';
 import lmstudioRoutes from './routes/lmstudio.routes';
 import localLLMRoutes from './routes/local-llm.routes';
 import authRoutes from './routes/auth.routes';
@@ -17,6 +16,7 @@ import agentPrototypesRoutes from './routes/agent-prototypes.routes';
 import agentTemplatesRoutes from './routes/agent-templates.routes';
 import agentInstancesRoutes from './routes/agent-instances.routes';
 import llmConfigsRoutes from './routes/llm-configs.routes';
+import cloudConnectionProfilesRoutes from './routes/cloud-connection-profiles.routes';
 import localLLMProfilesRoutes from './routes/local-llm-profiles.routes';
 import llmProxyRoutes from './routes/llm-proxy.routes';
 import userSettingsRoutes from './routes/user-settings.routes';
@@ -25,7 +25,6 @@ import workspacesTransitionRoutes from './routes/workspaces.routes';
 import toolsRoutes from './routes/tools.routes';
 import runsRoutes from './routes/runs.routes';
 import mediaRoutes from './routes/media.routes';
-import functionsRoutes from './routes/functions.routes';
 import sandboxRoutes from './routes/sandbox.routes';
 import { initializeDatabase } from './services/databaseInit';
 
@@ -110,6 +109,7 @@ app.use('/api/agent-templates', agentTemplatesRoutes);
 
 // LLM routes (Jalon 3 - Phase 2)
 app.use('/api/llm-configs', llmConfigsRoutes);
+app.use('/api/cloud-connection-profiles', cloudConnectionProfilesRoutes);
 app.use('/api/local-llm-profiles', localLLMProfilesRoutes);
 app.use('/api/llm', llmProxyRoutes);
 
@@ -129,70 +129,29 @@ app.use('/api/runs', runsRoutes);
 app.use('/api/media', mediaRoutes);
 
 // ⭐ Tools V2 — Bibliothèque de fonctions personnalisées (Phil Robot)
-app.use('/api/functions', functionsRoutes);
 app.use('/api/sandbox', sandboxRoutes);
 
 // Routes proxy LMStudio (legacy)
 app.use('/api/lmstudio', lmstudioRoutes);
 
-// Route pour exécuter les outils Python
-app.post('/api/execute-python-tool', async (req, res) => {
-  try {
-    const { toolName, args } = req.body;
-
-    if (!toolName || !args) {
-      return res.status(400).json({ error: 'toolName et args requis' });
-    }
-
-    const pythonPath = path.join(__dirname, '../../utils/pythonTools', `${toolName}.py`);
-    const argsString = JSON.stringify(args);
-
-    const pythonProcess = spawn('python3', [pythonPath, argsString]);
-
-    let stdout = '';
-    let stderr = '';
-
-    pythonProcess.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    pythonProcess.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    pythonProcess.on('close', (code) => {
-      if (code !== 0) {
-        return res.status(500).json({
-          error: 'Erreur d\'exécution Python',
-          stderr: stderr
-        });
-      }
-
-      try {
-        const result = JSON.parse(stdout);
-        res.json(result);
-      } catch (parseError) {
-        res.status(500).json({
-          error: 'Erreur de parsing JSON',
-          output: stdout
-        });
-      }
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      error: 'Erreur serveur',
-      message: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
-  }
-});
-
 // Créer le serveur HTTP
 const httpServer = createServer(app);
+const lmStudioRequestTimeoutMs = LMSTUDIO_CONFIG.STREAM_FIRST_BYTE_TIMEOUT_MS + 10_000;
 
-// Initialiser WebSocket
-const wsManager = new WebSocketManager(httpServer);
-void wsManager;
+// Align HTTP server timeouts with local LLM long-running streaming paths.
+httpServer.headersTimeout = Math.max(httpServer.headersTimeout, lmStudioRequestTimeoutMs + 1_000);
+httpServer.requestTimeout = Math.max(httpServer.requestTimeout, lmStudioRequestTimeoutMs);
+httpServer.keepAliveTimeout = Math.max(httpServer.keepAliveTimeout, 65_000);
+
+let wsManager: WebSocketManager | null = null;
+
+function ensureWebSocketManager(): WebSocketManager {
+  if (!wsManager) {
+    wsManager = new WebSocketManager(httpServer);
+  }
+
+  return wsManager;
+}
 
 let serverStarted = false;
 
@@ -203,6 +162,8 @@ async function startServer() {
   }
 
   try {
+    ensureWebSocketManager();
+
     // Tentative connexion MongoDB (non-bloquante pour Jalon 1)
     try {
       await connectDatabase();
@@ -251,6 +212,11 @@ async function startServer() {
 async function stopServer() {
   if (!serverStarted) {
     return;
+  }
+
+  if (wsManager) {
+    await wsManager.close();
+    wsManager = null;
   }
 
   await new Promise<void>((resolve, reject) => {

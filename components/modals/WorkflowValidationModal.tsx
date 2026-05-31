@@ -14,7 +14,7 @@
  */
 
 import React, { useState } from 'react';
-import { Agent, LLMConfig, PersistenceConfig, defaultPersistenceConfig } from '../../types';
+import { Agent, LLMCapability, LLMConfig, PersistenceConfig, defaultPersistenceConfig, normalizePersistenceConfig } from '../../types';
 import { Button } from '../UI';
 import { CloseIcon } from '../Icons';
 import { AgentPersistenceForm } from './AgentPersistenceForm';
@@ -91,9 +91,9 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
   // ⭐ Persistence config: hérite du prototype si disponible
   const [persistenceConfig, setPersistenceConfig] = useState<PersistenceConfig>(() => {
     if (agent?.persistenceConfig) {
-      return { ...agent.persistenceConfig };
+      return normalizePersistenceConfig(agent.persistenceConfig);
     }
-    return { ...defaultPersistenceConfig };
+    return normalizePersistenceConfig(defaultPersistenceConfig);
   });
 
   // Reset state when agent changes
@@ -103,8 +103,8 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
       setActiveTab('general');
       setPersistenceConfig(
         agent.persistenceConfig 
-          ? { ...agent.persistenceConfig }
-          : { ...defaultPersistenceConfig }
+          ? normalizePersistenceConfig(agent.persistenceConfig)
+          : normalizePersistenceConfig(defaultPersistenceConfig)
       );
     }
   }, [agent]);
@@ -124,7 +124,7 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
 
   const handleConfirm = () => {
     const finalName = instanceName.trim() || agent.name;
-    onConfirm(finalName, persistenceConfig);
+    onConfirm(finalName, normalizePersistenceConfig(persistenceConfig));
     setInstanceName('');
     setActiveTab('general');
   };
@@ -170,7 +170,7 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
 
       {/* Agent Info */}
       <div className="bg-gray-700 p-3 rounded-lg mb-4">
-        <p className="text-gray-300 text-sm">{agent.role || agent.description || 'Pas de description'}</p>
+        <p className="text-gray-300 text-sm">{agent.role || agent.systemPrompt || 'Pas de description'}</p>
       </div>
 
       {/* Validation Checks */}
@@ -231,7 +231,7 @@ export const WorkflowValidationModal: React.FC<WorkflowValidationModalProps> = (
               }
             </p>
             {/* DEBUG: Show hint if no tools configured but capabilities suggest function calling */}
-            {!hasTools && agent.capabilities?.includes('FunctionCalling') && (
+            {!hasTools && agent.capabilities?.includes(LLMCapability.FunctionCalling) && (
               <p className="text-xs text-yellow-300 mt-1">💡 Ajoutez des outils dans l'onglet 'Fonctions' du template pour utiliser les appels de fonction</p>
             )}
           </div>

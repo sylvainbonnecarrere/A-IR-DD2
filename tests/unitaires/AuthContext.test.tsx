@@ -13,6 +13,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { act } from 'react';
 import { AuthProvider, useAuth } from '../../contexts/AuthContext';
 import React from 'react';
+import apiClient from '../../utils/apiClient';
+import * as llmConfigService from '../../services/llmConfigService';
+import * as localLLMProfileService from '../../services/localLLMProfileService';
 
 const TEST_ONLY_PASSWORD = 'test-only-password-123';
 
@@ -59,13 +62,15 @@ global.fetch = jest.fn();
 
 // Test component to access context
 const TestComponent = () => {
-    const { user, isAuthenticated, isLoading, sessionStatus, login, logout } = useAuth();
+    const { user, isAuthenticated, isLoading, sessionStatus, login, logout, runtimeLLMConfigs, localLLMProfiles } = useAuth();
     return (
         <div>
             <div data-testid="loading">{isLoading ? 'loading' : 'ready'}</div>
             <div data-testid="session-status">{sessionStatus}</div>
             <div data-testid="auth-status">{isAuthenticated ? 'authenticated' : 'guest'}</div>
             <div data-testid="user-email">{user?.email || 'no-user'}</div>
+            <div data-testid="runtime-config-count">{runtimeLLMConfigs.length}</div>
+            <div data-testid="local-profile-count">{localLLMProfiles.length}</div>
             <button onClick={() => login('test@example.com', TEST_ONLY_PASSWORD)}>
                 Login
             </button>
@@ -110,9 +115,12 @@ describe('AuthContext', () => {
                 </AuthProvider>
             );
 
+            expect(screen.getByTestId('session-status')).toHaveTextContent('restoring-session');
+
             await waitFor(() => {
                 expect(screen.getByTestId('auth-status')).toHaveTextContent('authenticated');
                 expect(screen.getByTestId('user-email')).toHaveTextContent('test@example.com');
+                expect(screen.getByTestId('session-status')).toHaveTextContent('ready');
             });
         });
     });
@@ -264,6 +272,28 @@ describe('AuthContext', () => {
             });
 
             getItemSpy.mockRestore();
+        });
+
+        test('should keep guest mode operational when guest runtime bootstrap fails', async () => {
+            jest.spyOn(llmConfigService, 'getAllLLMConfigs').mockRejectedValueOnce(new Error('Guest config load failed'));
+            jest.spyOn(localLLMProfileService, 'getAllProfiles').mockRejectedValueOnce(new Error('Guest profile load failed'));
+            const protectedApiSpy = jest.spyOn(apiClient, 'post');
+            const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+            render(
+                <AuthProvider>
+                    <TestComponent />
+                </AuthProvider>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('auth-status')).toHaveTextContent('guest');
+                expect(screen.getByTestId('session-status')).toHaveTextContent('ready');
+                expect(screen.getByTestId('local-profile-count')).toHaveTextContent('0');
+            });
+
+            expect(protectedApiSpy).not.toHaveBeenCalled();
+            consoleErrorSpy.mockRestore();
         });
     });
 });

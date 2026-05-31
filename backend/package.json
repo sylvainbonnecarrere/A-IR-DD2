@@ -3,36 +3,47 @@
   "version": "1.0.0",
   "description": "Backend service for executing Python tools for the LLM Agent Workflow Orchestrator.",
   "main": "dist/server.js",
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
   "scripts": {
     "start": "node dist/server.js",
     "build": "tsc",
-    "dev": "ts-node-dev --respawn --transpile-only -r  dotenv/config src/server.ts",
+    "dev": "node --watch --env-file=.env --import tsx src/server.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "runtime:setup": "node scripts/runtime/setup-runtime.cjs",
     "runtime:check": "node scripts/runtime/check-runtime.cjs",
+    "runtime:update-digests": "node scripts/runtime/sync-runtime-base-digests.cjs",
     "runtime:rebuild": "node scripts/runtime/rebuild-runtime.cjs",
-    "migrate:up": "ts-node -r dotenv/config src/migrations/004_tools_v2_function_registry.ts up",
-    "migrate:down": "ts-node -r dotenv/config src/migrations/004_tools_v2_function_registry.ts down",
-    "seed:functions": "ts-node -r dotenv/config src/seeds/nativeFunctions.seed.ts",
-    "setup:tools-v2": "npm run migrate:up && npm run seed:functions && echo 'Tools V2 setup terminé'"
+    "runtime:verify:provisioning": "node scripts/runtime/verify-provisioning-runtime.cjs",
+    "runtime:ci": "npm run runtime:rebuild && npm run runtime:verify:provisioning",
+    "runtime:scan": "node scripts/runtime/scan-runtime.cjs --fail-on-severity=high",
+    "runtime:maintain": "node scripts/runtime/maintain-runtime.cjs --fail-on-severity=high",
+    "migrate:user-functions:eol": "node --env-file=.env --import tsx src/migrations/005_user_functions_eol.ts up",
+    "migrate:media-reference-catalog": "node --env-file=.env --import tsx src/migrations/006_media_reference_catalog_backfill.ts up",
+    "seed:tools": "node --env-file=.env --import tsx src/scripts/setupToolsV2.ts --seed-only",
+    "setup:tools-v2": "node --env-file=.env --import tsx src/scripts/setupToolsV2.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1045.0",
+    "@aws-sdk/s3-request-presigner": "^3.1045.0",
+    "@google-cloud/storage": "^7.19.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.19.2",
     "express-mongo-sanitize": "^2.2.0",
-    "express-rate-limit": "^8.2.1",
+    "express-rate-limit": "^8.5.1",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.0.0",
+    "mongoose": "^8.23.1",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
-    "socket.io": "^4.7.5",
+    "socket.io": "^4.8.3",
     "zod": "^3.22.4"
   },
   "optionalDependencies": {
@@ -49,10 +60,18 @@
     "@types/passport-jwt": "^4.0.0",
     "@types/passport-local": "^1.0.38",
     "@types/supertest": "^6.0.3",
-    "jest": "^30.2.0",
+    "jest": "^30.4.2",
     "supertest": "^7.1.4",
-    "ts-jest": "^29.4.6",
-    "ts-node-dev": "^2.0.0",
+    "ts-jest": "^29.4.9",
+    "tsx": "^4.21.0",
     "typescript": "^5.4.5"
+  },
+  "overrides": {
+    "brace-expansion@1.1.12": "1.1.14",
+    "minimatch@3.1.2": "3.1.5",
+    "path-to-regexp@0.1.12": "0.1.13",
+    "picomatch@2.3.1": "2.3.2",
+    "picomatch@4.0.3": "4.0.4",
+    "socket.io-parser": "4.2.6"
   }
 }

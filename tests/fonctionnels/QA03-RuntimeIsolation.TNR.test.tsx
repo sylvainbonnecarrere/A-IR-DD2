@@ -11,11 +11,23 @@ import {
     LLMProvider,
     LocalLLMProfile,
     RobotId,
-    WorkflowNode,
 } from '../../types';
 import { ImageGenerationPanel } from '../../components/panels/ImageGenerationPanel';
 import { ImageModificationPanel } from '../../components/panels/ImageModificationPanel';
 import { MapsGroundingConfigPanel } from '../../components/panels/MapsGroundingConfigPanel';
+
+const mockCreateAdapter = jest.fn();
+const mockRunAgentLoop = jest.fn();
+const mockDesignStoreState = {
+    agentInstances: [
+        { id: 'instance-alpha', workflowId: 'wf-1' },
+        { id: 'instance-beta', workflowId: 'wf-1' },
+        { id: 'instance-multi-turn', workflowId: 'wf-1' },
+        { id: 'instance-follow-up', workflowId: 'wf-1' },
+    ],
+    nodes: [] as any[],
+    agents: [] as Agent[],
+};
 
 jest.mock('../../services/llmService', () => ({
     generateContentStream: jest.fn(),
@@ -29,11 +41,37 @@ jest.mock('../../utils/toolExecutor', () => ({
     executeTool: jest.fn(),
 }));
 
+jest.mock('../../services/adapters/AdapterFactory', () => ({
+    createAdapter: (...args: unknown[]) => mockCreateAdapter(...args),
+}));
+
+jest.mock('../../services/llm/AgentLoop', () => ({
+    runAgentLoop: (...args: unknown[]) => mockRunAgentLoop(...args),
+}));
+
 jest.mock('../../hooks/useLocalization', () => ({
     useLocalization: () => ({
         t: (key: string) => key,
     }),
 }));
+
+jest.mock('../../contexts/AuthContext', () => ({
+    useAuth: jest.fn(() => ({
+        accessToken: 'token-123',
+        isAuthenticated: true,
+    })),
+}));
+
+jest.mock('../../stores/useDesignStore', () => {
+    const actual = jest.requireActual('../../stores/useDesignStore');
+
+    return {
+        ...actual,
+        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+            return selector ? selector(mockDesignStoreState as unknown as Record<string, unknown>) : mockDesignStoreState;
+        }),
+    };
+});
 
 import * as llmService from '../../services/llmService';
 import { executeTool } from '../../utils/toolExecutor';
@@ -112,16 +150,26 @@ function createStream(chunks: any[]) {
 describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockDesignStoreState.nodes = [];
+        mockDesignStoreState.agents = [];
         useRuntimeStore.getState().resetAll();
         useRuntimeStore.getState().updateLocalLLMProfiles(LOCAL_PROFILES);
         useRuntimeStore.getState().updateLLMConfigs([LOCAL_RUNTIME_CONFIG, CLOUD_RUNTIME_CONFIG]);
+        mockCreateAdapter.mockImplementation((_provider, config, model, authToken) => ({
+            provider: (config as LLMConfig | null)?.provider,
+            endpoint: (config as LLMConfig | null)?.localEndpoint,
+            model,
+            authToken,
+        }));
+        mockRunAgentLoop.mockResolvedValue({
+            finalResponse: 'local response',
+            toolCallLog: [],
+            iterations: 1,
+            finishReason: 'stop',
+        });
     });
 
     it('isole deux agents locaux du meme provider avec des endpoints differents', async () => {
-        mockedGenerateContentStream
-            .mockImplementationOnce(() => createStream([{ response: { text: 'agent alpha' } }]))
-            .mockImplementationOnce(() => createStream([{ response: { text: 'agent beta' } }])) ;
-
         const firstAgent = createAgent({
             id: 'agent-alpha',
             name: 'Alpha Agent',
@@ -138,6 +186,7 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
             agent: firstAgent,
             llmConfigs: [LOCAL_RUNTIME_CONFIG],
             t: (key: string) => key,
+            instanceId: 'instance-alpha',
         }));
 
         await act(async () => {
@@ -149,24 +198,22 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
             agent: secondAgent,
             llmConfigs: [LOCAL_RUNTIME_CONFIG],
             t: (key: string) => key,
+            instanceId: 'instance-beta',
         }));
 
         await act(async () => {
             await secondHook.result.current.handleSendMessage('hello beta', null);
         });
 
-        expect(mockedGenerateContentStream).toHaveBeenCalledTimes(2);
-        expect(mockedGenerateContentStream.mock.calls[0][1]).toBe('http://localhost:11434');
-        expect(mockedGenerateContentStream.mock.calls[0][7]).toBe('http://localhost:11434');
-        expect(mockedGenerateContentStream.mock.calls[1][1]).toBe('http://localhost:1234');
-        expect(mockedGenerateContentStream.mock.calls[1][7]).toBe('http://localhost:1234');
+        expect(mockCreateAdapter).toHaveBeenCalledTimes(2);
+        expect(mockCreateAdapter.mock.calls[0][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:11434' }));
+        expect(mockCreateAdapter.mock.calls[1][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:1234' }));
+        expect(mockRunAgentLoop).toHaveBeenCalledTimes(2);
+        expect(mockRunAgentLoop.mock.calls[0][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:11434' }));
+        expect(mockRunAgentLoop.mock.calls[1][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:1234' }));
     });
 
     it('conserve la meme identite runtime sur plusieurs tours consecutifs', async () => {
-        mockedGenerateContentStream
-            .mockImplementationOnce(() => createStream([{ response: { text: 'turn one answer' } }]))
-            .mockImplementationOnce(() => createStream([{ response: { text: 'turn two answer' } }])) ;
-
         const agent = createAgent({
             id: 'agent-multi-turn',
             localLLMProfileId: 'profile-beta',
@@ -183,6 +230,13 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
                     sentence: 10000,
                     message: 10000,
                 },
+                enabledLimits: {
+                    char: true,
+                    word: true,
+                    token: true,
+                    sentence: true,
+                    message: true,
+                },
             },
         });
 
@@ -191,6 +245,7 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
             agent,
             llmConfigs: [LOCAL_RUNTIME_CONFIG],
             t: (key: string) => key,
+            instanceId: 'instance-multi-turn',
         }));
 
         await act(async () => {
@@ -201,25 +256,37 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
             await result.current.handleSendMessage('second turn', null);
         });
 
-        expect(mockedGenerateContentStream).toHaveBeenCalledTimes(2);
-        expect(mockedGenerateContentStream.mock.calls[0][1]).toBe('http://localhost:1234');
-        expect(mockedGenerateContentStream.mock.calls[1][1]).toBe('http://localhost:1234');
+        expect(mockCreateAdapter).toHaveBeenCalledTimes(2);
+        expect(mockCreateAdapter.mock.calls[0][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:1234' }));
+        expect(mockCreateAdapter.mock.calls[1][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:1234' }));
+        expect(mockRunAgentLoop).toHaveBeenCalledTimes(2);
+        expect(mockRunAgentLoop.mock.calls[0][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:1234' }));
+        expect(mockRunAgentLoop.mock.calls[1][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:1234' }));
 
-        const firstHistory = mockedGenerateContentStream.mock.calls[0][4] as ChatMessage[];
-        const secondHistory = mockedGenerateContentStream.mock.calls[1][4] as ChatMessage[];
+        const firstHistory = mockRunAgentLoop.mock.calls[0][1] as ChatMessage[];
+        const secondHistory = mockRunAgentLoop.mock.calls[1][1] as ChatMessage[];
 
         expect(secondHistory.length).toBeGreaterThan(firstHistory.length);
     });
 
     it('reutilise la meme identite pour le follow-up apres execution de tool', async () => {
-        mockedGenerateContentStream
-            .mockImplementationOnce(() => createStream([
-                { response: { text: 'tool preface', toolCalls: [{ id: 'tool-1', name: 'lookupWeather', arguments: '{}' }] } },
-            ]))
-            .mockImplementationOnce(() => createStream([
-                { response: { text: 'follow-up analysis' } },
-            ]));
-        mockedExecuteTool.mockResolvedValue({ city: 'Paris', temperature: 21 });
+        mockRunAgentLoop.mockResolvedValueOnce({
+            finalResponse: 'follow-up analysis',
+            toolCallLog: [
+                {
+                    id: 'tool-1',
+                    functionName: 'lookupWeather',
+                    arguments: {},
+                    result: { city: 'Paris', temperature: 21 },
+                    status: 'success',
+                    durationMs: 8,
+                    timestamp: new Date('2026-01-01T00:00:00.000Z'),
+                    executionId: 'exec-1',
+                },
+            ],
+            iterations: 1,
+            finishReason: 'stop',
+        });
 
         const agent = createAgent({
             id: 'agent-follow-up',
@@ -233,34 +300,62 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
             agent,
             llmConfigs: [LOCAL_RUNTIME_CONFIG],
             t: (key: string) => key,
+            instanceId: 'instance-follow-up',
         }));
 
         await act(async () => {
             await result.current.handleSendMessage('need tool', null);
         });
 
-        expect(mockedGenerateContentStream).toHaveBeenCalledTimes(2);
-        expect(mockedGenerateContentStream.mock.calls[0][1]).toBe('http://localhost:11434');
-        expect(mockedGenerateContentStream.mock.calls[1][1]).toBe('http://localhost:11434');
-
-        const followUpHistory = mockedGenerateContentStream.mock.calls[1][4] as ChatMessage[];
-        expect(followUpHistory.some(message => message.text.includes('tool_results_context'))).toBe(true);
+        expect(mockCreateAdapter).toHaveBeenCalledTimes(1);
+        expect(mockCreateAdapter.mock.calls[0][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:11434' }));
+        expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
+        expect(mockRunAgentLoop.mock.calls[0][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:11434' }));
+        expect(useRuntimeStore.getState().getNodeMessages('node-follow-up')).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    sender: 'tool',
+                    toolName: 'lookupWeather',
+                }),
+            ])
+        );
     });
 
     it('le panel image utilise le credential resolu du profil local actif', async () => {
         mockedGenerateImage.mockResolvedValue({ image: 'generated-image' });
+
+        const imageAgent = createAgent({
+            id: 'agent-image',
+            localLLMProfileId: 'profile-alpha',
+            capabilities: [LLMCapability.ImageGeneration],
+        });
+        mockDesignStoreState.agents = [imageAgent];
+        mockDesignStoreState.nodes = [{
+            id: 'node-image',
+            type: 'agent',
+            position: { x: 0, y: 0 },
+            data: {
+                label: imageAgent.name,
+                robotId: RobotId.Archi,
+                agent: imageAgent,
+                agentInstance: {
+                    id: 'instance-alpha',
+                    prototypeId: imageAgent.id,
+                    name: imageAgent.name,
+                    position: { x: 0, y: 0 },
+                    workflowId: 'wf-1',
+                    isMinimized: false,
+                    isMaximized: false,
+                    configuration_json: null,
+                },
+            },
+        }];
 
         render(
             <ImageGenerationPanel
                 isOpen={true}
                 hideSlideOver={true}
                 nodeId="node-image"
-                agent={createAgent({
-                    id: 'agent-image',
-                    localLLMProfileId: 'profile-alpha',
-                    capabilities: [LLMCapability.ImageGeneration],
-                })}
-                workflowNodes={[]}
                 llmConfigs={[LOCAL_RUNTIME_CONFIG]}
                 onClose={jest.fn()}
                 onImageGenerated={jest.fn()}
@@ -285,6 +380,33 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
         mockedEditImage.mockResolvedValue({ image: 'modified-image' });
         mockedGenerateContent.mockResolvedValue({ text: 'Image modifiee avec succes' });
 
+        const imageEditAgent = createAgent({
+            id: 'agent-edit',
+            localLLMProfileId: 'profile-beta',
+            capabilities: [LLMCapability.ImageModification],
+        });
+        mockDesignStoreState.agents = [imageEditAgent];
+        mockDesignStoreState.nodes = [{
+            id: 'node-edit',
+            type: 'agent',
+            position: { x: 0, y: 0 },
+            data: {
+                label: imageEditAgent.name,
+                robotId: RobotId.Archi,
+                agent: imageEditAgent,
+                agentInstance: {
+                    id: 'instance-beta',
+                    prototypeId: imageEditAgent.id,
+                    name: imageEditAgent.name,
+                    position: { x: 0, y: 0 },
+                    workflowId: 'wf-1',
+                    isMinimized: false,
+                    isMaximized: false,
+                    configuration_json: null,
+                },
+            },
+        }];
+
         render(
             <ImageModificationPanel
                 isOpen={true}
@@ -292,13 +414,7 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
                     nodeId: 'node-edit',
                     sourceImage: 'source-image',
                     mimeType: 'image/png',
-                    agent: createAgent({
-                        id: 'agent-edit',
-                        localLLMProfileId: 'profile-beta',
-                        capabilities: [LLMCapability.ImageModification],
-                    }),
                 }}
-                workflowNodes={[]}
                 llmConfigs={[LOCAL_RUNTIME_CONFIG]}
                 onClose={jest.fn()}
                 onImageModified={jest.fn()}
@@ -327,23 +443,33 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
             model: 'gemini-2.5-pro',
             capabilities: [LLMCapability.MapsGrounding],
         });
-
-        const workflowNodes: WorkflowNode[] = [
-            {
-                id: 'node-maps',
-                type: 'agentNode',
-                position: { x: 0, y: 0 },
-                data: { label: cloudAgent.name, robotId: RobotId.Archi, agent: cloudAgent },
+        mockDesignStoreState.agents = [cloudAgent];
+        mockDesignStoreState.nodes = [{
+            id: 'node-maps',
+            type: 'agent',
+            position: { x: 0, y: 0 },
+            data: {
+                label: cloudAgent.name,
+                robotId: RobotId.Archi,
                 agent: cloudAgent,
-            } as any,
-        ];
+                agentInstance: {
+                    id: 'instance-maps',
+                    prototypeId: cloudAgent.id,
+                    name: cloudAgent.name,
+                    position: { x: 0, y: 0 },
+                    workflowId: 'wf-1',
+                    isMinimized: false,
+                    isMaximized: false,
+                    configuration_json: null,
+                },
+            },
+        }];
 
         render(
             <MapsGroundingConfigPanel
                 isOpen={true}
                 hideSlideOver={true}
                 nodeId="node-maps"
-                workflowNodes={workflowNodes}
                 llmConfigs={[CLOUD_RUNTIME_CONFIG]}
                 onClose={jest.fn()}
             />
@@ -361,7 +487,7 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
                 'gemini-test-key-placeholder',
                 'gemini-2.5-pro',
                 'restaurants in Paris',
-                undefined,
+                'System prompt',
                 undefined
             );
         });

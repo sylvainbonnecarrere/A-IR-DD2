@@ -77,6 +77,8 @@ export const IconMenuItem: React.FC<IconMenuItemProps> = ({
       `}
       onClick={handleClick}
       role="button"
+      aria-label={t(item.name)}
+      title={t(item.name)}
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {

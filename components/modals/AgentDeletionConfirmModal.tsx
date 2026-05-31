@@ -1,18 +1,19 @@
-import React from 'react';
-import { Agent, AgentInstance } from '../../types';
+import React, { useEffect, useState } from 'react';
+import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy } from '../../types';
 import { Button } from '../UI';
 import { CloseIcon } from '../Icons';
 import { useDesignStore } from '../../stores/useDesignStore';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useAuth } from '../../hooks/useAuth';
-import { deleteAgentPrototype } from '../../services/agentPrototypeAPI';
+import { deleteAgentPrototype, type AgentPrototypeImpact } from '../../services/agentPrototypeAPI';
 
 interface AgentDeletionConfirmModalProps {
   isOpen: boolean;
   agent: Agent | null;
+  impact: AgentPrototypeImpact | null;
   onConfirm: () => void;
   onCancel: () => void;
-  onDeleteNodes?: (instanceIds: string[]) => void; // Callback to delete nodes by instanceId
+  onDeleteNodes?: (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Callback to delete nodes by instanceId
 }
 
 const AlertIcon2 = (props: React.SVGProps<SVGSVGElement>) => (
@@ -26,19 +27,28 @@ const AlertIcon2 = (props: React.SVGProps<SVGSVGElement>) => (
 export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps> = ({
   isOpen,
   agent,
+  impact,
   onConfirm,
   onCancel,
   onDeleteNodes
 }) => {
-  const { getInstancesOfPrototype, deleteAgent } = useDesignStore();
+  const { deleteAgent } = useDesignStore();
   const { addNotification } = useNotifications();
   const { isAuthenticated, accessToken } = useAuth();
+  const [mediaPolicy, setMediaPolicy] = useState<AgentDeletionMediaPolicy>('delete_media');
+
+  useEffect(() => {
+    if (isOpen) {
+      setMediaPolicy('delete_media');
+    }
+  }, [agent?.id, isOpen]);
 
   if (!isOpen || !agent) return null;
+  if (!isOpen || !agent || !impact) return null;
 
   // Analyse d'impact
-  const affectedInstances = getInstancesOfPrototype(agent.id);
-  const hasActiveInstances = affectedInstances.length > 0;
+  const affectedInstances = impact.instances;
+  const hasActiveInstances = impact.instanceCount > 0;
 
   const handleDeletePrototypeOnly = async () => {
     if (isAuthenticated && accessToken) {
@@ -62,7 +72,7 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
         type: 'success',
         title: 'Prototype supprimé',
         message: hasActiveInstances
-          ? `"${agent.name}" supprimé. ${affectedInstances.length} instance(s) orpheline(s) restent dans le workflow.`
+          ? `"${agent.name}" supprimé. ${impact.instanceCount} instance(s) orpheline(s) restent dans le workflow.`
           : `"${agent.name}" supprimé avec succès.`,
         duration: 4000
       });
@@ -94,19 +104,42 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
       }
     }
 
+    if (onDeleteNodes && instancesToDelete.length > 0) {
+      const deletionResult = await onDeleteNodes(instancesToDelete, mediaPolicy);
+
+      if (deletionResult && !deletionResult.success) {
+        const fallbackResult = deleteAgent(agent.id, { deleteInstances: false });
+
+        if (fallbackResult.success) {
+          addNotification({
+            type: 'warning',
+            title: 'Suppression partielle',
+            message: deletionResult.error || `"${agent.name}" a ete supprime, mais certaines instances ont ete conservees avec leurs medias.`,
+            duration: 6000
+          });
+          onConfirm();
+          return;
+        }
+
+        addNotification({
+          type: 'error',
+          title: 'Suppression refusee',
+          message: deletionResult.error || fallbackResult.error || 'Erreur de suppression des instances',
+          duration: 5000
+        });
+        return;
+      }
+    }
+
     // Supprimer le prototype ET toutes ses instances
     const result = deleteAgent(agent.id, { deleteInstances: true });
     if (result.success) {
-      // Sync with App.tsx workflowNodes if callback provided
-      // Pass instance IDs so App.tsx can filter workflowNodes by instanceId
-      if (onDeleteNodes && instancesToDelete.length > 0) {
-        onDeleteNodes(instancesToDelete);
-      }
-
       addNotification({
         type: 'success',
         title: 'Suppression complète',
-        message: `"${agent.name}" et ses ${affectedInstances.length} instance(s) ont été supprimés du workflow.`,
+        message: mediaPolicy === 'orphan_media'
+          ? `"${agent.name}" et ses ${impact.instanceCount} instance(s) ont ete supprimes. Les medias associes sont conserves comme orphelins.`
+          : `"${agent.name}" et ses ${impact.instanceCount} instance(s) ont ete supprimes du workflow avec leurs medias.`,
         duration: 4000
       });
       onConfirm();
@@ -142,7 +175,7 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
           {/* Agent info */}
           <div className="bg-gray-700 p-3 rounded-lg">
             <p className="text-white font-semibold">{agent.name}</p>
-            <p className="text-gray-300 text-sm">{agent.description || 'Aucune description'}</p>
+            <p className="text-gray-300 text-sm">{agent.role || agent.systemPrompt || 'Aucune description'}</p>
           </div>
 
           {/* Impact analysis */}
@@ -153,7 +186,7 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
                 <span className="text-orange-400 font-semibold">Impact détecté</span>
               </div>
               <p className="text-orange-300 text-sm mb-2">
-                Ce prototype a <strong>{affectedInstances.length} instance(s)</strong> active(s) dans le workflow :
+                Ce prototype a <strong>{impact.instanceCount} instance(s)</strong> active(s) dans le workflow :
               </p>
               <ul className="text-orange-200 text-sm space-y-1 ml-4 max-h-32 overflow-y-auto">
                 {affectedInstances.map((instance) => (
@@ -202,10 +235,42 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
                 <div className="flex flex-col items-start">
                   <span className="font-semibold">Supprimer uniquement le prototype</span>
                   <span className="text-xs text-gray-400 mt-0.5">
-                    Les {affectedInstances.length} instance(s) du workflow resteront actives (orphelines)
+                    Les {impact.instanceCount} instance(s) du workflow resteront actives (orphelines)
                   </span>
                 </div>
               </Button>
+
+              <div className="bg-gray-900/60 border border-gray-700 rounded-lg p-4 space-y-3">
+                <p className="text-sm font-semibold text-white">Politique media pour les instances supprimees</p>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="agent-media-policy"
+                    aria-label="Supprimer les medias lies"
+                    checked={mediaPolicy === 'delete_media'}
+                    onChange={() => setMediaPolicy('delete_media')}
+                    className="mt-1"
+                  />
+                  <div>
+                    <p className="text-sm text-white">Supprimer les medias lies</p>
+                    <p className="text-xs text-gray-400">Efface les references cataloguees et leurs supports actuellement geres.</p>
+                  </div>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="agent-media-policy"
+                    aria-label="Conserver les medias comme orphelins"
+                    checked={mediaPolicy === 'orphan_media'}
+                    onChange={() => setMediaPolicy('orphan_media')}
+                    className="mt-1"
+                  />
+                  <div>
+                    <p className="text-sm text-white">Conserver les medias comme orphelins</p>
+                    <p className="text-xs text-gray-400">L'instance disparait, mais les medias restent visibles dans BOS Media avec le statut orphelin.</p>
+                  </div>
+                </label>
+              </div>
 
               {/* Option 2: Supprimer prototype + instances */}
               <Button
@@ -216,7 +281,7 @@ export const AgentDeletionConfirmModal: React.FC<AgentDeletionConfirmModalProps>
                 <div className="flex flex-col items-start">
                   <span className="font-semibold">Supprimer le prototype ET ses instances</span>
                   <span className="text-xs text-red-200 mt-0.5">
-                    ⚠️ {affectedInstances.length + 1} élément(s) supprimé(s) (prototype + {affectedInstances.length} instance(s))
+                    ⚠️ {impact.instanceCount + 1} élément(s) supprimé(s) (prototype + {impact.instanceCount} instance(s))
                   </span>
                 </div>
               </Button>

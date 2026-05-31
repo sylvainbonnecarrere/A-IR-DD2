@@ -13,6 +13,38 @@
 import React, { useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useFunctionStore } from '../stores/useFunctionStore';
+import type { RuntimeHealthReport } from '../types/function.types';
+
+function buildNativePythonBadge(runtimeHealth: RuntimeHealthReport): {
+    label: string;
+    detail: string;
+    toneClass: string;
+} | null {
+    const nativePythonHealth = runtimeHealth.nativePython;
+    if (!nativePythonHealth) {
+        return null;
+    }
+
+    if (nativePythonHealth.status === 'healthy') {
+        return {
+            label: 'imports natifs OK',
+            detail: nativePythonHealth.summary,
+            toneClass: 'text-emerald-500/70'
+        };
+    }
+
+    const failingTools = nativePythonHealth.probes
+        .filter((probe) => probe.status !== 'healthy')
+        .map((probe) => probe.toolName);
+
+    return {
+        label: failingTools.length > 0
+            ? `imports natifs a verifier: ${failingTools.join(', ')}`
+            : 'imports natifs a verifier',
+        detail: nativePythonHealth.summary,
+        toneClass: 'text-amber-500/70'
+    };
+}
 
 export const SandboxHealthLoader: React.FC = () => {
     const { accessToken, isAuthenticated } = useAuth();
@@ -59,6 +91,7 @@ export const SandboxHealthLoader: React.FC = () => {
     const canRunTypescript = runtimeHealth.capabilities.run.typescript;
     const dockerMode = runtimeHealth.runtime.docker.mode;
     const isDevOnly = runtimeHealth.runtime.docker.securityLevel === 'dev-only';
+    const nativePythonBadge = buildNativePythonBadge(runtimeHealth);
     const runtimeModeLabel = dockerMode === 'rootless'
         ? 'rootless'
         : dockerMode === 'docker-desktop'
@@ -71,10 +104,13 @@ export const SandboxHealthLoader: React.FC = () => {
         return (
             <div
                 className="flex items-center gap-1.5 text-xs text-emerald-400"
-                title={`Runtime prêt — ${runtimeHealth.summary}`}
+                title={`Runtime prêt — ${runtimeHealth.summary}${nativePythonBadge ? ` — ${nativePythonBadge.detail}` : ''}`}
             >
                 <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-                <span>Runtime prêt <span className="text-emerald-500/70">({pythonVersionShort || 'Python OK'} · {runtimeModeLabel})</span></span>
+                <span>
+                    Runtime prêt <span className="text-emerald-500/70">({pythonVersionShort || 'Python OK'} · {runtimeModeLabel})</span>
+                    {nativePythonBadge && <span className={`ml-1 ${nativePythonBadge.toneClass}`}>· {nativePythonBadge.label}</span>}
+                </span>
             </div>
         );
     }
@@ -83,11 +119,12 @@ export const SandboxHealthLoader: React.FC = () => {
         return (
             <div
                 className="flex items-center gap-1.5 text-xs text-amber-300"
-                title={runtimeHealth.summary}
+                title={`${runtimeHealth.summary}${nativePythonBadge ? ` — ${nativePythonBadge.detail}` : ''}`}
             >
                 <div className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
                 <span>{isDevOnly ? 'Runtime dev/test (dev-only)' : 'Runtime partiel'}</span>
                 <span className="text-amber-500/70">({canRunPython || canRunTypescript ? runtimeModeLabel : 'build seulement'})</span>
+                {nativePythonBadge && <span className={`truncate ${nativePythonBadge.toneClass}`}>· {nativePythonBadge.label}</span>}
             </div>
         );
     }

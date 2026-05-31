@@ -21,7 +21,7 @@ import { LLMProvider } from '../../types';
 import { generateContentStream } from '../lmStudioService';
 import { buildFunctionCallingPrompt } from '../llm/FunctionCallingPromptBuilder';
 import { parseToolCalls } from '../llm/ToolCallParser';
-import type { ILLMAdapter, LLMRequest, LLMResponse } from './ILLMAdapter';
+import type { ILLMAdapter, LLMRequest, LLMResponse, LocalLLMTerminalError } from './ILLMAdapter';
 
 export interface LocalLLMAdapterConfig {
     /** Local endpoint, e.g. "http://localhost:1234" */
@@ -84,21 +84,53 @@ export class LocalLLMAdapter implements ILLMAdapter {
             }
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
+            const normalizedMessage = message.toLowerCase();
+            const terminalError: LocalLLMTerminalError = {
+                code: normalizedMessage.includes('timeout') ? 'timeout'
+                    : normalizedMessage.includes('network') || normalizedMessage.includes('read failed') ? 'network'
+                        : normalizedMessage.includes('stream error') ? 'stream_error'
+                            : 'local_llm_error',
+                message,
+                retryable: false,
+                provider: this.provider,
+                model: this.model,
+            };
+
             return {
                 content: '',
                 finishReason: 'error',
                 rawContent: message,
+                terminalError,
             };
         }
 
         // 4. Parse tool calls from accumulated text
         const parseResult = parseToolCalls(fullText);
 
+        if (parseResult.parseStatus === 'invalid_tool_call') {
+            return {
+                content: '',
+                finishReason: 'error',
+                rawContent: fullText,
+                terminalError: {
+                    code: 'invalid_tool_call',
+                    message: parseResult.trace.message ?? 'Malformed local tool call.',
+                    retryable: false,
+                    provider: this.provider,
+                    model: this.model,
+                },
+                parseTrace: parseResult.trace,
+            };
+        }
+
         return {
-            content: parseResult.textBefore,
+            content: parseResult.parseStatus === 'text'
+                ? parseResult.textBefore
+                : parseResult.textBefore,
             toolCalls: parseResult.hasToolCalls ? parseResult.toolCalls : undefined,
             finishReason: parseResult.hasToolCalls ? 'tool_calls' : 'stop',
             rawContent: fullText,
+            parseTrace: parseResult.trace,
         };
     }
 }

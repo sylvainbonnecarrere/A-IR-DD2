@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import mongoose from 'mongoose';
 import { User } from '../models/User.model';
-import { UserFunction } from '../models/UserFunction.model';
+import { UserTool } from '../models/UserTool.model';
 import { Workspace } from '../models/Workspace.model';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { UserToolRunRetentionService } from '../services/userToolRunRetention.service';
@@ -14,8 +14,8 @@ describe('UserToolRunRetentionService', () => {
 
     afterEach(async () => {
         await UserToolRun.deleteMany({});
+        await UserTool.deleteMany({});
         await Workspace.deleteMany({});
-        await UserFunction.deleteMany({ name: /retention-test-/i });
         await User.deleteMany({ email: /retention-test-/i });
         if (tempRoot) {
             await fs.rm(tempRoot, { recursive: true, force: true });
@@ -37,20 +37,54 @@ describe('UserToolRunRetentionService', () => {
         });
 
         const workflowId = new mongoose.Types.ObjectId();
-        const fn = await UserFunction.create({
-            userId: user._id,
+        const sourceInline = 'function run() { return { ok: true }; }';
+        const fn = await UserTool.create({
+            _id: new mongoose.Types.ObjectId(),
+            ownerUserId: user._id,
+            workspaceId: null,
+            scopeType: 'user',
             workflowId,
             name: `retention-test-${Date.now()}`,
             description: 'Retention cleanup test',
-            language: 'typescript',
-            origin: 'custom',
-            tags: ['test'],
+            runtime: 'typescript',
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: {
+                versionTag: '1',
+                contentHash: 'hash-retention-test',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline,
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: user._id,
+                buildStatus: 'built',
+                validationStatus: 'unknown'
+            },
+            versions: [{
+                versionTag: '1',
+                contentHash: 'hash-retention-test',
+                sourceMode: 'inline',
+                sourcePath: null,
+                sourceInline,
+                entrypoint: null,
+                createdAt: new Date(),
+                createdBy: user._id,
+                buildStatus: 'built',
+                validationStatus: 'unknown'
+            }],
             inputSchema: { type: 'object' },
             outputSchema: { type: 'object' },
-            codeInline: 'function run() { return { ok: true }; }',
-            isEnabled: true,
+            tags: ['test'],
+            dependencies: { npm: [], python: [] },
+            policy: {
+                networkMode: 'restricted',
+                timeoutSeconds: 30,
+                maxMemoryMb: 256,
+                secretAliases: []
+            },
             isReadonly: false,
-            version: 1
+            isEnabled: true
         });
 
         await Workspace.create({

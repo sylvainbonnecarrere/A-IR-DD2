@@ -11,6 +11,22 @@ interface PhilDataPageProps {
   onNavigateToWorkflow?: () => void;
 }
 
+type FileDraft = {
+  name: string;
+  type: FilePrototype['type'];
+  format: string;
+  validationRules: Record<string, unknown>;
+};
+
+function createInitialFileDraft(): FileDraft {
+  return {
+    name: '',
+    type: 'upload',
+    format: 'json',
+    validationRules: {},
+  };
+}
+
 // Mock store for file prototypes - à remplacer par un vrai store plus tard
 const useFilesStore = () => {
   const [files, setFiles] = useState<FilePrototype[]>([]);
@@ -45,12 +61,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
   const { currentRobotId } = useDesignStore();
 
   const [isCreating, setIsCreating] = useState(false);
-  const [newFile, setNewFile] = useState({
-    name: '',
-    type: 'upload' as const,
-    format: 'json',
-    validationRules: {}
-  });
+  const [newFile, setNewFile] = useState<FileDraft>(createInitialFileDraft());
 
   const handleCreateFile = () => {
     if (!newFile.name.trim()) {
@@ -78,7 +89,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
         message: t('phil_file_created_success', { name: newFile.name }),
         duration: 3000
       });
-      setNewFile({ name: '', type: 'upload', format: 'json', validationRules: {} });
+      setNewFile(createInitialFileDraft());
       setIsCreating(false);
     }
   };

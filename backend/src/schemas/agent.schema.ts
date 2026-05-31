@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
+import { WebSearchParamsSchema } from './web-search-params.schema';
 
 // ============================================
 // SOUS-SCHÉMAS
@@ -74,6 +75,7 @@ export const AgentCreateSchema = z.object({
         .min(1, 'Le modèle LLM est requis'),
     capabilities: z.array(z.string()).optional().default([]),
     historyConfig: AgentHistoryConfigSchema,
+    webSearchParams: WebSearchParamsSchema.optional(),
     tools: z.array(AgentToolSchema).optional().default([]),
     outputConfig: AgentOutputConfigSchema,
     position: AgentPositionSchema.optional().default({ x: 0, y: 0 }),

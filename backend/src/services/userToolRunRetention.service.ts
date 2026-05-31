@@ -2,7 +2,6 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
 import { UserToolRun, type IUserToolRun } from '../models/UserToolRun.model';
-import { FunctionService } from './function.service';
 import { UserToolQueryService } from './userToolQuery.service';
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
 
@@ -21,7 +20,6 @@ export interface CleanupFunctionRunsResult {
 }
 
 export class UserToolRunRetentionService {
-    private readonly functionService = new FunctionService();
     private readonly userToolQueryService = new UserToolQueryService();
     private readonly workspaceManager = createWorkspaceManager();
 
@@ -34,14 +32,14 @@ export class UserToolRunRetentionService {
             throw new Error('At least one retention policy must be provided.');
         }
 
-        const fn = await this.functionService.getFunctionById(functionId, ownerUserId);
-        if (!fn) {
+        const resolvedToolId = await this.resolveToolIdFromFunctionAlias(functionId, ownerUserId);
+        if (!resolvedToolId) {
             return null;
         }
 
         const runs = await UserToolRun.find({
             ownerUserId: new mongoose.Types.ObjectId(ownerUserId),
-            toolId: new mongoose.Types.ObjectId(functionId)
+            toolId: resolvedToolId
         })
             .sort({ createdAt: -1 })
             .lean<IUserToolRun[]>();
@@ -80,6 +78,22 @@ export class UserToolRunRetentionService {
             dryRun: options.dryRun === true,
             cutoffDate
         };
+    }
+
+    private async resolveToolIdFromFunctionAlias(
+        functionId: string,
+        ownerUserId: string
+    ): Promise<mongoose.Types.ObjectId | null> {
+        if (!mongoose.Types.ObjectId.isValid(functionId)) {
+            return null;
+        }
+
+        const tool = await this.userToolQueryService.getToolById(functionId, ownerUserId);
+        if (!tool) {
+            return null;
+        }
+
+        return new mongoose.Types.ObjectId(tool.id);
     }
 
     async cleanupRunsForTool(

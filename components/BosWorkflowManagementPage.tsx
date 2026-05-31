@@ -3,6 +3,7 @@ import { useDesignStore } from '@/stores/useDesignStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocalization } from '@/hooks/useLocalization';
 import WorkflowCard from '@/components/workflow/WorkflowCard';
+import BosMediaModal from '@/components/modals/BosMediaModal';
 import CreerWorkflowDialog from '@/components/modals/CreerWorkflowDialog';
 import EditWorkflowDialog from '@/components/modals/EditWorkflowDialog';
 
@@ -32,10 +33,12 @@ const BosWorkflowManagementPage: React.FC = () => {
   
   // Local state
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showMediaModal, setShowMediaModal] = useState(false);
   const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [switchSuccess, setSwitchSuccess] = useState<string | null>(null);
+  const activeWorkflow = workflows.find((workflow) => workflow._id === currentWorkflowId) ?? workflows[0] ?? null;
   
   /**
    * ⭐ V5: Observer pattern — Listen for workflow switch results from App.tsx
@@ -223,12 +226,22 @@ const BosWorkflowManagementPage: React.FC = () => {
             {t('page_bos_manage_workflows_description')}
           </p>
         </div>
-        <button
-          onClick={() => setShowCreateDialog(true)}
-          className="px-4 py-2 bg-yellow-500 text-black rounded hover:bg-yellow-400 font-medium transition-colors"
-        >
-          {t('nav_create_workflow')}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowMediaModal(true)}
+            disabled={!activeWorkflow}
+            className="px-4 py-2 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 font-medium transition-colors disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+          >
+            {t('bos_media_button', 'Gestion des fichiers')}
+          </button>
+          <button
+            onClick={() => setShowCreateDialog(true)}
+            className="px-4 py-2 bg-yellow-500 text-black rounded hover:bg-yellow-400 font-medium transition-colors"
+          >
+            {t('nav_create_workflow')}
+          </button>
+        </div>
       </div>
       
       {/* Error Message */}
@@ -328,6 +341,13 @@ const BosWorkflowManagementPage: React.FC = () => {
           onSave={handleEdit}
         />
       )}
+
+      <BosMediaModal
+        isOpen={showMediaModal}
+        workflowId={activeWorkflow?._id ?? null}
+        workflowName={activeWorkflow?.name ?? null}
+        onClose={() => setShowMediaModal(false)}
+      />
     </div>
   );
 };

@@ -18,12 +18,13 @@
  */
 
 import mongoose from 'mongoose';
+import { backfillMediaReferenceCatalogFields } from '../migrations/006_media_reference_catalog_backfill';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
-import {
-  getRepairOnlyProtectedFields,
-  getUserToolStartupSyncPhase,
-  syncUserToolsFromLegacyFunctionsOnStartup
-} from './userToolStartupSync.service';
+import { NativePythonProvisioningService } from './nativePythonProvisioning.service';
+import { mapLegacyFunctionToUserToolFields, type LegacyFunctionLike } from '../utils/userToolLegacyMapper';
+
+const nativePythonProvisioningService = new NativePythonProvisioningService();
+const SHARED_HELLO_TEST_TOOL_NAME = 'hello_test';
 
 /**
  * Define MongoDB collection schemas with validation rules
@@ -243,28 +244,6 @@ const COLLECTION_SCHEMAS = {
     }
   },
 
-  user_functions: {
-    validator: {
-      $jsonSchema: {
-        bsonType: 'object',
-        additionalProperties: true,
-        properties: {
-          _id: { bsonType: 'objectId' },
-          name: { bsonType: 'string' },
-          description: { bsonType: 'string' },
-          language: { bsonType: 'string' },
-          origin: { bsonType: 'string' },
-          userId: { bsonType: ['objectId', 'null'] },
-          workflowId: { bsonType: ['objectId', 'null'] },
-          isEnabled: { bsonType: 'bool' },
-          isReadonly: { bsonType: 'bool' },
-          createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
-  },
-
   workspaces: {
     validator: {
       $jsonSchema: {
@@ -400,11 +379,6 @@ const INDEX_DEFINITIONS = {
   local_llm_profiles: [
     { spec: { userId: 1, name: 1 }, options: { unique: true } },
     { spec: { userId: 1 }, options: {} }
-  ],
-  user_functions: [
-    { spec: { userId: 1, workflowId: 1, isEnabled: 1 }, options: { name: 'idx_user_workflow_enabled' } },
-    { spec: { origin: 1, isEnabled: 1 }, options: { name: 'idx_origin_enabled' } },
-    { spec: { name: 1, userId: 1 }, options: { unique: true, sparse: false, name: 'idx_name_user_unique' } }
   ],
   workspaces: [
     { spec: { ownerUserId: 1, scopeType: 1, scopeId: 1 }, options: { unique: true, name: 'uq_workspace_owner_scope' } },
@@ -549,9 +523,12 @@ export async function initializeDatabase(): Promise<void> {
       }
     }
 
+    await runMediaReferenceCatalogBackfill(db);
+
     // ─── Toujours seeder les fonctions natives (idempotent) ───────────────
     await seedNativeFunctions(db);
-    await syncUserToolsFromLegacyFunctions(db);
+    await seedSharedExampleFunctions(db);
+    await provisionNativePythonToolsOnStartup();
 
     console.info('🎯 Database initialization complete!');
   } catch (error) {
@@ -561,6 +538,23 @@ export async function initializeDatabase(): Promise<void> {
     if (process.env.NODE_ENV === 'production') {
       throw error; // In production, fail fast
     }
+  }
+}
+
+export async function runMediaReferenceCatalogBackfill(db: any): Promise<void> {
+  try {
+    const summary = await backfillMediaReferenceCatalogFields(db);
+
+    if (!summary.collectionFound) {
+      console.debug('  • media_references absent, backfill catalogue media ignoré');
+      return;
+    }
+
+    console.info(
+      `🧩 Media catalog backfill: scanned=${summary.scanned} updated=${summary.updated} compatible=${summary.alreadyCompatible} blocked=${summary.blocked}`
+    );
+  } catch (error) {
+    console.warn('⚠️  media catalog backfill warning:', error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -757,31 +751,68 @@ async function createIndexesForNewCollections(
   console.info('✅ Indexes created for new collections');
 }
 
+async function upsertCanonicalSeedTool(
+  userToolsCol: any,
+  filter: Record<string, unknown>,
+  legacySeed: LegacyFunctionLike,
+  overrides?: Record<string, unknown>
+): Promise<{ upsertedCount: number; modifiedCount: number }> {
+  const existingTool = await userToolsCol.findOne(filter, {
+    projection: {
+      currentVersion: 1,
+      versions: 1,
+    },
+  });
+
+  const mappedFields = {
+    ...mapLegacyFunctionToUserToolFields(legacySeed as any, existingTool),
+    ...overrides,
+  };
+
+  const result = await userToolsCol.updateOne(
+    filter,
+    {
+      $set: mappedFields,
+      $setOnInsert: {
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    },
+    { upsert: true },
+  );
+
+  return {
+    upsertedCount: result.upsertedCount ?? 0,
+    modifiedCount: result.modifiedCount ?? 0,
+  };
+}
+
 /**
- * Seed des 11 fonctions natives dans user_functions.
- * Idempotent : utilise upsert sur (name, userId:null) pour ne jamais dupliquer.
- * Appelée à chaque démarrage du serveur.
+ * Seed des 11 fonctions natives directement dans user_tools.
+ * Idempotent : upsert par (scopeType:native, ownerUserId:null, name).
  */
-async function seedNativeFunctions(db: any): Promise<void> {
+export async function seedNativeFunctions(db: any): Promise<void> {
   try {
-    const col = db.collection('user_functions');
+    const userToolsCol = db.collection('user_tools');
     let upserted = 0;
+    let updated = 0;
+
     for (const fn of nativeFunctionsSeed) {
-      const result = await col.updateOne(
-        { name: fn.name, userId: null },
-        {
-          // Corrige la version (number) sur les docs existants seedés avec l'ancienne string '1.0.0'
-          $set: { version: fn.version },
-          $setOnInsert: { ...fn, createdAt: new Date(), updatedAt: new Date() }
-        },
-        { upsert: true }
+      const result = await upsertCanonicalSeedTool(
+        userToolsCol,
+        { name: fn.name, ownerUserId: null, scopeType: 'native' },
+        fn,
       );
       if (result.upsertedCount > 0) upserted++;
+      else if (result.modifiedCount > 0) updated++;
     }
+
     if (upserted > 0) {
-      console.info(`🌱 ${upserted} fonction(s) native(s) seedée(s) dans user_functions`);
+      console.info(`🌱 ${upserted} outil(s) natif(s) seedé(s) dans user_tools`);
+    } else if (updated > 0) {
+      console.info(`🔁 ${updated} outil(s) natif(s) mis à jour dans user_tools`);
     } else {
-      console.debug('  ✓ Fonctions natives déjà présentes (aucun upsert nécessaire)');
+      console.debug('  ✓ Outils natifs déjà convergents dans user_tools');
     }
   } catch (err) {
     // Non-bloquant : log mais ne crashe pas le démarrage
@@ -789,28 +820,92 @@ async function seedNativeFunctions(db: any): Promise<void> {
   }
 }
 
-async function syncUserToolsFromLegacyFunctions(db: any): Promise<void> {
+export async function seedSharedExampleFunctions(db: any): Promise<void> {
   try {
-    const phase = getUserToolStartupSyncPhase();
-    const summary = await syncUserToolsFromLegacyFunctionsOnStartup(db);
+    const userToolsCol = db.collection('user_tools');
+    const helloTestInline = `// Exemple de fonction TypeScript partagée\nexport function run(\n  context: { userId: string; agentId?: string; workflowId?: string; depth: number },\n  args: { user_name?: string; name?: string }\n): unknown {\n  // Compatibilité transitoire: accepte encore args.name pour les anciens prompts déjà persistés.\n  const legacyName = typeof args.name === "string" && args.name.trim().length > 0\n    ? args.name.trim()\n    : null;\n\n  const userName = typeof args.user_name === "string" && args.user_name.trim().length > 0\n    ? args.user_name.trim()\n    : legacyName ?? "inconnu";\n\n  return { result: \`Ton nom, ${'${'}userName}, est maintenant enregistré dans ma mémoire\` };\n}\n`;
 
-    if (summary.created > 0 || summary.updated > 0) {
-      console.info(
-        `🔁 startup sync user_functions -> user_tools [${summary.phase}] scanned=${summary.scanned} created=${summary.created} updated=${summary.updated} skipped=${summary.skippedExisting}`
-      );
-    } else {
-      console.debug(
-        `  ✓ startup sync user_tools déjà convergent [${summary.phase}] scanned=${summary.scanned} skipped=${summary.skippedExisting}`
-      );
+    const staleToolMirrors = await userToolsCol.deleteMany({
+      name: SHARED_HELLO_TEST_TOOL_NAME,
+      $or: [
+        { ownerUserId: { $ne: null } },
+        { isReadonly: { $ne: true } }
+      ]
+    });
+
+    if (staleToolMirrors.deletedCount > 0) {
+      console.info(`🧹 Nettoyage hello_test: ${staleToolMirrors.deletedCount} miroir(s) orphelin(s) user_tools supprimé(s)`);
     }
 
-    if (phase === 'repair-only') {
-      console.info(
-        `🛡️ startup sync repair-only protège les champs cibles: ${getRepairOnlyProtectedFields().join(', ')}`
-      );
+    const result = await upsertCanonicalSeedTool(
+      userToolsCol,
+      { name: SHARED_HELLO_TEST_TOOL_NAME, ownerUserId: null, scopeType: 'user' },
+      {
+        name: SHARED_HELLO_TEST_TOOL_NAME,
+        description: 'Exemple TypeScript partagé. Appelle cette fonction quand l\'utilisateur se présente, donne son prénom ou son nom, ou demande d\'enregistrer son nom. Extrais ce nom dans args.user_name puis laisse l\'outil confirmer l\'enregistrement.',
+        language: 'typescript',
+        origin: 'custom',
+        userId: null,
+        workflowId: null,
+        inputSchema: {
+          type: 'object',
+          required: ['user_name'],
+          properties: {
+            user_name: {
+              type: 'string',
+              description: 'Nom ou prénom fourni par l\'utilisateur au moment où il se présente.',
+              example: 'Syl'
+            }
+          }
+        },
+        outputSchema: {
+          type: 'object',
+          properties: {
+            result: {
+              type: 'string',
+              description: 'Confirmation textuelle retournée à l\'utilisateur.',
+              example: 'Ton nom, Syl, est maintenant enregistré dans ma mémoire'
+            }
+          }
+        },
+        codeInline: helloTestInline,
+        codePath: null,
+        dependencies: { python: [], npm: [] },
+        isEnabled: true,
+        isReadonly: true,
+        version: 3,
+        tags: ['example', 'shared', 'typescript'],
+      },
+      {
+        trustLevel: 'internal',
+      },
+    );
+
+    if (result.upsertedCount > 0) {
+      console.info('🌱 Exemple partagé hello_test seedé dans user_tools');
+    } else if (result.modifiedCount > 0) {
+      console.info('🔁 Exemple partagé hello_test mis à jour dans user_tools');
+    } else {
+      console.debug('  ✓ Exemple partagé hello_test déjà convergent');
     }
   } catch (err) {
-    console.warn('⚠️  syncUserToolsFromLegacyFunctions warning:', err instanceof Error ? err.message : String(err));
+    console.warn('⚠️  seedSharedExampleFunctions warning:', err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function provisionNativePythonToolsOnStartup(): Promise<void> {
+  try {
+    const summary = await nativePythonProvisioningService.provisionPendingNativeToolsOnStartup();
+
+    if (summary.attempted === 0) {
+      return;
+    }
+
+    console.info(
+      `🐍 native python provisioning startup: attempted=${summary.attempted} succeeded=${summary.succeeded} failed=${summary.failed} skipped=${summary.skipped}`
+    );
+  } catch (err) {
+    console.warn('⚠️  native python provisioning startup warning:', err instanceof Error ? err.message : String(err));
   }
 }
 

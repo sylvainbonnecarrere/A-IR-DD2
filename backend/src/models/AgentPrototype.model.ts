@@ -1,28 +1,12 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import { CANONICAL_ROBOT_IDS, CANONICAL_ROBOT_IDS_LABEL } from '../types';
+import type { PersistedPersistenceConfig } from '../types/persistence';
 
 /**
  * ⭐ PERSISTENCE CONFIG: Configuration granulaire par agent
  * Permet de définir ce qui est sauvegardé pour chaque agent
  */
-export interface IPersistenceConfig {
-    saveChat: boolean;             // Défaut: true - Sauvegarder les messages de chat
-    saveChatHistory?: boolean;     // ⭐ Alias pour saveChat (compatibilité)
-    saveErrors: boolean;           // Défaut: true - Sauvegarder les erreurs rencontrées
-    saveTasks: boolean;            // Défaut: false - Sauvegarder les tâches assignées
-    saveTaskExecution?: boolean;   // ⭐ Alias pour saveTasks (compatibilité)
-    saveLinks: boolean;            // Défaut: false - Sauvegarder les liens entre agents
-    saveMedia?: boolean;           // ⭐ Activer sauvegarde des fichiers médias
-    saveHistorySummary: boolean;   // Défaut: false - Générer et stocker un résumé périodique
-    mediaStorage?: 'db' | 'local' | 'cloud'; // Défaut: 'db' - Stockage GridFS
-    cloudStorageConfig?: {         // ⭐ FIX QA: Config cloud S3/GCS
-        provider?: 'aws' | 'gcs';
-        bucket?: string;
-        region?: string;
-        endpoint?: string;
-    } | null;
-    retentionDays?: number;        // Durée de conservation en jours
-}
+export type IPersistenceConfig = PersistedPersistenceConfig;
 
 export interface IToolSelectionVersionRef {
     versionTag?: string;
@@ -45,8 +29,9 @@ export interface IAgentPrototype extends Document {
     llmModel: string;
     capabilities: string[];
     historyConfig?: object;
-    // ⭐ Tools V2: Références vers user_functions (rétrocompat : legacyTools conservé)
-    tools?: mongoose.Types.ObjectId[];     // Références vers user_functions._id
+    webSearchParams?: object;
+    // ⭐ Tools V2: Références vers user_tools (rétrocompat : legacyTools conservé)
+    tools?: mongoose.Types.ObjectId[];     // Références vers user_tools._id
     toolSelections?: IToolSelection[];     // Références versionnées vers user_tools
     legacyTools?: object[];               // Ancien format inline (migration rétrocompat)
     outputConfig?: object;
@@ -61,10 +46,16 @@ export interface IAgentPrototype extends Document {
 // ⭐ Sub-schema for persistence config
 const PersistenceConfigSchema = new Schema<IPersistenceConfig>({
     saveChat: { type: Boolean, default: true },
+    saveChatHistory: { type: Boolean, default: true },
     saveErrors: { type: Boolean, default: true },
     saveHistorySummary: { type: Boolean, default: false },
     saveLinks: { type: Boolean, default: false },
     saveTasks: { type: Boolean, default: false },
+    saveTaskExecution: { type: Boolean, default: false },
+    saveMedia: { type: Boolean, default: false },
+    allowWorkspaceWrite: { type: Boolean, default: false },
+    retentionDays: { type: Number, default: undefined },
+    cloudConnectionProfileId: { type: String, default: undefined },
     mediaStorage: { 
         type: String, 
         enum: ['db', 'local', 'cloud'], 
@@ -126,14 +117,18 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
         type: String
     }],
     historyConfig: Schema.Types.Mixed,
-    // ⭐ Tools V2: tableau de références ObjectId vers user_functions
+    webSearchParams: Schema.Types.Mixed,
+    // ⭐ Tools V2: tableau de références ObjectId vers user_tools
     tools: [{
         type: Schema.Types.ObjectId,
-        ref: 'UserFunction'
+        ref: 'UserTool'
     }],
     toolSelections: [ToolSelectionSchema],
     // ⭐ Tools V2: conservation des anciens tools inline (migration rétrocompat)
-    legacyTools: [Schema.Types.Mixed],
+    legacyTools: {
+        type: [Schema.Types.Mixed],
+        default: undefined
+    },
     outputConfig: Schema.Types.Mixed,
     robotId: {
         type: String,
@@ -155,10 +150,13 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
         type: PersistenceConfigSchema,
         default: () => ({
             saveChat: true,
+            saveChatHistory: true,
             saveErrors: true,
             saveHistorySummary: false,
             saveLinks: false,
             saveTasks: false,
+            saveTaskExecution: false,
+            saveMedia: false,
             mediaStorage: 'db'
         })
     },

@@ -6,8 +6,15 @@ import type {
     SandboxExecutionFailureKind,
     SandboxExecutionMetadata,
     SandboxExecutionRequest,
-    SandboxExecutionResult
+    SandboxExecutionResult,
+    SandboxSyntaxCheckResult
 } from './execution.types';
+import { inferSandboxFailureSubsystem } from './errors';
+import {
+    buildPythonCustomWrapper,
+    buildPythonNativeWrapper,
+    buildTypescriptWrapper,
+} from './runtimeWrappers';
 
 const CONTAINER_PERSISTENT_ROOT = '/persistent-workspace';
 const CONTAINER_SOURCE_ROOT = `${CONTAINER_PERSISTENT_ROOT}/source`;
@@ -28,6 +35,14 @@ interface CommandExecutionResult {
 interface ProcessRunOptions {
     stdin?: string;
     timeoutMs?: number;
+}
+
+interface SandboxExecutionContextPayload {
+    userId: string;
+    workflowId?: string;
+    depth: number;
+    maxDepth: number;
+    sessionId: string;
 }
 
 export interface DockerProcessRunner {
@@ -101,88 +116,6 @@ class SpawnDockerProcessRunner implements DockerProcessRunner {
     }
 }
 
-function escapeForSingleQuotedPython(value: string): string {
-    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-}
-
-function buildTypescriptWrapper(): string {
-    return [
-        'const chunks = [];',
-        "process.stdin.setEncoding('utf8');",
-        "process.stdin.on('data', (chunk) => chunks.push(chunk));",
-        "process.stdin.on('end', async () => {",
-        '  const payload = JSON.parse(chunks.join(\'\'));',
-        '  const args = payload.args ?? {};',
-        '  const source = String(payload.code ?? \"\").replace(/\\bexport\\s+(?=(async\\s+)?function\\s+run\\b)/g, \"\");',
-        '  const logs = [];',
-        '  const console = {',
-        '    log: (...items) => logs.push(items.map(stringify).join(\' \')),',
-        '    warn: (...items) => logs.push(items.map(stringify).join(\' \')),',
-        '    error: (...items) => logs.push(items.map(stringify).join(\' \'));',
-        '  };',
-        '  function stringify(value) {',
-        '    if (typeof value === \"string\") return value;',
-        '    try { return JSON.stringify(value); } catch { return String(value); }',
-        '  }',
-        '  let result;',
-        '  try {',
-        '    eval(source);',
-        '    if (typeof run === \"function\") {',
-        '      result = await Promise.resolve(run(args));',
-        '    }',
-        '    process.stdout.write(JSON.stringify({ success: true, output: result ?? null, stdout: logs.join(\'\\n\') }));',
-        '  } catch (error) {',
-        '    process.stdout.write(JSON.stringify({ success: false, output: null, stdout: logs.join(\'\\n\'), stderr: error instanceof Error ? `${error.name}: ${error.message}` : String(error) }));',
-        '    process.exitCode = 1;',
-        '  }',
-        '});'
-    ].join('\n');
-}
-
-function buildPythonCustomWrapper(): string {
-    return [
-        'import json',
-        'import sys',
-        'import traceback',
-        'payload = json.loads(sys.stdin.read() or "{}")',
-        'args = payload.get("args") or {}',
-        'code = payload.get("code") or ""',
-        'namespace = {}',
-        'try:',
-        '    exec(code, namespace)',
-        '    result = namespace.get("run")',
-        '    output = result(args) if callable(result) else namespace.get("__result__")',
-        '    print(json.dumps({"success": True, "output": output, "stdout": ""}, ensure_ascii=False))',
-        'except Exception as exc:',
-        '    print(json.dumps({"success": False, "output": None, "stderr": str(exc), "stdout": "", "traceback": traceback.format_exc()}, ensure_ascii=False))',
-        '    sys.exit(1)'
-    ].join('\n');
-}
-
-function buildPythonNativeWrapper(nativeRoot: string): string {
-    return [
-        'import json',
-        'import os',
-        'import sys',
-        'import traceback',
-        `sys.path.insert(0, '${escapeForSingleQuotedPython(nativeRoot)}')`,
-        'from runner import FUNCTION_REGISTRY, FunctionContext',
-        'payload = json.loads(sys.stdin.read() or "{}")',
-        'function_name = payload.get("functionName")',
-        'args = payload.get("args") or {}',
-        'workspace_dir = os.environ.get("SANDBOX_WORKSPACE_DIR", "/sandbox/workspace")',
-        'try:',
-        '    if function_name not in FUNCTION_REGISTRY:',
-        '        raise ValueError(f"Fonction \'{function_name}\' non trouvée dans le registre")',
-        '    context = FunctionContext(workspace_dir=workspace_dir, function_name=function_name)',
-        '    output = FUNCTION_REGISTRY[function_name](context, args)',
-        '    print(json.dumps({"success": True, "output": output, "stdout": ""}, ensure_ascii=False))',
-        'except Exception as exc:',
-        '    print(json.dumps({"success": False, "output": None, "stderr": str(exc), "stdout": "", "traceback": traceback.format_exc()}, ensure_ascii=False))',
-        '    sys.exit(1)'
-    ].join('\n');
-}
-
 export class DockerSandboxRunner implements SandboxRunnerPort {
     constructor(
         private readonly processRunner: DockerProcessRunner = new SpawnDockerProcessRunner(),
@@ -228,6 +161,10 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         const maxMemoryMb = Math.max(request.policySnapshot.maxMemoryMb ?? 256, 64);
         const containerWorkspaceDir = request.workspace ? CONTAINER_SOURCE_ROOT : CONTAINER_FALLBACK_WORKSPACE;
         const stdinPayload = this.buildStdinPayload(request);
+        // Debug: log the stdin payload that will be sent to the sandbox (helps verify transformed query propagation)
+        try {
+            console.debug('[DockerSandboxRunner] stdinPayload:', stdinPayload);
+        } catch {}
         const args = this.buildDockerArgs(request, maxMemoryMb, containerWorkspaceDir);
 
         const result = await this.processRunner.run('docker', args, {
@@ -254,12 +191,50 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         };
     }
 
+    async checkPythonSyntax(code: string): Promise<SandboxSyntaxCheckResult> {
+        const result = await this.processRunner.run('docker', this.buildDockerPythonSyntaxCheckArgs(), {
+            stdin: code,
+            timeoutMs: 5_000
+        });
+
+        if (result.timedOut) {
+            return {
+                valid: false,
+                errors: [{ message: 'Timeout: verification syntaxique Python interrompue dans la sandbox.' }]
+            };
+        }
+
+        const stdout = result.stdout.trim();
+        const stderr = result.stderr.trim();
+
+        try {
+            const parsed = stdout ? JSON.parse(stdout) : null;
+            if (
+                parsed
+                && typeof parsed === 'object'
+                && 'valid' in parsed
+                && 'errors' in parsed
+                && Array.isArray((parsed as SandboxSyntaxCheckResult).errors)
+            ) {
+                return parsed as SandboxSyntaxCheckResult;
+            }
+        } catch {
+            // Fall through to normalized sandbox error response.
+        }
+
+        return {
+            valid: false,
+            errors: [{ message: stderr || result.errorMessage || 'Erreur interne de verification syntaxique Python dans la sandbox.' }]
+        };
+    }
+
     private buildDockerArgs(request: SandboxExecutionRequest, maxMemoryMb: number, containerWorkspaceDir: string): string[] {
+        const networkMode = this.resolveDockerNetworkMode(request.policySnapshot.networkMode);
         const baseArgs = [
             'run',
             '--rm',
             '--interactive',
-            '--network=none',
+            `--network=${networkMode}`,
             '--cpus=0.50',
             '--pids-limit=128',
             `--memory=${maxMemoryMb}m`,
@@ -286,7 +261,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
             baseArgs.push('--mount', `type=bind,src=${this.backendPythonRoot},dst=${CONTAINER_NATIVE_ROOT},readonly`);
             return [
                 ...baseArgs,
-                'airdd2-runtime-python:3.12-slim',
+                'airdd2-runtime-python:3.12-ubuntu-noble',
                 'python3',
                 '-c',
                 buildPythonNativeWrapper(CONTAINER_NATIVE_ROOT)
@@ -296,7 +271,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         if (request.mode === 'python-custom') {
             return [
                 ...baseArgs,
-                'airdd2-runtime-python:3.12-slim',
+                'airdd2-runtime-python:3.12-ubuntu-noble',
                 'python3',
                 '-c',
                 buildPythonCustomWrapper()
@@ -305,7 +280,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
 
         return [
             ...baseArgs,
-            'airdd2-runtime-node:bookworm-slim',
+            'airdd2-runtime-node:22.22.2-ubuntu-noble',
             'node',
             '--input-type=commonjs',
             '--eval',
@@ -313,18 +288,68 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         ];
     }
 
+    private buildDockerPythonSyntaxCheckArgs(): string[] {
+        return [
+            'run',
+            '--rm',
+            '--interactive',
+            '--network=none',
+            '--cpus=0.25',
+            '--pids-limit=64',
+            '--memory=128m',
+            '--read-only',
+            '--tmpfs', '/sandbox/tmp:size=16m,noexec,nosuid,nodev',
+            '--security-opt', 'no-new-privileges',
+            '--cap-drop=ALL',
+            '--workdir', '/sandbox/tmp',
+            '--env', 'PYTHONDONTWRITEBYTECODE=1',
+            '--env', 'PYTHONUNBUFFERED=1',
+            'airdd2-runtime-python:3.12-ubuntu-noble',
+            'python3',
+            '-c',
+            [
+                'import ast, json, sys',
+                'try:',
+                '    ast.parse(sys.stdin.read())',
+                '    print(json.dumps({"valid": True, "errors": []}))',
+                'except SyntaxError as exc:',
+                '    print(json.dumps({"valid": False, "errors": [{"line": exc.lineno, "message": str(exc.msg)}]}))',
+            ].join('\n')
+        ];
+    }
+
+    private resolveDockerNetworkMode(networkMode: SandboxExecutionRequest['policySnapshot']['networkMode'] | undefined): 'none' | 'bridge' {
+        return networkMode === 'restricted' ? 'bridge' : 'none';
+    }
+
     private buildStdinPayload(request: SandboxExecutionRequest): string {
         if (request.mode === 'python-native') {
-            return JSON.stringify({
+            const payload: any = {
                 functionName: request.function.name,
-                args: request.args
-            });
+                toolVersionTag: request.toolVersionTag,
+                args: request.args,
+            };
+            if (request.privateContext !== undefined) {
+                payload.privateContext = request.privateContext;
+            }
+            return JSON.stringify(payload);
         }
 
         return JSON.stringify({
+            context: this.buildExecutionContext(request),
             args: request.args,
             code: request.sourceCode ?? ''
         });
+    }
+
+    private buildExecutionContext(request: SandboxExecutionRequest): SandboxExecutionContextPayload {
+        return {
+            userId: request.userId,
+            workflowId: request.function.workflowId?.toString(),
+            depth: 0,
+            maxDepth: 8,
+            sessionId: request.executionId
+        };
     }
 
     private normalizeResult(
@@ -343,7 +368,8 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
                 exitCode: 124,
                 metadata: {
                     exitCode: 124,
-                    failureKind: 'timeout'
+                    failureKind: 'timeout',
+                    failureSubsystem: inferSandboxFailureSubsystem('timeout')
                 }
             };
         }
@@ -355,7 +381,15 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         try {
             const parsed = stdout ? JSON.parse(stdout) : null;
             if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-                const payload = parsed as { success: boolean; output?: unknown; stdout?: string; stderr?: string };
+                const payload = parsed as {
+                    success: boolean;
+                    output?: unknown;
+                    stdout?: string;
+                    stderr?: string;
+                    failureKind?: SandboxExecutionFailureKind;
+                    errorType?: string;
+                    traceback?: string;
+                };
                 return {
                     success: payload.success,
                     output: payload.output ?? null,
@@ -365,7 +399,14 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
                     exitCode: commandResult.exitCode,
                     metadata: {
                         exitCode: commandResult.exitCode,
-                        ...(payload.success ? {} : { failureKind: 'sandbox_runtime_error' as const })
+                        ...(payload.success
+                            ? {}
+                            : {
+                                failureKind: payload.failureKind ?? 'sandbox_runtime_error' as const,
+                                failureSubsystem: inferSandboxFailureSubsystem(payload.failureKind ?? 'sandbox_runtime_error'),
+                                ...(payload.errorType ? { errorType: payload.errorType } : {}),
+                                ...(payload.traceback ? { traceback: payload.traceback } : {}),
+                            })
                     }
                 };
             }
@@ -382,7 +423,10 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
                         exitCode: commandResult.exitCode,
                         ...(commandResult.exitCode === 0
                             ? {}
-                            : { failureKind: processFailureKind ?? 'sandbox_non_zero_exit' as const })
+                            : {
+                                failureKind: processFailureKind ?? 'sandbox_non_zero_exit' as const,
+                                failureSubsystem: inferSandboxFailureSubsystem(processFailureKind ?? 'sandbox_non_zero_exit')
+                            })
                     }
                 };
             }
@@ -400,7 +444,8 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
                 exitCode: commandResult.exitCode,
                 metadata: {
                     exitCode: commandResult.exitCode,
-                    failureKind: 'sandbox_invalid_output'
+                    failureKind: 'sandbox_invalid_output',
+                    failureSubsystem: inferSandboxFailureSubsystem('sandbox_invalid_output')
                 }
             };
         }
@@ -414,7 +459,8 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
             exitCode: commandResult.exitCode,
             metadata: {
                 exitCode: commandResult.exitCode,
-                failureKind: processFailureKind ?? 'sandbox_non_zero_exit'
+                failureKind: processFailureKind ?? 'sandbox_non_zero_exit',
+                failureSubsystem: inferSandboxFailureSubsystem(processFailureKind ?? 'sandbox_non_zero_exit')
             }
         };
     }
@@ -424,6 +470,21 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
 
         if (!normalized.trim()) {
             return undefined;
+        }
+
+        if (
+            (normalized.includes('[eval]') || normalized.includes('--eval'))
+            && normalized.includes('syntaxerror')
+        ) {
+            return 'wrapper_syntax_error';
+        }
+
+        if (
+            normalized.includes('no module named')
+            || normalized.includes('modulenotfounderror')
+            || normalized.includes('module_not_found')
+        ) {
+            return 'dependency_missing';
         }
 
         if (

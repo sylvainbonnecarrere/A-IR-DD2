@@ -1,11 +1,12 @@
 import { Dirent, promises as fs } from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
-import type { IUserFunction } from '../../models/UserFunction.model';
+import ts from 'typescript';
 import type { UserToolRunLaunchContext } from '../../models/UserToolRun.model';
 import type { IUserToolRunArtifact } from '../../models/UserToolRun.model';
 import { deriveExecutionMetadataFromLegacyFunction } from '../../utils/userToolLegacyMapper';
 import { BuildService } from '../build.service';
+import { MediaCatalogService } from '../mediaCatalog.service';
 import { RuntimeHealthService } from '../runtimeHealth.service';
 import { UserToolRunService } from '../userToolRun.service';
 import { createWorkspaceManager } from '../workspace/WorkspaceManager';
@@ -14,17 +15,20 @@ import { createSandboxRunnerFactory } from './SandboxRunner';
 import { DockerSandboxRunner } from './DockerSandboxRunner';
 import { FirecrackerRunner } from './FirecrackerRunner';
 import type {
+    ExecutionFunctionRef,
     OrchestratedExecutionResult,
     SandboxExecutionFailureKind,
     SandboxExecutionRequest,
-    SandboxExecutionResourceUsage
+    SandboxExecutionResourceUsage,
+    SandboxSyntaxCheckResult
 } from './execution.types';
-import { RuntimeNotReadyError } from './errors';
+import { buildSandboxErrorDetails, inferSandboxFailureSubsystem, RuntimeNotReadyError } from './errors';
 
 export interface ExecutionOrchestratorRequest {
-    fn: IUserFunction;
+    fn: ExecutionFunctionRef;
     userId: string;
     args: Record<string, unknown>;
+    privateContext?: Record<string, unknown>;
     launchContext: UserToolRunLaunchContext;
     agentInstanceId?: string;
 }
@@ -34,6 +38,7 @@ export class ExecutionOrchestrator {
 
     private readonly runtimeHealthService = new RuntimeHealthService();
     private readonly buildService = new BuildService();
+    private readonly mediaCatalogService = new MediaCatalogService();
     private readonly userToolRunService = new UserToolRunService();
     private readonly workspaceManager = createWorkspaceManager();
     private readonly sandboxRunnerFactory = createSandboxRunnerFactory();
@@ -51,6 +56,24 @@ export class ExecutionOrchestrator {
         };
     }
 
+    async checkSyntax(language: 'python' | 'typescript', code: string): Promise<SandboxSyntaxCheckResult> {
+        if (language === 'typescript') {
+            return { valid: true, errors: [] };
+        }
+
+        const { report: runtimeReport, runner: selectedRunnerPort, readiness } = await this.getPreferredRunnerReadiness('python');
+        if (!readiness.ready) {
+            throw new RuntimeNotReadyError(readiness.reason ?? runtimeReport.summary);
+        }
+
+        const selectedRunnerId = this.normalizeRunnerId(selectedRunnerPort.getRunnerId());
+        if (selectedRunnerId !== 'docker_sandbox') {
+            throw new RuntimeNotReadyError(`Le runner prefere '${selectedRunnerPort.getLabel()}' ne supporte pas encore la verification syntaxique Python.`);
+        }
+
+        return this.dockerRunner.checkPythonSyntax(code);
+    }
+
     async execute(request: ExecutionOrchestratorRequest): Promise<OrchestratedExecutionResult> {
         const executionMetadata = deriveExecutionMetadataFromLegacyFunction(request.fn);
         const executionId = `utr-${new mongoose.Types.ObjectId().toString()}`;
@@ -61,10 +84,21 @@ export class ExecutionOrchestrator {
             throw new RuntimeNotReadyError(readiness.reason ?? runtimeReport.summary);
         }
 
+        console.info('[ExecutionOrchestrator] queue execution', {
+            executionId,
+            userId: request.userId,
+            functionName: request.fn.name,
+            toolId: executionMetadata.toolId,
+            runtime: executionMetadata.runtime,
+            launchContext: request.launchContext,
+            runner: selectedRunnerId,
+        });
+
         const executionRequest = await this.buildExecutionRequest({
             ...request,
             executionId,
             executionMetadataRuntime: executionMetadata.runtime,
+            executionMetadataToolVersionTag: executionMetadata.toolVersionTag,
             executionMetadataPolicy: executionMetadata.policySnapshot,
             launchContext: request.launchContext
         });
@@ -105,25 +139,41 @@ export class ExecutionOrchestrator {
                     });
                 } else if (executionResult.timedOut) {
                     await this.userToolRunService.timeoutRun(executionId, {
-                        error: {
-                            code: this.toPersistedErrorCode(executionResult.metadata?.failureKind),
-                            message: executionResult.stderr || 'Function execution timed out',
-                            retryable: false
-                        },
+                        error: this.buildPersistedRunError(
+                            executionResult.stderr || 'Function execution timed out',
+                            executionResult.metadata?.failureKind ?? 'timeout'
+                        ),
                         outputs,
                         resourceUsage: this.buildResourceUsage(executionResult)
                     });
                 } else {
                     await this.userToolRunService.failRun(executionId, {
-                        error: {
-                            code: this.toPersistedErrorCode(executionResult.metadata?.failureKind),
-                            message: executionResult.stderr || 'Function execution failed',
-                            retryable: false
-                        },
+                        error: this.buildPersistedRunError(
+                            executionResult.stderr || 'Function execution failed',
+                            executionResult.metadata?.failureKind
+                        ),
                         outputs,
                         resourceUsage: this.buildResourceUsage(executionResult)
                     });
                 }
+
+                await this.catalogOutputArtifacts({
+                    executionId,
+                    userId: request.userId,
+                    workflowId: request.fn.workflowId?.toString(),
+                    agentInstanceId: request.agentInstanceId,
+                    workspace: executionRequest.workspace,
+                    outputArtifacts,
+                });
+
+                console.info('[ExecutionOrchestrator] finished execution', {
+                    executionId,
+                    success: executionResult.success,
+                    timedOut: executionResult.timedOut ?? false,
+                    runner: selectedRunnerId,
+                    exitCode: executionResult.exitCode ?? null,
+                    failureKind: executionResult.metadata?.failureKind ?? null,
+                });
 
                 return {
                     ...executionResult,
@@ -137,12 +187,18 @@ export class ExecutionOrchestrator {
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
+                console.error('[ExecutionOrchestrator] failed execution', {
+                    executionId,
+                    runner: selectedRunnerId,
+                    message,
+                });
                 await this.userToolRunService.failRun(executionId, {
-                    error: {
+                    error: buildSandboxErrorDetails({
                         code: 'ORCHESTRATOR_ERROR',
                         message,
+                        subsystem: 'unknown',
                         retryable: false
-                    },
+                    }),
                     ...(outputArtifacts.length > 0
                         ? {
                             outputs: {
@@ -151,14 +207,51 @@ export class ExecutionOrchestrator {
                         }
                         : {})
                 });
+
+                await this.catalogOutputArtifacts({
+                    executionId,
+                    userId: request.userId,
+                    workflowId: request.fn.workflowId?.toString(),
+                    agentInstanceId: request.agentInstanceId,
+                    workspace: executionRequest.workspace,
+                    outputArtifacts,
+                });
+
                 throw error;
             }
         });
     }
 
+    private async catalogOutputArtifacts(params: {
+        executionId: string;
+        userId: string;
+        workflowId?: string;
+        agentInstanceId?: string;
+        workspace: WorkspaceProvisioningResult | null;
+        outputArtifacts: IUserToolRunArtifact[];
+    }): Promise<void> {
+        if (!params.workspace || !params.workflowId || !params.agentInstanceId || params.outputArtifacts.length === 0) {
+            return;
+        }
+
+        try {
+            await this.mediaCatalogService.registerRuntimeOutputArtifacts({
+                userId: params.userId,
+                workflowId: params.workflowId,
+                agentInstanceId: params.agentInstanceId,
+                executionId: params.executionId,
+                workspaceOutputRoot: params.workspace.runtimeRoots.outputRoot,
+                artifacts: params.outputArtifacts,
+            });
+        } catch (error) {
+            console.warn('[ExecutionOrchestrator] Runtime artifact catalog projection skipped after error:', error);
+        }
+    }
+
     private async buildExecutionRequest(input: ExecutionOrchestratorRequest & {
         executionId: string;
         executionMetadataRuntime: SandboxExecutionRequest['runtime'];
+        executionMetadataToolVersionTag: string;
         executionMetadataPolicy: SandboxExecutionRequest['policySnapshot'];
     }): Promise<SandboxExecutionRequest> {
         const workspace = await this.resolveWorkspace(input.fn, input.userId);
@@ -174,11 +267,14 @@ export class ExecutionOrchestrator {
                 language: input.fn.language,
                 origin: input.fn.origin,
                 codeInline: input.fn.codeInline,
-                codePath: input.fn.codePath
+                codePath: input.fn.codePath,
+                workflowId: input.fn.workflowId
             },
+            toolVersionTag: input.executionMetadataToolVersionTag,
             runtime: input.executionMetadataRuntime,
             launchContext: input.launchContext,
             args: input.args,
+            privateContext: input.privateContext,
             policySnapshot: input.executionMetadataPolicy,
             workspace,
             sourceCode,
@@ -187,7 +283,7 @@ export class ExecutionOrchestrator {
         };
     }
 
-    private async resolveWorkspace(fn: IUserFunction, userId: string): Promise<WorkspaceProvisioningResult | null> {
+    private async resolveWorkspace(fn: Pick<ExecutionFunctionRef, 'workflowId'>, userId: string): Promise<WorkspaceProvisioningResult | null> {
         if (!fn.workflowId) {
             return null;
         }
@@ -196,7 +292,7 @@ export class ExecutionOrchestrator {
     }
 
     private async resolveSourceCode(
-        fn: IUserFunction,
+        fn: ExecutionFunctionRef,
         userId: string,
         workspace: WorkspaceProvisioningResult | null
     ): Promise<string | undefined> {
@@ -212,7 +308,9 @@ export class ExecutionOrchestrator {
         }
 
         if (typeof fn.codeInline === 'string') {
-            return fn.codeInline;
+            return fn.language === 'typescript'
+                ? this.transpileTypescriptSource(fn.codeInline, `${fn.name || 'tool'}.ts`)
+                : fn.codeInline;
         }
 
         const resolvedPath = this.resolveSourcePath(fn, workspace);
@@ -220,10 +318,46 @@ export class ExecutionOrchestrator {
             throw new Error(`No source available for function '${fn.name}'.`);
         }
 
-        return fs.readFile(resolvedPath, 'utf-8');
+        const sourceCode = await fs.readFile(resolvedPath, 'utf-8');
+        return fn.language === 'typescript'
+            ? this.transpileTypescriptSource(sourceCode, resolvedPath)
+            : sourceCode;
     }
 
-    private resolveSourcePath(fn: Pick<IUserFunction, 'codePath' | 'origin'>, workspace: WorkspaceProvisioningResult | null): string | null {
+    private transpileTypescriptSource(sourceCode: string, sourceName: string): string {
+        const transpiled = ts.transpileModule(sourceCode, {
+            fileName: sourceName,
+            reportDiagnostics: true,
+            compilerOptions: {
+                target: ts.ScriptTarget.ES2020,
+                module: ts.ModuleKind.CommonJS,
+                esModuleInterop: true,
+                strict: false,
+                skipLibCheck: true,
+            }
+        });
+
+        const diagnostics = transpiled.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error) ?? [];
+        if (diagnostics.length > 0) {
+            const formattedMessage = diagnostics
+                .map((diagnostic) => {
+                    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+                    if (diagnostic.file && typeof diagnostic.start === 'number') {
+                        const position = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+                        return `${position.line + 1}:${position.character + 1} ${message}`;
+                    }
+
+                    return message;
+                })
+                .join('\n');
+
+            throw new SyntaxError(`TypeScript transpilation failed: ${formattedMessage}`);
+        }
+
+        return transpiled.outputText;
+    }
+
+    private resolveSourcePath(fn: Pick<ExecutionFunctionRef, 'codePath' | 'origin'>, workspace: WorkspaceProvisioningResult | null): string | null {
         if (!fn.codePath) {
             return null;
         }
@@ -243,7 +377,7 @@ export class ExecutionOrchestrator {
         return path.resolve(process.cwd(), fn.codePath);
     }
 
-    private resolveExecutionMode(fn: Pick<IUserFunction, 'language' | 'origin'>): SandboxExecutionRequest['mode'] {
+    private resolveExecutionMode(fn: Pick<ExecutionFunctionRef, 'language' | 'origin'>): SandboxExecutionRequest['mode'] {
         if (fn.language === 'python') {
             return fn.origin === 'native' ? 'python-native' : 'python-custom';
         }
@@ -404,5 +538,15 @@ export class ExecutionOrchestrator {
 
     private toPersistedErrorCode(failureKind?: SandboxExecutionFailureKind): string | undefined {
         return failureKind ? failureKind.toUpperCase() : undefined;
+    }
+
+    private buildPersistedRunError(message: string, failureKind?: SandboxExecutionFailureKind) {
+        return buildSandboxErrorDetails({
+            message,
+            code: this.toPersistedErrorCode(failureKind),
+            subsystem: inferSandboxFailureSubsystem(failureKind),
+            retryable: false,
+            failureKind,
+        });
     }
 }

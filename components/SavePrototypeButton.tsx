@@ -35,7 +35,7 @@ import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { PersistenceService } from '../services/persistenceService';
 import { useSaveMode } from '../hooks/useSaveMode';
 import { getBackendUrl } from '../config/api.config';
-import { V2WorkflowNode, ChatMessage } from '../types';
+import { V2WorkflowNode, ChatMessage, PendingNodeAttachment } from '../types';
 
 // ⭐ CONSTANTES DE CONFIGURATION - Anti-boucle infinie
 const MAX_ERRORS_BEFORE_ABORT = 3;
@@ -64,6 +64,68 @@ type ButtonState = 'idle' | 'saving' | 'success' | 'error';
 // ⭐ MODULE-LEVEL: Set des messages déjà envoyés (persistant entre les re-renders)
 const globalSentMessageIds = new Set<string>();
 
+function resolveInlineMediaExtension(mimeType?: string): string {
+    switch (mimeType?.toLowerCase()) {
+        case 'image/jpeg':
+        case 'image/jpg':
+            return 'jpg';
+        case 'image/png':
+            return 'png';
+        case 'image/gif':
+            return 'gif';
+        case 'image/webp':
+            return 'webp';
+        case 'image/svg+xml':
+            return 'svg';
+        case 'application/pdf':
+            return 'pdf';
+        default:
+            return 'bin';
+    }
+}
+
+function resolveInlineMediaFileName(message: ChatMessage, messageId: string): string | undefined {
+    const explicitFileName = typeof message.filename === 'string' ? message.filename.trim() : '';
+    if (explicitFileName.length > 0) {
+        return explicitFileName;
+    }
+
+    if (!message.image || !message.mimeType) {
+        return undefined;
+    }
+
+    const messageSlug = messageId.trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'inline-chat-media';
+    return `chat-upload-${messageSlug}.${resolveInlineMediaExtension(message.mimeType)}`;
+}
+
+async function persistPendingDraftAttachment(params: {
+    backendUrl: string;
+    accessToken: string;
+    workflowId: string;
+    agentInstanceId: string;
+    attachment: PendingNodeAttachment;
+    signal: AbortSignal;
+}) {
+    return fetch(
+        `${params.backendUrl}/api/workflows/${params.workflowId}/instances/${params.agentInstanceId}/imported-media`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${params.accessToken}`,
+            },
+            body: JSON.stringify({
+                attachmentId: params.attachment.id,
+                fileName: params.attachment.fileName,
+                mimeType: params.attachment.mimeType,
+                contentBase64: params.attachment.base64Content,
+                origin: params.attachment.origin,
+            }),
+            signal: params.signal,
+        }
+    );
+}
+
 export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     workflowId,
     canvasState,
@@ -74,7 +136,13 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     const [buttonState, setButtonState] = useState<ButtonState>('idle');
     const { isAuthenticated, accessToken } = useAuth();
     const { nodes, edges } = useDesignStore();
-    const { nodeMessages, getNewMessages, setLastSavedAt } = useRuntimeStore();
+    const {
+        nodeMessages,
+        nodePendingAttachments = {},
+        getNewMessages,
+        setLastSavedAt,
+        updateNodePendingAttachment = () => undefined,
+    } = useRuntimeStore();
     const { isManualSave } = useSaveMode();
     
     // ⭐ LOCK: Éviter les appels concurrents (ref stable au niveau composant)
@@ -114,16 +182,26 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
         try {
             // ⭐ SNAPSHOT IMMÉDIAT: Capturer l'état une seule fois
             const nodeMessagesSnapshot = JSON.parse(JSON.stringify(nodeMessages));
+            const nodePendingAttachmentsSnapshot = { ...nodePendingAttachments } as Record<string, PendingNodeAttachment | null>;
             const nodesSnapshot = [...nodes];
+            const nodeIds = new Set([
+                ...Object.keys(nodeMessagesSnapshot),
+                ...Object.keys(nodePendingAttachmentsSnapshot),
+            ]);
 
-            for (const [nodeId, messages] of Object.entries(nodeMessagesSnapshot)) {
+            for (const nodeId of nodeIds) {
                 // ⭐ CIRCUIT BREAKER: Arrêter si trop d'erreurs consécutives
                 if (consecutiveErrors >= MAX_ERRORS_BEFORE_ABORT) {
                     console.error(`[SavePrototypeButton] 🛑 Aborting: ${MAX_ERRORS_BEFORE_ABORT} consecutive errors`);
                     break;
                 }
 
-                if (!messages || (messages as ChatMessage[]).length === 0) continue;
+                const messages = nodeMessagesSnapshot[nodeId] as ChatMessage[] | undefined;
+                const pendingAttachment = nodePendingAttachmentsSnapshot[nodeId];
+
+                if ((!messages || messages.length === 0) && !pendingAttachment) {
+                    continue;
+                }
 
                 // Trouver le node pour les métadonnées
                 const node = nodesSnapshot.find(n => n.id === nodeId) as V2WorkflowNode | undefined;
@@ -136,20 +214,18 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                 }
 
                 // ⭐ DÉDUPLICATION STRICTE: Filtrer via globalSentMessageIds
-                const allMessages = messages as ChatMessage[];
+                const allMessages = (messages || []) as ChatMessage[];
                 const newMessages = allMessages.filter((msg: ChatMessage) => {
                     const msgId = msg.id || `${nodeId}-${msg.timestamp?.toString() || Date.now()}`;
                     return !globalSentMessageIds.has(msgId);
                 });
 
-                if (newMessages.length === 0) {
-                    continue;
-                }
-
                 // ⭐ LIMITE PAR BATCH: Ne pas envoyer trop de messages d'un coup
                 const messagesToSend = newMessages.slice(0, MAX_MESSAGES_PER_BATCH);
-                
-                console.log(`[SavePrototypeButton] 📤 Sending ${messagesToSend.length}/${newMessages.length} messages for instance ${agentInstance.id}`);
+
+                if (messagesToSend.length > 0) {
+                    console.log(`[SavePrototypeButton] 📤 Sending ${messagesToSend.length}/${newMessages.length} messages for instance ${agentInstance.id}`);
+                }
 
                 for (const message of messagesToSend) {
                     // ⭐ Vérifier si l'opération a été annulée
@@ -171,10 +247,9 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                         continue;
                     }
 
-                    // ⭐ MARQUER IMMÉDIATEMENT comme en cours (avant l'envoi)
-                    globalSentMessageIds.add(msgId);
-
                     try {
+                        const resolvedFileName = resolveInlineMediaFileName(message, msgId);
+
                         // ⭐ TIMEOUT: Requête avec délai maximum
                         const timeoutId = setTimeout(() => {
                             abortControllerRef.current?.abort();
@@ -194,8 +269,9 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                                         role: message.sender === 'user' ? 'user' : 'agent',
                                         content: message.text || '',
                                         imageBase64: message.image,
+                                        fileContent: message.fileContent,
                                         mimeType: message.mimeType,
-                                        fileName: message.filename,
+                                        fileName: resolvedFileName,
                                         messageId: msgId
                                     }
                                 }),
@@ -206,23 +282,72 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                         clearTimeout(timeoutId);
 
                         if (response.ok) {
+                            // Marquer comme envoyé uniquement APRÈS succès
+                            globalSentMessageIds.add(msgId);
                             saved++;
                             consecutiveErrors = 0; // ⭐ Reset du circuit breaker
                         } else {
-                            // ⭐ En cas d'erreur serveur, ne pas retirer du Set (éviter retry infini)
+                            // En cas d'erreur serveur, permettre retry futur -> ne pas ajouter au Set
                             console.warn(`[SavePrototypeButton] Server error ${response.status} for message ${msgId}`);
+                            consecutiveErrors++;
+                            totalErrors++;
+                            // Defensive: ensure it's not marked as sent
+                            if (globalSentMessageIds.has(msgId)) globalSentMessageIds.delete(msgId);
+                        }
+                    } catch (err) {
+                        // ⭐ En cas d'erreur réseau, autoriser retry futur en supprimant le marqueur
+                        console.error(`[SavePrototypeButton] Network error for message ${msgId}:`, err);
+                        consecutiveErrors++;
+                        totalErrors++;
+                        if (globalSentMessageIds.has(msgId)) globalSentMessageIds.delete(msgId);
+
+                        // ⭐ Si c'est une erreur d'abort, arrêter proprement
+                        if (err instanceof Error && err.name === 'AbortError') {
+                            console.warn('[SavePrototypeButton] Request aborted');
+                            return { saved, errors: totalErrors, aborted: true };
+                        }
+                    }
+                }
+
+                if (pendingAttachment && !pendingAttachment.draftPersisted) {
+                    try {
+                        const timeoutId = setTimeout(() => {
+                            abortControllerRef.current?.abort();
+                        }, REQUEST_TIMEOUT_MS);
+
+                        const response = await persistPendingDraftAttachment({
+                            backendUrl,
+                            accessToken: accessToken || '',
+                            workflowId: effectiveWorkflowId,
+                            agentInstanceId: agentInstance.id,
+                            attachment: pendingAttachment,
+                            signal,
+                        });
+
+                        clearTimeout(timeoutId);
+
+                        if (response.ok) {
+                            const responseBody = await response.json().catch(() => ({}));
+                            if (responseBody?.success || responseBody?.skipped) {
+                                updateNodePendingAttachment(nodeId, {
+                                    draftPersisted: true,
+                                    persistedAt: new Date(),
+                                });
+                                saved++;
+                                consecutiveErrors = 0;
+                            }
+                        } else {
+                            console.warn(`[SavePrototypeButton] Draft media server error ${response.status} for node ${nodeId}`);
                             consecutiveErrors++;
                             totalErrors++;
                         }
                     } catch (err) {
-                        // ⭐ En cas d'erreur réseau, NE PAS retirer du Set pour éviter les retry infinis
-                        console.error(`[SavePrototypeButton] Network error for message ${msgId}:`, err);
+                        console.error(`[SavePrototypeButton] Draft media network error for node ${nodeId}:`, err);
                         consecutiveErrors++;
                         totalErrors++;
-                        
-                        // ⭐ Si c'est une erreur d'abort, arrêter proprement
+
                         if (err instanceof Error && err.name === 'AbortError') {
-                            console.warn('[SavePrototypeButton] Request aborted');
+                            console.warn('[SavePrototypeButton] Draft media request aborted');
                             return { saved, errors: totalErrors, aborted: true };
                         }
                     }
@@ -241,7 +366,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
         }
         
         return { saved, errors: totalErrors, aborted: false };
-    }, [nodeMessages, nodes, workflowId, accessToken, setLastSavedAt]);
+    }, [nodeMessages, nodePendingAttachments, nodes, workflowId, accessToken, setLastSavedAt, updateNodePendingAttachment]);
 
     /**
      * Handle save action with strict single-execution guarantee

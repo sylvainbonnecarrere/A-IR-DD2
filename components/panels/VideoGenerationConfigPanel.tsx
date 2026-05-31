@@ -15,7 +15,6 @@ interface VideoGenerationConfigPanelProps {
   isOpen: boolean;
   nodeId?: string;
   llmConfigs?: any[];
-  workflowNodes?: any[];
   onClose: () => void;
   hideSlideOver?: boolean;
 }
@@ -24,7 +23,6 @@ export const VideoGenerationConfigPanel: React.FC<VideoGenerationConfigPanelProp
   isOpen,
   nodeId,
   llmConfigs,
-  workflowNodes,
   onClose,
   hideSlideOver = false
 }) => {
@@ -56,7 +54,6 @@ export const VideoGenerationConfigPanel: React.FC<VideoGenerationConfigPanelProp
           <VideoGenerationContent
             nodeId={nodeId}
             llmConfigs={llmConfigs}
-            workflowNodes={workflowNodes}
             onClose={onClose}
             onSubmit={(config) => {
               console.log('Video generation config:', config);
@@ -74,7 +71,6 @@ export const VideoGenerationConfigPanel: React.FC<VideoGenerationConfigPanelProp
       <VideoGenerationContent
         nodeId={nodeId}
         llmConfigs={llmConfigs}
-        workflowNodes={workflowNodes}
         onClose={onClose}
         onSubmit={(config) => {
           console.log('Video generation config:', config);

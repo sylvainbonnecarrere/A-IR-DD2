@@ -2,15 +2,22 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { AgentInstance } from '../models/AgentInstance.model';
-import { AgentPrototype } from '../models/AgentPrototype.model';
-import { Workflow } from '../models/Workflow.model';
 import { AgentJournal } from '../models/AgentJournal.model';
+import { AgentPrototype } from '../models/AgentPrototype.model';
+import { UserToolRun } from '../models/UserToolRun.model';
+import { Workflow } from '../models/Workflow.model';
+import { WorkflowNodeV2 } from '../models/WorkflowNodeV2.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { requireRobotGovernance } from '../middleware/robot-governance.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
+import { journalService } from '../services/journal.service';
+import { buildChatMessagesByInstance } from '../utils/chatMessageProjection';
 import { transformAgentInstanceForFrontend } from '../utils/transforms';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
+import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
+import { extractPersistenceConfigValue, normalizePersistenceConfigForPersistence, normalizePersistenceConfigForProduct, summarizePersistenceConfigBoundary } from '../types/persistence';
+import { AgentInstanceDeletionPolicyService } from '../services/agentInstanceDeletionPolicy.service';
 
 // Type pour les paramètres de route hérités (via mergeParams)
 interface WorkflowParams {
@@ -30,6 +37,17 @@ const toolSelectionSchema = z.object({
     }).optional()
 });
 
+function normalizeIncomingPersistenceConfig<T extends { persistenceConfig?: any }>(payload: T): T {
+    if (!payload?.persistenceConfig) {
+        return payload;
+    }
+
+    return {
+        ...payload,
+        persistenceConfig: normalizePersistenceConfigForPersistence(payload.persistenceConfig)
+    };
+}
+
 // Schema validation
 const createAgentInstanceSchema = z.object({
     workflowId: z.string(),
@@ -45,20 +63,25 @@ const createAgentInstanceSchema = z.object({
     historyConfig: z.object({}).passthrough().optional(),
     tools: z.array(z.object({}).passthrough()).optional(),
     toolSelections: z.array(toolSelectionSchema).optional(),
+    webSearchParams: WebSearchParamsSchema.optional(),
     outputConfig: z.object({}).passthrough().optional(),
     robotId: CanonicalRobotIdEnum,
     
     // ⭐ FIX QA: Add persistenceConfig to validation schema for media storage
     persistenceConfig: z.object({
         saveChat: z.boolean().optional(),
+        saveChatHistory: z.boolean().optional(),
         saveErrors: z.boolean().optional(),
         saveHistorySummary: z.boolean().optional(),
         saveLinks: z.boolean().optional(),
         saveTasks: z.boolean().optional(),
+        saveTaskExecution: z.boolean().optional(),
         saveMedia: z.boolean().optional(),
-        mediaStorage: z.enum(['db', 'local', 'cloud']).optional(), // ⭐ FIX: Use 'db' not 'database'
-        cloudStorageConfig: z.object({}).passthrough().nullable().optional()
-    }).optional(),
+        allowWorkspaceWrite: z.boolean().optional(),
+        mediaStorage: z.enum(['db', 'local', 'workspace', 'cloud']).optional(),
+        cloudConnectionProfileId: z.string().optional(),
+        retentionDays: z.number().int().positive().optional()
+    }).strict().optional(),
 
     // Canvas properties
     position: z.object({
@@ -78,6 +101,33 @@ const createAgentInstanceSchema = z.object({
 });
 
 const updateAgentInstanceSchema = createAgentInstanceSchema.partial();
+
+const deleteAgentInstanceQuerySchema = z.object({
+    mediaPolicy: z.enum(['delete_media', 'orphan_media']).optional().default('delete_media')
+});
+
+const importedMediaDraftSchema = z.object({
+    attachmentId: z.string().min(1).max(160),
+    fileName: z.string().min(1).max(255),
+    mimeType: z.string().min(1).max(255),
+    contentBase64: z.string().min(1),
+    origin: z.string().min(1).max(64).optional(),
+});
+
+function buildDraftImportMessageId(origin: string | undefined, attachmentId: string): string {
+    const originSlug = (origin || 'unknown')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'unknown';
+
+    const attachmentSlug = attachmentId
+        .trim()
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'draft';
+
+    return `draft-import::${originSlug}::${attachmentSlug}`;
+}
 
 // GET /api/workflows/:workflowId/instances - Liste des instances
 router.get('/', requireAuth, async (req: Request<WorkflowParams>, res: Response) => {
@@ -113,14 +163,34 @@ router.get('/:id',
     }),
     async (req, res) => {
         try {
+            const user = req.user as IUser;
             const instance = await AgentInstance.findById(req.params.id);
 
             if (!instance) {
                 return res.status(404).json({ error: 'Instance introuvable' });
             }
 
-            // ⭐ FIX: Transform instance for frontend consumption
-            res.json(transformAgentInstanceForFrontend(instance));
+            const [journalEntries, toolRuns] = await Promise.all([
+                AgentJournal.find({
+                    agentInstanceId: instance._id,
+                    type: { $in: ['chat', 'tool_invocation'] }
+                }).sort({ timestamp: 1 }),
+                UserToolRun.find({
+                    ownerUserId: user.id,
+                    agentInstanceId: instance._id
+                }).sort({ createdAt: -1 }).limit(200)
+            ]);
+
+            const transformedInstance = transformAgentInstanceForFrontend(instance);
+            const chatMessagesByInstance = buildChatMessagesByInstance(
+                journalEntries,
+                new Map(toolRuns.map((run: any) => [run.executionId, run]))
+            );
+
+            res.json({
+                ...transformedInstance,
+                chatMessages: chatMessagesByInstance[transformedInstance.id] || []
+            });
         } catch (error) {
             console.error('[AgentInstances] GET/:id error:', error);
             res.status(500).json({ error: 'Erreur récupération instance' });
@@ -161,11 +231,15 @@ router.post('/',
                 }
             }
 
+            const normalizedInstanceData = instanceData.webSearchParams !== undefined
+                ? { ...instanceData, webSearchParams: parseWebSearchParams(instanceData.webSearchParams) }
+                : instanceData;
+
             const instance = new AgentInstance({
                 workflowId,
                 userId: user.id,
                 prototypeId: prototypeId || undefined,
-                ...instanceData
+                ...normalizedInstanceData
             });
 
             await instance.save();
@@ -174,7 +248,7 @@ router.post('/',
             workflow.isDirty = true;
             await workflow.save();
 
-            res.status(201).json(instance);
+            res.status(201).json(transformAgentInstanceForFrontend(instance));
         } catch (error) {
             console.error('[AgentInstances] POST error:', error);
             res.status(500).json({ error: 'Erreur création instance' });
@@ -258,6 +332,9 @@ router.post('/from-prototype', requireAuth,
           : ['Chat'];
         
         const finalTools = Array.isArray(prototype.tools) ? prototype.tools : [];
+        const finalLegacyTools = Array.isArray(configuration_json?.tools)
+            ? configuration_json.tools
+            : (Array.isArray((prototype as any).legacyTools) ? (prototype as any).legacyTools : []);
         const finalToolSelections = Array.isArray((prototype as any).toolSelections) && (prototype as any).toolSelections.length > 0
             ? (prototype as any).toolSelections
             : finalTools.map((toolId: mongoose.Types.ObjectId) => ({ toolId: toolId.toString() }));
@@ -265,21 +342,28 @@ router.post('/from-prototype', requireAuth,
         // 4. PHASE 2 - HistoryConfig: Use frontend config if provided
         const finalHistoryConfig = configuration_json?.historyConfig || prototype.historyConfig || {};
         const finalOutputConfig = configuration_json?.outputConfig || prototype.outputConfig || {};
+            const finalWebSearchParams = configuration_json?.webSearchParams !== undefined
+                ? parseWebSearchParams(configuration_json.webSearchParams)
+                : (prototype as any).webSearchParams || undefined;
         // ⭐ LOCAL LLM: Resolve localLLMProfileId (frontend takes precedence over prototype)
         const finalLocalLLMProfileId = configuration_json?.localLLMProfileId ?? (prototype as any).localLLMProfileId ?? null;
         
         // 5. PersistenceConfig: merge prototype config avec overrides
-        const prototypePersistenceConfig = prototype.persistenceConfig || {
-            saveChat: true,
-            saveErrors: true,
-            saveHistorySummary: false,
-            saveLinks: false,
-            saveTasks: false,
-            mediaStorage: 'db'
-        };
+        const prototypePersistenceConfig = normalizePersistenceConfigForPersistence(
+            extractPersistenceConfigValue(prototype.persistenceConfig) ?? {
+                saveChat: true,
+                saveErrors: true,
+                saveHistorySummary: false,
+                saveLinks: false,
+                saveTasks: false,
+                allowWorkspaceWrite: true,
+                mediaStorage: 'db'
+            }
+        );
         
-        const finalPersistenceConfig = persistenceConfig 
-            ? { ...prototypePersistenceConfig, ...persistenceConfig }
+        const normalizedRequestPersistence = normalizeIncomingPersistenceConfig({ persistenceConfig }).persistenceConfig;
+        const finalPersistenceConfig = normalizedRequestPersistence
+            ? { ...prototypePersistenceConfig, ...normalizedRequestPersistence }
             : prototypePersistenceConfig;
 
         // Log des valeurs finales pour debugging
@@ -313,7 +397,9 @@ router.post('/from-prototype', requireAuth,
             capabilities: finalCapabilities,  // ⭐ PHASE 2: From frontend configuration_json
             historyConfig: finalHistoryConfig,  // ⭐ PHASE 2: From frontend configuration_json
             outputConfig: finalOutputConfig,  // ⭐ PHASE 2: From frontend configuration_json
+            webSearchParams: finalWebSearchParams,
             tools: finalTools,
+            legacyTools: finalLegacyTools,
             toolSelections: finalToolSelections,
             robotId: finalRobotId,
             // ⭐ LOCAL LLM: Persist localLLMProfileId for correct endpoint resolution
@@ -348,6 +434,28 @@ router.post('/from-prototype', requireAuth,
 
         await instance.save();
 
+        let node;
+
+        try {
+            node = await WorkflowNodeV2.create({
+                workflowId,
+                ownerId: user.id,
+                instanceId: instance._id,
+                nodeType: 'agent',
+                position,
+                uiConfig: {
+                    label: finalName,
+                    expanded: true,
+                },
+            });
+        } catch (nodeError) {
+            await AgentInstance.findByIdAndDelete(instance._id).catch((rollbackError) => {
+                console.error('[AgentInstances] ❌ Failed to rollback orphaned instance after node creation error:', rollbackError);
+            });
+
+            throw nodeError;
+        }
+
         // Marquer workflow comme dirty
         workflow.isDirty = true;
         await workflow.save();
@@ -365,7 +473,17 @@ router.post('/from-prototype', requireAuth,
         // Use the helper function to ensure consistency across all endpoints
         const mappedInstance = transformAgentInstanceForFrontend(instance);
 
-        res.status(201).json(mappedInstance);
+        res.status(201).json({
+            ...mappedInstance,
+            instance: mappedInstance,
+            node: {
+                id: node._id.toString(),
+                instanceId: instance._id.toString(),
+                nodeType: node.nodeType,
+                position: node.position,
+                uiConfig: node.uiConfig,
+            },
+        });
     } catch (error: any) {
         // ⭐ LOGGING AMÉLIORÉ: afficher les détails de l'erreur de validation
         console.error('[AgentInstances] ❌ POST/from-prototype error:', {
@@ -396,6 +514,17 @@ router.post('/from-prototype', requireAuth,
             }));
         }
         
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({
+                error: 'Validation échouée',
+                details: error.errors.map((e) => ({
+                    field: e.path.join('.'),
+                    message: e.message,
+                    code: e.code,
+                })),
+            });
+        }
+
         res.status(500).json(errorResponse);
     }
 });
@@ -431,7 +560,7 @@ router.put('/:id',
                 bodyKeys: Object.keys(req.body),
                 hasConfigurationJson: !!req.body.configuration_json,
                 hasPersistenceConfig: !!req.body.persistenceConfig,
-                persistenceConfig: req.body.persistenceConfig
+                persistenceConfig: summarizePersistenceConfigBoundary(req.body.persistenceConfig)
             });
             
             const instance = await AgentInstance.findOne({ _id: instanceId, userId: user.id });
@@ -475,6 +604,11 @@ router.put('/:id',
                 if (Array.isArray(configuration_json.toolSelections)) {
                     instance.toolSelections = configuration_json.toolSelections;
                 }
+                if (Array.isArray(configuration_json.tools)) {
+                    instance.legacyTools = configuration_json.tools;
+                } else if (Array.isArray(configuration_json.legacyTools)) {
+                    instance.legacyTools = configuration_json.legacyTools;
+                }
                 // ⭐ ARCHITECTURE NOTE — dual storage:
                 //   instance.tools (ObjectId[]) = stable tool IDs mirrored across legacy/cible
                 //   functionInheritance.overrideFunctionIds (String[]) = instance-level override IDs in the same ID space
@@ -496,6 +630,9 @@ router.put('/:id',
                 }
                 if (configuration_json.outputConfig !== undefined) {
                     instance.outputConfig = configuration_json.outputConfig;
+                }
+                if (configuration_json.webSearchParams !== undefined) {
+                    instance.webSearchParams = parseWebSearchParams(configuration_json.webSearchParams);
                 }
                 // J6: Function Inheritance
                 if (configuration_json.functionInheritance !== undefined) {
@@ -537,12 +674,44 @@ router.put('/:id',
             }
             
             // Apply other updates (name, position, etc.) using Object.assign
-            Object.assign(instance, otherUpdates);
+            const normalizedPayload = normalizeIncomingPersistenceConfig(otherUpdates);
+            const normalizedOtherUpdates = normalizedPayload.webSearchParams !== undefined
+                ? { ...normalizedPayload, webSearchParams: parseWebSearchParams(normalizedPayload.webSearchParams) }
+                : normalizedPayload;
+            const shouldSyncWorkflowNodePosition = !!normalizedOtherUpdates.position
+                && typeof normalizedOtherUpdates.position.x === 'number'
+                && typeof normalizedOtherUpdates.position.y === 'number';
+
+            Object.assign(instance, normalizedOtherUpdates);
             await instance.save();
+
+            if (shouldSyncWorkflowNodePosition) {
+                const syncedNode = await WorkflowNodeV2.findOneAndUpdate(
+                    {
+                        workflowId: instance.workflowId,
+                        ownerId: user.id,
+                        instanceId: instance._id,
+                    },
+                    {
+                        $set: {
+                            position: instance.position,
+                        },
+                    },
+                    { new: true }
+                );
+
+                if (!syncedNode) {
+                    console.warn('[AgentInstances] ⚠️ No WorkflowNodeV2 found while syncing instance position:', {
+                        instanceId,
+                        workflowId: instance.workflowId?.toString?.() || instance.workflowId,
+                    });
+                }
+            }
 
             // ⭐ CRITICAL: Log saved state for debugging (BREAK #2 fix)
             const historyConfigObj = instance.historyConfig as any || {};
             const persistenceConfigObj = instance.persistenceConfig as any || {};
+            const persistenceSummary = summarizePersistenceConfigBoundary(persistenceConfigObj);
             console.log('[AgentInstances] ✅ PUT endpoint saved:', {
                 instanceId: instance._id?.toString(),
                 name: instance.name,
@@ -553,10 +722,7 @@ router.put('/:id',
                     enabled: historyConfigObj.enabled || false,
                     provider: historyConfigObj.llmProvider || 'unknown'
                 },
-                persistenceConfig: {
-                    saveMedia: persistenceConfigObj.saveMedia || false,
-                    mediaStorage: persistenceConfigObj.mediaStorage || 'db'
-                },
+                persistenceConfig: persistenceSummary,
                 toolsCount: Array.isArray(instance.tools) ? instance.tools.length : 0
             });
 
@@ -567,9 +733,19 @@ router.put('/:id',
                 await workflow.save();
             }
 
-            res.json(instance);
+            res.json(transformAgentInstanceForFrontend(instance));
         } catch (error) {
             console.error('[AgentInstances] PUT error:', error);
+            if (error instanceof z.ZodError) {
+                return res.status(400).json({
+                    error: 'Validation échouée',
+                    details: error.errors.map((e) => ({
+                        field: e.path.join('.'),
+                        message: e.message,
+                        code: e.code,
+                    })),
+                });
+            }
             res.status(500).json({ error: 'Erreur mise à jour instance' });
         }
     }
@@ -595,6 +771,252 @@ const contentSchema = z.object({
     })
 });
 
+type LegacyContentPayload = z.infer<typeof contentSchema>['content'];
+
+function normalizeLegacyChatRole(role?: string): 'user' | 'agent' | 'tool' | 'tool_result' {
+    if (role === 'user' || role === 'tool' || role === 'tool_result') {
+        return role;
+    }
+
+    if (role === 'assistant') {
+        return 'agent';
+    }
+
+    return 'agent';
+}
+
+function normalizeLegacyErrorSource(source: unknown): 'llm_service' | 'tool_executor' | 'frontend' | 'system' {
+    if (
+        source === 'llm_service'
+        || source === 'tool_executor'
+        || source === 'frontend'
+        || source === 'system'
+    ) {
+        return source;
+    }
+
+    return 'frontend';
+}
+
+function extractLegacyCorrelationIds(metadata: Record<string, unknown>) {
+    const correlationIds: Record<string, string> = {};
+
+    if (typeof metadata.messageId === 'string' && metadata.messageId.trim().length > 0) {
+        correlationIds.messageId = metadata.messageId.trim();
+    }
+    if (typeof metadata.toolCallId === 'string' && metadata.toolCallId.trim().length > 0) {
+        correlationIds.toolCallId = metadata.toolCallId.trim();
+    }
+    if (typeof metadata.executionId === 'string' && metadata.executionId.trim().length > 0) {
+        correlationIds.executionId = metadata.executionId.trim();
+    }
+
+    return correlationIds;
+}
+
+function resolveLegacyMediaExtension(mimeType: string, fallbackType: 'image' | 'video'): string {
+    if (mimeType === 'image/jpeg') {
+        return 'jpg';
+    }
+    if (mimeType === 'image/webp') {
+        return 'webp';
+    }
+    if (mimeType === 'image/gif') {
+        return 'gif';
+    }
+    if (mimeType === 'video/webm') {
+        return 'webm';
+    }
+
+    return fallbackType === 'video' ? 'mp4' : 'png';
+}
+
+function resolveLegacyMediaMimeType(content: LegacyContentPayload, metadata: Record<string, unknown>): string {
+    if (typeof metadata.mimeType === 'string' && metadata.mimeType.trim().length > 0) {
+        return metadata.mimeType.trim();
+    }
+
+    return content.type === 'video' ? 'video/mp4' : 'image/png';
+}
+
+function resolveLegacyMediaFileName(
+    content: LegacyContentPayload,
+    metadata: Record<string, unknown>,
+    mimeType: string,
+): string {
+    if (typeof metadata.fileName === 'string' && metadata.fileName.trim().length > 0) {
+        return metadata.fileName.trim();
+    }
+
+    const stem = typeof content.mediaId === 'string' && content.mediaId.trim().length > 0
+        ? content.mediaId.trim()
+        : `legacy-${content.type}-${Date.now()}`;
+
+    return `${stem}.${resolveLegacyMediaExtension(mimeType, content.type === 'video' ? 'video' : 'image')}`;
+}
+
+function resolveLegacyMediaSize(metadata: Record<string, unknown>): number {
+    if (typeof metadata.byteSize === 'number' && Number.isFinite(metadata.byteSize)) {
+        return metadata.byteSize;
+    }
+    if (typeof metadata.sizeInBytes === 'number' && Number.isFinite(metadata.sizeInBytes)) {
+        return metadata.sizeInBytes;
+    }
+
+    return 0;
+}
+
+function buildLegacyMetricsIncrement(content: LegacyContentPayload): Record<string, number> {
+    if (content.type === 'chat') {
+        const metricsUpdate: Record<string, number> = {
+            'metrics.callCount': 1,
+        };
+
+        if (typeof content.metadata?.tokensUsed === 'number' && Number.isFinite(content.metadata.tokensUsed)) {
+            metricsUpdate['metrics.totalTokens'] = content.metadata.tokensUsed;
+        }
+
+        return metricsUpdate;
+    }
+
+    if (content.type === 'error') {
+        return { 'metrics.totalErrors': 1 };
+    }
+
+    return { 'metrics.totalMediaGenerated': 1 };
+}
+
+function mapLegacyContentToJournalEntry(content: LegacyContentPayload): {
+    type: 'chat' | 'error' | 'media';
+    payload: Record<string, unknown>;
+    severity?: 'info' | 'warn' | 'error';
+} | null {
+    const metadata = content.metadata || {};
+    const correlationIds = extractLegacyCorrelationIds(metadata);
+
+    if (content.type === 'chat') {
+        const toolCalls = Array.isArray(metadata.toolCalls)
+            ? metadata.toolCalls
+                .filter((toolCall): toolCall is { id?: unknown; name?: unknown; arguments?: unknown } => !!toolCall && typeof toolCall === 'object')
+                .map((toolCall) => ({
+                    id: typeof toolCall.id === 'string' ? toolCall.id : '',
+                    name: typeof toolCall.name === 'string' ? toolCall.name : '',
+                    arguments: typeof toolCall.arguments === 'string' ? toolCall.arguments : '{}',
+                }))
+                .filter((toolCall) => toolCall.name.length > 0)
+            : undefined;
+
+        return {
+            type: 'chat',
+            payload: {
+                ...correlationIds,
+                role: normalizeLegacyChatRole(content.role),
+                content: content.message || '',
+                llmProvider: typeof metadata.llmProvider === 'string' ? metadata.llmProvider : undefined,
+                modelUsed: typeof metadata.modelUsed === 'string' ? metadata.modelUsed : undefined,
+                tokensUsed: typeof metadata.tokensUsed === 'number' ? metadata.tokensUsed : undefined,
+                toolCalls,
+                imageBase64: typeof metadata.imageBase64 === 'string' ? metadata.imageBase64 : undefined,
+                fileContent: typeof metadata.fileContent === 'string' ? metadata.fileContent : undefined,
+                mimeType: typeof metadata.mimeType === 'string' ? metadata.mimeType : undefined,
+                fileName: typeof metadata.fileName === 'string' ? metadata.fileName : undefined,
+            },
+        };
+    }
+
+    if (content.type === 'error') {
+        return {
+            type: 'error',
+            severity: 'error',
+            payload: {
+                ...correlationIds,
+                errorCode: typeof metadata.errorCode === 'string'
+                    ? metadata.errorCode
+                    : content.subType || 'legacy_content_error',
+                message: content.message || '',
+                source: normalizeLegacyErrorSource(metadata.source),
+                retryable: typeof metadata.retryable === 'boolean' ? metadata.retryable : false,
+                attempts: typeof metadata.attempts === 'number' ? metadata.attempts : 1,
+                stack: typeof metadata.stack === 'string' ? metadata.stack : undefined,
+            },
+        };
+    }
+
+    const mimeType = resolveLegacyMediaMimeType(content, metadata);
+    const fileName = resolveLegacyMediaFileName(content, metadata, mimeType);
+    const base64Payload = typeof metadata.dataBase64 === 'string'
+        ? metadata.dataBase64
+        : typeof metadata.imageBase64 === 'string'
+            ? metadata.imageBase64
+            : undefined;
+    const explicitStorageMode = metadata.storageMode;
+
+    let storageMode: 'database' | 'local' | 'cloud' | null = null;
+    let payload: Record<string, unknown> = {
+        ...correlationIds,
+        mimeType,
+        fileName,
+        size: resolveLegacyMediaSize(metadata),
+        generationPrompt: content.prompt,
+        generationModel: typeof metadata.generatedBy === 'string'
+            ? metadata.generatedBy
+            : typeof metadata.model === 'string'
+                ? metadata.model
+                : undefined,
+        metadata: {
+            ...metadata,
+            legacyMediaId: content.mediaId,
+            legacyDuration: content.duration,
+        },
+    };
+
+    if (explicitStorageMode === 'database' || explicitStorageMode === 'local' || explicitStorageMode === 'cloud') {
+        storageMode = explicitStorageMode;
+    } else if (typeof metadata.path === 'string' && metadata.path.trim().length > 0) {
+        storageMode = 'local';
+    } else if (typeof content.url === 'string' && content.url.trim().length > 0) {
+        storageMode = 'cloud';
+    } else if (typeof base64Payload === 'string' && base64Payload.trim().length > 0) {
+        storageMode = 'database';
+    }
+
+    if (storageMode === 'database') {
+        if (typeof base64Payload !== 'string' || base64Payload.trim().length === 0) {
+            return null;
+        }
+        payload = {
+            ...payload,
+            storageMode,
+            data: Buffer.from(base64Payload, 'base64'),
+        };
+    } else if (storageMode === 'local') {
+        if (typeof metadata.path !== 'string' || metadata.path.trim().length === 0) {
+            return null;
+        }
+        payload = {
+            ...payload,
+            storageMode,
+            path: metadata.path.trim(),
+        };
+    } else if (storageMode === 'cloud') {
+        if (typeof content.url !== 'string' || content.url.trim().length === 0) {
+            return null;
+        }
+        payload = {
+            ...payload,
+            storageMode,
+            url: content.url.trim(),
+        };
+    } else {
+        return null;
+    }
+
+    return {
+        type: 'media',
+        payload,
+    };
+}
+
 router.post('/:id/content',
     requireAuth,
     validateRequest(contentSchema),
@@ -619,33 +1041,69 @@ router.post('/:id/content',
                 return res.status(404).json({ error: 'Instance introuvable' });
             }
 
-            // Add content with timestamp
             const contentWithTimestamp = {
                 ...content,
                 timestamp: content.timestamp ? new Date(content.timestamp) : new Date()
             };
 
-            // Push to content array
-            instance.content.push(contentWithTimestamp);
-
-            // Update metrics based on content type
-            if (content.type === 'chat') {
-                instance.metrics.callCount = (instance.metrics.callCount || 0) + 1;
-                if (content.metadata?.tokensUsed) {
-                    instance.metrics.totalTokens = (instance.metrics.totalTokens || 0) + content.metadata.tokensUsed;
-                }
-            } else if (content.type === 'error') {
-                instance.metrics.totalErrors = (instance.metrics.totalErrors || 0) + 1;
-            } else if (content.type === 'image' || content.type === 'video') {
-                instance.metrics.totalMediaGenerated = (instance.metrics.totalMediaGenerated || 0) + 1;
+            const journalEntry = mapLegacyContentToJournalEntry(contentWithTimestamp);
+            if (!journalEntry) {
+                return res.status(422).json({
+                    error: 'Legacy content payload cannot be mapped to journal authority'
+                });
             }
 
-            await instance.save();
+            const result = await journalService.persistJournalEntry(
+                {
+                    instanceId,
+                    type: journalEntry.type,
+                    payload: journalEntry.payload as never,
+                },
+                {
+                    timestamp: contentWithTimestamp.timestamp,
+                    severity: journalEntry.severity,
+                }
+            );
 
-            console.log(`[AgentInstances] ✅ Content added to ${instanceId}: ${content.type}`);
+            if (!result.success) {
+                return res.status(500).json({
+                    error: result.error || 'Erreur ajout contenu'
+                });
+            }
+
+            if (result.saved) {
+                const metricsIncrement = buildLegacyMetricsIncrement(contentWithTimestamp);
+                await AgentInstance.findByIdAndUpdate(instanceId, {
+                    ...(Object.keys(metricsIncrement).length > 0 ? { $inc: metricsIncrement } : {}),
+                    $set: {
+                        'state.lastActivity': contentWithTimestamp.timestamp,
+                    },
+                });
+            }
+
+            const contentCount = await AgentJournal.countDocuments({
+                agentInstanceId: instance._id,
+                type: { $in: ['chat', 'error', 'media'] },
+            });
+
+            if (!result.saved) {
+                console.log(`[AgentInstances] Legacy content skipped for ${instanceId}: ${result.reason || 'unknown reason'}`);
+                return res.status(200).json({
+                    success: true,
+                    skipped: true,
+                    reason: result.reason,
+                    contentCount,
+                    authority: 'agent_journals',
+                    ...(result.existingEntryId ? { journalId: result.existingEntryId } : {}),
+                });
+            }
+
+            console.log(`[AgentInstances] ✅ Legacy content stored in journals for ${instanceId}: ${content.type}`);
             res.status(201).json({ 
-                success: true, 
-                contentCount: instance.content.length 
+                success: true,
+                contentCount,
+                authority: 'agent_journals',
+                ...(result.entryId ? { journalId: result.entryId } : {}),
             });
 
         } catch (error) {
@@ -669,14 +1127,14 @@ router.post(
     async (req: Request, res: Response) => {
         try {
             const { agentInstanceId } = req.params;
-            const { type, payload } = req.body;
+            const { type, payload, timestamp, severity } = req.body;
             const user = req.user as IUser;
 
             // Validation du type d'entrée
-            if (!['chat', 'error', 'media'].includes(type)) {
+            if (!['chat', 'error', 'media', 'tool_invocation'].includes(type)) {
                 return res.status(400).json({ 
                     error: 'Invalid journal entry type',
-                    validTypes: ['chat', 'error', 'media']
+                    validTypes: ['chat', 'error', 'media', 'tool_invocation']
                 });
             }
 
@@ -691,77 +1149,52 @@ router.post(
                 return res.status(403).json({ error: 'Unauthorized - user does not own this instance' });
             }
 
-            // ⭐ DÉDUPLICATION BACKEND: Vérifier si ce message existe déjà
-            if (payload?.messageId) {
-                const existingEntry = await AgentJournal.findOne({
-                    agentInstanceId: instance._id,
-                    'payload.messageId': payload.messageId
-                });
-                
-                if (existingEntry) {
-                    console.log(`[Journal] SKIP duplicate: messageId ${payload.messageId} already exists`);
-                    return res.status(200).json({ 
-                        skipped: true, 
-                        reason: 'Duplicate messageId - entry already exists',
-                        existingJournalId: existingEntry._id
-                    });
+            const journalOptions: {
+                timestamp?: Date;
+                severity?: 'info' | 'warn' | 'error';
+            } = {};
+
+            if (timestamp !== undefined) {
+                const parsedTimestamp = timestamp instanceof Date ? timestamp : new Date(timestamp);
+                if (Number.isNaN(parsedTimestamp.getTime())) {
+                    return res.status(400).json({ error: 'Invalid journal timestamp' });
                 }
+                journalOptions.timestamp = parsedTimestamp;
             }
 
-            const { persistenceConfig } = instance;
+            if (severity !== undefined) {
+                if (severity !== 'info' && severity !== 'warn' && severity !== 'error') {
+                    return res.status(400).json({ error: 'Invalid journal severity' });
+                }
+                journalOptions.severity = severity;
+            }
 
-            let result;
+            const result = Object.keys(journalOptions).length > 0
+                ? await journalService.persistJournalEntry({
+                    instanceId: agentInstanceId,
+                    type,
+                    payload
+                }, journalOptions)
+                : await journalService.persistJournalEntry({
+                    instanceId: agentInstanceId,
+                    type,
+                    payload
+                });
 
-            // Persister selon le type ET la config
-            switch (type) {
-                case 'chat':
-                    if (!persistenceConfig?.saveChat) {
-                        return res.status(200).json({ 
-                            skipped: true, 
-                            reason: 'saveChat is false in persistenceConfig' 
-                        });
-                    }
-                    result = await AgentJournal.createChatEntry(
-                        instance._id,
-                        instance.workflowId,
-                        payload
-                    );
-                    break;
+            if (!result.success) {
+                return res.status(500).json({ error: result.error || 'Failed to create journal entry' });
+            }
 
-                case 'error':
-                    if (!persistenceConfig?.saveErrors) {
-                        return res.status(200).json({ 
-                            skipped: true, 
-                            reason: 'saveErrors is false in persistenceConfig' 
-                        });
-                    }
-                    result = await AgentJournal.createErrorEntry(
-                        instance._id,
-                        instance.workflowId,
-                        payload
-                    );
-                    break;
-
-                case 'media':
-                    if (!persistenceConfig?.saveMedia) {
-                        return res.status(200).json({ 
-                            skipped: true, 
-                            reason: 'saveMedia is false in persistenceConfig' 
-                        });
-                    }
-                    result = await AgentJournal.createMediaEntry(
-                        instance._id,
-                        instance.workflowId,
-                        payload
-                    );
-                    break;
-
-                default:
-                    return res.status(400).json({ error: 'Unhandled journal type' });
+            if (!result.saved) {
+                return res.status(200).json({
+                    skipped: true,
+                    reason: result.reason,
+                    ...(result.existingEntryId ? { existingJournalId: result.existingEntryId } : {})
+                });
             }
 
             console.log(`[Journal] Created ${type} entry for instance ${agentInstanceId}`);
-            res.json({ success: true, journalId: result._id });
+            res.json({ success: true, journalId: result.entryId });
         } catch (error) {
             console.error('[Journal] POST error:', error);
             res.status(500).json({ error: 'Failed to create journal entry' });
@@ -769,8 +1202,83 @@ router.post(
     }
 );
 
+router.post(
+    '/:agentInstanceId/imported-media',
+    requireAuth,
+    requireOwnershipAsync(async (req) => {
+        const instance = await AgentInstance.findById(req.params.agentInstanceId);
+        return instance?.userId.toString() || null;
+    }),
+    validateRequest(importedMediaDraftSchema),
+    async (req: Request, res: Response) => {
+        try {
+            const workflowId = typeof req.params.workflowId === 'string' ? req.params.workflowId : undefined;
+            const agentInstanceId = typeof req.params.agentInstanceId === 'string' ? req.params.agentInstanceId : null;
+
+            if (!agentInstanceId) {
+                return res.status(400).json({ error: 'Missing agentInstanceId route parameter' });
+            }
+
+            const { attachmentId, fileName, mimeType, contentBase64, origin } = req.body as z.infer<typeof importedMediaDraftSchema>;
+            const user = req.user as IUser;
+
+            const instance = await AgentInstance.findById(agentInstanceId);
+            if (!instance) {
+                return res.status(404).json({ error: 'Agent instance not found' });
+            }
+
+            if (instance.userId.toString() !== user.id) {
+                return res.status(403).json({ error: 'Unauthorized - user does not own this instance' });
+            }
+
+            if (workflowId && instance.workflowId.toString() !== workflowId) {
+                return res.status(400).json({ error: 'workflowId mismatch for imported media' });
+            }
+
+            const fileBuffer = Buffer.from(contentBase64, 'base64');
+            if (fileBuffer.length === 0) {
+                return res.status(400).json({ error: 'Imported media payload is empty' });
+            }
+
+            const result = await journalService.logMedia({
+                instanceId: agentInstanceId,
+                userId: user.id,
+                workflowId: instance.workflowId.toString(),
+                file: fileBuffer,
+                metadata: {
+                    originalName: fileName,
+                    mimeType,
+                    size: fileBuffer.length,
+                    generatedBy: instance.name,
+                },
+                correlationIds: {
+                    messageId: buildDraftImportMessageId(origin, attachmentId),
+                },
+            });
+
+            if (!result.success) {
+                return res.status(500).json({ error: result.error || 'Failed to import media draft' });
+            }
+
+            if (!result.saved) {
+                return res.status(200).json({
+                    skipped: true,
+                    reason: result.reason,
+                    ...(result.existingEntryId ? { existingJournalId: result.existingEntryId } : {}),
+                });
+            }
+
+            console.log(`[Journal] Imported media draft for instance ${agentInstanceId}`);
+            return res.status(200).json({ success: true, journalId: result.entryId });
+        } catch (error) {
+            console.error('[Journal] Imported media draft POST error:', error);
+            return res.status(500).json({ error: 'Failed to import media draft' });
+        }
+    }
+);
+
 // DELETE /api/agent-instances/:id - Supprimer instance
-// ⭐ CASCADE DELETE: Supprime aussi les journaux et médias associés
+// ⭐ POLICY DELETE: supprime les médias ou les conserve comme orphelins
 router.delete('/:id',
     requireAuth,
     requireOwnershipAsync(async (req) => {
@@ -789,6 +1297,15 @@ router.delete('/:id',
         try {
             const user = req.user as IUser;
             const instanceId = req.params.id;
+            const queryParseResult = deleteAgentInstanceQuerySchema.safeParse(req.query);
+
+            if (!queryParseResult.success) {
+                return res.status(400).json({
+                    error: 'Paramètres invalides',
+                    details: queryParseResult.error.errors,
+                });
+            }
+
             const instance = await AgentInstance.findOne({ _id: instanceId, userId: user.id });
 
             if (!instance) {
@@ -796,13 +1313,15 @@ router.delete('/:id',
             }
 
             const workflowId = instance.workflowId;
-            
-            // ⭐ CASCADE DELETE: Supprimer les journaux de l'instance (inclut les médias en base64)
-            const journalDeleteResult = await AgentJournal.deleteMany({ agentInstanceId: instanceId });
-            console.log(`[AgentInstances] CASCADE DELETE: ${journalDeleteResult.deletedCount} journals deleted for instance ${instanceId}`);
-            
-            // Supprimer l'instance elle-même
-            await instance.deleteOne();
+
+            const deletionResult = await new AgentInstanceDeletionPolicyService().deleteInstanceWithPolicy({
+                userId: user.id,
+                workflowId: workflowId.toString(),
+                instanceId,
+                mediaPolicy: queryParseResult.data.mediaPolicy,
+                auditOrigin: 'agent_instance_delete_route',
+                triggeredBy: user.id,
+            });
 
             // Marquer workflow comme dirty
             const workflow = await Workflow.findById(workflowId);
@@ -812,13 +1331,32 @@ router.delete('/:id',
             }
 
             res.json({ 
-                message: 'Instance et données associées supprimées',
+                message: deletionResult.mediaPolicy === 'orphan_media'
+                    ? 'Instance supprimée, médias conservés comme orphelins'
+                    : 'Instance et données associées supprimées',
+                mediaPolicy: deletionResult.mediaPolicy,
                 cascadeDelete: {
-                    journalsDeleted: journalDeleteResult.deletedCount
-                }
+                    journalsDeleted: deletionResult.journalsDeleted,
+                    mediaFilesDeleted: deletionResult.mediaFilesDeleted,
+                    mediaReferencesDeleted: deletionResult.mediaReferencesDeleted,
+                    mediaReferencesOrphaned: deletionResult.mediaReferencesOrphaned,
+                    retainedMediaEntries: deletionResult.retainedMediaEntries,
+                },
+                audit: {
+                    journalId: deletionResult.audit.journalId || null,
+                    severity: deletionResult.audit.severity,
+                    anomalyCount: deletionResult.audit.anomalyCount,
+                    anomalyCodes: deletionResult.audit.anomalies.map((anomaly) => anomaly.code),
+                    origin: deletionResult.audit.origin,
+                },
             });
         } catch (error) {
             console.error('[AgentInstances] DELETE error:', error);
+
+            if (error instanceof Error && error.message === 'INSTANCE_NOT_FOUND') {
+                return res.status(404).json({ error: 'Instance introuvable' });
+            }
+
             res.status(500).json({ error: 'Erreur suppression instance' });
         }
     }

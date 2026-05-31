@@ -12,8 +12,10 @@
  * NOTE : import.meta.env est le mécanisme natif Vite.
  *        process.env.REACT_APP_* est un pattern CRA, non supporté par Vite.
  */
+const viteApiUrl = import.meta.env?.VITE_API_URL as string | undefined;
+
 export const API_BASE_URL: string =
-  (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001';
+    viteApiUrl ?? process.env.VITE_API_URL ?? 'http://localhost:3001';
 
 /**
  * getBackendUrl() — Alias fonctionnel pour compatibilité arrière.
@@ -41,11 +43,6 @@ export const API_ENDPOINTS = {
         models: '/api/lmstudio/models',
         chat: '/api/lmstudio/chat/completions',
         detectEndpoint: '/api/lmstudio/detect-endpoint',
-    },
-
-    // Python tools execution (existant)
-    pythonTools: {
-        execute: '/api/execute-python-tool',
     },
 } as const;
 

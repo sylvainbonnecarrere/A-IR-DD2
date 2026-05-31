@@ -16,6 +16,7 @@ export { default as workflowsRoutes } from './workflows.routes';
 export { default as agentPrototypesRoutes } from './agent-prototypes.routes';
 export { default as agentInstancesRoutes } from './agent-instances.routes';
 export { default as llmConfigsRoutes } from './llm-configs.routes';
+export { default as cloudConnectionProfilesRoutes } from './cloud-connection-profiles.routes';
 export { default as llmProxyRoutes } from './llm-proxy.routes';
 export { default as userSettingsRoutes } from './user-settings.routes';
 export { default as userWorkspaceRoutes } from './user-workspace.routes';

@@ -6,7 +6,15 @@ import type { RuntimeHealthReport } from '../../types/function.types';
 jest.mock('../../services/toolRepository', () => ({
     toolRepository: {
         loadPhilFunctions: jest.fn(),
+        updateFunction: jest.fn(),
+        deleteFunction: jest.fn(),
+        toggleFunction: jest.fn(),
+        runInSandbox: jest.fn(),
         loadFunctionRuns: jest.fn(),
+        loadArtifactPreview: jest.fn(),
+        cleanupFunctionRuns: jest.fn(),
+        runBuild: jest.fn(),
+        loadBuildStatus: jest.fn(),
         loadRuntimeHealth: jest.fn(),
     }
 }));
@@ -54,7 +62,15 @@ const runtimeHealthFixture: RuntimeHealthReport = {
 describe('useFunctionStore hybrid J9 flows', () => {
     beforeEach(() => {
         mockedToolRepository.loadPhilFunctions.mockReset();
+        mockedToolRepository.updateFunction.mockReset();
+        mockedToolRepository.deleteFunction.mockReset();
+        mockedToolRepository.toggleFunction.mockReset();
+        mockedToolRepository.runInSandbox.mockReset();
         mockedToolRepository.loadFunctionRuns.mockReset();
+        mockedToolRepository.loadArtifactPreview.mockReset();
+        mockedToolRepository.cleanupFunctionRuns.mockReset();
+        mockedToolRepository.runBuild.mockReset();
+        mockedToolRepository.loadBuildStatus.mockReset();
         mockedToolRepository.loadRuntimeHealth.mockReset();
         useFunctionStore.getState().resetStore();
     });
@@ -144,6 +160,61 @@ describe('useFunctionStore hybrid J9 flows', () => {
         expect(state.runtimeCompatibility).toEqual(expect.objectContaining({ mode: 'docker-desktop' }));
     });
 
+    it('deduplicates concurrent loads for the same workflow and reuses the hydrated workspace cache', async () => {
+        let resolveLoad: ((value: unknown) => void) | null = null;
+
+        mockedToolRepository.loadPhilFunctions.mockImplementation(() => new Promise((resolve) => {
+            resolveLoad = resolve;
+        }) as Promise<any>);
+
+        const firstLoad = useFunctionStore.getState().loadFunctions('wf-1');
+        const secondLoad = useFunctionStore.getState().loadFunctions('wf-1');
+
+        expect(mockedToolRepository.loadPhilFunctions).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            resolveLoad?.({
+                functions: [],
+                runtimeCompatibility: {
+                    checkedAt: '2026-03-19T12:00:00.000Z',
+                    mode: 'docker-desktop',
+                    securityLevel: 'dev-only',
+                    executionReady: true,
+                    preferredRunner: 'docker_sandbox',
+                    summary: 'Runtime ready in dev mode.'
+                },
+                workspace: {
+                    id: 'ws-1',
+                    logicalRoot: 'wf-demo',
+                    runtimeRoots: {
+                        sourceRoot: 'source',
+                        manifestsRoot: 'manifests',
+                        buildRoot: 'build',
+                        outputRoot: 'output'
+                    },
+                    manifests: {
+                        packageJson: false,
+                        packageLockJson: false,
+                        requirementsTxt: true,
+                        pyprojectToml: false
+                    },
+                    status: 'active',
+                    workflowId: 'wf-1'
+                }
+            });
+
+            await Promise.all([firstLoad, secondLoad]);
+        });
+
+        mockedToolRepository.loadPhilFunctions.mockClear();
+
+        await act(async () => {
+            await useFunctionStore.getState().loadFunctions('wf-1');
+        });
+
+        expect(mockedToolRepository.loadPhilFunctions).not.toHaveBeenCalled();
+    });
+
     it('updates runtime compatibility from runs and runtime health through the repository', async () => {
         mockedToolRepository.loadFunctionRuns.mockResolvedValue({
             data: {
@@ -193,5 +264,106 @@ describe('useFunctionStore hybrid J9 flows', () => {
             mode: 'docker-desktop',
             warning: 'Docker Desktop is dev-only.'
         }));
+    });
+
+    it('resolves canonical toolId for command and run actions when UI still references legacy _id', async () => {
+        mockedToolRepository.loadPhilFunctions.mockResolvedValue({
+            functions: [
+                {
+                    _id: 'legacy-1',
+                    toolId: 'tool-1',
+                    name: 'tool_alpha',
+                    description: 'Tool projected from user_tools',
+                    language: 'python',
+                    origin: 'custom',
+                    userId: null,
+                    workflowId: 'wf-1',
+                    inputSchema: {},
+                    outputSchema: {},
+                    codePath: 'tools/tool_alpha.py',
+                    resolvedCodePath: 'tools/tool_alpha.py',
+                    codePathRoot: 'workspace_source',
+                    codeInline: 'def run(context, args):\n    return {"ok": True}',
+                    dependencies: ['requests'],
+                    isEnabled: true,
+                    isReadonly: false,
+                    version: 2,
+                    tags: ['demo'],
+                    createdAt: '2026-03-19T12:00:00.000Z',
+                    updatedAt: '2026-03-19T12:00:00.000Z'
+                }
+            ],
+            runtimeCompatibility: null,
+            workspace: null
+        });
+        mockedToolRepository.updateFunction.mockResolvedValue({
+            data: {
+                _id: 'legacy-1',
+                toolId: 'tool-1',
+                name: 'tool_alpha',
+                description: 'updated',
+                language: 'python',
+                origin: 'custom',
+                userId: null,
+                workflowId: 'wf-1',
+                inputSchema: {},
+                outputSchema: {},
+                codePath: 'tools/tool_alpha.py',
+                resolvedCodePath: 'tools/tool_alpha.py',
+                codePathRoot: 'workspace_source',
+                codeInline: 'def run(context, args):\n    return {"ok": False}',
+                dependencies: ['requests'],
+                isEnabled: true,
+                isReadonly: false,
+                version: 2,
+                tags: ['demo'],
+                createdAt: '2026-03-19T12:00:00.000Z',
+                updatedAt: '2026-03-19T12:05:00.000Z'
+            }
+        } as any);
+        mockedToolRepository.toggleFunction.mockResolvedValue({ data: { id: 'tool-1', isEnabled: false } } as any);
+        mockedToolRepository.runInSandbox.mockResolvedValue({ data: { success: true, output: { ok: true }, durationMs: 5 } } as any);
+        mockedToolRepository.loadFunctionRuns.mockResolvedValue({
+            data: {
+                items: [],
+                pagination: { page: 1, limit: 20, total: 0, totalPages: 1, sortBy: 'createdAt', sortOrder: 'desc' }
+            }
+        } as any);
+        mockedToolRepository.loadArtifactPreview.mockResolvedValue({
+            data: {
+                executionId: 'run-1',
+                artifact: {
+                    path: 'output/result.json',
+                    kind: 'json',
+                    sizeBytes: 24,
+                    previewable: true,
+                    truncated: false,
+                    contentType: 'application/json',
+                    jsonContent: { ok: true }
+                }
+            }
+        } as any);
+        mockedToolRepository.deleteFunction.mockResolvedValue({} as any);
+
+        await act(async () => {
+            await useFunctionStore.getState().loadFunctions('wf-1');
+        });
+
+        await act(async () => {
+            await useFunctionStore.getState().updateFunction('legacy-1', { description: 'updated' });
+            await useFunctionStore.getState().toggleFunction('legacy-1');
+            await useFunctionStore.getState().runInSandbox('legacy-1', { city: 'Paris' });
+            await useFunctionStore.getState().loadFunctionRuns('legacy-1');
+            await useFunctionStore.getState().loadArtifactPreview('legacy-1', 'run-1', 'output/result.json');
+            await useFunctionStore.getState().deleteFunction('legacy-1');
+        });
+
+        expect(mockedToolRepository.updateFunction).toHaveBeenCalledWith('tool-1', { description: 'updated' });
+        expect(mockedToolRepository.toggleFunction).toHaveBeenCalledWith('tool-1', false);
+        expect(mockedToolRepository.runInSandbox).toHaveBeenCalledWith('tool-1', { city: 'Paris' }, undefined);
+        expect(mockedToolRepository.loadFunctionRuns).toHaveBeenCalledWith('tool-1', expect.any(Object));
+        expect(mockedToolRepository.loadArtifactPreview).toHaveBeenCalledWith('tool-1', 'run-1', 'output/result.json');
+        expect(mockedToolRepository.deleteFunction).toHaveBeenCalledWith('tool-1');
+        expect(useFunctionStore.getState().functions).toHaveLength(0);
     });
 });

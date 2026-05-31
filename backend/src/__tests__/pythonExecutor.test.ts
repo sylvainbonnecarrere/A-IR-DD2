@@ -1,13 +1,32 @@
 import mongoose from 'mongoose';
 import { User } from '../models/User.model';
-import { UserFunction } from '../models/UserFunction.model';
+import { UserTool } from '../models/UserTool.model';
+import { Workspace } from '../models/Workspace.model';
 import { ExecutionOrchestrator } from '../services/runtime/ExecutionOrchestrator';
+import * as userToolMirrorService from '../services/userToolMirror.service';
 import { executeFunctionById } from '../pythonExecutor';
+
+function createToolVersion(overrides: Record<string, unknown> = {}) {
+    return {
+        versionTag: 'v1',
+        contentHash: 'hash-v1',
+        sourceMode: 'inline',
+        sourcePath: null,
+        sourceInline: 'export function run(args) { return args; }',
+        entrypoint: null,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        createdBy: null,
+        buildStatus: 'not_built',
+        validationStatus: 'valid',
+        ...overrides,
+    };
+}
 
 describe('pythonExecutor.executeFunctionById', () => {
     afterEach(async () => {
         jest.restoreAllMocks();
-        await UserFunction.deleteMany({ name: /python-executor-test-/i });
+        await Workspace.deleteMany({});
+        await UserTool.deleteMany({ name: /python-executor-test-/i });
         await User.deleteMany({ email: /python-executor-test-/i });
     });
 
@@ -17,20 +36,32 @@ describe('pythonExecutor.executeFunctionById', () => {
             password: 'test-only-password-123',
             username: `pyexec${Date.now()}`
         });
-        const fn = await UserFunction.create({
-            userId: user._id,
+        const fn = await UserTool.create({
+            ownerUserId: user._id,
+            scopeType: 'user',
             workflowId: new mongoose.Types.ObjectId(),
             name: `python-executor-test-${Date.now()}`,
             description: 'pythonExecutor integration test',
-            language: 'python',
-            origin: 'custom',
+            runtime: 'python',
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: createToolVersion({
+                versionTag: 'v7',
+                contentHash: 'hash-python-executor-v7',
+                sourceInline: 'def run(args):\n    return {"value": args.get("value")}',
+            }),
+            versions: [createToolVersion({
+                versionTag: 'v7',
+                contentHash: 'hash-python-executor-v7',
+                sourceInline: 'def run(args):\n    return {"value": args.get("value")}',
+            })],
             tags: ['test'],
             inputSchema: { type: 'object' },
             outputSchema: { type: 'object' },
-            codeInline: 'def run(args):\n    return {"value": args.get("value")}',
+            dependencies: { python: ['requests'], npm: [] },
+            policy: { networkMode: 'restricted', timeoutSeconds: 45 },
             isEnabled: true,
             isReadonly: false,
-            version: 1
         });
 
         const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
@@ -50,10 +81,12 @@ describe('pythonExecutor.executeFunctionById', () => {
                 memoryLimitMb: 256
             }
         });
+        const syncMirrorSpy = jest.spyOn(userToolMirrorService, 'syncUserToolMirrorFromLegacyFunction').mockResolvedValue();
 
         const result = await executeFunctionById(fn.id, { value: 'ok' }, user.id, 'agent-123');
 
         expect(result).toEqual({ value: 'ok' });
+        expect(syncMirrorSpy).not.toHaveBeenCalled();
         expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({
             userId: user.id,
             args: { value: 'ok' },
@@ -62,7 +95,13 @@ describe('pythonExecutor.executeFunctionById', () => {
             fn: expect.objectContaining({
                 _id: expect.anything(),
                 name: fn.name,
-                language: 'python'
+                language: 'python',
+                toolVersionTag: 'v7',
+                toolContentHash: 'hash-python-executor-v7',
+                policySnapshot: expect.objectContaining({
+                    networkMode: 'restricted',
+                    timeoutSeconds: 45
+                })
             })
         }));
     });
@@ -73,20 +112,28 @@ describe('pythonExecutor.executeFunctionById', () => {
             password: 'test-only-password-123',
             username: `pyexecsystem${Date.now()}`
         });
-        const fn = await UserFunction.create({
-            userId: user._id,
+        const fn = await UserTool.create({
+            ownerUserId: user._id,
+            scopeType: 'user',
             workflowId: null,
             name: `python-executor-test-system-${Date.now()}`,
             description: 'pythonExecutor system validation test',
-            language: 'typescript',
-            origin: 'custom',
+            runtime: 'typescript',
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: createToolVersion({
+                sourceInline: 'function run(args) { return args; }',
+            }),
+            versions: [createToolVersion({
+                sourceInline: 'function run(args) { return args; }',
+            })],
             tags: ['test'],
             inputSchema: { type: 'object' },
             outputSchema: { type: 'object' },
-            codeInline: 'function run(args) { return args; }',
+            dependencies: { python: [], npm: [] },
+            policy: { networkMode: 'none' },
             isEnabled: true,
             isReadonly: false,
-            version: 1
         });
 
         const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({

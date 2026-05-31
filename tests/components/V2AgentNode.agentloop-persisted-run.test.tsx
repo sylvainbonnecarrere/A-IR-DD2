@@ -78,11 +78,16 @@ jest.mock('../../stores/useRuntimeStore', () => ({
     )),
 }));
 
-jest.mock('../../stores/useDesignStore', () => ({
-    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-        selector ? selector(designStoreState) : designStoreState
-    )),
-}));
+jest.mock('../../stores/useDesignStore', () => {
+    const actual = jest.requireActual('../../stores/useDesignStore');
+
+    return {
+        ...actual,
+        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
+            selector ? selector(designStoreState) : designStoreState
+        )),
+    };
+});
 
 jest.mock('../../stores/useFunctionStore', () => ({
     useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[] }) => unknown) => (
@@ -124,6 +129,7 @@ jest.mock('../../utils/toolExecutor', () => ({
 }));
 
 jest.mock('../../utils/textUtils', () => ({
+    countChars: jest.fn(() => 0),
     countTokens: jest.fn(() => 0),
     countWords: jest.fn(() => 0),
     countSentences: jest.fn(() => 0),
@@ -192,6 +198,8 @@ const baseAgent: Agent = {
     model: 'gemini-2.5-flash',
     capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
     tools: [],
+    functionIds: ['legacy-weather'],
+    toolSelections: [{ toolId: 'tool.weather' }],
     creator_id: RobotId.Archi,
     created_at: '2026-03-23T10:00:00.000Z',
     updated_at: '2026-03-23T10:00:00.000Z',

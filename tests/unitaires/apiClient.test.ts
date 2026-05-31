@@ -141,6 +141,47 @@ describe('apiClient Interceptors', () => {
             dispatchSpy.mockRestore();
         });
 
+        test('should perform a single refresh when multiple requests fail with 401 concurrently', async () => {
+            const mockAuthData = {
+                user: { id: '123', email: 'test@example.com', role: 'user' },
+                accessToken: 'expired-token',
+                refreshToken: 'test-refresh-token',
+            };
+
+            localStorage.setItem('auth_data_v1', JSON.stringify(mockAuthData));
+            const dispatchSpy = jest.spyOn(window, 'dispatchEvent');
+
+            instanceMock.onGet('/api/protected-a').replyOnce(401, { error: 'Unauthorized' });
+            instanceMock.onGet('/api/protected-a').replyOnce(200, { data: 'a-ok' });
+            instanceMock.onGet('/api/protected-b').replyOnce(401, { error: 'Unauthorized' });
+            instanceMock.onGet('/api/protected-b').replyOnce(200, { data: 'b-ok' });
+            transportMock.onPost('http://localhost:3001/api/auth/refresh')
+                .reply(200, { accessToken: 'fresh-access-token' });
+
+            const [responseA, responseB] = await Promise.all([
+                apiClient.get('/api/protected-a'),
+                apiClient.get('/api/protected-b'),
+            ]);
+
+            expect(responseA.status).toBe(200);
+            expect(responseB.status).toBe(200);
+            expect(responseA.data).toEqual({ data: 'a-ok' });
+            expect(responseB.data).toEqual({ data: 'b-ok' });
+            expect(transportMock.history.post).toHaveLength(1);
+            expect(instanceMock.history.get).toHaveLength(4);
+            expect(JSON.parse(localStorage.getItem('auth_data_v1') || '{}')).toMatchObject({
+                accessToken: 'fresh-access-token',
+                refreshToken: 'test-refresh-token',
+            });
+            expect(dispatchSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'auth:session-refreshed',
+                })
+            );
+
+            dispatchSpy.mockRestore();
+        });
+
         test('should degrade session when refresh fails', async () => {
             const mockAuthData = {
                 user: { id: '123', email: 'test@example.com', role: 'user' },

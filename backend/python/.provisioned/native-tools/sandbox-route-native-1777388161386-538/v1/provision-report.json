@@ -1,0 +1,17 @@
+{
+  "toolId": "69f0ca81d775e23903a00f3b",
+  "toolName": "sandbox-route-native-1777388161386-538",
+  "toolVersionTag": "v1",
+  "status": "ready",
+  "provisionedAt": "2026-04-28T14:56:08.889Z",
+  "dependencies": [
+    "duckduckgo-search==6.1.0"
+  ],
+  "criticalModules": [
+    "duckduckgo_search"
+  ],
+  "sitePackagesPath": "C:\\AITest\\A-IR-DD2\\PersistAIRDD2\\A-IR-DD2\\backend\\python\\.provisioned\\native-tools\\sandbox-route-native-1777388161386-538\\v1\\site-packages",
+  "reportPath": "C:\\AITest\\A-IR-DD2\\PersistAIRDD2\\A-IR-DD2\\backend\\python\\.provisioned\\native-tools\\sandbox-route-native-1777388161386-538\\v1\\provision-report.json",
+  "stdout": "Collecting duckduckgo-search==6.1.0\n  Downloading duckduckgo_search-6.1.0-py3-none-any.whl.metadata (18 kB)\nCollecting click>=8.1.7 (from duckduckgo-search==6.1.0)\n  Downloading click-8.3.3-py3-none-any.whl.metadata (2.6 kB)\nCollecting pyreqwest-impersonate>=0.4.5 (from duckduckgo-search==6.1.0)\n  Downloading pyreqwest_impersonate-0.5.3-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (10 kB)\nCollecting orjson>=3.10.3 (from duckduckgo-search==6.1.0)\n  Downloading orjson-3.11.8-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (41 kB)\nDownloading duckduckgo_search-6.1.0-py3-none-any.whl (23 kB)\nDownloading click-8.3.3-py3-none-any.whl (110 kB)\nDownloading orjson-3.11.8-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (133 kB)\nDownloading pyreqwest_impersonate-0.5.3-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.0 MB)\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.0/3.0 MB 14.1 MB/s eta 0:00:00\nInstalling collected packages: pyreqwest-impersonate, orjson, click, duckduckgo-search\nSuccessfully installed click-8.3.3 duckduckgo-search-6.1.0 orjson-3.11.8 pyreqwest-impersonate-0.5.3\n",
+  "stderr": ""
+}

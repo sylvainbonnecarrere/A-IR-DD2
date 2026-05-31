@@ -27,10 +27,17 @@ type ModalProps = React.HTMLAttributes<HTMLDivElement> & {
   isOpen: boolean;
   onClose: () => void;
   children: React.ReactNode;
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 };
-export const Modal = ({ title, isOpen, onClose, children, ...props }: ModalProps) => {
+export const Modal = ({ title, isOpen, onClose, children, size = 'md', ...props }: ModalProps) => {
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElement = useRef<HTMLElement | null>(null);
+  const sizeClasses = {
+    sm: 'max-w-sm',
+    md: 'max-w-md',
+    lg: 'max-w-2xl',
+    xl: 'max-w-4xl',
+  } as const;
 
   useEffect(() => {
     if (isOpen) {
@@ -94,7 +101,7 @@ export const Modal = ({ title, isOpen, onClose, children, ...props }: ModalProps
       <div
         ref={modalRef}
         tabIndex={-1}
-        className="bg-gray-800 border border-gray-700 rounded-lg shadow-xl w-full max-w-md m-4 outline-none"
+        className={`bg-gray-800 border border-gray-700 rounded-lg shadow-xl w-full ${sizeClasses[size]} m-4 outline-none`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-4 border-b border-gray-700">

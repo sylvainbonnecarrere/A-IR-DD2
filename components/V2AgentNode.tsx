@@ -1,13 +1,14 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
-import { Agent, ChatMessage, LLMConfig, LLMCapability, LLMProvider, ToolCall, AgentInstance, ToolCallRecord } from '../types';
+import { Agent, ChatMessage, LLMCapability, LLMProvider, Tool, ToolCall, AgentInstance, ToolCallRecord } from '../types';
 import { Button } from './UI';
-import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon, MaximizeIcon } from './Icons';
+import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon, HistorySynthesisIcon, MaximizeIcon } from './Icons';
 import { ConfirmationModal } from './modals/ConfirmationModal';
+import { WebSearchParamsModal } from './modals/WebSearchParamsModal';
 
 import { WebSearchGroundingPanel } from './panels/WebSearchGroundingPanel';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
-import { useDesignStore } from '../stores/useDesignStore';
+import { selectResolvedAgentExecutionSelectionContext, selectResolvedAgentHasToolNamed, useDesignStore } from '../stores/useDesignStore';
 import { useFunctionStore } from '../stores/useFunctionStore';
 import { useWorkflowCanvasContext } from '../contexts/WorkflowCanvasContext';
 import * as llmService from '../services/llmService';
@@ -16,13 +17,18 @@ import { runAgentLoop } from '../services/llm/AgentLoop';
 import { ToolCallBlock } from './workflow/ToolCallBlock';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
-import { countTokens, countWords, countSentences, countMessages } from '../utils/textUtils';
-import { isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
+import { getEffectiveCredential, isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
 import { useLocalization } from '../hooks/useLocalization';
-import { useJournalQueue } from '../hooks/useJournalQueue';
+import { useAgentJournalPersistence } from '../hooks/useAgentJournalPersistence';
 import { useAuth } from '../hooks/useAuth';
-import { resolveAgentRuntimeConfig, resolveHistoryRuntimeConfig } from '../services/runtimeConfigResolver';
+import { resolveAgentRuntimeConfig } from '../services/runtimeConfigResolver';
 import { buildBosHydrationFingerprint, hydrateToolMessagesFromPersistedRuns } from '../services/bosRunProjectionService';
+import { persistInstanceWebSearchParams } from '../services/webSearchParamsConfigService';
+import type { UserFunction } from '../types/function.types';
+import { executeAgentToolCall, parseToolCallArguments } from '../services/agentToolExecution';
+import { shouldSuppressVisualToolResult } from '../utils/toolResultVisibility';
+import { AGENT_NODE_HANDLES } from './workflow/connectionContracts';
+import { prepareConversationHistoryForAPI } from '../services/historySynthesisService';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
 let messageIdCounter = 0;
@@ -30,6 +36,31 @@ const generateMessageId = (suffix?: string): string => {
     const id = `msg-${Date.now()}-${++messageIdCounter}${suffix ? `-${suffix}` : ''}`;
     return id;
 };
+
+let pendingAttachmentCounter = 0;
+const generatePendingAttachmentId = (): string => `draft-${Date.now()}-${++pendingAttachmentCounter}`;
+
+const TEXT_LIKE_MIME_TYPES = new Set([
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/x-javascript',
+  'application/x-yaml',
+  'application/yaml',
+]);
+
+function isTextLikeFile(file: File): boolean {
+  const mimeType = file.type?.toLowerCase() || '';
+  if (mimeType.startsWith('text/')) {
+    return true;
+  }
+
+  if (TEXT_LIKE_MIME_TYPES.has(mimeType)) {
+    return true;
+  }
+
+  return /\.(txt|md|csv|json|ya?ml|xml|html?|js|jsx|ts|tsx)$/i.test(file.name);
+}
 
 // Temporary minimize icon
 const MinimizeIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -82,21 +113,212 @@ export interface V2AgentNodeData {
   workflowId?: string; // For journal persistence
 }
 
-export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, selected }) => {
+function toPlainObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function toObjectArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
+    : [];
+}
+
+function toNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function formatToolResultMessage(toolName: string, result: unknown, executionId?: string): string {
+  const serializedResult = typeof result === 'string'
+    ? result
+    : JSON.stringify(result, null, 2);
+
+  const resultObject = toPlainObject(result);
+  if (toolName !== 'web_search_py' || !resultObject) {
+    return executionId
+      ? `[executionId=${executionId}] ${serializedResult}`
+      : serializedResult;
+  }
+
+  const query = toNonEmptyString(resultObject.query);
+  const normalizedQuery = toNonEmptyString(resultObject.normalized_query);
+  const trace = toPlainObject(resultObject.trace);
+  const traceQueries = toObjectArray(trace?.queries);
+  const selectedSources = toObjectArray(trace?.selected_sources);
+  const rerankedSources = toObjectArray(resultObject.reranked_sources);
+  const verifiedFragments = toObjectArray(resultObject.verified_fragments);
+  const llmContextBlock = toPlainObject(resultObject.llm_context_block);
+  const contextSources = toObjectArray(llmContextBlock?.sources);
+  const projectedResults = toObjectArray(resultObject.results);
+
+  if (!query && !trace && projectedResults.length === 0 && selectedSources.length === 0 && rerankedSources.length === 0) {
+    return executionId
+      ? `[executionId=${executionId}] ${serializedResult}`
+      : serializedResult;
+  }
+
+  const totalResults = typeof resultObject.total_results === 'number'
+    ? resultObject.total_results
+    : projectedResults.length;
+  const primaryVerified = verifiedFragments[0] ?? rerankedSources[0] ?? null;
+  const primarySource = primaryVerified ?? selectedSources[0] ?? projectedResults[0] ?? null;
+  const primaryTitle = toNonEmptyString(primarySource?.title);
+  const primaryUrl = toNonEmptyString(primarySource?.url);
+  const primaryFragment = toNonEmptyString(primaryVerified?.critical_fragment);
+  const primaryScore = typeof primaryVerified?.relevance_score === 'number' ? primaryVerified.relevance_score : null;
+  const pageFetches = toObjectArray(trace?.page_fetches);
+  const fetchedCount = pageFetches.filter((item) => item.fetched === true).length;
+
+  const lines = [
+    executionId ? `[executionId=${executionId}]` : null,
+    query ? `query=${query}` : null,
+    normalizedQuery && normalizedQuery !== query ? `normalized_query=${normalizedQuery}` : null,
+    `planned_queries=${traceQueries.length}`,
+    ...traceQueries.slice(0, 3).map((traceQuery, index) => {
+      const label = toNonEmptyString(traceQuery.query) ?? JSON.stringify(traceQuery);
+      const status = toNonEmptyString(traceQuery.status) ?? 'unknown';
+      return `query_${index + 1}=[${status}] ${label}`;
+    }),
+    `selected_results=${totalResults}`,
+    rerankedSources.length > 0 ? `reranked_sources=${rerankedSources.length}` : null,
+    verifiedFragments.length > 0 ? `verified_fragments=${verifiedFragments.length}` : null,
+    pageFetches.length > 0 ? `page_fetches=${pageFetches.length} (fetched=${fetchedCount})` : null,
+    contextSources.length > 0 ? `llm_context_sources=${contextSources.length}` : null,
+    primaryTitle ? `primary_title=${primaryTitle}` : null,
+    primaryUrl ? `primary_source=${primaryUrl}` : null,
+    primaryScore !== null ? `primary_relevance_score=${primaryScore}` : null,
+    primaryFragment ? `primary_fragment=${primaryFragment}` : null,
+  ].filter((line): line is string => Boolean(line));
+
+  return lines.join('\n');
+}
+
+function isToolErrorResult(result: unknown): boolean {
+  const resultObject = toPlainObject(result);
+  if (!resultObject) {
+    return false;
+  }
+
+  return typeof resultObject.error === 'string'
+    || resultObject.success === false;
+}
+
+function buildToolInvocationText(toolName: string, args: Record<string, unknown> | string, executionId?: string): string {
+  const serializedArguments = typeof args === 'string'
+    ? args
+    : JSON.stringify(args);
+
+  return `${toolName}(${serializedArguments})${executionId ? ` [${executionId}]` : ''}`;
+}
+
+function buildToolCallMessage(record: ToolCallRecord): ChatMessage {
+  return {
+    id: record.id,
+    sender: 'tool',
+    text: buildToolInvocationText(record.functionName, record.arguments, record.executionId),
+    toolName: record.functionName,
+    timestamp: record.timestamp,
+    isError: record.status === 'error',
+    toolCallRecord: record,
+  };
+}
+
+function needsBosRunHydration(messages: ChatMessage[]): boolean {
+  return messages.some((message) => {
+    const toolCallRecord = message.toolCallRecord;
+    if (message.sender !== 'tool' || !toolCallRecord?.executionId || !(toolCallRecord.toolId || toolCallRecord.functionId)) {
+      return false;
+    }
+
+    return !toolCallRecord.persistedRunStatus
+      && !toolCallRecord.persistedRunUpdatedAt
+      && (toolCallRecord.artifacts?.length ?? 0) === 0;
+  });
+}
+
+function buildPendingToolCallMessage(messageId: string, toolName: string, args: Record<string, unknown> | string, timestamp: Date): ChatMessage {
+  return {
+    id: messageId,
+    sender: 'tool',
+    text: buildToolInvocationText(toolName, args),
+    toolName,
+    timestamp,
+    status: 'executing_tool',
+  };
+}
+
+const cornerHandleClassName = 'w-3 h-3 bg-cyan-400 border-2 border-cyan-300 shadow-lg shadow-cyan-400/50 hover:bg-cyan-300 hover:shadow-cyan-300/70 transition-all duration-200 z-20';
+
+function buildToolResultChatMessage(record: ToolCallRecord): ChatMessage {
+  return {
+    id: generateMessageId('tool-result'),
+    sender: 'tool_result',
+    text: formatToolResultMessage(record.functionName, record.result, record.executionId),
+    toolCallId: record.id,
+    toolName: record.functionName,
+    timestamp: record.timestamp,
+    isError: record.status === 'error',
+  };
+}
+
+function mapUserFunctionToProviderTool(fn: UserFunction): Tool {
+  return {
+    name: fn.name,
+    description: fn.description,
+    parameters: fn.inputSchema ?? { type: 'object' },
+    outputSchema: fn.outputSchema,
+  };
+}
+
+function isProviderToolCandidate(tool: unknown): tool is Tool {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+    return false;
+  }
+
+  const candidate = tool as Partial<Tool>;
+  return typeof candidate.name === 'string'
+    && candidate.name.trim().length > 0
+    && candidate.parameters !== undefined;
+}
+
+function mergeProviderTools(agentTools: Tool[] | undefined, selectedFunctions: UserFunction[]): Tool[] | undefined {
+  const sanitizedAgentTools = (agentTools ?? []).filter(isProviderToolCandidate).map((tool) => ({
+    ...tool,
+    name: tool.name.trim(),
+  }));
+
+  if (selectedFunctions.length === 0) {
+    return sanitizedAgentTools.length > 0 ? sanitizedAgentTools : undefined;
+  }
+
+  const mergedTools = new Map<string, Tool>();
+
+  for (const tool of sanitizedAgentTools) {
+    mergedTools.set(tool.name, tool);
+  }
+
+  for (const fn of selectedFunctions) {
+    mergedTools.set(fn.name, mapUserFunctionToProviderTool(fn));
+  }
+
+  return Array.from(mergedTools.values());
+}
+
+export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: NodeProps<V2AgentNodeData>) {
   const { t } = useLocalization();
-  const { agent, agentInstance: agentInstanceProp } = data;
+  const { agent: nodeAgent, agentInstance: agentInstanceProp } = data;
   
   // Read minimize state from store
   const isMinimized = useRuntimeStore((state) => state.getIsNodeMinimized(id));
 
-  // Read agentInstance from store to get fresh config when updated via settings modal
-  const agentInstances = useDesignStore((state) => state.agentInstances);
-  const agentInstance = agentInstanceProp?.id
-    ? agentInstances.find(inst => inst.id === agentInstanceProp.id)
-    : agentInstanceProp;
-
   // Protection: if agent is null, show error state
-  if (!agent) {
+  if (!nodeAgent) {
     return (
       <div className="min-w-80 bg-red-900/50 border-2 border-red-500 rounded-lg p-4">
         <div className="text-red-300 font-medium">{t('agent_not_found')}</div>
@@ -107,24 +329,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     );
   }
 
-  // Use instance name if available, otherwise use prototype name with null safety
-  const displayName = agentInstance?.name || agent?.name || 'Unknown Agent';
-
-  // Résoudre la configuration effective (instance > prototype)
-  // Créer un "agent effectif" qui utilise la config de l'instance si disponible
-  const effectiveAgent = agentInstance?.configuration_json ? {
-    ...agent,
-    role: agentInstance.configuration_json.role,
-    llmProvider: agentInstance.configuration_json.llmProvider,
-    model: agentInstance.configuration_json.model,
-    systemPrompt: agentInstance.configuration_json.systemPrompt,
-    tools: agentInstance.configuration_json.tools,
-    capabilities: agentInstance.configuration_json.capabilities,
-    outputConfig: agentInstance.configuration_json.outputConfig,
-    historyConfig: agentInstance.configuration_json.historyConfig,
-    localLLMProfileId: (agentInstance.configuration_json as any)?.localLLMProfileId || agent.localLLMProfileId,
-  } : agent;
-
   // Runtime store for messages and execution state
   const {
     getNodeMessages,
@@ -132,12 +336,13 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     setNodeMessages,
     isNodeExecuting,
     setNodeExecuting,
-    setImagePanelOpen,
-    setImageModificationPanelOpen,
-    setFullscreenImage,
-    setFullscreenChatNodeId,
     llmConfigs,
-    localLLMProfiles
+    localLLMProfiles,
+    getNodePendingAttachment = () => null,
+    setNodePendingAttachment = () => undefined,
+    clearNodePendingAttachment = () => undefined,
+    getNodeInvisibleHistorySummary = () => null,
+    setNodeInvisibleHistorySummary = () => undefined,
   } = useRuntimeStore();
 
   // WorkflowCanvas context for navigation and node operations
@@ -153,22 +358,84 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   } = useWorkflowCanvasContext();
 
   // Design store for agent data (not node operations)
-  const { selectAgent } = useDesignStore();
+  const selectAgent = useDesignStore((state) => state.selectAgent);
+  const updateInstanceConfig = useDesignStore((state) => state.updateInstanceConfig);
+  const designAgents = useDesignStore((state) => state.agents);
+  const designAgentInstances = useDesignStore((state) => state.agentInstances);
 
   // J8 — Functions available for AgentLoop (emulated FC for local LLMs)
   const allFunctions = useFunctionStore(state => state.functions);
+  const loadFunctions = useFunctionStore(state => state.loadFunctions);
+  const {
+    storedPrototype,
+    resolvedAgent,
+    agentInstance,
+    workflowId: resolvedWorkflowId,
+    selectedToolIds: configuredToolIds,
+    scopedFunctions,
+  } = useMemo(
+    () => selectResolvedAgentExecutionSelectionContext(
+      {
+        agents: designAgents,
+        agentInstances: designAgentInstances,
+      },
+      nodeAgent,
+      agentInstanceProp?.id,
+      allFunctions
+    ),
+    [allFunctions, agentInstanceProp?.id, designAgentInstances, designAgents, nodeAgent]
+  );
+  const agent = resolvedAgent ?? nodeAgent;
+  const effectiveWorkflowId = data.workflowId || resolvedWorkflowId;
+  const hasWebSearchPyTool = useDesignStore((state) => selectResolvedAgentHasToolNamed(state, nodeAgent, agentInstanceProp?.id, allFunctions, 'web_search_py'));
+
+  // Use instance name if available, otherwise use prototype name with null safety
+  const displayName = agentInstance?.name || agent?.name || 'Unknown Agent';
+
+  // Résoudre la configuration effective (instance > prototype)
+  // Créer un "agent effectif" qui utilise la config de l'instance si disponible
+  const effectiveAgent = agentInstance?.configuration_json ? {
+    ...agent,
+    role: agentInstance.configuration_json.role,
+    llmProvider: agentInstance.configuration_json.llmProvider,
+    model: agentInstance.configuration_json.model,
+    systemPrompt: agentInstance.configuration_json.systemPrompt,
+    tools: agentInstance.configuration_json.tools,
+    toolSelections: agentInstance.configuration_json.toolSelections || (agentInstance as any).toolSelections || agent.toolSelections,
+    capabilities: agentInstance.configuration_json.capabilities,
+    outputConfig: agentInstance.configuration_json.outputConfig,
+    webSearchParams: agentInstance.configuration_json.webSearchParams || agent.webSearchParams,
+    historyConfig: agentInstance.configuration_json.historyConfig,
+    localLLMProfileId: (agentInstance.configuration_json as any)?.localLLMProfileId || agent.localLLMProfileId,
+  } : agent;
+
+  const providerTools = useMemo(
+    () => mergeProviderTools(effectiveAgent.tools, scopedFunctions),
+    [effectiveAgent.tools, scopedFunctions]
+  );
+
+  useEffect(() => {
+    if (hasWebSearchPyTool || configuredToolIds.length === 0 || allFunctions.length > 0) {
+      return;
+    }
+
+    void loadFunctions(effectiveWorkflowId ?? undefined);
+  }, [allFunctions.length, configuredToolIds.length, effectiveWorkflowId, hasWebSearchPyTool, loadFunctions]);
 
   // C1 FIX: Auth token pour les appels sandbox (requireAuth)
   const { accessToken } = useAuth();
+  const pendingAttachment = getNodePendingAttachment(id);
 
   // Local states
   const [userInput, setUserInput] = useState('');
-  const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [loadingMessage, setLoadingMessage] = useState('');
+  const [isHistorySynthesisActive, setIsHistorySynthesisActive] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showThinking, setShowThinking] = useState(true);
   const [webFetchEnabled, setWebFetchEnabled] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [isWebSearchParamsModalOpen, setIsWebSearchParamsModalOpen] = useState(false);
+  const [isSavingWebSearchParams, setIsSavingWebSearchParams] = useState(false);
 
   // Arc-LLM states
   const [showWebSearchResults, setShowWebSearchResults] = useState(false);
@@ -177,6 +444,12 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const bosHydrationFingerprintRef = useRef<string>('');
+  const pendingLocalToolMessageIdsRef = useRef<Record<string, string>>({});
+  const journalWorkflowId = data.workflowId || agentInstance?.workflowId;
+  const { persistJournalEntry, persistToolInvocation, resetToolInvocationDedup } = useAgentJournalPersistence({
+    workflowId: journalWorkflowId,
+    instanceId: agentInstance?.id,
+  });
 
   // Get messages from store
   const messages = getNodeMessages(id);
@@ -194,7 +467,16 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     let cancelled = false;
     const fingerprint = buildBosHydrationFingerprint(messages);
 
-    if (!fingerprint || bosHydrationFingerprintRef.current === fingerprint) {
+    if (!fingerprint) {
+      return;
+    }
+
+    if (!needsBosRunHydration(messages)) {
+      bosHydrationFingerprintRef.current = fingerprint;
+      return;
+    }
+
+    if (bosHydrationFingerprintRef.current === fingerprint) {
       return;
     }
 
@@ -226,6 +508,72 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     // Ouvrir directement la modale de confirmation sans manipulation de focus
     setShowDeleteConfirm(true);
   };
+
+  const upsertChatMessage = useCallback((message: ChatMessage) => {
+    const existingMessages = getNodeMessages(id);
+    if (existingMessages.some((candidate) => candidate.id === message.id)) {
+      setNodeMessages(id, existingMessages.map((candidate) => candidate.id === message.id ? message : candidate));
+      return;
+    }
+
+    addNodeMessage(id, message);
+  }, [addNodeMessage, getNodeMessages, id, setNodeMessages]);
+
+  const finalizeToolCallMessage = useCallback((toolMessage: ChatMessage, pendingMessageId?: string) => {
+    const existingMessages = getNodeMessages(id);
+    const finalToolCallId = toolMessage.toolCallRecord?.id;
+
+    if (finalToolCallId && existingMessages.some((candidate) => candidate.sender === 'tool' && candidate.toolCallRecord?.id === finalToolCallId)) {
+      setNodeMessages(id, existingMessages.map((candidate) => (
+        candidate.sender === 'tool' && candidate.toolCallRecord?.id === finalToolCallId
+          ? toolMessage
+          : candidate
+      )));
+      return;
+    }
+
+    if (pendingMessageId && existingMessages.some((candidate) => candidate.id === pendingMessageId)) {
+      setNodeMessages(id, existingMessages.map((candidate) => candidate.id === pendingMessageId ? toolMessage : candidate));
+      return;
+    }
+
+    addNodeMessage(id, toolMessage);
+  }, [addNodeMessage, getNodeMessages, id, setNodeMessages]);
+
+  const ensureToolResultMessage = useCallback((toolResultMessage: ChatMessage) => {
+    const existingMessages = getNodeMessages(id);
+    if (existingMessages.some((candidate) => candidate.sender === 'tool_result' && candidate.toolCallId === toolResultMessage.toolCallId)) {
+      return;
+    }
+
+    addNodeMessage(id, toolResultMessage);
+  }, [addNodeMessage, getNodeMessages, id]);
+
+  const handleSaveWebSearchParams = useCallback(async (webSearchParams: NonNullable<Agent['webSearchParams']>) => {
+    if (!agentInstance?.id || !agentInstance.configuration_json) {
+      return;
+    }
+
+    setIsSavingWebSearchParams(true);
+
+    try {
+      const updatedConfig = {
+        ...agentInstance.configuration_json,
+        webSearchParams,
+      };
+
+      await persistInstanceWebSearchParams(
+        { ...agentInstance, configuration_json: updatedConfig },
+        webSearchParams,
+        accessToken
+      );
+
+      updateInstanceConfig(agentInstance.id, updatedConfig);
+      setIsWebSearchParamsModalOpen(false);
+    } finally {
+      setIsSavingWebSearchParams(false);
+    }
+  }, [accessToken, agentInstance, updateInstanceConfig]);
 
   const handleConfirmDelete = () => {
     if (onDeleteNode) {
@@ -339,7 +687,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         credential,
         agent.model,
         userInput,
-        agent.systemInstruction
+        agent.systemPrompt
       );
 
       setWebSearchResults(result);
@@ -351,40 +699,11 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     }
   };
 
-  /**
-   * Persister une entrée journal dans MongoDB agent_journals via queue robuste
-   * Respecte persistenceConfig granulaire
-   * Gère les retries automatiques en cas de déconnexion
-   */
-  const { enqueueEntry } = useJournalQueue();
-
-  const persistJournalEntry = useCallback((entryType: 'chat' | 'error' | 'media', payload: any) => {
-    // Try data.workflowId first, fallback to instance.workflowId
-    const effectiveWorkflowId = data.workflowId || agentInstance?.workflowId;
-    
-    if (!agentInstance?.id || !effectiveWorkflowId) {
-      console.warn('[Journal] Missing context for persistence:', { 
-        agentInstanceId: agentInstance?.id, 
-        workflowId: effectiveWorkflowId,
-        dataWorkflowId: data.workflowId,
-        instanceWorkflowId: agentInstance?.workflowId
-      });
-      return;
-    }
-
-    // Enqueuer sans bloquage (async, non-blocking)
-    enqueueEntry(
-      effectiveWorkflowId,
-      agentInstance.id,
-      entryType,
-      payload
-    );
-  }, [agentInstance?.id, agentInstance?.workflowId, data.workflowId, enqueueEntry]);
-
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedInput = userInput.trim();
-    if (!trimmedInput && !attachedFile) return;
+    const activeAttachment = getNodePendingAttachment(id);
+    if (!trimmedInput && !activeAttachment) return;
 
     // Protection null safety pour agent
     if (!agent) {
@@ -392,6 +711,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       return;
     }
 
+    resetToolInvocationDedup();
     setNodeExecuting(id, true);
 
     const userMessage: ChatMessage = {
@@ -401,35 +721,39 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       timestamp: new Date(),
     };
 
-    // Handle file attachment
-    if (attachedFile) {
-      userMessage.filename = attachedFile.name;
-      userMessage.mimeType = attachedFile.type;
+      // Handle file attachment
+      if (activeAttachment) {
+        userMessage.filename = activeAttachment.fileName;
+        userMessage.mimeType = activeAttachment.mimeType;
 
-      if (effectiveAgent.llmProvider === LLMProvider.Mistral) {
-        try {
-          userMessage.fileContent = await fileToText(attachedFile);
-        } catch (err) {
-          userMessage.image = await fileToBase64(attachedFile);
+        if (effectiveAgent.llmProvider === LLMProvider.Mistral && activeAttachment.textContent) {
+          userMessage.fileContent = activeAttachment.textContent;
+        } else {
+          userMessage.image = activeAttachment.base64Content;
         }
-      } else {
-        userMessage.image = await fileToBase64(attachedFile);
       }
-    }
 
     addNodeMessage(id, userMessage);
     setUserInput('');
-    setAttachedFile(null);
+    clearNodePendingAttachment(id);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    pendingLocalToolMessageIdsRef.current = {};
+
+    const shouldPersistInlineAttachment = !activeAttachment?.draftPersisted;
 
     // Persist user message to journal (non-blocking)
     // ⭐ FIX QA: Include image data for persistence if present
     persistJournalEntry('chat', {
+      messageId: userMessage.id,
       role: 'user',
       content: trimmedInput,
       llmProvider: effectiveAgent.llmProvider,
       modelUsed: effectiveAgent.model,
       // ⭐ FIX QA: Persist image data for reload after login
-      ...(userMessage.image && { imageBase64: userMessage.image }),
+      ...(shouldPersistInlineAttachment && userMessage.image && { imageBase64: userMessage.image }),
+      ...(shouldPersistInlineAttachment && userMessage.fileContent && { fileContent: userMessage.fileContent }),
       ...(userMessage.mimeType && { mimeType: userMessage.mimeType }),
       ...(userMessage.filename && { fileName: userMessage.filename })
     });
@@ -456,75 +780,29 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     }
 
     try {
-      // Gestion de l'historique avec messages d'information
-      let conversationHistoryForAPI: ChatMessage[];
-      const historyConfig = effectiveAgent.historyConfig;
-      const currentFullHistory = [...messages, userMessage];
-
-      if (historyConfig?.enabled && messages.length > 0) {
-        const { limits } = historyConfig;
-        const stats = {
-          tokens: countTokens(currentFullHistory),
-          words: countWords(currentFullHistory),
-          sentences: countSentences(currentFullHistory),
-          messages: countMessages(currentFullHistory),
-        };
-
-        const shouldSummarize = stats.tokens >= limits.token ||
-          stats.words >= limits.word ||
-          stats.sentences >= limits.sentence ||
-          stats.messages >= limits.message;
-
-        if (shouldSummarize) {
-          setLoadingMessage(t('agentNode_history_summarizing'));
-          const summarizationRuntime = resolveHistoryRuntimeConfig(
-            historyConfig,
-            llmConfigs,
-            localLLMProfiles,
-            effectiveAgent.localLLMProfileId
-          );
-          const summarizationConfig = summarizationRuntime.config;
-
-          if (!summarizationConfig) {
-            throw new Error(`Summarization LLM ${historyConfig.llmProvider} not configured.`);
+      const preparedConversation = await prepareConversationHistoryForAPI({
+        visibleMessagesBeforeSend: messages,
+        userMessage,
+        historyConfig: effectiveAgent.historyConfig,
+        invisibleSummaryState: getNodeInvisibleHistorySummary(id),
+        llmConfigs,
+        localLLMProfiles,
+        inheritedLocalLLMProfileId: effectiveAgent.localLLMProfileId,
+        t,
+        accessToken,
+        onSummarizingChange: (isSummarizing) => {
+          if (isSummarizing) {
+            setIsHistorySynthesisActive(true);
+            setLoadingMessage(t('agentNode_history_summarizing'));
+            return;
           }
 
-          const summarizationPrompt = `${t('conversation_to_summarize')}:\n\n${currentFullHistory.map(m => `${m.sender}: ${m.text}`).join('\n')}`;
-          const summarizationHistory: ChatMessage[] = [{
-            id: `msg-summary-prompt-${Date.now()}`,
-            sender: 'user',
-            text: summarizationPrompt,
-            timestamp: new Date()
-          }];
-
-          const { text: summary } = await llmService.generateContent(
-            summarizationConfig.provider,
-            summarizationRuntime.credential,
-            historyConfig.model,
-            historyConfig.systemPrompt,
-            summarizationHistory,
-            undefined, // tools
-            undefined, // outputConfig
-            summarizationRuntime.credential, // endpoint for LMStudio
-            accessToken ?? undefined
-          );
-
-          const summaryMessage: ChatMessage = {
-            id: generateMessageId('summary'),
-            sender: 'agent',
-            text: `(Résumé de l'historique): ${summary}`,
-            timestamp: new Date()
-          };
-
-          conversationHistoryForAPI = [summaryMessage, userMessage];
-          setNodeMessages(id, [summaryMessage, userMessage]);
           setLoadingMessage('');
-        } else {
-          conversationHistoryForAPI = currentFullHistory;
         }
-      } else {
-        conversationHistoryForAPI = historyConfig?.enabled ? currentFullHistory : [userMessage];
-      }
+      });
+
+      setNodeInvisibleHistorySummary(id, preparedConversation.invisibleSummaryState);
+      const conversationHistoryForAPI = preparedConversation.conversationHistoryForAPI;
       // Stream LLM response
       // ⭐ NEW: Resolve local endpoint from profile if available, fallback to llm_configs
       const credential = agentRuntime.credential;
@@ -539,7 +817,54 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
       if (adapter) {
         // Local LLM path: use AgentLoop with emulated FC via FunctionCallingPromptBuilder
-        const enabledFunctions = allFunctions.filter(f => f.isEnabled);
+        let enabledFunctions = scopedFunctions;
+
+        if (enabledFunctions.length === 0 && configuredToolIds.length > 0) {
+          const effectiveWorkflowId = data.workflowId || agentInstance?.workflowId;
+          console.warn('[V2AgentNode] Empty local tool scope for a configured agent, attempting catalog reload', {
+            nodeId: id,
+            agentId: effectiveAgent.id,
+            configuredToolIds,
+            workflowId: effectiveWorkflowId,
+            loadedFunctionCount: allFunctions.length,
+          });
+
+          await loadFunctions(effectiveWorkflowId ?? undefined);
+          enabledFunctions = selectResolvedAgentExecutionSelectionContext(
+            {
+              agents: designAgents,
+              agentInstances: designAgentInstances,
+            },
+            nodeAgent,
+            agentInstanceProp?.id,
+            useFunctionStore.getState().functions
+          ).scopedFunctions;
+        }
+
+        console.info('[V2AgentNode] Local AgentLoop tool scope', {
+          nodeId: id,
+          agentId: effectiveAgent.id,
+          agentName: effectiveAgent.name,
+          configuredToolIds,
+          loadedFunctionCount: allFunctions.length,
+          selectedCount: enabledFunctions.length,
+          selectedTools: enabledFunctions.map(fn => ({ id: fn.toolId ?? fn._id, name: fn.name }))
+        });
+
+        if (enabledFunctions.length === 0 && configuredToolIds.length > 0) {
+          const configurationError = `[Erreur configuration outils] ${configuredToolIds.length} outil(s) sont configures pour cet agent, mais aucun n'a pu etre resolu dans le catalogue charge.`;
+          const errorMessage: ChatMessage = {
+            id: generateMessageId('tool-config-error'),
+            sender: 'agent',
+            text: configurationError,
+            isError: true,
+            timestamp: new Date(),
+          };
+          addNodeMessage(id, errorMessage);
+          setNodeExecuting(id, false);
+          return;
+        }
+
         setLoadingMessage(t('loading'));
 
         const loopResult = await runAgentLoop(
@@ -550,8 +875,43 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
           {
             authToken: accessToken ?? undefined,  // C1 FIX: JWT pour requireAuth sandbox
             onEvent: (event) => {
-              if (event.type === 'tool_call_start') {
-                setLoadingMessage(`🔧 ${event.toolCall?.name ?? '…'}`);
+              if (event.type === 'tool_call_start' && event.toolCall) {
+                const pendingKey = `${event.iteration}:${event.toolCall.name}:${JSON.stringify(event.toolCall.arguments)}`;
+                const pendingMessageId = pendingLocalToolMessageIdsRef.current[pendingKey] ?? generateMessageId('pending-tool');
+                pendingLocalToolMessageIdsRef.current[pendingKey] = pendingMessageId;
+                const matchedFunction = enabledFunctions.find((fn) => fn.name === event.toolCall.name);
+                if (event.toolCall.id) {
+                  persistToolInvocation({
+                    toolCallId: event.toolCall.id,
+                    toolName: event.toolCall.name,
+                    phase: 'started',
+                    toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+                    functionId: matchedFunction?._id,
+                  });
+                }
+                upsertChatMessage(buildPendingToolCallMessage(
+                  pendingMessageId,
+                  event.toolCall.name,
+                  event.toolCall.arguments,
+                  new Date()
+                ));
+                setLoadingMessage(`🔧 ${event.toolCall.name}`);
+              } else if (event.type === 'tool_call_done' && event.toolCall && event.toolCallRecord) {
+                const pendingKey = `${event.iteration}:${event.toolCall.name}:${JSON.stringify(event.toolCall.arguments)}`;
+                const pendingMessageId = pendingLocalToolMessageIdsRef.current[pendingKey];
+                persistToolInvocation({
+                  toolCallId: event.toolCallRecord.id,
+                  toolName: event.toolCallRecord.functionName,
+                  phase: event.toolCallRecord.status === 'error' ? 'failed' : 'completed',
+                  executionId: event.toolCallRecord.executionId,
+                  toolId: event.toolCallRecord.toolId,
+                  functionId: event.toolCallRecord.functionId,
+                });
+                finalizeToolCallMessage(buildToolCallMessage(event.toolCallRecord as ToolCallRecord), pendingMessageId);
+                ensureToolResultMessage(buildToolResultChatMessage(event.toolCallRecord as ToolCallRecord));
+                delete pendingLocalToolMessageIdsRef.current[pendingKey];
+              } else if (event.type === 'tool_protocol_violation') {
+                setLoadingMessage(t('tool_protocol_violation'));
               } else if (event.type === 'llm_start') {
                 setLoadingMessage(t('loading'));
               }
@@ -561,48 +921,48 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
         // Add tool call messages for each executed function
         for (const record of loopResult.toolCallLog) {
-          const toolChatMsg: ChatMessage = {
+          const toolRecord: ToolCallRecord = {
             id: record.id,
-            sender: 'tool',
-            text: `${record.functionName}(${JSON.stringify(record.arguments)})`,
-            toolName: record.functionName,
+            toolId: record.toolId,
+            functionId: record.functionId,
+            functionName: record.functionName,
+            arguments: record.arguments,
+            result: record.result,
+            status: record.status,
+            durationMs: record.durationMs,
+            executionId: record.executionId,
+            runner: record.runner,
+            exitCode: record.exitCode,
+            failureKind: record.failureKind,
+            artifacts: record.artifacts,
             timestamp: record.timestamp,
-            isError: record.status === 'error',
-            toolCallRecord: {
-              id: record.id,
-              toolId: record.toolId,
-              functionId: record.functionId,
-              functionName: record.functionName,
-              arguments: record.arguments,
-              result: record.result,
-              status: record.status,
-              durationMs: record.durationMs,
-              executionId: record.executionId,
-              runner: record.runner,
-              exitCode: record.exitCode,
-              failureKind: record.failureKind,
-              artifacts: record.artifacts,
-              timestamp: record.timestamp,
-            } as ToolCallRecord,
           };
-          addNodeMessage(id, toolChatMsg);
+
+          finalizeToolCallMessage(buildToolCallMessage(toolRecord));
+          ensureToolResultMessage(buildToolResultChatMessage(toolRecord));
         }
 
+        pendingLocalToolMessageIdsRef.current = {};
+
         // Add final agent response
-        if (loopResult.finalResponse.trim()) {
+        if (loopResult.finalResponse.trim() || loopResult.finishReason === 'error') {
           const agentMsg: ChatMessage = {
             id: generateMessageId('agent'),
             sender: 'agent',
             text: loopResult.finalResponse,
+            isError: loopResult.finishReason === 'error',
             timestamp: new Date(),
           };
           addNodeMessage(id, agentMsg);
-          persistJournalEntry('chat', {
-            role: 'agent',
-            content: loopResult.finalResponse,
-            llmProvider: effectiveAgent.llmProvider,
-            modelUsed: effectiveAgent.model,
-          });
+          if (loopResult.finalResponse.trim()) {
+            persistJournalEntry('chat', {
+              messageId: agentMsg.id,
+              role: 'agent',
+              content: loopResult.finalResponse,
+              llmProvider: effectiveAgent.llmProvider,
+              modelUsed: effectiveAgent.model,
+            });
+          }
         }
       } else {
       // ─── Standard streaming path (native providers — zero regression) ────────
@@ -612,7 +972,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         effectiveAgent.model,
         effectiveAgent.systemPrompt,
         conversationHistoryForAPI, // Use computed history based on config
-        effectiveAgent.tools,
+        providerTools,
         effectiveAgent.outputConfig,
         credential, // For endpoints (will be used for LMStudio, ignored for cloud)
         { webFetch: webFetchEnabled, webSearch: webSearchEnabled }, // Native tools config
@@ -661,25 +1021,29 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         // Handle tool calls
         if (chunk.response && 'toolCalls' in chunk.response && chunk.response.toolCalls) {
           toolCalls = chunk.response.toolCalls;
-          const toolMessage: ChatMessage = {
-            id: agentMessageId,
-            sender: 'agent',
-            text: currentResponse,
-            toolCalls,
-            status: 'executing_tool',
-            timestamp: new Date()
-          };
-
-          const existingMessages = getNodeMessages(id);
-          setNodeMessages(id, existingMessages.map(m =>
-            m.id === agentMessageId ? toolMessage : m
-          ));
+          for (const toolCall of toolCalls) {
+            const matchedFunction = scopedFunctions.find((fn) => fn.isEnabled && fn.name === toolCall.name);
+            persistToolInvocation({
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              phase: 'started',
+              toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+              functionId: matchedFunction?._id,
+            });
+            upsertChatMessage(buildPendingToolCallMessage(
+              `pending-tool-${toolCall.id}`,
+              toolCall.name,
+              parseToolCallArguments(toolCall.arguments),
+              new Date()
+            ));
+          }
         }
       }
 
       // Persist agent response if successful
       if (currentResponse.trim() && !toolCalls.length) {
         persistJournalEntry('chat', {
+          messageId: agentMessageId,
           role: 'agent',
           content: currentResponse,
           llmProvider: effectiveAgent.llmProvider,
@@ -690,28 +1054,66 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       // Execute tools if any
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
+          const matchedFunction = scopedFunctions.find((fn) => fn.isEnabled && fn.name === toolCall.name);
+          const toolTimestamp = new Date();
+          const pendingToolMessageId = `pending-tool-${toolCall.id}`;
+
           try {
-            const toolResult = await executeTool(toolCall);
-            const toolResultMessage: ChatMessage = {
-              id: generateMessageId('tool-result'),
-              sender: 'tool_result',
-              text: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
-              toolCallId: toolCall.id,
-              toolName: toolCall.name,
-              timestamp: new Date()
+            const execution = await executeAgentToolCall({
+              toolCall,
+              agent: effectiveAgent,
+              availableFunctions: scopedFunctions,
+              authToken: accessToken ?? undefined,
+            });
+            const toolResult = execution.result;
+            const toolRecord: ToolCallRecord = {
+              id: toolCall.id,
+              toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+              functionId: matchedFunction?._id,
+              functionName: toolCall.name,
+              arguments: execution.executedArguments,
+              result: toolResult,
+              status: isToolErrorResult(toolResult) ? 'error' : 'success',
+              timestamp: toolTimestamp,
+              executionId: execution.executionId,
+              runner: execution.runner,
+              exitCode: execution.exitCode,
+              failureKind: execution.failureKind,
+              artifacts: execution.artifacts,
             };
-            addNodeMessage(id, toolResultMessage);
+
+            persistToolInvocation({
+              toolCallId: toolRecord.id,
+              toolName: toolRecord.functionName,
+              phase: toolRecord.status === 'error' ? 'failed' : 'completed',
+              executionId: toolRecord.executionId,
+              toolId: toolRecord.toolId,
+              functionId: toolRecord.functionId,
+            });
+            finalizeToolCallMessage(buildToolCallMessage(toolRecord), pendingToolMessageId);
+            ensureToolResultMessage(buildToolResultChatMessage(toolRecord));
           } catch (error) {
-            const errorMessage: ChatMessage = {
-              id: generateMessageId('tool-error'),
-              sender: 'tool_result',
-              text: `Erreur: ${error instanceof Error ? error.message : String(error)}`,
-              toolCallId: toolCall.id,
-              toolName: toolCall.name,
-              isError: true,
-              timestamp: new Date()
+            const toolErrorText = `Erreur: ${error instanceof Error ? error.message : String(error)}`;
+            const toolRecord: ToolCallRecord = {
+              id: toolCall.id,
+              toolId: matchedFunction?.toolId ?? matchedFunction?._id,
+              functionId: matchedFunction?._id,
+              functionName: toolCall.name,
+              arguments: parseToolCallArguments(toolCall.arguments),
+              result: { error: toolErrorText },
+              status: 'error',
+              timestamp: toolTimestamp,
             };
-            addNodeMessage(id, errorMessage);
+
+            persistToolInvocation({
+              toolCallId: toolRecord.id,
+              toolName: toolRecord.functionName,
+              phase: 'failed',
+              toolId: toolRecord.toolId,
+              functionId: toolRecord.functionId,
+            });
+            finalizeToolCallMessage(buildToolCallMessage(toolRecord), pendingToolMessageId);
+            ensureToolResultMessage(buildToolResultChatMessage(toolRecord));
           }
         }
 
@@ -721,97 +1123,119 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
           m.status === 'executing_tool' ? { ...m, status: undefined } : m
         ));
 
-        // If agent has Chat capability, continue generation with tool results
-        if (effectiveAgent?.capabilities?.includes(LLMCapability.Chat)) {
-          setLoadingMessage(t('analyzing_results'));
+        persistJournalEntry('chat', {
+          messageId: agentMessageId,
+          role: 'agent',
+          content: currentResponse,
+          llmProvider: effectiveAgent.llmProvider,
+          modelUsed: effectiveAgent.model,
+          toolCalls,
+        });
 
-          // Get updated message history including tool results
-          const updatedMessages = getNodeMessages(id);
+        // A native provider that emitted a tool call must always receive the tool result back,
+        // even if the prototype forgot to keep Chat explicitly enabled in capabilities.
+        setLoadingMessage(t('analyzing_results'));
 
-          // Filter out tool_result messages for the follow-up call and create a synthetic user message
-          // that contains the tool results as context
-          const messagesWithoutToolResults = updatedMessages.filter(m => m.sender !== 'tool_result');
+        // Get updated message history including tool results.
+        const updatedMessages = getNodeMessages(id);
 
-          // Collect tool results for context
-          const toolResults = updatedMessages.filter(m => m.sender === 'tool_result');
+        // Filter out UI-only tool and tool_result messages for the follow-up call and create a synthetic user message
+        // that contains the tool results as context.
+        const messagesWithoutToolResults = updatedMessages.filter(m => m.sender !== 'tool_result' && m.sender !== 'tool');
 
-          if (toolResults.length > 0) {
-            // Create a synthetic message that provides tool results as context
-            const toolResultsSummary = toolResults.map(tr =>
-              `${t('tool_result_from')} ${tr.toolName}: ${tr.text}`
-            ).join('\n\n'); const contextMessage: ChatMessage = {
-              id: generateMessageId('tool-context'),
-              sender: 'user',
-              text: `${t('tool_results_context')}:\n\n${toolResultsSummary}\n\n${t('analyze_results_request')}`,
+        // Collect tool results for context.
+        const toolResults = updatedMessages.filter(m => m.sender === 'tool_result');
+
+        if (toolResults.length > 0) {
+          const toolResultsSummary = toolResults.map(tr =>
+            `${t('tool_result_from')} ${tr.toolName}: ${tr.text}`
+          ).join('\n\n');
+          const contextMessage: ChatMessage = {
+            id: generateMessageId('tool-context'),
+            sender: 'user',
+            text: `${t('tool_results_context')}:\n\n${toolResultsSummary}\n\n${t('analyze_results_request')}`,
+            timestamp: new Date()
+          };
+
+          messagesWithoutToolResults.push(contextMessage);
+        }
+
+        // Generate a follow-up response using the tool results as context.
+        // ⭐ FIX: Use `credential` (resolved from localLLMProfileId) — NOT agentConfig.apiKey.
+        // agentConfig is a singleton find(provider===X) which returns the FIRST matching config,
+        // causing endpoint cross-contamination when 2+ local LLM agents share the same provider type.
+        // `credential` was already resolved above via resolveLocalEndpoint() for this specific agent.
+        const followUpStream = llmService.generateContentStream(
+          effectiveAgent.llmProvider,
+          credential,
+          effectiveAgent.model,
+          effectiveAgent.systemPrompt,
+          messagesWithoutToolResults,
+          providerTools,
+          effectiveAgent.outputConfig,
+          credential // endpoint for LMStudio — same agent-specific credential
+        );
+
+        let followUpResponse = '';
+        let followUpMessageId = generateMessageId('followup');
+        let followUpErrored = false;
+
+        for await (const chunk of followUpStream) {
+          if (chunk.error) {
+            followUpErrored = true;
+            const errorMessage: ChatMessage = {
+              id: followUpMessageId,
+              sender: 'agent',
+              text: chunk.error,
+              isError: true,
               timestamp: new Date()
             };
-
-            messagesWithoutToolResults.push(contextMessage);
+            addNodeMessage(id, errorMessage);
+            break;
           }
 
-          // Generate a follow-up response using the tool results as context
-          // ⭐ FIX: Use `credential` (resolved from localLLMProfileId) — NOT agentConfig.apiKey
-          // agentConfig is a singleton find(provider===X) which returns the FIRST matching config,
-          // causing endpoint cross-contamination when 2+ local LLM agents share the same provider type.
-          // `credential` was already resolved above via resolveLocalEndpoint() for this specific agent.
-          const followUpStream = llmService.generateContentStream(
-            effectiveAgent.llmProvider,
-            credential,
-            effectiveAgent.model,
-            effectiveAgent.systemPrompt,
-            messagesWithoutToolResults,
-            effectiveAgent.tools,
-            effectiveAgent.outputConfig,
-            credential // endpoint for LMStudio — same agent-specific credential
-          );
+          if (chunk.response && 'text' in chunk.response && chunk.response.text) {
+            followUpResponse += chunk.response.text;
 
-          let followUpResponse = '';
-          let followUpMessageId = generateMessageId('followup');
+            const existingFollowUpMessages = getNodeMessages(id);
+            const existingFollowUpMessage = existingFollowUpMessages.find(m => m.id === followUpMessageId);
 
-          for await (const chunk of followUpStream) {
-            if (chunk.error) {
-              const errorMessage: ChatMessage = {
+            if (existingFollowUpMessage) {
+              setNodeMessages(id, existingFollowUpMessages.map(m =>
+                m.id === followUpMessageId ? { ...m, text: followUpResponse } : m
+              ));
+            } else {
+              const newFollowUpMessage: ChatMessage = {
                 id: followUpMessageId,
                 sender: 'agent',
-                text: chunk.error,
-                isError: true,
+                text: followUpResponse,
                 timestamp: new Date()
               };
-              addNodeMessage(id, errorMessage);
-              break;
-            }
-
-            if (chunk.response && 'text' in chunk.response && chunk.response.text) {
-              followUpResponse += chunk.response.text;
-
-              const existingFollowUpMessages = getNodeMessages(id);
-              const existingFollowUpMessage = existingFollowUpMessages.find(m => m.id === followUpMessageId);
-
-              if (existingFollowUpMessage) {
-                setNodeMessages(id, existingFollowUpMessages.map(m =>
-                  m.id === followUpMessageId ? { ...m, text: followUpResponse } : m
-                ));
-              } else {
-                const newFollowUpMessage: ChatMessage = {
-                  id: followUpMessageId,
-                  sender: 'agent',
-                  text: followUpResponse,
-                  timestamp: new Date()
-                };
-                addNodeMessage(id, newFollowUpMessage);
-              }
+              addNodeMessage(id, newFollowUpMessage);
             }
           }
+        }
 
-          // ⭐ Phase 3: Persister la réponse follow-up
-          if (followUpResponse.trim()) {
-            persistJournalEntry('chat', {
-              role: 'agent',
-              content: followUpResponse,
-              llmProvider: effectiveAgent.llmProvider,
-              modelUsed: effectiveAgent.model
-            });
-          }
+        if (!followUpErrored && !followUpResponse.trim()) {
+          const emptyFollowUpMessage: ChatMessage = {
+            id: followUpMessageId,
+            sender: 'agent',
+            text: 'Erreur: aucune reponse finale du modele apres execution de l\'outil.',
+            isError: true,
+            timestamp: new Date()
+          };
+          addNodeMessage(id, emptyFollowUpMessage);
+        }
+
+        // ⭐ Phase 3: Persister la réponse follow-up
+        if (followUpResponse.trim()) {
+          persistJournalEntry('chat', {
+            messageId: followUpMessageId,
+            role: 'agent',
+            content: followUpResponse,
+            llmProvider: effectiveAgent.llmProvider,
+            modelUsed: effectiveAgent.model
+          });
         }
       }
       } // end else (standard streaming path)
@@ -828,6 +1252,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
       // Persist error to journal
       persistJournalEntry('error', {
+        messageId: errorMessage.id,
         errorCode: 'AGENT_ERROR',
         message: error instanceof Error ? error.message : String(error),
         source: 'llm_service',
@@ -837,13 +1262,41 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     } finally {
       setNodeExecuting(id, false);
       setLoadingMessage('');
+      setIsHistorySynthesisActive(false);
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setAttachedFile(file);
+    if (!file) {
+      return;
+    }
+
+    try {
+      const base64Content = await fileToBase64(file);
+      let textContent: string | undefined;
+
+      if (isTextLikeFile(file)) {
+        try {
+          textContent = await fileToText(file);
+        } catch (error) {
+          console.warn(`[V2AgentNode ${id}] Failed to read text upload as UTF-8, keeping base64 only`, error);
+        }
+      }
+
+      setNodePendingAttachment(id, {
+        id: generatePendingAttachmentId(),
+        file,
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        base64Content,
+        textContent,
+        origin: 'llm_file_upload',
+        createdAt: new Date(),
+        draftPersisted: false,
+      });
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -853,11 +1306,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     } else {
       console.warn(`[V2AgentNode ${id}] Cannot open image panel - missing callback or agent/instance`);
     }
-  };
-
-  const handleImageClick = (imageBase64: string, mimeType: string) => {
-    // Cette fonction est maintenant utilisée pour le bouton fullscreen dans l'overlay
-    // On ne fait rien ici car le fullscreen est géré par App.tsx via setFullscreenImage
   };
 
   const handleOpenFullscreenImage = (imageBase64: string, mimeType: string) => {
@@ -895,12 +1343,30 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
     const isError = message.isError;
     const isToolResult = message.sender === 'tool_result';
     const isToolCall = message.sender === 'tool';
+    const suppressToolResult = shouldSuppressVisualToolResult(message, messages);
+
+    if (suppressToolResult) {
+      return null;
+    }
 
     return (
       <div key={message.id} className={`mb-3 ${isUser ? 'ml-4' : 'mr-4'}`}>
         {/* J9 — ToolCallBlock for Tools V2 function invocations */}
         {isToolCall && message.toolCallRecord && (
           <ToolCallBlock toolCall={message.toolCallRecord} defaultExpanded={false} />
+        )}
+
+        {isToolCall && !message.toolCallRecord && (
+          <div className="mb-2 rounded bg-gray-800/70 border border-cyan-800/40 px-3 py-2">
+            <div className="flex items-center gap-2 text-sm text-cyan-300">
+              <span className="text-gray-400 shrink-0">🔧</span>
+              <span className="font-mono font-bold truncate">{message.toolName ?? t('executing_tool')}</span>
+              <span className="text-xs text-amber-300 animate-pulse shrink-0">{t('executing_tool')}...</span>
+            </div>
+            <div className="mt-2 text-xs text-gray-400 font-mono bg-gray-900/60 p-2 rounded break-words overflow-wrap-anywhere whitespace-pre-wrap">
+              {message.text}
+            </div>
+          </div>
         )}
 
         {/* Tool result message */}
@@ -1170,7 +1636,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 
       border border-gray-600 rounded-lg shadow-lg 
       transition-all duration-300 ease-out
-      relative overflow-hidden
+      relative overflow-visible
       ${selected ?
           'border-cyan-400 shadow-cyan-400/40 shadow-2xl' :
           'border-gray-600 hover:border-gray-500'
@@ -1197,16 +1663,16 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
         <div className="absolute inset-[1px] rounded-lg bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-purple-500/20 animate-pulse"></div>
       </div>
 
-      {/* Input Handle with glow effect */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="w-3 h-3 bg-cyan-400 border-2 border-cyan-300 
-                   shadow-lg shadow-cyan-400/50
-                   hover:bg-cyan-300 hover:shadow-cyan-300/70 
-                   transition-all duration-200
-                   relative z-10"
-      />
+      {AGENT_NODE_HANDLES.map((handle) => (
+        <Handle
+          key={handle.id}
+          id={handle.id}
+          type={handle.type}
+          position={handle.position}
+          className={cornerHandleClassName}
+          style={handle.style}
+        />
+      ))}
 
       {/* Header - zone de titre draggable avec classe spéciale */}
       <div className="flex items-center justify-between p-3 border-b border-gray-700/80 
@@ -1215,18 +1681,20 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                       backdrop-blur-sm relative z-10
                       hover:from-gray-800/90 hover:via-gray-700/70 hover:to-gray-800/90
                       transition-all duration-300">
-        <div className="flex items-center space-x-2">
-          <div className={`w-2 h-2 rounded-full shadow-lg transition-all duration-200 ${isLoading
-            ? 'bg-yellow-400 animate-pulse shadow-yellow-400/60'
-            : 'bg-green-400 shadow-green-400/60 group-hover:shadow-green-400/80'
-            }`}></div>
-          <h3 className="font-semibold text-white truncate 
-                         group-hover:text-cyan-100 transition-colors duration-200">
-            {displayName}
-          </h3>
-        </div>
+        <div className="flex items-center space-x-2 min-w-0">
+            <div className={`w-2 h-2 rounded-full shadow-lg transition-all duration-200 ${isLoading
+              ? 'bg-yellow-400 animate-pulse shadow-yellow-400/60'
+              : 'bg-green-400 shadow-green-400/60 group-hover:shadow-green-400/80'
+              }`}></div>
+            <div className="min-w-0">
+              <h3 className="font-semibold text-white truncate min-w-0
+                           group-hover:text-cyan-100 transition-colors duration-200">
+                {displayName}
+              </h3>
+            </div>
+          </div>
 
-        <div className="flex items-center space-x-1">
+          <div className="flex items-center space-x-1 flex-none">
           <Button
             variant="ghost"
             className="p-1 h-6 w-6 text-gray-400 hover:text-blue-400 
@@ -1266,6 +1734,8 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                        hover:bg-red-500/20 hover:shadow-lg hover:shadow-red-500/40
                        transition-all duration-200 rounded-md
                        hover:scale-110 active:scale-95"
+            aria-label={t('confirm_delete')}
+            title={t('confirm_delete')}
             onClick={(e) => {
               e.stopPropagation();
               handleDelete();
@@ -1317,9 +1787,15 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
             {messages.map(renderMessage)}
 
             {/* Loading message d'information système */}
-            {isLoading && loadingMessage && (
-              <div className="text-center text-xs text-gray-400 animate-pulse">
-                {loadingMessage}
+            {isLoading && (
+              <div className="flex justify-start mb-2">
+                <div className="inline-flex items-center gap-2 rounded-lg border border-gray-700/70 bg-gray-800/90 px-3 py-2 text-xs text-gray-200 shadow-lg shadow-cyan-900/10">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent"></div>
+                  {isHistorySynthesisActive && (
+                    <HistorySynthesisIcon data-testid="history-synthesis-icon" className="h-4 w-4 animate-pulse text-cyan-300" />
+                  )}
+                  <span className="whitespace-pre-wrap break-words">{loadingMessage || t('loading')}</span>
+                </div>
               </div>
             )}
 
@@ -1330,12 +1806,12 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
           <div className="p-3 border-t border-gray-700 nodrag">
             <form onSubmit={handleSendMessage} className="space-y-2">
               {/* File attachment preview */}
-              {attachedFile && (
+              {pendingAttachment && (
                 <div className="flex items-center justify-between bg-gray-700 p-2 rounded text-xs">
-                  <span>📎 {attachedFile.name}</span>
+                  <span>📎 {pendingAttachment.fileName}</span>
                   <button
                     type="button"
-                    onClick={() => setAttachedFile(null)}
+                    onClick={() => clearNodePendingAttachment(id)}
                     className="text-red-400 hover:text-red-300"
                   >
                     ×
@@ -1345,7 +1821,7 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
 
               {/* Input row */}
               <div className="flex items-end space-x-2">
-                <div className="flex-1">
+                <div className="flex-1 space-y-2">
                   <textarea
                     value={userInput}
                     onChange={(e) => setUserInput(e.target.value)}
@@ -1364,6 +1840,21 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                       }
                     }}
                   />
+
+                  {hasWebSearchPyTool && (
+                    <div className="flex justify-start">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="p-2 h-8 w-8 text-sky-300 border border-sky-400/30 bg-[linear-gradient(135deg,rgba(8,33,59,0.9),rgba(13,78,118,0.78)_58%,rgba(125,211,252,0.16))] hover:text-sky-100 hover:border-sky-200/55 hover:bg-[linear-gradient(135deg,rgba(10,41,71,0.95),rgba(14,116,144,0.82)_58%,rgba(186,230,253,0.24))] hover:shadow-[0_0_16px_rgba(56,189,248,0.28)] transition-all duration-200 rounded-md hover:scale-110 active:scale-95"
+                        onClick={() => setIsWebSearchParamsModalOpen(true)}
+                        disabled={isLoading}
+                        title={t('agentNode_webSearchParams_buttonTitle', "Paramètres Web Search de l'agent")}
+                      >
+                        <WebSearchIcon width={14} height={14} />
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Action buttons */}
@@ -1497,7 +1988,9 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                         }`}
                       onClick={() => setWebSearchEnabled(!webSearchEnabled)}
                       disabled={isLoading}
-                      title={webSearchEnabled ? 'Web Search activé' : 'Web Search désactivé'}
+                      title={webSearchEnabled
+                        ? t('agentNode_webSearchEnabled', 'Web Search activé')
+                        : t('agentNode_webSearchDisabled', 'Web Search désactivé')}
                     >
                       🔍
                     </Button>
@@ -1508,11 +2001,11 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
                     type="submit"
                     variant="ghost"
                     className={`p-2 h-8 w-8 transition-all duration-200 rounded-md
-                                hover:scale-110 active:scale-95 ${isLoading || (!userInput.trim() && !attachedFile)
+                                hover:scale-110 active:scale-95 ${isLoading || (!userInput.trim() && !pendingAttachment)
                         ? 'text-gray-500 cursor-not-allowed'
                         : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/20 hover:shadow-lg hover:shadow-cyan-500/40 laser-glow'
                       }`}
-                    disabled={isLoading || (!userInput.trim() && !attachedFile)}
+                    disabled={isLoading || (!userInput.trim() && !pendingAttachment)}
                   >
                     <SendIcon width={14} height={14} />
                   </Button>
@@ -1528,21 +2021,18 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
               className="hidden"
               accept={effectiveAgent?.capabilities?.includes(LLMCapability.PDFSupport) ? "image/*,application/pdf" : "image/*,text/*,.pdf,.doc,.docx"}
             />
+
+            <WebSearchParamsModal
+              isOpen={isWebSearchParamsModalOpen}
+              agentName={displayName}
+              initialParams={agentInstance?.configuration_json?.webSearchParams || effectiveAgent?.webSearchParams}
+              isSaving={isSavingWebSearchParams}
+              onClose={() => setIsWebSearchParamsModalOpen(false)}
+              onSave={handleSaveWebSearchParams}
+            />
           </div>
         </div>
       </div>
-
-      {/* Output Handle with laser styling */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="w-3 h-3 bg-cyan-400 border-2 border-cyan-300 
-                   shadow-lg shadow-cyan-400/50
-                   hover:bg-cyan-300 hover:shadow-cyan-300/70 
-                   transition-all duration-200
-                   relative z-10"
-      />
-
       {/* Modal de confirmation de suppression - Sécurité : aucune info de configuration affichée */}
       <ConfirmationModal
         isOpen={showDeleteConfirm}
@@ -1566,4 +2056,6 @@ export const V2AgentNode: React.FC<NodeProps<V2AgentNodeData>> = ({ data, id, se
       )}
     </div>
   );
-};
+});
+
+V2AgentNode.displayName = 'V2AgentNode';
