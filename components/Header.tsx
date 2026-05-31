@@ -5,7 +5,7 @@ import { useLocalization } from '../hooks/useLocalization';
 import { useAuth } from '../hooks/useAuth';
 import { LoginModal } from './modals/LoginModal';
 import { RegisterModal } from './modals/RegisterModal';
-import RestoreTraceButton from './RestoreTraceButton';
+// RestoreTraceButton removed after QA; export UI cleaned up.
 
 interface HeaderProps {
   onOpenSettings: () => void;
@@ -43,7 +43,7 @@ export const Header = ({ onOpenSettings }: HeaderProps) => {
             <span className="ml-2">{t('header_settings')}</span>
           </Button>
 
-          <RestoreTraceButton />
+          {/* dev trace export removed */}
 
           {/* Authentication UI */}
           <div className="border-l border-gray-700 pl-3 flex items-center space-x-2">
