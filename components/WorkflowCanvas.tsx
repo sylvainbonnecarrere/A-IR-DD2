@@ -380,50 +380,30 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               }];
             });
 
-            // Diagnostic trace for QA: record perimeter, occupied rects and desired position
+            // Ask placement util for a non-overlapping position using expanded subject size
             try {
-              const globalWindow: any = typeof window !== 'undefined' ? window : {};
-              globalWindow.__ARC_RESTORE_LOG__ = globalWindow.__ARC_RESTORE_LOG__ || [];
-              const trace: any = {
-                occurredAt: new Date().toISOString(),
-                nodeId,
-                desiredPosition,
-                subjectSize: { width: subjectWidth, height: subjectHeight },
-                occupiedCount: occupiedNodeRects.length,
-                occupiedSample: occupiedNodeRects.slice(0, 8),
-                workflowId,
-                resolved: null,
-                applied: false,
-              };
-              globalWindow.__ARC_RESTORE_LOG__.push(trace);
-
-              // Ask placement util for a non-overlapping position using expanded subject size
               const resolved = findCollisionFreeWorkflowNodePosition({
-              nodeId,
-              instanceId: movedNode?.data?.agentInstance?.id,
-              currentPosition: movedNode?.position,
-              desiredPosition,
-              workflowId,
-              nodes: designState.nodes,
-              agentInstances: designState.agentInstances,
-              occupiedNodeRects,
-              subjectSize: { width: subjectWidth, height: subjectHeight },
-              maxSearchRadius: 24,
-            });
+                nodeId,
+                instanceId: movedNode?.data?.agentInstance?.id,
+                currentPosition: movedNode?.position,
+                desiredPosition,
+                workflowId,
+                nodes: designState.nodes,
+                agentInstances: designState.agentInstances,
+                occupiedNodeRects,
+                subjectSize: { width: subjectWidth, height: subjectHeight },
+                maxSearchRadius: 24,
+              });
+
               if (resolved && (resolved.x !== desiredPosition.x || resolved.y !== desiredPosition.y)) {
                 setReactFlowNodes((current) => current.map((n) => n.id === nodeId ? { ...n, position: resolved } : n));
+                // Apply visual-only correction; do not persist automatically on restore
                 (onUpdateNodePosition || (() => {}))(nodeId, resolved, { persist: false } as any);
-                trace.resolved = resolved;
-                trace.applied = true;
-              } else {
-                trace.resolved = resolved;
-                trace.applied = false;
               }
-              // eslint-disable-next-line no-console
-              console.info('[WorkflowCanvas][restore-trace]', trace);
             } catch (traceErr) {
+              // Do not break UI on trace calculation failures
               // eslint-disable-next-line no-console
-              console.warn('[WorkflowCanvas] failed to record/emit restore trace', traceErr);
+              console.warn('[WorkflowCanvas] perimeter-check/resolve failed', traceErr);
             }
           } catch (err) {
             // eslint-disable-next-line no-console
@@ -485,7 +465,9 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             const directInstance = agentInstances.find(i => i.id === wfNode.instanceId);
             if (directInstance) {
               agentInstance = { ...directInstance, workflowId: directInstance.workflowId || workflowId };
-              console.log('[WorkflowCanvas] Found instance directly:', wfNode.instanceId);
+              // debug: instance resolved directly from agentInstances
+              // eslint-disable-next-line no-console
+              console.debug('[WorkflowCanvas] Found instance directly:', wfNode.instanceId);
             } else {
               console.warn(`[WorkflowCanvas] Instance not found for instanceId: ${wfNode.instanceId}. Available instances:`, 
                 agentInstances.map(i => ({ id: i.id, prototypeId: i.prototypeId }))
@@ -699,36 +681,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       onOpenFullscreen,
     }), [handleEditPrototype, onNavigate, onDeleteNode, onToggleNodeMinimize, onUpdateNodePosition, onOpenImagePanel, onOpenImageModificationPanel, onOpenVideoPanel, onOpenMapsPanel, onOpenFullscreen]);
 
-  // DEV/TEST API: expose a trigger to run the minimize->restore perimeter check from tests
-  useEffect(() => {
-    try {
-      const globalWindow: any = typeof window !== 'undefined' ? window : {};
-      if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
-        globalWindow.__ARC_TEST_API__ = globalWindow.__ARC_TEST_API__ || {};
-        globalWindow.__ARC_TEST_API__.triggerToggle = (nodeId: string) => {
-          try {
-            return stableRefs.current.callbacks.onToggleNodeMinimize(nodeId);
-          } catch (e) {
-            // swallow in tests
-            // eslint-disable-next-line no-console
-            console.warn('[WorkflowCanvas] __ARC_TEST_API__.triggerToggle failed', e);
-          }
-        };
-      }
-    } catch (e) {
-      // ignore
-    }
-    return () => {
-      try {
-        const globalWindow: any = typeof window !== 'undefined' ? window : {};
-        if (globalWindow && globalWindow.__ARC_TEST_API__) {
-          delete globalWindow.__ARC_TEST_API__.triggerToggle;
-        }
-      } catch (e) {
-        // ignore
-      }
-    };
-  }, []);
+  // Note: test helpers removed post-QA to reduce dev-only surface.
 
   const effectiveWorkflowId = workflowId === 'default-workflow' && isAuthenticated ? undefined : workflowId;
 
