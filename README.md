@@ -48,7 +48,7 @@ A-IR-DD2 lets you build complex AI workflows through a **visual node-based edito
                              │   MongoDB    │         ┌──────────────────┐
                              │ users/keys/  │         │  Cloud LLMs      │
                              │ workflows    │         │  Gemini · GPT-4  │
-                             └─────────────┘          │  Mistral · Grok  │
+                             └──────────────┘         │  Mistral · Grok  │
                                                       │  Anthropic · ... │
                                                       └──────────────────┘
 ```
