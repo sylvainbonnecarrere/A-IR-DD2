@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { EventPrototype, LLMConfig, RobotId } from '../types';
+import { EventPrototype, RobotId } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
+import { useProvisionalPrototypeCollection } from '../hooks/useProvisionalPrototypeCollection';
 import { useLocalization } from '../hooks/useLocalization';
 import { Button, Card } from './UI';
+import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
 import { PlusIcon, ClockIcon, SettingsIcon, CloseIcon } from './Icons';
 import { useNotifications } from '../contexts/NotificationContext';
 
 interface TimEventsPageProps {
-  llmConfigs: LLMConfig[];
   onNavigateToWorkflow?: () => void;
 }
 
@@ -19,6 +20,8 @@ type EventDraft = {
   rateLimit: { max_calls: number; time_window: number };
 };
 
+type EventPrototypeType = EventPrototype['type'];
+
 function createInitialEventDraft(): EventDraft {
   return {
     name: '',
@@ -29,37 +32,19 @@ function createInitialEventDraft(): EventDraft {
   };
 }
 
-// Mock store for event prototypes - à remplacer par un vrai store plus tard
-const useEventsStore = () => {
-  const [events, setEvents] = useState<EventPrototype[]>([]);
-
-  const addEvent = (event: Omit<EventPrototype, 'id' | 'creator_id' | 'created_at' | 'updated_at'>) => {
-    const newEvent: EventPrototype = {
-      ...event,
-      id: `event-${Date.now()}`,
-      creator_id: RobotId.Tim,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    setEvents(prev => [...prev, newEvent]);
-    return { success: true, eventId: newEvent.id };
-  };
-
-  const deleteEvent = (id: string) => {
-    setEvents(prev => prev.filter(e => e.id !== id));
-    return { success: true };
-  };
-
-  return { events, addEvent, deleteEvent };
-};
-
 export const TimEventsPage: React.FC<TimEventsPageProps> = ({
-  llmConfigs,
   onNavigateToWorkflow
 }) => {
   const { t } = useLocalization();
   const { addNotification } = useNotifications();
-  const { events, addEvent, deleteEvent } = useEventsStore();
+  const {
+    items: events,
+    addItem: addEvent,
+    deleteItem: deleteEvent,
+  } = useProvisionalPrototypeCollection<EventPrototype>({
+    prefix: 'event',
+    creatorId: RobotId.Tim,
+  });
   const { currentRobotId } = useDesignStore();
 
   const [isCreating, setIsCreating] = useState(false);
@@ -118,7 +103,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
     }
   };
 
-  const getEventTypeColor = (type: string) => {
+  const getEventTypeColor = (type: EventPrototypeType) => {
     switch (type) {
       case 'trigger': return 'bg-red-500/20 text-red-300 border-red-500/30';
       case 'scheduler': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
@@ -128,7 +113,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
     }
   };
 
-  const getEventTypeIcon = (type: string) => {
+  const getEventTypeIcon = (type: EventPrototypeType) => {
     switch (type) {
       case 'trigger': return '⚡';
       case 'scheduler': return '📅';
@@ -207,6 +192,12 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
 
       {/* Main Content */}
       <div className="p-6 space-y-6">
+        <ProvisionalSurfaceNotice
+          description={t(
+            'tim_provisional_notice',
+            'Cette page conserve les evenements et limites localement dans la session UI. Aucun service canonique Tim n est encore connecte a ce flux.'
+          )}
+        />
 
         {/* Create New Event */}
         {isCreating && (
@@ -232,7 +223,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
                 <label className="block text-sm font-medium text-gray-300 mb-1">{t('event_type')}</label>
                 <select
                   value={newEvent.type}
-                  onChange={(e) => setNewEvent({ ...newEvent, type: e.target.value as any })}
+                  onChange={(e) => setNewEvent({ ...newEvent, type: e.target.value as EventPrototypeType })}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-yellow-500"
                 >
                   <option value="trigger">{t('manual_trigger')}</option>

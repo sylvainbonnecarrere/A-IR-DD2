@@ -1,11 +1,18 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useAgentChat } from '../../hooks/useAgentChat';
-import { LLMCapability, LLMProvider, RobotId, type Agent, type AgentInstance } from '../../types';
-import type { UserFunction } from '../../types/function.types';
+import { LLMCapability, LLMProvider, type Agent } from '../../types';
+import {
+  createTestAgent,
+  createTestAgentInstance,
+  createTestUserFunction,
+  createToolSelection,
+} from '../builders/domainBuilders';
+import { resetUseAgentChatHarness } from '../harnesses/useAgentChatHarness';
 
 const mockRunAgentLoop = jest.fn();
 const mockCreateAdapter = jest.fn();
 const mockResolveHistoryRuntimeConfig = jest.fn(() => ({ config: null, credential: null }));
+let useAgentChatHarness = resetUseAgentChatHarness();
 
 jest.mock('../../services/llmService', () => ({
   generateContentStream: jest.fn(),
@@ -32,86 +39,48 @@ jest.mock('../../services/runtimeConfigResolver', () => ({
   resolveHistoryRuntimeConfig: (...args: unknown[]) => (mockResolveHistoryRuntimeConfig as (...callArgs: unknown[]) => unknown)(...args),
 }));
 
-const designState = {
-  agentInstances: [
-    {
-      id: 'instance-1',
-      workflowId: 'wf-1',
-    },
-  ] as Partial<AgentInstance>[],
-};
-
 jest.mock('../../stores/useDesignStore', () => {
   const actual = jest.requireActual('../../stores/useDesignStore');
 
   return {
     ...actual,
     useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-      return selector ? selector(designState) : designState;
+      const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+      const state = getUseAgentChatHarness().designStore;
+      return selector ? selector(state) : state;
     }),
   };
 });
 
-const runtimeState = {
-  getNodeMessages: jest.fn(() => []),
-  getNodeInvisibleHistorySummary: jest.fn(() => null),
-  addNodeMessage: jest.fn(),
-  setNodeInvisibleHistorySummary: jest.fn(),
-  setNodeMessages: jest.fn(),
-  setNodeExecuting: jest.fn(),
-  localLLMProfiles: [],
-};
-
 jest.mock('../../stores/useRuntimeStore', () => ({
-  useRuntimeStore: jest.fn((selector?: (state: typeof runtimeState) => unknown) => (
-    selector ? selector(runtimeState) : runtimeState
-  )),
+  useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+    const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+    const state = getUseAgentChatHarness().runtimeStore;
+    return selector ? selector(state) : state;
+  }),
 }));
-
-const functionState: { functions: UserFunction[]; loadFunctions: jest.Mock } = {
-  functions: [
-    {
-      _id: '507f1f77bcf86cd799439011',
-      toolId: '507f1f77bcf86cd799439022',
-      name: 'web_search_py',
-      description: 'Search the web',
-      language: 'python',
-      origin: 'native',
-      userId: null,
-      workflowId: 'wf-1',
-      inputSchema: {},
-      outputSchema: {},
-      codePath: null,
-      codeInline: null,
-      dependencies: [],
-      isEnabled: true,
-      isReadonly: true,
-      version: 1,
-      versionTag: '1.0.0',
-      tags: [],
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    },
-  ],
-  loadFunctions: jest.fn(async () => undefined),
-};
 
 jest.mock('../../stores/useFunctionStore', () => ({
   useFunctionStore: Object.assign(
-    jest.fn((selector?: (state: typeof functionState) => unknown) => (
-      selector ? selector(functionState) : functionState
-    )),
+    jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+      const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+      const state = getUseAgentChatHarness().functionStore;
+      return selector ? selector(state) : state;
+    }),
     {
-      getState: () => functionState,
+      getState: () => {
+        const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+        return getUseAgentChatHarness().functionStore;
+      },
     }
   ),
 }));
 
 jest.mock('../../contexts/AuthContext', () => ({
-  useAuth: jest.fn(() => ({
-    accessToken: 'token-123',
-    isAuthenticated: true,
-  })),
+  useAuth: jest.fn(() => {
+    const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+    return getUseAgentChatHarness().authState;
+  }),
 }));
 
 const llmServiceMocks = jest.requireMock('../../services/llmService') as {
@@ -121,12 +90,39 @@ const llmServiceMocks = jest.requireMock('../../services/llmService') as {
 describe('useAgentChat local AgentLoop path', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    designState.agentInstances = [
-      {
+    useAgentChatHarness = resetUseAgentChatHarness({
+      agentInstance: createTestAgentInstance({
         id: 'instance-1',
         workflowId: 'wf-1',
+        configuration_json: null,
+      }),
+      runtimeStore: {
+        getNodeMessages: jest.fn((_nodeId: string) => []),
+        getNodeInvisibleHistorySummary: jest.fn(() => null),
+        addNodeMessage: jest.fn(),
+        setNodeInvisibleHistorySummary: jest.fn(),
+        setNodeMessages: jest.fn(),
+        setNodeExecuting: jest.fn(),
+        localLLMProfiles: [],
       },
-    ];
+      functionStore: {
+        functions: [
+          createTestUserFunction({
+            _id: '507f1f77bcf86cd799439011',
+            toolId: '507f1f77bcf86cd799439022',
+            name: 'web_search_py',
+            description: 'Search the web',
+            workflowId: 'wf-1',
+            isReadonly: true,
+          }),
+        ],
+        loadFunctions: jest.fn(async () => undefined),
+      },
+      authState: {
+        accessToken: 'token-123',
+        isAuthenticated: true,
+      },
+    });
     mockCreateAdapter.mockReturnValue({ provider: LLMProvider.LMStudio });
     mockResolveHistoryRuntimeConfig.mockReturnValue({ config: null, credential: null });
     mockRunAgentLoop.mockResolvedValue({
@@ -145,13 +141,13 @@ describe('useAgentChat local AgentLoop path', () => {
       iterations: 1,
       finishReason: 'stop',
     });
-    runtimeState.getNodeMessages.mockReturnValue([]);
-    runtimeState.getNodeInvisibleHistorySummary.mockReturnValue(null);
+    useAgentChatHarness.runtimeStore.getNodeMessages.mockReturnValue([]);
+    useAgentChatHarness.runtimeStore.getNodeInvisibleHistorySummary.mockReturnValue(null);
     llmServiceMocks.generateContent.mockResolvedValue({ text: 'Résumé caché' });
   });
 
   it('uses AgentLoop for local fullscreen chat and keeps web_search_py in scope', async () => {
-    const agent: Agent = {
+    const agent: Agent = createTestAgent({
       id: 'agent-1',
       name: 'Local Agent',
       role: 'assistant',
@@ -159,10 +155,7 @@ describe('useAgentChat local AgentLoop path', () => {
       llmProvider: LLMProvider.LMStudio,
       model: 'local-model',
       capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
-      toolSelections: [{ toolId: '507f1f77bcf86cd799439022' }],
-      creator_id: RobotId.Archi,
-      created_at: '2026-01-01T00:00:00.000Z',
-      updated_at: '2026-01-01T00:00:00.000Z',
+      toolSelections: [createToolSelection({ toolId: '507f1f77bcf86cd799439022' })],
       webSearchParams: {
         nb_request_transformation: 1,
         request_list: false,
@@ -179,7 +172,7 @@ describe('useAgentChat local AgentLoop path', () => {
         rerank_strategy: 'Fast',
         max_context_tokens: 4000,
       },
-    };
+    });
 
     const { result } = renderHook(() => useAgentChat({
       nodeId: 'node-1',
@@ -201,7 +194,7 @@ describe('useAgentChat local AgentLoop path', () => {
     expect(mockRunAgentLoop.mock.calls[0][2]).toEqual([
       expect.objectContaining({ name: 'web_search_py' }),
     ]);
-    expect(runtimeState.addNodeMessage).toHaveBeenCalledWith(
+    expect(useAgentChatHarness.runtimeStore.addNodeMessage).toHaveBeenCalledWith(
       'node-1',
       expect.objectContaining({
         sender: 'agent',
@@ -211,7 +204,7 @@ describe('useAgentChat local AgentLoop path', () => {
   });
 
   it('keeps invisible synthesis out of the visible chat while sending summary plus the latest user turn to AgentLoop', async () => {
-    runtimeState.getNodeMessages.mockReturnValue([
+    useAgentChatHarness.runtimeStore.getNodeMessages.mockReturnValue([
       {
         id: 'prior-msg-1',
         sender: 'agent',
@@ -224,7 +217,7 @@ describe('useAgentChat local AgentLoop path', () => {
       credential: 'summary-key',
     });
 
-    const agent: Agent = {
+    const agent: Agent = createTestAgent({
       id: 'agent-history-1',
       name: 'Local Agent',
       role: 'assistant',
@@ -232,7 +225,7 @@ describe('useAgentChat local AgentLoop path', () => {
       llmProvider: LLMProvider.LMStudio,
       model: 'local-model',
       capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
-      toolSelections: [{ toolId: '507f1f77bcf86cd799439022' }],
+      toolSelections: [createToolSelection({ toolId: '507f1f77bcf86cd799439022' })],
       historyConfig: {
         enabled: true,
         llmProvider: LLMProvider.Gemini,
@@ -242,10 +235,7 @@ describe('useAgentChat local AgentLoop path', () => {
         limits: { char: 1, word: 9999, token: 9999, sentence: 9999, message: 9999 },
         enabledLimits: { char: true, word: false, token: false, sentence: false, message: false },
       },
-      creator_id: RobotId.Archi,
-      created_at: '2026-01-01T00:00:00.000Z',
-      updated_at: '2026-01-01T00:00:00.000Z',
-    };
+    });
 
     const { result } = renderHook(() => useAgentChat({
       nodeId: 'node-1',
@@ -274,8 +264,8 @@ describe('useAgentChat local AgentLoop path', () => {
       expect.objectContaining({ sender: 'agent', text: 'Résumé caché' }),
       expect.objectContaining({ sender: 'user', text: 'Nouveau message utilisateur' }),
     ]);
-    expect(runtimeState.setNodeMessages).not.toHaveBeenCalled();
-    expect(runtimeState.setNodeInvisibleHistorySummary).toHaveBeenCalledWith(
+    expect(useAgentChatHarness.runtimeStore.setNodeMessages).not.toHaveBeenCalled();
+    expect(useAgentChatHarness.runtimeStore.setNodeInvisibleHistorySummary).toHaveBeenCalledWith(
       'node-1',
       expect.objectContaining({
         summary: 'Résumé caché',
@@ -285,8 +275,8 @@ describe('useAgentChat local AgentLoop path', () => {
   });
 
   it('hydrates tool scope from instance toolSelections when the prototype has none', async () => {
-    designState.agentInstances = [
-      {
+    useAgentChatHarness.designStore.agentInstances = [
+      createTestAgentInstance({
         id: 'instance-1',
         workflowId: 'wf-1',
         configuration_json: {
@@ -296,12 +286,12 @@ describe('useAgentChat local AgentLoop path', () => {
           systemPrompt: 'Use tools when relevant',
           tools: [],
           position: { x: 0, y: 0 },
-          toolSelections: [{ toolId: '507f1f77bcf86cd799439022' }],
+          toolSelections: [createToolSelection({ toolId: '507f1f77bcf86cd799439022' })],
         },
-      },
+      }),
     ];
 
-    const agent: Agent = {
+    const agent: Agent = createTestAgent({
       id: 'agent-instance-tools-1',
       name: 'Instance Scoped Agent',
       role: 'assistant',
@@ -310,10 +300,7 @@ describe('useAgentChat local AgentLoop path', () => {
       model: 'local-model',
       capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
       toolSelections: [],
-      creator_id: RobotId.Archi,
-      created_at: '2026-01-01T00:00:00.000Z',
-      updated_at: '2026-01-01T00:00:00.000Z',
-    };
+    });
 
     const { result } = renderHook(() => useAgentChat({
       nodeId: 'node-1',
@@ -338,7 +325,7 @@ describe('useAgentChat local AgentLoop path', () => {
   });
 
   it('does not crash when a legacy partial historyConfig is enabled on the first chat turn', async () => {
-    const agent: Agent = {
+    const agent: Agent = createTestAgent({
       id: 'agent-partial-history-1',
       name: 'Legacy History Agent',
       role: 'assistant',
@@ -346,7 +333,7 @@ describe('useAgentChat local AgentLoop path', () => {
       llmProvider: LLMProvider.LMStudio,
       model: 'local-model',
       capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
-      toolSelections: [{ toolId: '507f1f77bcf86cd799439022' }],
+      toolSelections: [createToolSelection({ toolId: '507f1f77bcf86cd799439022' })],
       historyConfig: {
         enabled: true,
         llmProvider: LLMProvider.Gemini,
@@ -354,10 +341,7 @@ describe('useAgentChat local AgentLoop path', () => {
         role: 'Summarizer',
         systemPrompt: 'Summarize previous turns only.',
       } as Agent['historyConfig'],
-      creator_id: RobotId.Archi,
-      created_at: '2026-01-01T00:00:00.000Z',
-      updated_at: '2026-01-01T00:00:00.000Z',
-    };
+    });
 
     const { result } = renderHook(() => useAgentChat({
       nodeId: 'node-1',
@@ -376,7 +360,7 @@ describe('useAgentChat local AgentLoop path', () => {
       expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
     });
 
-    expect(runtimeState.addNodeMessage).not.toHaveBeenCalledWith(
+    expect(useAgentChatHarness.runtimeStore.addNodeMessage).not.toHaveBeenCalledWith(
       'node-1',
       expect.objectContaining({
         sender: 'agent',

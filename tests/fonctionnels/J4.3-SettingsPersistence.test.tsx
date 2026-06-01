@@ -16,6 +16,7 @@ import userEvent from '@testing-library/user-event';
 import { ISettingsStorage, getSettingsStorage, MockSettingsStorage, UserSettingsData } from '../../utils/SettingsStorage';
 import React from 'react';
 import type { AuthContextType } from '../../contexts/types/auth.types';
+import { getBackendUrl } from '../../config/api.config';
 
 function createAuthContextMock(overrides: Partial<AuthContextType> = {}): AuthContextType {
     return {
@@ -163,11 +164,14 @@ describe('J4.3 - Guest Mode Settings Persistence', () => {
     });
 
     it('should handle corrupted localStorage gracefully', async () => {
+        const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
         localStorage.setItem('user_settings_guest', 'invalid-json');
 
         const settings = await storage.getSettings();
         expect(settings.llmConfigs).toEqual({});
         expect(settings.preferences.language).toBe('fr');
+
+        consoleErrorSpy.mockRestore();
     });
 });
 
@@ -175,11 +179,11 @@ describe('J4.3 - Guest Mode Settings Persistence', () => {
  * Test Suite 3: Authenticated Mode - API persistence
  */
 describe('J4.3 - Authenticated Mode Settings Persistence', () => {
-    let mockFetch: any;
+    let mockFetch: jest.Mock;
 
     beforeEach(() => {
         mockFetch = jest.fn();
-        global.fetch = mockFetch;
+        global.fetch = mockFetch as typeof fetch;
     });
 
     afterEach(() => {
@@ -205,10 +209,17 @@ describe('J4.3 - Authenticated Mode Settings Persistence', () => {
         });
 
         const authContext = createAuthContextMock({ accessToken: 'mock-bearer-token' });
+        const storage = getSettingsStorage(authContext);
 
-        // Simulate storage (would be real in integration test)
-        const storage = new MockSettingsStorage(mockResponse);
         const settings = await storage.getSettings();
+
+        expect(mockFetch).toHaveBeenCalledWith(`${getBackendUrl()}/api/user-settings`, {
+            method: 'GET',
+            headers: {
+                Authorization: 'Bearer mock-bearer-token',
+                'Content-Type': 'application/json',
+            },
+        });
 
         expect(settings.llmConfigs['OpenAI'].enabled).toBe(true);
         expect(settings.preferences.language).toBe('en');
@@ -220,23 +231,26 @@ describe('J4.3 - Authenticated Mode Settings Persistence', () => {
             json: async () => ({ llmConfigs: {}, preferences: { language: 'fr' } })
         });
 
-        // In real scenario, fetch would be called with auth header
-        // This test verifies the contract
-        const testToken = 'Bearer test-token-xyz';
-        expect(testToken).toContain('Bearer');
+        const storage = getSettingsStorage(createAuthContextMock({ accessToken: 'test-token-xyz' }));
+
+        await storage.getSettings();
+
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        expect(mockFetch.mock.calls[0][1]?.headers).toMatchObject({
+            Authorization: 'Bearer test-token-xyz',
+        });
     });
 
     it('should save settings to /api/user-settings on POST', async () => {
         mockFetch.mockResolvedValueOnce({
             ok: true,
             json: async () => ({
-                llmConfigs: { 'OpenAI': { enabled: true, capabilities: { Chat: true } } },
-                preferences: { language: 'fr' },
-                updatedAt: new Date()
+                preferences: { language: 'fr', theme: 'light' },
+                updatedAt: new Date('2025-01-01T00:00:00.000Z').toISOString()
             })
         });
 
-        const storage = new MockSettingsStorage();
+        const storage = getSettingsStorage(createAuthContextMock({ accessToken: 'mock-post-token' }));
         const configsToSave: UserSettingsData = {
             llmConfigs: {
                 'OpenAI': {
@@ -249,25 +263,35 @@ describe('J4.3 - Authenticated Mode Settings Persistence', () => {
         };
 
         const result = await storage.saveSettings(configsToSave);
+
+        expect(mockFetch).toHaveBeenCalledWith(`${getBackendUrl()}/api/user-settings`, {
+            method: 'POST',
+            headers: {
+                Authorization: 'Bearer mock-post-token',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ preferences: configsToSave.preferences }),
+        });
+
         expect(result.preferences.language).toBe('fr');
+        expect(result.preferences.theme).toBe('light');
+        expect(result.llmConfigs).toEqual(configsToSave.llmConfigs);
     });
 
     it('should handle authentication errors gracefully', async () => {
+        const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
+
         mockFetch.mockResolvedValueOnce({
             ok: false,
             status: 401,
             statusText: 'Unauthorized'
         });
 
-        // Mock implementation should throw on 401
-        try {
-            const response = { ok: false };
-            if (!response.ok) {
-                throw new Error('HTTP 401: Unauthorized');
-            }
-        } catch (error) {
-            expect((error as Error).message).toContain('Unauthorized');
-        }
+        const storage = getSettingsStorage(createAuthContextMock({ accessToken: 'expired-token' }));
+
+        await expect(storage.getSettings()).rejects.toThrow('HTTP 401: Unauthorized');
+
+        consoleErrorSpy.mockRestore();
     });
 });
 
@@ -487,15 +511,15 @@ describe('J4.3 - Backward Compatibility', () => {
  */
 describe('J4.3 - Error Handling', () => {
     it('should handle network errors when fetching from API', async () => {
+        const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
         const mockFetch = jest.fn().mockRejectedValueOnce(new Error('Network error'));
-        global.fetch = mockFetch;
+        global.fetch = mockFetch as typeof fetch;
 
-        try {
-            // Would throw in real authenticated storage
-            throw new Error('Network error');
-        } catch (error) {
-            expect((error as Error).message).toBe('Network error');
-        }
+        const storage = getSettingsStorage(createAuthContextMock({ accessToken: 'network-token' }));
+
+        await expect(storage.getSettings()).rejects.toThrow('Network error');
+
+        consoleErrorSpy.mockRestore();
     });
 
     it('should handle empty settings gracefully', async () => {

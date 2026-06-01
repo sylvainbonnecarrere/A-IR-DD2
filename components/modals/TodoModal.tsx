@@ -16,16 +16,40 @@ interface TodoModalProps {
   onClose: () => void;
 }
 
+type TodoPriority = TodoItem['priority'];
+
+type TodoDraft = {
+  title: string;
+  description: string;
+  priority: TodoPriority;
+};
+
+let todoIdCounter = 0;
+
+function createTodoId(): string {
+  todoIdCounter += 1;
+
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `todo-${crypto.randomUUID()}`;
+  }
+
+  return `todo-${Date.now()}-${todoIdCounter}`;
+}
+
+function isTodoPriority(value: string): value is TodoPriority {
+  return value === 'low' || value === 'medium' || value === 'high';
+}
+
 export const TodoModal: React.FC<TodoModalProps> = ({ isOpen, onClose }) => {
   const [todos, setTodos] = useState<TodoItem[]>([]);
-  const [newTodo, setNewTodo] = useState({ title: '', description: '', priority: 'medium' as const });
+  const [newTodo, setNewTodo] = useState<TodoDraft>({ title: '', description: '', priority: 'medium' });
   const [isCreating, setIsCreating] = useState(false);
 
   const handleAddTodo = () => {
     if (!newTodo.title.trim()) return;
     
     const todo: TodoItem = {
-      id: `todo-${Date.now()}`,
+      id: createTodoId(),
       title: newTodo.title,
       description: newTodo.description,
       priority: newTodo.priority,
@@ -33,24 +57,29 @@ export const TodoModal: React.FC<TodoModalProps> = ({ isOpen, onClose }) => {
       created_at: new Date().toISOString()
     };
     
-    setTodos([...todos, todo]);
+    setTodos((previousTodos) => [...previousTodos, todo]);
     setNewTodo({ title: '', description: '', priority: 'medium' });
     setIsCreating(false);
   };
 
   const handleToggleStatus = (id: string) => {
-    setTodos(todos.map(todo => {
+    setTodos((previousTodos) => previousTodos.map((todo) => {
       if (todo.id === id) {
-        const newStatus = todo.status === 'pending' ? 'in-progress' : 
-                         todo.status === 'in-progress' ? 'completed' : 'pending';
-        return { ...todo, status: newStatus };
+        const nextStatus = todo.status === 'pending'
+          ? 'in-progress'
+          : todo.status === 'in-progress'
+            ? 'completed'
+            : 'pending';
+
+        return { ...todo, status: nextStatus };
       }
+
       return todo;
     }));
   };
 
   const handleDeleteTodo = (id: string) => {
-    setTodos(todos.filter(todo => todo.id !== id));
+    setTodos((previousTodos) => previousTodos.filter((todo) => todo.id !== id));
   };
 
   const getPriorityColor = (priority: string) => {
@@ -74,8 +103,15 @@ export const TodoModal: React.FC<TodoModalProps> = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Gestionnaire de Tâches" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title="Gestionnaire de Taches - Interne" size="lg">
       <div className="space-y-6 max-h-96 overflow-y-auto">
+
+        <Card className="border border-amber-500/40 bg-amber-500/10 p-4">
+          <div className="text-sm font-medium text-amber-200">Outil interne / surface provisoire</div>
+          <p className="mt-1 text-xs text-amber-100/80">
+            Les taches de ce modal restent locales a cette session UI. Elles ne sont ni persistees ni synchronisees avec un service canonique.
+          </p>
+        </Card>
         
         {/* Add New Todo */}
         <Card className="p-4">
@@ -107,7 +143,13 @@ export const TodoModal: React.FC<TodoModalProps> = ({ isOpen, onClose }) => {
               <div className="flex items-center justify-between">
                 <select
                   value={newTodo.priority}
-                  onChange={(e) => setNewTodo({ ...newTodo, priority: e.target.value as any })}
+                  onChange={(e) => {
+                    const nextPriority = e.target.value;
+                    setNewTodo({
+                      ...newTodo,
+                      priority: isTodoPriority(nextPriority) ? nextPriority : 'medium'
+                    });
+                  }}
                   className="px-3 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-indigo-500"
                 >
                   <option value="low">Priorité Basse</option>

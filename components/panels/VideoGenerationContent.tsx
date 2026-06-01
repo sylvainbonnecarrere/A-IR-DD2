@@ -10,23 +10,21 @@ import React, { useState } from 'react';
 import { Button } from '../UI';
 import { VideoGenerationOptions, VideoGenerationStatus } from '../../types';
 import { useLocalization } from '../../hooks/useLocalization';
+import { useNotifications } from '../../contexts/NotificationContext';
 
 interface VideoGenerationContentProps {
-  nodeId?: string;
-  llmConfigs?: any[];
   onClose: () => void;
-  onSubmit: (config: any) => void;
+  onSubmit: (config: VideoGenerationOptions) => void;
   videoStatus?: VideoGenerationStatus | null;
 }
 
 export const VideoGenerationContent: React.FC<VideoGenerationContentProps> = ({
-  nodeId,
-  llmConfigs,
   onClose,
   onSubmit,
   videoStatus = null
 }) => {
   const { t } = useLocalization();
+  const { addNotification } = useNotifications();
   const isGenerating = videoStatus?.status === 'PROCESSING';
 
   const [prompt, setPrompt] = useState('');
@@ -39,7 +37,12 @@ export const VideoGenerationContent: React.FC<VideoGenerationContentProps> = ({
 
     // Max 3 images
     if (referenceImages.length + files.length > 3) {
-      alert('Maximum 3 reference images allowed');
+      addNotification({
+        type: 'error',
+        title: t('validation_error', 'Validation'),
+        message: t('video_reference_limit_message', 'Maximum 3 reference images allowed'),
+        duration: 4000,
+      });
       return;
     }
 
@@ -63,7 +66,12 @@ export const VideoGenerationContent: React.FC<VideoGenerationContentProps> = ({
 
   const handleGenerate = () => {
     if (!prompt.trim()) {
-      alert('Please enter a video prompt');
+      addNotification({
+        type: 'error',
+        title: t('validation_error', 'Validation'),
+        message: t('video_prompt_required_message', 'Please enter a video prompt'),
+        duration: 4000,
+      });
       return;
     }
 
@@ -202,7 +210,6 @@ export const VideoGenerationContent: React.FC<VideoGenerationContentProps> = ({
         >
           <option value="720p">720p (HD)</option>
           <option value="1080p">1080p (Full HD)</option>
-          <option value="4k" disabled>4K (bientot)</option>
         </select>
       </div>
 
@@ -220,7 +227,6 @@ export const VideoGenerationContent: React.FC<VideoGenerationContentProps> = ({
         >
           <option value="16:9">16:9 (Widescreen)</option>
           <option value="9:16">9:16 (Vertical / Mobile)</option>
-          <option value="1:1" disabled>1:1 (bientot)</option>
         </select>
       </div>
 

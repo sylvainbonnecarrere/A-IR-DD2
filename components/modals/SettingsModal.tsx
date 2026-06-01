@@ -11,6 +11,7 @@ import {
 import { Button, ToggleSwitch } from '../UI';
 import { CloseIcon, PlusIcon } from '../Icons';
 import { useLocalization } from '../../hooks/useLocalization';
+import { useNotifications } from '../../contexts/NotificationContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useLLMConfigs } from '../../hooks/useLLMConfigs';
 import { useSaveMode } from '../../hooks/useSaveMode';
@@ -149,6 +150,7 @@ function buildCloudProfilePayload(profile: CloudConnectionProfileDraft) {
 export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: SettingsModalProps) => {
   const [currentLLMConfigs, setCurrentLLMConfigs] = useState<LLMConfigWithHasKey[]>(JSON.parse(JSON.stringify(propConfigs)));
   const { t, locale, setLocale } = useLocalization();
+  const { addNotification } = useNotifications();
   const { user, isAuthenticated, refreshRuntimeConfigState } = useAuth();
   const { configs: hookConfigs, loading: hookLoading, updateConfig, deleteConfig } = useLLMConfigs();
   const { saveMode, setSaveMode, isLoading: saveModeLoading } = useSaveMode();
@@ -178,6 +180,15 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
   const [activeTab, setActiveTab] = useState<'llms' | 'cloud' | 'save' | 'language'>('llms');
   const [isSaving, setIsSaving] = useState(false);
+
+  const notifyError = (title: string, message: string) => {
+    addNotification({
+      type: 'error',
+      title,
+      message,
+      duration: 5000,
+    });
+  };
 
   // Load authenticated user's configs from hook on auth state change
   // When user logs in, hookConfigs will have their saved configs from API
@@ -334,7 +345,10 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
         handleCloudProfileChange(index, toCloudProfileDraft(result.profile));
       }
     } catch (err) {
-      alert(`Erreur test cloud: ${err instanceof Error ? err.message : 'Test impossible'}`);
+      notifyError(
+        t('settings_cloud_test_error_title', 'Erreur test cloud'),
+        err instanceof Error ? err.message : 'Test impossible'
+      );
     } finally {
       setTestingCloudProfileId(null);
     }
@@ -426,7 +440,10 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
       
     } catch (err) {
       console.error('[SettingsModal] Failed to save configs:', err);
-      alert(`Erreur: ${err instanceof Error ? err.message : 'Impossible de sauvegarder les configurations'}`);
+      notifyError(
+        t('settings_save_error_title', 'Erreur de sauvegarde'),
+        err instanceof Error ? err.message : 'Impossible de sauvegarder les configurations'
+      );
       setIsSaving(false);
       return;
     }
@@ -462,7 +479,10 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
     } catch (profileErr) {
       console.error('[SettingsModal] Failed to save local LLM profiles:', profileErr);
-      alert(`Erreur profils LLM local: ${profileErr instanceof Error ? profileErr.message : 'Sauvegarde échouée'}`);
+      notifyError(
+        t('settings_local_profiles_error_title', 'Erreur profils LLM locaux'),
+        profileErr instanceof Error ? profileErr.message : 'Sauvegarde échouée'
+      );
     }
 
     try {
@@ -484,7 +504,10 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
       }
     } catch (cloudErr) {
       console.error('[SettingsModal] Failed to save cloud profiles:', cloudErr);
-      alert(`Erreur profils cloud: ${cloudErr instanceof Error ? cloudErr.message : 'Sauvegarde échouée'}`);
+      notifyError(
+        t('settings_cloud_profiles_error_title', 'Erreur profils cloud'),
+        cloudErr instanceof Error ? cloudErr.message : 'Sauvegarde échouée'
+      );
       setIsSaving(false);
       return;
     }

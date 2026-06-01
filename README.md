@@ -48,12 +48,63 @@ A-IR-DD2 lets you build complex AI workflows through a **visual node-based edito
                              │   MongoDB    │         ┌──────────────────┐
                              │ users/keys/  │         │  Cloud LLMs      │
                              │ workflows    │         │  Gemini · GPT-4  │
-                             └─────────────┘         │  Mistral · Grok  │
+                             └─────────────┘          │  Mistral · Grok  │
                                                       │  Anthropic · ... │
                                                       └──────────────────┘
 ```
 
-**Stack:** React 18 · TypeScript · Tailwind · Zustand · React Flow · Node.js · Express · MongoDB · Python · Docker
+### Runtime, sandboxes & media persistence
+
+```mermaid
+flowchart LR
+      subgraph Frontend[Frontend]
+            Canvas[Workflow canvas and V2AgentNode]
+            Settings[Settings and Archi persistence UI]
+            BOS[BOS workflow media explorer]
+      end
+
+      subgraph Backend[Backend]
+            API[Express APIs and journal authority]
+            Catalog[Media catalog and workflow media explorer services]
+            Sandbox[ExecutionOrchestrator]
+      end
+
+      subgraph Storage[Persistence layers]
+            Mongo[(MongoDB\nusers · workflows · agent_journals · media_references)]
+            Workspace[Workspace runtime roots\nsource · build · output]
+            Cloud[S3 / GCS via secure cloud profiles]
+      end
+
+      Local[Local models\nLMStudio / Ollama / Jan]
+      CloudLLM[Cloud LLMs\nGemini · OpenAI · Mistral · Anthropic · ...]
+      Docker[Docker sandbox runner\nPython and TypeScript tools]
+      Firecracker[Firecracker prototype\noptional runner path]
+
+      Canvas <--> API
+      Settings <--> API
+      BOS <--> API
+      API <--> Local
+      API <--> CloudLLM
+      API --> Catalog
+      API --> Mongo
+      Sandbox --> Docker
+      Sandbox -. optional .-> Firecracker
+      Docker --> Workspace
+      Sandbox --> Catalog
+      Catalog --> Mongo
+      Catalog --> Workspace
+      Catalog --> Cloud
+```
+
+- **Dockerized runtime:** MongoDB is typically started through Docker Compose, and agent code execution uses hardened Docker sandboxes as the current default runner.
+- **Sandbox outputs:** Python/TypeScript tool executions publish artifacts into workflow-scoped workspace roots, then the backend projects them into the media catalog for BOS exploration.
+- **Media persistence modes:** each agent can persist media to database-backed journals, workspace storage, or cloud storage; workspace publication can remain enabled as a companion write path.
+- **Cloud secret boundary:** S3/GCS credentials live in secure settings profiles, while agents only reference a profile identifier.
+- **Journal + catalog model:** conversation/media writes enter the journal first, and `MediaReference` becomes the workflow-scoped read model used for preview, download, filtering, and orphan handling.
+
+See also: [Guides/Features/MEDIAS/README.md](Guides/Features/MEDIAS/README.md)
+
+**Stack:** React 18 · TypeScript · Tailwind · Zustand · React Flow · Node.js · Express · MongoDB · Docker · Python · Workspace runtime roots · S3/GCS profiles
 
 ---
 

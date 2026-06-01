@@ -1,19 +1,31 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FullscreenChatModal } from '../../components/modals/FullscreenChatModal';
-import { LLMProvider, RobotId } from '../../types';
+import { LLMCapability, LLMProvider, RobotId } from '../../types';
 import type { UserFunction } from '../../types/function.types';
 import apiClient from '../../utils/apiClient';
+import { createTestAgent, createTestAgentInstance, createToolSelection } from '../builders/domainBuilders';
+import { resetFullscreenChatHarness } from '../harnesses/fullscreenChatHarness';
 
-let runtimeStoreState: Record<string, any>;
-let designStoreState: Record<string, any>;
-let functionStoreState: { functions: UserFunction[] };
+let fullscreenChatHarness = resetFullscreenChatHarness();
+let runtimeStoreState = fullscreenChatHarness.runtimeStore;
+let designStoreState = fullscreenChatHarness.designStore;
+let functionStoreState = fullscreenChatHarness.functionStore;
 const mockUseAgentChat = jest.fn(() => ({ handleSendMessage: jest.fn(), loadingMessage: '', isHistorySynthesisActive: false }));
 
 jest.mock('../../components/workflow/ToolCallBlock', () => ({ ToolCallBlock: () => <div data-testid="tool-call-block" /> }));
 jest.mock('../../components/modals/ConfirmationModal', () => ({ ConfirmationModal: () => null }));
 jest.mock('../../components/modals/WebSearchParamsModal', () => ({ WebSearchParamsModal: () => null }));
-jest.mock('../../components/panels/ImageGenerationPanel', () => ({ ImageGenerationPanel: () => null }));
+jest.mock('../../components/panels/ImageGenerationPanel', () => ({
+  ImageGenerationPanel: ({ onImageGenerated }: { onImageGenerated?: (nodeId: string, imageBase64: string) => void }) => (
+    <button
+      data-testid="mock-image-generation-add"
+      onClick={() => onImageGenerated?.('node-instance-1', 'generated-image-base64')}
+    >
+      mock-image-generation-add
+    </button>
+  )
+}));
 jest.mock('../../components/panels/VideoGenerationConfigPanel', () => ({ VideoGenerationConfigPanel: () => null }));
 jest.mock('../../components/panels/MapsGroundingConfigPanel', () => ({ MapsGroundingConfigPanel: () => null }));
 jest.mock('../../hooks/useLocalization', () => ({ useLocalization: () => ({ t: (key: string) => key }) }));
@@ -29,9 +41,10 @@ jest.mock('../../utils/apiClient', () => ({
 }));
 
 jest.mock('../../stores/useRuntimeStore', () => ({
-  useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-    selector ? selector(runtimeStoreState) : runtimeStoreState
-  )),
+  useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = require('../harnesses/fullscreenChatHarness').getFullscreenChatHarness().runtimeStore;
+    return selector ? selector(state) : state;
+  }),
 }));
 
 jest.mock('../../stores/useDesignStore', () => {
@@ -39,75 +52,67 @@ jest.mock('../../stores/useDesignStore', () => {
 
   return {
     ...actual,
-    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-      selector ? selector(designStoreState) : designStoreState
-    )),
+    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+      const state = require('../harnesses/fullscreenChatHarness').getFullscreenChatHarness().designStore;
+      return selector ? selector(state) : state;
+    }),
   };
 });
 
 jest.mock('../../stores/useFunctionStore', () => ({
-  useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[] }) => unknown) => (
-    selector ? selector(functionStoreState) : functionStoreState
-  )),
+  useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[] }) => unknown) => {
+    const state = require('../harnesses/fullscreenChatHarness').getFullscreenChatHarness().functionStore;
+    return selector ? selector(state) : state;
+  }),
 }));
 
 describe('FullscreenChatModal tool projection hydration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    runtimeStoreState = {
-      fullscreenChatNodeId: 'node-instance-1',
-      fullscreenChatAgent: null,
-      fullscreenChatAgentInstance: null,
-      setFullscreenChatNodeId: jest.fn(),
-      getNodeMessages: jest.fn(() => []),
-      addNodeMessage: jest.fn(),
-      setNodeMessages: jest.fn(),
-      setNodeExecuting: jest.fn(),
-      isNodeExecuting: jest.fn(() => false),
-      llmConfigs: [],
-    };
+    const agent = createTestAgent({
+      id: 'agent-1',
+      name: 'Archi Agent',
+      role: 'Archi',
+      llmProvider: LLMProvider.OpenAI,
+      creator_id: RobotId.Archi,
+      toolSelections: [createToolSelection({ toolId: 'tool.weather' })],
+    });
 
-    designStoreState = {
-      agents: [
-        {
-          id: 'agent-1',
-          name: 'Archi Agent',
+    fullscreenChatHarness = resetFullscreenChatHarness({
+      runtimeStore: {
+        fullscreenChatNodeId: 'node-instance-1',
+        fullscreenChatAgent: null,
+        fullscreenChatAgentInstance: null,
+        setFullscreenChatNodeId: jest.fn(),
+        getNodeMessages: jest.fn((_nodeId: string) => []),
+        addNodeMessage: jest.fn(),
+        setNodeMessages: jest.fn(),
+        setNodeExecuting: jest.fn(),
+        isNodeExecuting: jest.fn(() => false),
+        llmConfigs: [],
+      },
+      agent,
+      agentInstance: createTestAgentInstance({
+        id: 'instance-1',
+        prototypeId: agent.id,
+        workflowId: 'wf-1',
+        name: 'Archi Instance',
+        configuration_json: {
           role: 'Archi',
-          systemPrompt: 'Prompt',
-          llmProvider: LLMProvider.OpenAI,
           model: 'gpt-4o-mini',
-          capabilities: [],
-          toolSelections: [{ toolId: 'tool.weather' }],
-          creator_id: RobotId.Archi,
-          created_at: '2026-01-01T00:00:00.000Z',
-          updated_at: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-      agentInstances: [
-        {
-          id: 'instance-1',
-          prototypeId: 'agent-1',
-          workflowId: 'wf-1',
-          name: 'Archi Instance',
+          llmProvider: LLMProvider.OpenAI,
+          systemPrompt: 'Prompt',
+          tools: [],
+          toolSelections: [createToolSelection({ toolId: 'tool.weather' })],
           position: { x: 0, y: 0 },
-          isMinimized: false,
-          isMaximized: false,
-          configuration_json: {
-            role: 'Archi',
-            model: 'gpt-4o-mini',
-            llmProvider: LLMProvider.OpenAI,
-            systemPrompt: 'Prompt',
-            tools: [],
-            toolSelections: [{ toolId: 'tool.weather' }],
-            position: { x: 0, y: 0 },
-          },
         },
-      ],
-      updateInstanceConfig: jest.fn(),
-    };
-
-    functionStoreState = { functions: [] };
+      }),
+      functionStore: { functions: [] as UserFunction[] },
+    });
+    runtimeStoreState = fullscreenChatHarness.runtimeStore;
+    designStoreState = fullscreenChatHarness.designStore;
+    functionStoreState = fullscreenChatHarness.functionStore;
 
     (apiClient.get as jest.Mock).mockResolvedValue({
       data: {
@@ -219,5 +224,43 @@ describe('FullscreenChatModal tool projection hydration', () => {
 
     expect(screen.getByText('agentNode_history_summarizing')).toBeInTheDocument();
     expect(screen.getByTestId('history-synthesis-icon')).toBeInTheDocument();
+  });
+
+  it('delegates image add-to-chat to the parent callback without appending locally a second time', async () => {
+    const onImageGenerated = jest.fn();
+    (apiClient.get as jest.Mock).mockResolvedValueOnce({
+      data: {
+        id: 'instance-1',
+        chatMessages: []
+      }
+    });
+
+    designStoreState = {
+      ...designStoreState,
+      agents: [
+        {
+          ...designStoreState.agents[0],
+          capabilities: [LLMCapability.ImageGeneration],
+        },
+      ],
+    };
+    fullscreenChatHarness.designStore = designStoreState as typeof fullscreenChatHarness.designStore;
+
+    render(<FullscreenChatModal onImageGenerated={onImageGenerated} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Image' }));
+    fireEvent.click(screen.getByTestId('mock-image-generation-add'));
+
+    expect(onImageGenerated).toHaveBeenCalledWith('node-instance-1', 'generated-image-base64');
+    expect(runtimeStoreState.addNodeMessage).not.toHaveBeenCalledWith(
+      'node-instance-1',
+      expect.objectContaining({ image: 'generated-image-base64' })
+    );
+    expect(runtimeStoreState.setNodeMessages).not.toHaveBeenCalledWith(
+      'node-instance-1',
+      expect.arrayContaining([
+        expect.objectContaining({ image: 'generated-image-base64' })
+      ])
+    );
   });
 });

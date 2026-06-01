@@ -1,8 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { RobotId, LLMConfig, Agent, AgentInstance, AgentBatchDeleteResult, AgentDeletionMediaPolicy, NodePositionUpdateOptions } from '../types';
+import { RobotId, LLMConfig, Agent, AgentInstance, AgentBatchDeleteResult, AgentDeletionMediaPolicy, NodePositionUpdateOptions, ChatMessage, MapsPanelPreloadedResults } from '../types';
 import { ArchiPrototypingPage } from './ArchiPrototypingPage';
 import WorkflowCanvas from './WorkflowCanvas';
-import { ComConnectionsPage } from './ComConnectionsPage';
 import { ComDatabasesPage } from './ComDatabasesPage';
 import { ComApiPage } from './ComApiPage';
 import { PhilDataPage } from './PhilDataPage';
@@ -13,6 +12,7 @@ import BosMediaModal from './modals/BosMediaModal';
 import { useLocalization } from '../hooks/useLocalization';
 import { useDesignStore } from '../stores/useDesignStore';
 import { publishHydrationComponentReady } from '../utils/hydrationComponentReadiness';
+import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from '../utils/robotPageRouting';
 
 interface RobotPageRouterProps {
   currentPath: string;
@@ -23,13 +23,13 @@ interface RobotPageRouterProps {
   agents?: Agent[];
   onDeleteNode?: (nodeId: string) => void;
   onDeleteNodes?: (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Batch delete nodes by instanceId
-  onUpdateNodeMessages?: (nodeId: string, messages: any[]) => void;
+  onUpdateNodeMessages?: (nodeId: string, messages: ChatMessage[]) => void;
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
-  onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
+  onOpenMapsPanel?: (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   onAddToWorkflow?: (agent: Agent) => void;
 }
@@ -43,13 +43,13 @@ const WorkflowPage: React.FC<{
   llmConfigs: LLMConfig[];
   onWorkflowCanvasReady?: () => void;
   onDeleteNode?: (nodeId: string) => void;
-  onUpdateNodeMessages?: (nodeId: string, messages: any[]) => void;
+  onUpdateNodeMessages?: (nodeId: string, messages: ChatMessage[]) => void;
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
-  onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
+  onOpenMapsPanel?: (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   onAddToWorkflow?: (agent: Agent) => void;
   headerActions?: React.ReactNode;
@@ -142,16 +142,14 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
   const { t } = useLocalization();
   const { workflows, currentWorkflowId } = useDesignStore();
   const [showBosMediaModal, setShowBosMediaModal] = useState(false);
+  const resolvedRoute = useMemo(() => resolveRobotPageRoute(currentPath), [currentPath]);
   const activeWorkflow = useMemo(
     () => workflows.find((workflow) => workflow._id === currentWorkflowId) ?? workflows[0] ?? null,
     [currentWorkflowId, workflows],
   );
 
   React.useEffect(() => {
-    const showsBosMediaButton = currentPath.startsWith('/bos/dashboard')
-      || (currentPath.startsWith('/bos') && !currentPath.startsWith('/bos/workflows/manage'));
-
-    if (!showsBosMediaButton) {
+    if (resolvedRoute !== ROBOT_PAGE_ROUTE_IDS.bosDashboard && resolvedRoute !== ROBOT_PAGE_ROUTE_IDS.bosSupervision) {
       return;
     }
 
@@ -169,7 +167,7 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     } catch {
       // ignore readiness signal failures
     }
-  }, [activeWorkflow?._id, currentPath]);
+  }, [activeWorkflow?._id, currentWorkflowId, resolvedRoute]);
 
   // Navigation helper to go to workflow map (Bos Dashboard)
   const handleNavigateToWorkflow = () => {
@@ -214,85 +212,58 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     </>
   );
 
-  // Route matching logic
-  if (currentPath.startsWith('/archi/prototype')) {
-    return <ArchiPrototypingPage llmConfigs={llmConfigs} onNavigateToWorkflow={handleNavigateToWorkflow} onAddToWorkflow={onAddToWorkflow} onDeleteNodes={onDeleteNodes} />;
+  switch (resolvedRoute) {
+    case ROBOT_PAGE_ROUTE_IDS.archi:
+      return <ArchiPrototypingPage llmConfigs={llmConfigs} onNavigateToWorkflow={handleNavigateToWorkflow} onAddToWorkflow={onAddToWorkflow} onDeleteNodes={onDeleteNodes} />;
+    case ROBOT_PAGE_ROUTE_IDS.bosDashboard:
+      return (
+        <WorkflowPage
+          robotName={t('page_dashboard_title')}
+          description={t('page_dashboard_description')}
+          headerActions={bosMediaHeaderAction}
+          {...workflowProps}
+        />
+      );
+    case ROBOT_PAGE_ROUTE_IDS.bosSupervision:
+      return (
+        <WorkflowPage
+          robotName={t('page_bos_supervision_title')}
+          description={t('page_bos_supervision_description')}
+          headerActions={bosMediaHeaderAction}
+          {...workflowProps}
+        />
+      );
+    case ROBOT_PAGE_ROUTE_IDS.bosWorkflowManagement:
+      return (
+        <div className="h-full">
+          <BosWorkflowManagementPage />
+        </div>
+      );
+    case ROBOT_PAGE_ROUTE_IDS.comDatabases:
+      return <ComDatabasesPage />;
+    case ROBOT_PAGE_ROUTE_IDS.comApi:
+      return <ComApiPage />;
+    case ROBOT_PAGE_ROUTE_IDS.philFunctions:
+      return <PhilFunctionsPage />;
+    case ROBOT_PAGE_ROUTE_IDS.philData:
+      return (
+        <PhilDataPage
+          onNavigateToWorkflow={handleNavigateToWorkflow}
+        />
+      );
+    case ROBOT_PAGE_ROUTE_IDS.timEvents:
+      return (
+        <TimEventsPage
+          onNavigateToWorkflow={handleNavigateToWorkflow}
+        />
+      );
+    case ROBOT_PAGE_ROUTE_IDS.fallback:
+    default:
+      return (
+        <PlaceholderPage
+          robotName={t('page_orchestrator_title')}
+          description={t('page_orchestrator_description')}
+        />
+      );
   }
-
-  if (currentPath.startsWith('/archi')) {
-    return <ArchiPrototypingPage llmConfigs={llmConfigs} onNavigateToWorkflow={handleNavigateToWorkflow} onAddToWorkflow={onAddToWorkflow} onDeleteNodes={onDeleteNodes} />;
-  }
-
-  if (currentPath.startsWith('/bos/dashboard')) {
-    return (
-      <WorkflowPage
-        robotName={t('page_dashboard_title')}
-        description={t('page_dashboard_description')}
-        headerActions={bosMediaHeaderAction}
-        {...workflowProps}
-      />
-    );
-  }
-
-  // ⭐ NEW - BOS Workflow Management Page
-  if (currentPath.startsWith('/bos/workflows/manage')) {
-    return (
-      <div className="h-full">
-        <BosWorkflowManagementPage />
-      </div>
-    );
-  }
-
-  if (currentPath.startsWith('/bos')) {
-    return (
-      <WorkflowPage
-        robotName={t('page_bos_supervision_title')}
-        description={t('page_bos_supervision_description')}
-        headerActions={bosMediaHeaderAction}
-        {...workflowProps}
-      />
-    );
-  }
-
-  if (currentPath.startsWith('/com/connexions-api')) {
-    return <ComApiPage />;
-  }
-
-  if (currentPath.startsWith('/com/databases')) {
-    return <ComDatabasesPage />;
-  }
-
-  if (currentPath.startsWith('/com')) {
-    return <ComApiPage />;
-  }
-
-  if (currentPath.startsWith('/phil/functions')) {
-    return <PhilFunctionsPage />;
-  }
-
-  if (currentPath.startsWith('/phil')) {
-    return (
-      <PhilDataPage
-        llmConfigs={llmConfigs}
-        onNavigateToWorkflow={handleNavigateToWorkflow}
-      />
-    );
-  }
-
-  if (currentPath.startsWith('/tim')) {
-    return (
-      <TimEventsPage
-        llmConfigs={llmConfigs}
-        onNavigateToWorkflow={handleNavigateToWorkflow}
-      />
-    );
-  }
-
-  // Default fallback
-  return (
-    <PlaceholderPage
-      robotName={t('page_orchestrator_title')}
-      description={t('page_orchestrator_description')}
-    />
-  );
 };

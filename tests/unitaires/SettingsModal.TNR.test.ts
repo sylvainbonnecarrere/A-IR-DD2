@@ -25,6 +25,10 @@ let cloudProfilesHookState = {
     clearError: jest.fn(),
 };
 
+let notificationHookState = {
+    addNotification: jest.fn(),
+};
+
 jest.mock('../../hooks/useLocalization', () => ({
     useLocalization: () => ({
         t: (key: string) => key,
@@ -84,6 +88,10 @@ jest.mock('../../hooks/useLocalLLMProfiles', () => ({
 
 jest.mock('../../hooks/useCloudConnectionProfiles', () => ({
     useCloudConnectionProfiles: () => cloudProfilesHookState,
+}));
+
+jest.mock('../../contexts/NotificationContext', () => ({
+    useNotifications: () => notificationHookState,
 }));
 
 jest.mock('../../i18n/locales', () => ({
@@ -168,6 +176,9 @@ describe('SettingsModal.handleDetectLMStudio - TNR', () => {
             deleteProfile: jest.fn(),
             testProfile: jest.fn(),
             clearError: jest.fn(),
+        };
+        notificationHookState = {
+            addNotification: jest.fn(),
         };
     });
 

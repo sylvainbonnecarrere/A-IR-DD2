@@ -4,16 +4,6 @@ import { IconSidebar } from './IconSidebar';
 import { ROBOT_MENU_DATA } from '../data/robotNavigation';
 
 interface NavigationLayoutProps {
-  // Legacy props - kept for potential modal functionality if needed
-  agents?: any[];
-  isCollapsed?: boolean;
-  onToggleCollapse?: () => void;
-  onAddAgent?: () => void;
-  onAddToWorkflow?: (agent: any) => void;
-  onDeleteAgent?: (agentId: string) => void;
-  onEditAgent?: (agent: any) => void;
-
-  // V2 navigation props
   currentPath?: string;
   onNavigate?: (robotId: RobotId, path: string) => void;
 }

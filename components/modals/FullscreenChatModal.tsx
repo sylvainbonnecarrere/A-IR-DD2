@@ -8,7 +8,7 @@ import { useFunctionStore } from '../../stores/useFunctionStore';
 import { useAgentChat } from '../../hooks/useAgentChat';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../contexts/AuthContext';
-import { ChatMessage, Agent, LLMCapability, WorkflowNode, AgentInstance } from '../../types';
+import { ChatMessage, Agent, LLMCapability, WorkflowNode, AgentInstance, MapsPanelPreloadedResults } from '../../types';
 import { ConfirmationModal } from './ConfirmationModal';
 import { WebSearchParamsModal } from './WebSearchParamsModal';
 import { ImageGenerationPanel } from '../panels/ImageGenerationPanel';
@@ -18,6 +18,7 @@ import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from '../.
 import { persistInstanceWebSearchParams } from '../../services/webSearchParamsConfigService';
 import apiClient from '../../utils/apiClient';
 import { shouldSuppressVisualToolResult } from '../../utils/toolResultVisibility';
+import { generateRuntimeMessageId } from '../../utils/runtimeMessageId';
 
 // Minimize icon
 const MinimizeIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -59,7 +60,7 @@ interface FullscreenChatModalProps {
   onDeleteNode?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string) => void;
   onOpenVideoPanel?: (nodeId: string) => void;
-  onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
+  onOpenMapsPanel?: (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
   onImageGenerated?: (nodeId: string, imageBase64: string) => void;
@@ -142,7 +143,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const agent: Agent | null = agentInstance && agentPrototype
     ? {
         ...agentPrototype,
-        ...(agentInstance.configuration_json as any),
+        ...(agentInstance.configuration_json ?? {}),
         webSearchParams: agentInstance.configuration_json?.webSearchParams || agentPrototype.webSearchParams,
         historyConfig: agentInstance.configuration_json?.historyConfig 
           || agentPrototype.historyConfig
@@ -701,22 +702,21 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                     llmConfigs={llmConfigs}
                     onClose={handleCloseSidePanel}
                     onImageGenerated={(nodeId: string, imageBase64: string) => {
-                      // Add generated image to chat messages
+                      if (onImageGenerated) {
+                        onImageGenerated(nodeId, imageBase64);
+                        return;
+                      }
+
                       const imageMessage: ChatMessage = {
-                        id: `msg-${Date.now()}`,
+                        id: generateRuntimeMessageId('image'),
                         sender: 'agent',
                         text: t('app_generatedImageText'),
                         image: imageBase64,
                         mimeType: 'image/png',
                         timestamp: new Date()
                       };
-                      // Update runtime store
-                      const { setNodeMessages, getNodeMessages } = useRuntimeStore.getState();
-                      const currentMessages = getNodeMessages(nodeId) || [];
-                      setNodeMessages(nodeId, [...currentMessages, imageMessage]);
-                      
-                      // Call parent handler if provided
-                      onImageGenerated?.(nodeId, imageBase64);
+
+                      addNodeMessage(nodeId, imageMessage);
                     }}
                     onOpenImageModificationPanel={(nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => {
                       onOpenImageModificationPanel?.(nodeId, sourceImage, agent, agentInstance, mimeType);
@@ -728,8 +728,6 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                 {activeSidePanel === 'video' && agent?.capabilities?.includes(LLMCapability.VideoGeneration) && (
                   <VideoGenerationConfigPanel
                     isOpen={true}
-                    nodeId={fullscreenChatNodeId || undefined}
-                    llmConfigs={llmConfigs}
                     onClose={handleCloseSidePanel}
                     hideSlideOver={true}
                   />

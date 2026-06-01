@@ -472,17 +472,19 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
                 onClick={() => setTodoModalOpen(true)}
                 className="flex items-center space-x-2 text-xs"
                 variant="secondary"
+                title="Outil interne provisoire"
               >
                 <span>📝</span>
-                <span>Tâches</span>
+                <span>Taches (interne)</span>
               </Button>
               <Button
                 onClick={() => setGovernanceTestOpen(true)}
                 className="flex items-center space-x-2 text-xs"
                 variant="secondary"
+                title="Outil interne provisoire"
               >
                 <span>🔒</span>
-                <span>Gouvernance</span>
+                <span>Gouvernance (interne)</span>
               </Button>
               <Button
                 onClick={handleCreateFromTemplate}

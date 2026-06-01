@@ -4,6 +4,7 @@ import { useLocalization } from '../hooks/useLocalization';
 import { CheckCircleIcon, ChevronDownIcon, LoaderIcon, DatabaseIcon, XIcon, PlusIcon } from './Icons';
 import ConnectionListItem, { IConnectionItem } from './com/ConnectionListItem';
 import DatabaseExplorer from './com/DatabaseExplorer';
+import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
 
 // ============== TYPES & CONSTANTS ==============
 
@@ -599,6 +600,14 @@ export const ComDatabasesPage: React.FC = () => {
 
           {/* Right Column - Provider Selection & Explorer */}
           <div className="flex-1 overflow-y-auto p-8 flex flex-col">
+            <div className="mb-6">
+              <ProvisionalSurfaceNotice
+                description={t(
+                  'com_databases_provisional_notice',
+                  'Cette surface COM reste en mode atelier local. Les bases affichees, les tests de connexion et l exploration restent pilotes par des donnees provisoires ou de demonstration.'
+                )}
+              />
+            </div>
             <style>{`
               div::-webkit-scrollbar {
                 width: 8px;

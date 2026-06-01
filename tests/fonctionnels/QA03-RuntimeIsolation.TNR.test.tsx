@@ -10,24 +10,20 @@ import {
     LLMConfig,
     LLMProvider,
     LocalLLMProfile,
-    RobotId,
 } from '../../types';
 import { ImageGenerationPanel } from '../../components/panels/ImageGenerationPanel';
 import { ImageModificationPanel } from '../../components/panels/ImageModificationPanel';
 import { MapsGroundingConfigPanel } from '../../components/panels/MapsGroundingConfigPanel';
+import {
+    createTestAgent,
+    createTestAgentInstance,
+    createTestCanvasNode,
+} from '../builders/domainBuilders';
+import { resetUseAgentChatHarness } from '../harnesses/useAgentChatHarness';
 
 const mockCreateAdapter = jest.fn();
 const mockRunAgentLoop = jest.fn();
-const mockDesignStoreState = {
-    agentInstances: [
-        { id: 'instance-alpha', workflowId: 'wf-1' },
-        { id: 'instance-beta', workflowId: 'wf-1' },
-        { id: 'instance-multi-turn', workflowId: 'wf-1' },
-        { id: 'instance-follow-up', workflowId: 'wf-1' },
-    ],
-    nodes: [] as any[],
-    agents: [] as Agent[],
-};
+let useAgentChatHarness = resetUseAgentChatHarness();
 
 jest.mock('../../services/llmService', () => ({
     generateContentStream: jest.fn(),
@@ -56,10 +52,10 @@ jest.mock('../../hooks/useLocalization', () => ({
 }));
 
 jest.mock('../../contexts/AuthContext', () => ({
-    useAuth: jest.fn(() => ({
-        accessToken: 'token-123',
-        isAuthenticated: true,
-    })),
+    useAuth: jest.fn(() => {
+        const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+        return getUseAgentChatHarness().authState;
+    }),
 }));
 
 jest.mock('../../stores/useDesignStore', () => {
@@ -68,10 +64,44 @@ jest.mock('../../stores/useDesignStore', () => {
     return {
         ...actual,
         useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-            return selector ? selector(mockDesignStoreState as unknown as Record<string, unknown>) : mockDesignStoreState;
+            const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+            const state = getUseAgentChatHarness().designStore;
+            return selector ? selector(state) : state;
         }),
     };
 });
+
+jest.mock('../../stores/useRuntimeStore', () => ({
+    useRuntimeStore: Object.assign(
+        jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+            const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+            const state = getUseAgentChatHarness().runtimeStore;
+            return selector ? selector(state) : state;
+        }),
+        {
+            getState: () => {
+                const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+                return getUseAgentChatHarness().runtimeStore;
+            },
+        }
+    ),
+}));
+
+jest.mock('../../stores/useFunctionStore', () => ({
+    useFunctionStore: Object.assign(
+        jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+            const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+            const state = getUseAgentChatHarness().functionStore;
+            return selector ? selector(state) : state;
+        }),
+        {
+            getState: () => {
+                const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+                return getUseAgentChatHarness().functionStore;
+            },
+        }
+    ),
+}));
 
 import * as llmService from '../../services/llmService';
 import { executeTool } from '../../utils/toolExecutor';
@@ -123,7 +153,7 @@ const LOCAL_PROFILES: LocalLLMProfile[] = [
 ];
 
 function createAgent(overrides: Partial<Agent> = {}): Agent {
-    return {
+    return createTestAgent({
         id: overrides.id || 'agent-1',
         name: overrides.name || 'Runtime Agent',
         role: 'assistant',
@@ -132,11 +162,9 @@ function createAgent(overrides: Partial<Agent> = {}): Agent {
         model: overrides.model || 'local-model',
         capabilities: overrides.capabilities || [LLMCapability.Chat],
         tools: overrides.tools || [],
-        creator_id: RobotId.Archi,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        toolSelections: overrides.toolSelections || [],
         ...overrides,
-    };
+    });
 }
 
 function createStream(chunks: any[]) {
@@ -150,11 +178,27 @@ function createStream(chunks: any[]) {
 describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        mockDesignStoreState.nodes = [];
-        mockDesignStoreState.agents = [];
-        useRuntimeStore.getState().resetAll();
-        useRuntimeStore.getState().updateLocalLLMProfiles(LOCAL_PROFILES);
-        useRuntimeStore.getState().updateLLMConfigs([LOCAL_RUNTIME_CONFIG, CLOUD_RUNTIME_CONFIG]);
+        useAgentChatHarness = resetUseAgentChatHarness({
+            designStore: {
+                agents: [],
+                nodes: [],
+                agentInstances: [
+                    createTestAgentInstance({ id: 'instance-alpha', workflowId: 'wf-1', configuration_json: null }),
+                    createTestAgentInstance({ id: 'instance-beta', workflowId: 'wf-1', configuration_json: null }),
+                    createTestAgentInstance({ id: 'instance-multi-turn', workflowId: 'wf-1', configuration_json: null }),
+                    createTestAgentInstance({ id: 'instance-follow-up', workflowId: 'wf-1', configuration_json: null }),
+                ],
+            },
+            runtimeStore: {
+                llmConfigs: [LOCAL_RUNTIME_CONFIG, CLOUD_RUNTIME_CONFIG],
+                localLLMProfiles: LOCAL_PROFILES,
+                nodeMessages: {},
+                getNodeMessages: jest.fn((nodeId: string) => useAgentChatHarness.runtimeStore.nodeMessages[nodeId] || []),
+                getNodeInvisibleHistorySummary: jest.fn(() => null),
+                setNodeInvisibleHistorySummary: jest.fn(),
+                setNodeExecuting: jest.fn(),
+            },
+        });
         mockCreateAdapter.mockImplementation((_provider, config, model, authToken) => ({
             provider: (config as LLMConfig | null)?.provider,
             endpoint: (config as LLMConfig | null)?.localEndpoint,
@@ -329,27 +373,24 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
             localLLMProfileId: 'profile-alpha',
             capabilities: [LLMCapability.ImageGeneration],
         });
-        mockDesignStoreState.agents = [imageAgent];
-        mockDesignStoreState.nodes = [{
+        useAgentChatHarness.designStore.agents = [imageAgent];
+        useAgentChatHarness.designStore.nodes = [createTestCanvasNode({
             id: 'node-image',
-            type: 'agent',
             position: { x: 0, y: 0 },
             data: {
+                robotId: imageAgent.creator_id,
                 label: imageAgent.name,
-                robotId: RobotId.Archi,
                 agent: imageAgent,
-                agentInstance: {
+                agentInstance: createTestAgentInstance({
                     id: 'instance-alpha',
                     prototypeId: imageAgent.id,
                     name: imageAgent.name,
                     position: { x: 0, y: 0 },
                     workflowId: 'wf-1',
-                    isMinimized: false,
-                    isMaximized: false,
                     configuration_json: null,
-                },
+                }),
             },
-        }];
+        })];
 
         render(
             <ImageGenerationPanel
@@ -385,27 +426,24 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
             localLLMProfileId: 'profile-beta',
             capabilities: [LLMCapability.ImageModification],
         });
-        mockDesignStoreState.agents = [imageEditAgent];
-        mockDesignStoreState.nodes = [{
+        useAgentChatHarness.designStore.agents = [imageEditAgent];
+        useAgentChatHarness.designStore.nodes = [createTestCanvasNode({
             id: 'node-edit',
-            type: 'agent',
             position: { x: 0, y: 0 },
             data: {
+                robotId: imageEditAgent.creator_id,
                 label: imageEditAgent.name,
-                robotId: RobotId.Archi,
                 agent: imageEditAgent,
-                agentInstance: {
+                agentInstance: createTestAgentInstance({
                     id: 'instance-beta',
                     prototypeId: imageEditAgent.id,
                     name: imageEditAgent.name,
                     position: { x: 0, y: 0 },
                     workflowId: 'wf-1',
-                    isMinimized: false,
-                    isMaximized: false,
                     configuration_json: null,
-                },
+                }),
             },
-        }];
+        })];
 
         render(
             <ImageModificationPanel
@@ -443,27 +481,24 @@ describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
             model: 'gemini-2.5-pro',
             capabilities: [LLMCapability.MapsGrounding],
         });
-        mockDesignStoreState.agents = [cloudAgent];
-        mockDesignStoreState.nodes = [{
+        useAgentChatHarness.designStore.agents = [cloudAgent];
+        useAgentChatHarness.designStore.nodes = [createTestCanvasNode({
             id: 'node-maps',
-            type: 'agent',
             position: { x: 0, y: 0 },
             data: {
+                robotId: cloudAgent.creator_id,
                 label: cloudAgent.name,
-                robotId: RobotId.Archi,
                 agent: cloudAgent,
-                agentInstance: {
+                agentInstance: createTestAgentInstance({
                     id: 'instance-maps',
                     prototypeId: cloudAgent.id,
                     name: cloudAgent.name,
                     position: { x: 0, y: 0 },
                     workflowId: 'wf-1',
-                    isMinimized: false,
-                    isMaximized: false,
                     configuration_json: null,
-                },
+                }),
             },
-        }];
+        })];
 
         render(
             <MapsGroundingConfigPanel

@@ -45,8 +45,15 @@ export const GovernanceTestModal: React.FC<GovernanceTestModalProps> = ({
   if (!isOpen) return null;
   
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Test de Gouvernance V2" size="xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="Test de Gouvernance V2 - Interne" size="xl">
       <div className="space-y-4">
+
+        <Card className="border border-amber-500/40 bg-amber-500/10 p-3">
+          <div className="text-sm font-medium text-amber-200">Outil interne / surface provisoire</div>
+          <div className="mt-1 text-xs text-amber-100/80">
+            Ce modal sert a qualifier les regles de gouvernance avant industrialisation produit. Il ne constitue pas un flux utilisateur final.
+          </div>
+        </Card>
         
         <div className="text-sm text-gray-400">
           Testez les règles de gouvernance du système selon les mandats des robots spécialisés.

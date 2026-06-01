@@ -5,6 +5,7 @@ import { PlusIcon, CloseIcon, LoaderIcon, ElectricPlugIcon, XIcon } from './Icon
 import JsonResultViewer from './JsonResultViewer';
 import TabbedDataEditor from './TabbedDataEditor';
 import ConnectionListItem, { IConnectionItem } from './com/ConnectionListItem';
+import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
 import ResultViewer from './com/ResultViewer';
 import ResultExtractor from './com/ResultExtractor';
 
@@ -539,6 +540,15 @@ export const ComApiPage: React.FC = () => {
 
         {/* Column 2: Form (Center) */}
         <div className="w-full max-w-2xl border-r border-gray-700 bg-gray-800/10 overflow-y-auto p-6 flex flex-col">
+          <div className="mb-6">
+            <ProvisionalSurfaceNotice
+              description={t(
+                'com_api_provisional_notice',
+                'Cette surface COM fonctionne encore comme un atelier local de demonstration. Les connexions initiales, les executions et les resultats affiches restent provisoires tant qu un backend canonique n est pas branche.'
+              )}
+            />
+          </div>
+
           {!showForm && !selectedConnectionId && (
             <div className="flex flex-col items-center justify-center h-full text-center">
               <div className="text-6xl mb-4 opacity-30">⚙️</div>

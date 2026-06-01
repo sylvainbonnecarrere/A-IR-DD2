@@ -28,7 +28,7 @@ A-IR-DD2 can be used without an account in **guest mode** — ideal for quick ex
 | Workflow persistence | ❌ | ✅ |
 | Multiple workflows | ❌ | ✅ |
 | Conversation history | Session only | Persistent |
-| Media storage | ❌ | GridFS / Local / S3-GCS |
+| Media storage | ❌ | MongoDB-backed journals / Workspace / S3-GCS |
 | Multi-device sync | ❌ | ✅ |
 
 ---
@@ -63,6 +63,18 @@ Connect any local LLM server (LMStudio, Ollama-compatible) via a custom endpoint
 Choose how the workflow saves changes — manual (Ctrl+S) or automatic after each action:
 
 ![Save mode](screenshots/Save_mode.PNG)
+
+### Secure cloud storage profiles
+
+Cloud media targets are configured once in **Settings → Cloud**, then reused by agents through profile references instead of raw secrets:
+
+![Cloud storage profiles](screenshots/Gestion_Cloud.PNG)
+
+- Centralized **S3 and Google Cloud Storage** profiles
+- Per-profile activation state to hide incomplete or maintenance profiles from agent selection
+- Bucket, region / project, custom endpoint and key-prefix targeting
+- Secret material managed in the settings surface, not duplicated inside agent persistence forms
+- Designed to let agents reference cloud persistence safely through a profile identifier
 
 ---
 
@@ -120,8 +132,21 @@ When adding a prototype to the workflow, configure what gets persisted:
 ![Content save](screenshots/Content_Save.PNG)
 
 - Save conversation history
-- Save generated media (images, documents, video) — GridFS (MongoDB), local filesystem, or cloud (S3/GCS)
+- Save generated media (images, documents, video) — MongoDB-backed journal storage, workspace filesystem, or cloud (S3/GCS)
 - Per-agent granularity: each agent in the workflow has its own save policy
+
+
+### Agent persistence policy
+
+Each agent instance also exposes a dedicated **Persistence** tab to fine-tune what stays durable and where media should land:
+
+![Agent persistence](screenshots/Gestion_persistance.PNG)
+
+- Independent toggles for chat, errors, history summaries and media persistence
+- Primary media destination per agent: **Database**, **Workspace**, or **Cloud (S3/GCS)**
+- Optional companion workspace publication when the flow still needs runtime files alongside database or cloud persistence
+- Secure cloud profile selection instead of re-entering provider secrets in the agent modal
+- Future-facing placeholders for links and task persistence, already surfaced in the UI contract
 
 ---
 
@@ -138,6 +163,18 @@ Authenticated users can create and switch between multiple independent workflows
 - Each workflow has its own agents, nodes, conversation history and connections
 - Workflow metadata: creation date, last modified, agent count, node count
 - Set a default workflow loaded on login
+
+### Workflow media explorer
+
+Bos also provides a workflow-scoped media explorer to inspect everything that has been persisted or cataloged across the current workflow:
+
+![Workflow media explorer](screenshots/Gestion_media.PNG)
+
+- Tabs by storage location: **BDD**, **Workspace**, **Cloud**
+- Search and filtering by media name, MIME type, agent and orphan status
+- Active preview area for supported files, starting with images and text-like content
+- Counts per storage mode to understand where a workflow writes its outputs
+- Useful to distinguish persisted chat media, imported files and sandbox-produced runtime artifacts
 
 ---
 

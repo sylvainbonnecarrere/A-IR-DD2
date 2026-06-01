@@ -20,10 +20,11 @@ import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { wipeGuestData, GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
-import { AgentDraft, LLMCapability, LLMProvider, RobotId } from '../types';
+import { LLMCapability, LLMProvider, RobotId } from '../types';
+import { createTestAgentDraft } from './builders/domainBuilders';
 
-function createAgentDraft(name: string, role: string, systemPrompt: string): AgentDraft {
-    return {
+function createIsolationAgentDraft(name: string, role: string, systemPrompt: string) {
+    return createTestAgentDraft({
         name,
         role,
         systemPrompt,
@@ -31,7 +32,8 @@ function createAgentDraft(name: string, role: string, systemPrompt: string): Age
         model: 'gemini-2.0-flash',
         capabilities: [LLMCapability.Chat],
         tools: [],
-    };
+        toolSelections: [],
+    });
 }
 
 describe('J4.4 TNR - Security: Guest ↔ Auth Data Isolation', () => {
@@ -49,7 +51,7 @@ describe('J4.4 TNR - Security: Guest ↔ Auth Data Isolation', () => {
             console.log('🟡 [GUEST SESSION] Creating guest agent...');
             const designStore = useDesignStore.getState();
             
-            const result = designStore.addAgent(createAgentDraft('Guest Test Agent', 'Created in guest mode before login', 'Guest prompt'));
+            const result = designStore.addAgent(createIsolationAgentDraft('Guest Test Agent', 'Created in guest mode before login', 'Guest prompt'));
             
             // Vérifier: Agent créé en mode guest
             expect(result.success).toBe(true);
@@ -109,7 +111,7 @@ describe('J4.4 TNR - Security: Guest ↔ Auth Data Isolation', () => {
             console.log('🔵 [AUTH SESSION] Creating auth agent...');
             const designStore = useDesignStore.getState();
             
-            const result = designStore.addAgent(createAgentDraft('Auth User Agent', 'Created by authenticated user', 'Auth prompt'));
+            const result = designStore.addAgent(createIsolationAgentDraft('Auth User Agent', 'Created by authenticated user', 'Auth prompt'));
             
             // Vérifier: Agent créé en mode auth
             expect(result.success).toBe(true);
@@ -166,7 +168,7 @@ describe('J4.4 TNR - Security: Guest ↔ Auth Data Isolation', () => {
         it('should maintain isolation across multiple session switches', () => {
             // === SESSION 1: GUEST ===
             console.log('🟡 [SESSION 1: GUEST] Creating guest data...');
-            useDesignStore.getState().addAgent(createAgentDraft('Guest Agent 1', 'First guest session', 'Guest 1'));
+            useDesignStore.getState().addAgent(createIsolationAgentDraft('Guest Agent 1', 'First guest session', 'Guest 1'));
             
             expect(useDesignStore.getState().agents.length).toBe(1);
             
@@ -174,7 +176,7 @@ describe('J4.4 TNR - Security: Guest ↔ Auth Data Isolation', () => {
             console.log('🔴 [LOGIN] Wiping guest data...');
             wipeGuestData();
             
-            useDesignStore.getState().addAgent(createAgentDraft('Auth Agent', 'Auth session', 'Auth'));
+            useDesignStore.getState().addAgent(createIsolationAgentDraft('Auth Agent', 'Auth session', 'Auth'));
             
             const authStore = useDesignStore.getState();
             expect(authStore.agents.length).toBe(1);
@@ -190,7 +192,7 @@ describe('J4.4 TNR - Security: Guest ↔ Auth Data Isolation', () => {
             expect(useDesignStore.getState().agents.length).toBe(0);
             
             // New guest creates agent
-            useDesignStore.getState().addAgent(createAgentDraft('Guest Agent 2', 'Second guest session', 'Guest 2'));
+            useDesignStore.getState().addAgent(createIsolationAgentDraft('Guest Agent 2', 'Second guest session', 'Guest 2'));
             
             const finalStore = useDesignStore.getState();
             expect(finalStore.agents.length).toBe(1);

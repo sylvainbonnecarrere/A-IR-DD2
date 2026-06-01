@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { V2AgentNode } from '../../components/V2AgentNode';
 import { LLMCapability, LLMProvider, RobotId, type Agent } from '../../types';
 import type { UserFunction } from '../../types/function.types';
+import { resetV2AgentNodeHarness } from '../harnesses/v2AgentNodeHarness';
 
 const mockRunAgentLoop = jest.fn();
 const mockCreateAdapter = jest.fn();
@@ -15,10 +16,11 @@ const llmServiceMocks = jest.requireMock('../../services/llmService') as { gener
 const textUtilsMocks = jest.requireMock('../../utils/textUtils') as { countChars: jest.Mock; countTokens: jest.Mock; countWords: jest.Mock; countSentences: jest.Mock; countMessages: jest.Mock };
 const runtimeConfigResolverMocks = jest.requireMock('../../services/runtimeConfigResolver') as { resolveHistoryRuntimeConfig: jest.Mock };
 
-let runtimeStoreState: Record<string, unknown>;
-let designStoreState: Record<string, unknown>;
-let functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> };
-let workflowCanvasContextState: Record<string, unknown>;
+let v2AgentNodeHarness = resetV2AgentNodeHarness();
+let runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
+let designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
+let functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> } = v2AgentNodeHarness.functionStore;
+let workflowCanvasContextState: Record<string, unknown> = v2AgentNodeHarness.workflowCanvasContext;
 
 const agentInstance = {
     id: 'instance-1',
@@ -83,9 +85,10 @@ jest.mock('../../hooks/useAuth', () => ({
 }));
 
 jest.mock('../../stores/useRuntimeStore', () => ({
-    useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-        selector ? selector(runtimeStoreState) : runtimeStoreState
-    )),
+    useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+        const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().runtimeStore;
+        return selector ? selector(state) : state;
+    }),
 }));
 
 jest.mock('../../stores/useDesignStore', () => {
@@ -93,25 +96,27 @@ jest.mock('../../stores/useDesignStore', () => {
 
     return {
         ...actual,
-        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-            selector ? selector(designStoreState) : designStoreState
-        )),
+        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+            const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().designStore;
+            return selector ? selector(state) : state;
+        }),
     };
 });
 
 jest.mock('../../stores/useFunctionStore', () => ({
     useFunctionStore: Object.assign(
-        jest.fn((selector?: (state: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> }) => unknown) => (
-            selector ? selector(functionStoreState) : functionStoreState
-        )),
+        jest.fn((selector?: (state: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> }) => unknown) => {
+            const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().functionStore;
+            return selector ? selector(state) : state;
+        }),
         {
-            getState: () => functionStoreState,
+            getState: () => require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().functionStore,
         }
     ),
 }));
 
 jest.mock('../../contexts/WorkflowCanvasContext', () => ({
-    useWorkflowCanvasContext: jest.fn(() => workflowCanvasContextState),
+    useWorkflowCanvasContext: jest.fn(() => require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().workflowCanvasContext),
 }));
 
 jest.mock('../../services/llmService', () => ({
@@ -229,30 +234,66 @@ describe('V2AgentNode AgentLoop integration', () => {
 
         const executingNodeIds = new Set<string>();
 
-        runtimeStoreState = {
-            getIsNodeMinimized: jest.fn(() => false),
-            getNodeMessages: jest.fn(() => []),
-            getNodeInvisibleHistorySummary: jest.fn(() => null),
-            addNodeMessage: mockAddNodeMessage,
-            setNodeInvisibleHistorySummary: jest.fn(),
-            setNodeMessages: jest.fn(),
-            isNodeExecuting: jest.fn((nodeId: string) => executingNodeIds.has(nodeId)),
-            setNodeExecuting: jest.fn((nodeId: string, isExecuting: boolean) => {
-                mockSetNodeExecuting(nodeId, isExecuting);
-                if (isExecuting) {
-                    executingNodeIds.add(nodeId);
-                    return;
-                }
+        v2AgentNodeHarness = resetV2AgentNodeHarness({
+            runtimeStore: {
+                getIsNodeMinimized: jest.fn(() => false),
+                getNodeMessages: jest.fn((_nodeId: string) => []),
+                getNodeInvisibleHistorySummary: jest.fn(() => null),
+                addNodeMessage: mockAddNodeMessage,
+                setNodeInvisibleHistorySummary: jest.fn(),
+                setNodeMessages: jest.fn(),
+                isNodeExecuting: jest.fn((nodeId: string) => executingNodeIds.has(nodeId)),
+                setNodeExecuting: jest.fn((nodeId: string, isExecuting: boolean) => {
+                    mockSetNodeExecuting(nodeId, isExecuting);
+                    if (isExecuting) {
+                        executingNodeIds.add(nodeId);
+                        return;
+                    }
 
-                executingNodeIds.delete(nodeId);
-            }),
-            setImagePanelOpen: jest.fn(),
-            setImageModificationPanelOpen: jest.fn(),
-            setFullscreenImage: jest.fn(),
-            setFullscreenChatNodeId: jest.fn(),
-            llmConfigs: [],
-            localLLMProfiles: [],
-        };
+                    executingNodeIds.delete(nodeId);
+                }),
+                setImagePanelOpen: jest.fn(),
+                setImageModificationPanelOpen: jest.fn(),
+                setFullscreenImage: jest.fn(),
+                setFullscreenChatNodeId: jest.fn(),
+                llmConfigs: [],
+                localLLMProfiles: [],
+            },
+            designStore: {
+                agents: [],
+                agentInstances: [agentInstance],
+                selectAgent: jest.fn(),
+            },
+            workflowCanvasContext: {
+                navigationHandler: null,
+                onDeleteNode: jest.fn(),
+                onToggleNodeMinimize: jest.fn(),
+                onUpdateNodePosition: jest.fn(),
+                onOpenImagePanel: jest.fn(),
+                onOpenImageModificationPanel: jest.fn(),
+                onOpenVideoPanel: jest.fn(),
+                onOpenMapsPanel: jest.fn(),
+                onOpenFullscreen: jest.fn(),
+            },
+            functionStore: {
+                functions: [
+                    createFunction(),
+                    createFunction({
+                        _id: 'legacy-extra',
+                        toolId: 'tool.extra',
+                        name: 'Extra Tool',
+                        isEnabled: true,
+                    }),
+                    createFunction({
+                        _id: 'legacy-disabled',
+                        toolId: 'tool.disabled',
+                        name: 'Disabled Tool',
+                        isEnabled: false,
+                    }),
+                ],
+                loadFunctions: mockLoadFunctions,
+            },
+        });
 
         textUtilsMocks.countChars.mockReturnValue(0);
         textUtilsMocks.countTokens.mockReturnValue(0);
@@ -265,41 +306,10 @@ describe('V2AgentNode AgentLoop integration', () => {
             credential: null,
         });
 
-        designStoreState = {
-            agentInstances: [agentInstance],
-            selectAgent: jest.fn(),
-        };
-
-        workflowCanvasContextState = {
-            navigationHandler: null,
-            onDeleteNode: jest.fn(),
-            onToggleNodeMinimize: jest.fn(),
-            onUpdateNodePosition: jest.fn(),
-            onOpenImagePanel: jest.fn(),
-            onOpenImageModificationPanel: jest.fn(),
-            onOpenVideoPanel: jest.fn(),
-            onOpenMapsPanel: jest.fn(),
-            onOpenFullscreen: jest.fn(),
-        };
-
-        functionStoreState = {
-            functions: [
-                createFunction(),
-                createFunction({
-                    _id: 'legacy-extra',
-                    toolId: 'tool.extra',
-                    name: 'Extra Tool',
-                    isEnabled: true,
-                }),
-                createFunction({
-                    _id: 'legacy-disabled',
-                    toolId: 'tool.disabled',
-                    name: 'Disabled Tool',
-                    isEnabled: false,
-                }),
-            ],
-            loadFunctions: mockLoadFunctions,
-        };
+        runtimeStoreState = v2AgentNodeHarness.runtimeStore;
+        designStoreState = v2AgentNodeHarness.designStore;
+        workflowCanvasContextState = v2AgentNodeHarness.workflowCanvasContext;
+        functionStoreState = v2AgentNodeHarness.functionStore;
 
         mockLoadFunctions.mockImplementation(async () => undefined);
 
@@ -362,6 +372,7 @@ describe('V2AgentNode AgentLoop integration', () => {
             ...runtimeStoreState,
             getIsNodeMinimized: jest.fn(() => true),
         };
+        v2AgentNodeHarness.runtimeStore = runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
 
         render(
             <V2AgentNode
@@ -497,6 +508,7 @@ describe('V2AgentNode AgentLoop integration', () => {
                 nodeMessages[nodeId] = messages;
             }),
         };
+        v2AgentNodeHarness.runtimeStore = runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
 
         const nativeToolAgent: Agent = {
             ...baseAgent,

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { FilePrototype, LLMConfig, RobotId } from '../types';
+import { FilePrototype, RobotId } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
+import { useProvisionalPrototypeCollection } from '../hooks/useProvisionalPrototypeCollection';
 import { Button, Card } from './UI';
+import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
 import { PlusIcon, FileAnalysisIcon, SettingsIcon, CloseIcon } from './Icons';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useLocalization } from '../hooks/useLocalization';
 
 interface PhilDataPageProps {
-  llmConfigs: LLMConfig[];
   onNavigateToWorkflow?: () => void;
 }
 
@@ -18,6 +19,8 @@ type FileDraft = {
   validationRules: Record<string, unknown>;
 };
 
+type FilePrototypeType = FilePrototype['type'];
+
 function createInitialFileDraft(): FileDraft {
   return {
     name: '',
@@ -27,37 +30,19 @@ function createInitialFileDraft(): FileDraft {
   };
 }
 
-// Mock store for file prototypes - à remplacer par un vrai store plus tard
-const useFilesStore = () => {
-  const [files, setFiles] = useState<FilePrototype[]>([]);
-
-  const addFile = (file: Omit<FilePrototype, 'id' | 'creator_id' | 'created_at' | 'updated_at'>) => {
-    const newFile: FilePrototype = {
-      ...file,
-      id: `file-${Date.now()}`,
-      creator_id: RobotId.Phil,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    setFiles(prev => [...prev, newFile]);
-    return { success: true, fileId: newFile.id };
-  };
-
-  const deleteFile = (id: string) => {
-    setFiles(prev => prev.filter(f => f.id !== id));
-    return { success: true };
-  };
-
-  return { files, addFile, deleteFile };
-};
-
 export const PhilDataPage: React.FC<PhilDataPageProps> = ({
-  llmConfigs,
   onNavigateToWorkflow
 }) => {
   const { t } = useLocalization();
   const { addNotification } = useNotifications();
-  const { files, addFile, deleteFile } = useFilesStore();
+  const {
+    items: files,
+    addItem: addFile,
+    deleteItem: deleteFile,
+  } = useProvisionalPrototypeCollection<FilePrototype>({
+    prefix: 'file',
+    creatorId: RobotId.Phil,
+  });
   const { currentRobotId } = useDesignStore();
 
   const [isCreating, setIsCreating] = useState(false);
@@ -106,7 +91,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
     }
   };
 
-  const getFileTypeColor = (type: string) => {
+  const getFileTypeColor = (type: FilePrototypeType) => {
     switch (type) {
       case 'upload': return 'bg-green-500/20 text-green-300 border-green-500/30';
       case 'transformation': return 'bg-purple-500/20 text-purple-300 border-purple-500/30';
@@ -128,7 +113,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
     }
   };
 
-  const getFileTypeIcon = (type: string) => {
+  const getFileTypeIcon = (type: FilePrototypeType) => {
     switch (type) {
       case 'upload': return '⬆️';
       case 'transformation': return '🔄';
@@ -191,6 +176,12 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
 
       {/* Main Content */}
       <div className="p-6 space-y-6">
+        <ProvisionalSurfaceNotice
+          description={t(
+            'phil_provisional_notice',
+            'Cette page conserve des prototypes localement dans la session UI. Aucun service canonique de fichiers Phil n est encore branche a ce flux.'
+          )}
+        />
 
         {/* Create New File Prototype */}
         {isCreating && (
@@ -216,7 +207,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
                 <label className="block text-sm font-medium text-gray-300 mb-1">{t('phil_processing_type')}</label>
                 <select
                   value={newFile.type}
-                  onChange={(e) => setNewFile({ ...newFile, type: e.target.value as any })}
+                  onChange={(e) => setNewFile({ ...newFile, type: e.target.value as FilePrototypeType })}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-green-500"
                 >
                   <option value="upload">{t('phil_upload_import')}</option>

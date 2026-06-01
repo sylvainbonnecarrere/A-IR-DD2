@@ -4,13 +4,16 @@ import { V2AgentNode } from '../../components/V2AgentNode';
 import { LLMProvider, RobotId, type Agent } from '../../types';
 import type { UserFunction } from '../../types/function.types';
 import { runAgentLoop } from '../../services/llm/AgentLoop';
+import { createTestAgentInstance, createToolSelection } from '../builders/domainBuilders';
+import { resetV2AgentNodeHarness } from '../harnesses/v2AgentNodeHarness';
 
 const mockPersistInstanceWebSearchParams = jest.fn();
 const mockUpdateInstanceConfig = jest.fn();
 
-let runtimeStoreState: Record<string, unknown>;
-let designStoreState: Record<string, unknown>;
-let functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> };
+let v2AgentNodeHarness = resetV2AgentNodeHarness();
+let runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
+let designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
+let functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> } = v2AgentNodeHarness.functionStore;
 
 jest.mock('reactflow', () => ({
   Handle: () => null,
@@ -46,9 +49,10 @@ jest.mock('../../hooks/useAuth', () => ({
 }));
 
 jest.mock('../../stores/useRuntimeStore', () => ({
-  useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-    selector ? selector(runtimeStoreState) : runtimeStoreState
-  )),
+  useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().runtimeStore;
+    return selector ? selector(state) : state;
+  }),
 }));
 
 jest.mock('../../stores/useDesignStore', () => {
@@ -56,30 +60,22 @@ jest.mock('../../stores/useDesignStore', () => {
 
   return {
     ...actual,
-    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-      selector ? selector(designStoreState) : designStoreState
-    )),
+    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+      const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().designStore;
+      return selector ? selector(state) : state;
+    }),
   };
 });
 
 jest.mock('../../stores/useFunctionStore', () => ({
-  useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> }) => unknown) => (
-    selector ? selector(functionStoreState) : functionStoreState
-  )),
+  useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> }) => unknown) => {
+    const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().functionStore;
+    return selector ? selector(state) : state;
+  }),
 }));
 
 jest.mock('../../contexts/WorkflowCanvasContext', () => ({
-  useWorkflowCanvasContext: () => ({
-    navigationHandler: { navigateToNode: jest.fn() },
-    onDeleteNode: jest.fn(),
-    onToggleNodeMinimize: jest.fn(),
-    onUpdateNodePosition: jest.fn(),
-    onOpenImagePanel: jest.fn(),
-    onOpenImageModificationPanel: jest.fn(),
-    onOpenVideoPanel: jest.fn(),
-    onOpenMapsPanel: jest.fn(),
-    onOpenFullscreen: jest.fn(),
-  }),
+  useWorkflowCanvasContext: () => require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().workflowCanvasContext,
 }));
 
 jest.mock('../../services/llmService', () => ({}));
@@ -121,74 +117,75 @@ describe('V2AgentNode web search params entrypoint', () => {
       value: jest.fn(),
     });
 
-    runtimeStoreState = {
-      getIsNodeMinimized: jest.fn(() => false),
-      getNodeMessages: jest.fn(() => []),
-      addNodeMessage: jest.fn(),
-      setNodeMessages: jest.fn(),
-      isNodeExecuting: jest.fn(() => false),
-      setNodeExecuting: jest.fn(),
-      setImagePanelOpen: jest.fn(),
-      setImageModificationPanelOpen: jest.fn(),
-      setFullscreenImage: jest.fn(),
-      setFullscreenChatNodeId: jest.fn(),
-      llmConfigs: [],
-      localLLMProfiles: [],
-    };
-
-    designStoreState = {
-      agents: [agent],
-      agentInstances: [
-        {
-          id: 'instance-1',
-          prototypeId: 'agent-1',
-          workflowId: 'wf-1',
-          name: 'Archi instance',
+    v2AgentNodeHarness = resetV2AgentNodeHarness({
+      runtimeStore: {
+        getIsNodeMinimized: jest.fn(() => false),
+        getNodeMessages: jest.fn((_nodeId: string) => []),
+        addNodeMessage: jest.fn(),
+        setNodeMessages: jest.fn(),
+        isNodeExecuting: jest.fn(() => false),
+        setNodeExecuting: jest.fn(),
+        setImagePanelOpen: jest.fn(),
+        setImageModificationPanelOpen: jest.fn(),
+        setFullscreenImage: jest.fn(),
+        setFullscreenChatNodeId: jest.fn(),
+        llmConfigs: [],
+        localLLMProfiles: [],
+      },
+      agent,
+      agentInstance: createTestAgentInstance({
+        id: 'instance-1',
+        prototypeId: 'agent-1',
+        workflowId: 'wf-1',
+        name: 'Archi instance',
+        configuration_json: {
+          role: 'Architect',
+          model: 'gpt-4o-mini',
+          llmProvider: LLMProvider.OpenAI,
+          systemPrompt: 'Prompt',
+          tools: [],
+          toolSelections: [createToolSelection({ toolId: 'tool.web-search' })],
           position: { x: 0, y: 0 },
-          isMinimized: false,
-          isMaximized: false,
-          configuration_json: {
-            role: 'Architect',
-            model: 'gpt-4o-mini',
-            llmProvider: LLMProvider.OpenAI,
-            systemPrompt: 'Prompt',
-            tools: [],
-            toolSelections: [{ toolId: 'tool.web-search' }],
-            position: { x: 0, y: 0 },
-            webSearchParams: undefined,
+          webSearchParams: undefined,
+        },
+      }),
+      designStore: {
+        updateInstanceConfig: mockUpdateInstanceConfig,
+      },
+      functionStore: {
+        functions: [
+          {
+            _id: 'fn-1',
+            toolId: 'tool.web-search',
+            name: 'web_search_py',
+            description: 'Web search',
+            language: 'python',
+            origin: 'native',
+            userId: null,
+            workflowId: null,
+            inputSchema: {},
+            outputSchema: {},
+            codePath: null,
+            codeInline: null,
+            dependencies: [],
+            isEnabled: true,
+            isReadonly: true,
+            version: 1,
+            tags: [],
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
           },
-        },
-      ],
-      selectAgent: jest.fn(),
-      updateInstanceConfig: mockUpdateInstanceConfig,
-    };
+        ],
+        loadFunctions: jest.fn(async () => undefined),
+      },
+      workflowCanvasContext: {
+        navigationHandler: { navigateToNode: jest.fn() },
+      },
+    });
 
-    functionStoreState = {
-      functions: [
-        {
-          _id: 'fn-1',
-          toolId: 'tool.web-search',
-          name: 'web_search_py',
-          description: 'Web search',
-          language: 'python',
-          origin: 'native',
-          userId: null,
-          workflowId: null,
-          inputSchema: {},
-          outputSchema: {},
-          codePath: null,
-          codeInline: null,
-          dependencies: [],
-          isEnabled: true,
-          isReadonly: true,
-          version: 1,
-          tags: [],
-          createdAt: '2026-01-01T00:00:00.000Z',
-          updatedAt: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-      loadFunctions: jest.fn(async () => undefined),
-    };
+    runtimeStoreState = v2AgentNodeHarness.runtimeStore;
+    designStoreState = v2AgentNodeHarness.designStore;
+    functionStoreState = v2AgentNodeHarness.functionStore;
 
     (runAgentLoop as jest.Mock).mockReset().mockResolvedValue({
       finalResponse: 'ok',
@@ -256,6 +253,7 @@ describe('V2AgentNode web search params entrypoint', () => {
       functions: [],
       loadFunctions,
     };
+    v2AgentNodeHarness.functionStore = functionStoreState as typeof v2AgentNodeHarness.functionStore;
 
     const view = render(
       <V2AgentNode
@@ -309,6 +307,7 @@ describe('V2AgentNode web search params entrypoint', () => {
 
     designStoreState.agents = [];
     designStoreState.agentInstances = [inheritedInstance];
+    v2AgentNodeHarness.designStore = designStoreState as typeof v2AgentNodeHarness.designStore;
 
     const view = render(
       <V2AgentNode
@@ -327,6 +326,7 @@ describe('V2AgentNode web search params entrypoint', () => {
     expect(screen.queryByTitle("Paramètres Web Search de l'agent")).not.toBeInTheDocument();
 
     designStoreState.agents = [agent];
+    v2AgentNodeHarness.designStore = designStoreState as typeof v2AgentNodeHarness.designStore;
 
     view.rerender(
       <V2AgentNode

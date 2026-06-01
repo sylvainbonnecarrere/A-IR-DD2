@@ -1,9 +1,10 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import WorkflowCanvas from '../../components/WorkflowCanvas';
+import { createDesignStoreTestState, createWorkflowStoreTestState } from '../builders/storeStateBuilders';
+import { resetWorkflowCanvasHarness } from '../harnesses/workflowCanvasHarness';
 
-let designStoreState: Record<string, unknown>;
-let workflowStoreState: Record<string, unknown>;
+let workflowCanvasHarness = resetWorkflowCanvasHarness();
 
 jest.mock('reactflow', () => {
     const React = require('react');
@@ -52,18 +53,20 @@ jest.mock('../../contexts/AuthContext', () => ({
 }));
 
 jest.mock('../../stores/useDesignStore', () => ({
-    useDesignStore: Object.assign((selector?: (state: Record<string, unknown>) => unknown) => (
-        selector ? selector(designStoreState) : designStoreState
-    ), {
-        getState: () => designStoreState,
+    useDesignStore: Object.assign((selector?: (state: Record<string, unknown>) => unknown) => {
+        const state = require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().designStore;
+        return selector ? selector(state) : state;
+    }, {
+        getState: () => require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().designStore,
     }),
 }));
 
 jest.mock('../../stores/useWorkflowStore', () => ({
-    useWorkflowStore: Object.assign((selector?: (state: Record<string, unknown>) => unknown) => (
-        selector ? selector(workflowStoreState) : workflowStoreState
-    ), {
-        getState: () => workflowStoreState,
+    useWorkflowStore: Object.assign((selector?: (state: Record<string, unknown>) => unknown) => {
+        const state = require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().workflowStore;
+        return selector ? selector(state) : state;
+    }, {
+        getState: () => require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().workflowStore,
     }),
 }));
 
@@ -93,15 +96,16 @@ jest.mock('../../components/V2AgentNode', () => ({
 
 describe('WorkflowCanvas render smoke test', () => {
     beforeEach(() => {
-        designStoreState = {
+        workflowCanvasHarness = resetWorkflowCanvasHarness();
+        workflowCanvasHarness.designStore = createDesignStoreTestState({
             nodes: [],
             agentInstances: [],
             getResolvedInstance: jest.fn(() => null),
-        };
+        });
 
-        workflowStoreState = {
+        workflowCanvasHarness.workflowStore = createWorkflowStoreTestState({
             getCurrentWorkflowId: jest.fn(() => null),
-        };
+        });
     });
 
     it('renders without crashing when diagnostics are enabled in development', () => {

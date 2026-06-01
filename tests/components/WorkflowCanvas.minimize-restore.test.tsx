@@ -1,13 +1,12 @@
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import WorkflowCanvas from '../../components/WorkflowCanvas';
+import { RobotId } from '../../types';
+import { createTestAgentInstance, createTestCanvasNode } from '../builders/domainBuilders';
+import { createDesignStoreTestState, createWorkflowStoreTestState } from '../builders/storeStateBuilders';
+import { resetWorkflowCanvasHarness } from '../harnesses/workflowCanvasHarness';
 
-let designStoreState: Record<string, any>;
-let workflowStoreState: Record<string, unknown>;
-let capturedOnNodesChange: ((changes: unknown[]) => void) | null = null;
-let capturedOnNodeDragStop: ((event: unknown, node: Record<string, unknown>) => void) | null = null;
-let capturedWorkflowCanvasContextValue: Record<string, any> | null = null;
-let renderedNodes: Record<string, any>[] = [];
+let workflowCanvasHarness = resetWorkflowCanvasHarness();
 
 jest.mock('reactflow', () => {
     const React = require('react');
@@ -15,9 +14,10 @@ jest.mock('reactflow', () => {
     return {
         __esModule: true,
         default: ({ children, nodes, onNodesChange, onNodeDragStop }: { children?: React.ReactNode; nodes?: Record<string, unknown>[]; onNodesChange?: (changes: unknown[]) => void; onNodeDragStop?: (event: unknown, node: Record<string, unknown>) => void }) => {
-            renderedNodes = Array.isArray(nodes) ? (nodes as any[]) : [];
-            capturedOnNodesChange = onNodesChange ?? null;
-            capturedOnNodeDragStop = onNodeDragStop ?? null;
+            const harness = require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness();
+            harness.renderedNodes = Array.isArray(nodes) ? (nodes as any[]) : [];
+            harness.capturedOnNodesChange = onNodesChange ?? null;
+            harness.capturedOnNodeDragStop = onNodeDragStop ?? null;
             return <div data-testid="workflow-canvas-root">{children}</div>;
         },
         Background: () => null,
@@ -38,7 +38,7 @@ jest.mock('reactflow', () => {
         useReactFlow: jest.fn(() => ({
             getZoom: jest.fn(() => 1),
             getViewport: jest.fn(() => ({ x: 0, y: 0, zoom: 1 })),
-            getNodes: jest.fn(() => renderedNodes),
+            getNodes: jest.fn(() => require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().renderedNodes),
             getNode: jest.fn(() => null),
             setCenter: jest.fn(),
         })),
@@ -68,24 +68,26 @@ jest.mock('../../contexts/AuthContext', () => ({
 }));
 
 jest.mock('../../stores/useDesignStore', () => ({
-    useDesignStore: Object.assign((selector?: (state: Record<string, unknown>) => unknown) => (
-        selector ? selector(designStoreState) : designStoreState
-    ), {
-        getState: () => designStoreState,
+    useDesignStore: Object.assign((selector?: (state: Record<string, unknown>) => unknown) => {
+        const state = require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().designStore;
+        return selector ? selector(state) : state;
+    }, {
+        getState: () => require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().designStore,
     }),
 }));
 
 jest.mock('../../stores/useWorkflowStore', () => ({
-    useWorkflowStore: Object.assign((selector?: (state: Record<string, unknown>) => unknown) => (
-        selector ? selector(workflowStoreState) : workflowStoreState
-    ), {
-        getState: () => workflowStoreState,
+    useWorkflowStore: Object.assign((selector?: (state: Record<string, unknown>) => unknown) => {
+        const state = require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().workflowStore;
+        return selector ? selector(state) : state;
+    }, {
+        getState: () => require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().workflowStore,
     }),
 }));
 
 jest.mock('../../contexts/WorkflowCanvasContext', () => ({
     WorkflowCanvasProvider: ({ children, value }: { children?: React.ReactNode; value: Record<string, any> }) => {
-        capturedWorkflowCanvasContextValue = value;
+        require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().capturedWorkflowCanvasContextValue = value;
         return <>{children}</>;
     },
 }));
@@ -116,86 +118,57 @@ jest.mock('../../components/V2AgentNode', () => ({
 
 describe('WorkflowCanvas minimize->move->restore', () => {
     beforeEach(() => {
-        capturedOnNodesChange = null;
-        capturedOnNodeDragStop = null;
-        capturedWorkflowCanvasContextValue = null;
-        renderedNodes = [];
-        designStoreState = {
+        workflowCanvasHarness = resetWorkflowCanvasHarness();
+        const firstInstance = createTestAgentInstance({
+            id: 'instance-1',
+            prototypeId: 'prototype-1',
+            name: 'One',
+            workflowId: 'wf-1',
+            position: { x: 20, y: 20 },
+            configuration_json: null,
+        });
+        const secondInstance = createTestAgentInstance({
+            id: 'instance-2',
+            prototypeId: 'prototype-1',
+            name: 'Two',
+            workflowId: 'wf-1',
+            position: { x: 440, y: 20 },
+            configuration_json: null,
+        });
+
+        workflowCanvasHarness.designStore = createDesignStoreTestState({
             nodes: [
-                {
+                createTestCanvasNode({
                     id: 'node-1',
-                    type: 'agent',
                     position: { x: 20, y: 20 },
                     data: {
-                        robotId: 'archi',
+                        robotId: RobotId.Archi,
                         label: 'One',
                         workflowId: 'wf-1',
-                        agent: null,
-                        agentInstance: {
-                            id: 'instance-1',
-                            prototypeId: 'prototype-1',
-                            name: 'One',
-                            workflowId: 'wf-1',
-                            position: { x: 20, y: 20 },
-                            isMinimized: false,
-                            isMaximized: false,
-                            configuration_json: null,
-                        },
+                        agentInstance: firstInstance,
                     },
-                },
-                {
+                }),
+                createTestCanvasNode({
                     id: 'node-2',
-                    type: 'agent',
                     position: { x: 440, y: 20 },
                     data: {
-                        robotId: 'archi',
+                        robotId: RobotId.Archi,
                         label: 'Two',
                         workflowId: 'wf-1',
-                        agent: null,
-                        agentInstance: {
-                            id: 'instance-2',
-                            prototypeId: 'prototype-1',
-                            name: 'Two',
-                            workflowId: 'wf-1',
-                            position: { x: 440, y: 20 },
-                            isMinimized: false,
-                            isMaximized: false,
-                            configuration_json: null,
-                        },
+                        agentInstance: secondInstance,
                     },
-                },
+                }),
             ],
-            agentInstances: [
-                {
-                    id: 'instance-1',
-                    prototypeId: 'prototype-1',
-                    name: 'One',
-                    workflowId: 'wf-1',
-                    position: { x: 20, y: 20 },
-                    isMinimized: false,
-                    isMaximized: false,
-                    configuration_json: null,
-                },
-                {
-                    id: 'instance-2',
-                    prototypeId: 'prototype-1',
-                    name: 'Two',
-                    workflowId: 'wf-1',
-                    position: { x: 440, y: 20 },
-                    isMinimized: false,
-                    isMaximized: false,
-                    configuration_json: null,
-                },
-            ],
+            agentInstances: [firstInstance, secondInstance],
             getResolvedInstance: jest.fn(() => null),
-        };
+        });
 
-        workflowStoreState = {
+        workflowCanvasHarness.workflowStore = createWorkflowStoreTestState({
             getCurrentWorkflowId: jest.fn(() => 'wf-1'),
-        };
+        });
 
         // Default renderedNodes reflect initial positions
-        renderedNodes = [
+        workflowCanvasHarness.renderedNodes = [
             {
                 id: 'node-1',
                 position: { x: 20, y: 20 },
@@ -217,21 +190,21 @@ describe('WorkflowCanvas minimize->move->restore', () => {
         const onUpdateNodePosition = jest.fn();
         const onToggleNodeMinimize = jest.fn((nodeId: string) => {
             // Simulate the app toggling minimized state and the user moving the minimized node to x=100 while minimized
-            designStoreState = {
-                ...designStoreState,
-                nodes: designStoreState.nodes.map((n: any) => n.id === nodeId ? { ...n, position: { x: 100, y: 20 } } : n),
-                agentInstances: designStoreState.agentInstances.map((i: any) => i.id === 'instance-2' ? { ...i, position: { x: 100, y: 20 }, isMinimized: true } : i),
+            workflowCanvasHarness.designStore = {
+                ...workflowCanvasHarness.designStore,
+                nodes: workflowCanvasHarness.designStore.nodes.map((n: any) => n.id === nodeId ? { ...n, position: { x: 100, y: 20 } } : n),
+                agentInstances: workflowCanvasHarness.designStore.agentInstances.map((i: any) => i.id === 'instance-2' ? { ...i, position: { x: 100, y: 20 }, isMinimized: true } : i),
             };
             // Update renderedNodes as if the minimized node was dragged visually
-            renderedNodes = renderedNodes.map(r => r.id === nodeId ? { ...r, position: { x: 100, y: 20 }, width: 120, height: 80 } : r);
+            workflowCanvasHarness.renderedNodes = workflowCanvasHarness.renderedNodes.map(r => r.id === nodeId ? { ...r, position: { x: 100, y: 20 }, width: 120, height: 80 } : r);
         });
 
         render(<WorkflowCanvas workflowName="QA Workflow" onUpdateNodePosition={onUpdateNodePosition} onToggleNodeMinimize={onToggleNodeMinimize} />);
 
-        expect(capturedWorkflowCanvasContextValue?.onToggleNodeMinimize).toBeDefined();
+        expect(workflowCanvasHarness.capturedWorkflowCanvasContextValue?.onToggleNodeMinimize).toBeDefined();
 
         await act(async () => {
-            capturedWorkflowCanvasContextValue?.onToggleNodeMinimize?.('node-2');
+            workflowCanvasHarness.capturedWorkflowCanvasContextValue?.onToggleNodeMinimize?.('node-2');
             await new Promise((resolve) => setTimeout(resolve, 0));
             await new Promise((resolve) => setTimeout(resolve, 0));
         });

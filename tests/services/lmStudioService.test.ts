@@ -2,6 +2,7 @@ import { TextDecoder, TextEncoder } from 'util';
 import { ReadableStream } from 'stream/web';
 import { generateContent, generateContentStream } from '../../services/lmStudioService';
 import type { ChatMessage } from '../../types';
+import { createTestChatMessage } from '../builders/domainBuilders';
 
 describe('lmStudioService local runtime transport', () => {
     const originalFetch = global.fetch;
@@ -107,26 +108,25 @@ describe('lmStudioService local runtime transport', () => {
         } as unknown as Response)) as typeof fetch;
 
         const history: ChatMessage[] = [
-            {
+            createTestChatMessage({
                 id: 'msg-user-1',
-                sender: 'user',
                 text: 'Quelle meteo a Paris ?',
                 timestamp: new Date('2026-03-25T10:00:00.000Z'),
-            },
-            {
+            }),
+            createTestChatMessage({
                 id: 'msg-agent-1',
                 sender: 'agent',
                 text: '',
                 timestamp: new Date('2026-03-25T10:00:05.000Z'),
-            },
-            {
+            }),
+            createTestChatMessage({
                 id: 'msg-tool-1',
                 sender: 'tool_result',
                 text: '{"temperature":21}',
                 toolName: 'weather',
                 toolCallId: 'exec-1',
                 timestamp: new Date('2026-03-25T10:00:06.000Z'),
-            },
+            }),
         ];
 
         await generateContent(
@@ -154,6 +154,8 @@ describe('lmStudioService local runtime transport', () => {
     });
 
     it('surfaces backend 403 details instead of reporting an unknown error', async () => {
+        const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
+
         global.fetch = jest.fn(async () => ({
             ok: false,
             status: 403,
@@ -175,6 +177,8 @@ describe('lmStudioService local runtime transport', () => {
         )).rejects.toThrow(
             'LMStudio API error (http://8.8.8.8:1234): 403 - Endpoint forbidden'
         );
+
+        consoleErrorSpy.mockRestore();
     });
 
     it('forwards the authenticated session token to the backend LMStudio proxy when provided', async () => {
@@ -205,6 +209,7 @@ describe('lmStudioService local runtime transport', () => {
     });
 
     it('throws a terminal stream error when the backend emits an SSE error payload', async () => {
+        const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
         const encoder = new TextEncoder();
         const ssePayload = 'data: {"error":"LMStudio request timeout exceeded after 600000ms","code":"timeout","details":{"timeoutMs":600000}}\n\n';
 
@@ -231,5 +236,7 @@ describe('lmStudioService local runtime transport', () => {
         await expect(iterator.next()).rejects.toThrow(
             'LMStudio stream error [timeout] {"timeoutMs":600000}: LMStudio request timeout exceeded after 600000ms'
         );
+
+        consoleErrorSpy.mockRestore();
     });
 });

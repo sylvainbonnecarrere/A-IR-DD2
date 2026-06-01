@@ -3,14 +3,16 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { RobotPageRouter } from '../../components/RobotPageRouter';
 import { LLMProvider, RobotId, type Agent, type AgentInstance } from '../../types';
 import type { UserFunction } from '../../types/function.types';
+import { resetRobotPageRouterHarness } from '../harnesses/robotPageRouterHarness';
 
-let designStoreState: Record<string, any>;
-let workflowStoreState: Record<string, any>;
-let runtimeStoreState: Record<string, any>;
+let robotPageRouterHarness = resetRobotPageRouterHarness();
+let designStoreState: Record<string, any> = robotPageRouterHarness.designStore;
+let workflowStoreState: Record<string, any> = robotPageRouterHarness.workflowStore;
+let runtimeStoreState: Record<string, any> = robotPageRouterHarness.runtimeStore;
 let functionStoreState: {
   functions: UserFunction[];
   loadFunctions: jest.Mock<Promise<void>, [string?]>;
-};
+} = robotPageRouterHarness.functionStore;
 
 jest.mock('reactflow', () => {
   const React = require('react');
@@ -98,10 +100,11 @@ jest.mock('../../hooks/useAuth', () => ({
 }));
 
 jest.mock('../../stores/useRuntimeStore', () => ({
-  useRuntimeStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => (
-    selector ? selector(runtimeStoreState) : runtimeStoreState
-  ), {
-    getState: () => runtimeStoreState,
+  useRuntimeStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => {
+    const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore;
+    return selector ? selector(state) : state;
+  }, {
+    getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore,
   }),
 }));
 
@@ -110,27 +113,30 @@ jest.mock('../../stores/useDesignStore', () => {
 
   return {
     ...actual,
-    useDesignStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => (
-      selector ? selector(designStoreState) : designStoreState
-    ), {
-      getState: () => designStoreState,
+    useDesignStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => {
+      const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().designStore;
+      return selector ? selector(state) : state;
+    }, {
+      getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().designStore,
     }),
   };
 });
 
 jest.mock('../../stores/useWorkflowStore', () => ({
-  useWorkflowStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => (
-    selector ? selector(workflowStoreState) : workflowStoreState
-  ), {
-    getState: () => workflowStoreState,
+  useWorkflowStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => {
+    const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().workflowStore;
+    return selector ? selector(state) : state;
+  }, {
+    getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().workflowStore,
   }),
 }));
 
 jest.mock('../../stores/useFunctionStore', () => ({
-  useFunctionStore: Object.assign((selector?: (state: typeof functionStoreState) => unknown) => (
-    selector ? selector(functionStoreState) : functionStoreState
-  ), {
-    getState: () => functionStoreState,
+  useFunctionStore: Object.assign((selector?: (state: typeof functionStoreState) => unknown) => {
+    const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().functionStore;
+    return selector ? selector(state) : state;
+  }, {
+    getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().functionStore,
   }),
 }));
 
@@ -274,60 +280,64 @@ describe('RobotPageRouter BOS/canvas delete integration', () => {
       value: jest.fn(),
     });
 
-    runtimeStoreState = {
-      getIsNodeMinimized: jest.fn(() => false),
-      getNodeMessages: jest.fn(() => []),
-      addNodeMessage: jest.fn(),
-      setNodeMessages: jest.fn(),
-      isNodeExecuting: jest.fn(() => false),
-      setNodeExecuting: jest.fn(),
-      getNodePendingAttachment: jest.fn(() => null),
-      setNodePendingAttachment: jest.fn(),
-      clearNodePendingAttachment: jest.fn(),
-      getNodeInvisibleHistorySummary: jest.fn(() => null),
-      setNodeInvisibleHistorySummary: jest.fn(),
-      llmConfigs: [],
-      localLLMProfiles: [],
-      setFullscreenChatNodeId: jest.fn(),
-    };
-
-    designStoreState = {
-      agents: [baseAgent],
-      agentInstances: [baseInstance],
-      nodes: [
-        {
-          id: 'node-instance-1',
-          type: 'agent',
-          position: { x: 10, y: 20 },
-          data: {
-            robotId: RobotId.Bos,
-            label: 'Bos Agent Instance',
-            agent: baseAgent,
-            agentInstance: baseInstance,
-            workflowId: 'wf-1',
+    robotPageRouterHarness = resetRobotPageRouterHarness({
+      runtimeStore: {
+        getIsNodeMinimized: jest.fn(() => false),
+        getNodeMessages: jest.fn((_nodeId: string) => []),
+        addNodeMessage: jest.fn(),
+        setNodeMessages: jest.fn(),
+        isNodeExecuting: jest.fn(() => false),
+        setNodeExecuting: jest.fn(),
+        getNodePendingAttachment: jest.fn(() => null),
+        setNodePendingAttachment: jest.fn(),
+        clearNodePendingAttachment: jest.fn(),
+        getNodeInvisibleHistorySummary: jest.fn(() => null),
+        setNodeInvisibleHistorySummary: jest.fn(),
+        llmConfigs: [],
+        localLLMProfiles: [],
+        setFullscreenChatNodeId: jest.fn(),
+      },
+      designStore: {
+        agents: [baseAgent],
+        agentInstances: [baseInstance],
+        nodes: [
+          {
+            id: 'node-instance-1',
+            type: 'agent',
+            position: { x: 10, y: 20 },
+            data: {
+              robotId: RobotId.Bos,
+              label: 'Bos Agent Instance',
+              agent: baseAgent,
+              agentInstance: baseInstance,
+              workflowId: 'wf-1',
+            },
           },
-        },
-      ],
-      workflows: [
-        {
-          _id: 'wf-1',
-          name: 'Workflow Alpha',
-        },
-      ],
-      currentWorkflowId: 'wf-1',
-      getResolvedInstance: jest.fn(() => ({ instance: baseInstance, prototype: baseAgent })),
-      selectAgent: jest.fn(),
-      updateInstanceConfig: jest.fn(),
-    };
+        ],
+        workflows: [
+          {
+            _id: 'wf-1',
+            name: 'Workflow Alpha',
+          },
+        ],
+        currentWorkflowId: 'wf-1',
+        getResolvedInstance: jest.fn(() => ({ instance: baseInstance, prototype: baseAgent })),
+        selectAgent: jest.fn(),
+        updateInstanceConfig: jest.fn(),
+      },
+      workflowStore: {
+        getCurrentWorkflowId: jest.fn(() => 'wf-1'),
+      },
+      functionStore: {
+        functions: [],
+        loadFunctions: jest.fn().mockResolvedValue(undefined),
+      },
+    });
 
-    workflowStoreState = {
-      getCurrentWorkflowId: jest.fn(() => 'wf-1'),
-    };
-
-    functionStoreState = {
-      functions: [],
-      loadFunctions: jest.fn().mockResolvedValue(undefined),
-    };
+    runtimeStoreState = robotPageRouterHarness.runtimeStore;
+    designStoreState = robotPageRouterHarness.designStore;
+    workflowStoreState = robotPageRouterHarness.workflowStore;
+    functionStoreState = robotPageRouterHarness.functionStore;
   });
 
   it('propagates a real BOS workflow node delete click from the canvas UI to the delete callback', async () => {
