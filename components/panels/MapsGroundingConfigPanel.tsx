@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { SlideOver, Button } from '../UI';
-import { LLMConfig, ChatMessage, MapSource } from '../../types';
+import { LLMConfig, ChatMessage, MapsPanelPreloadedResults, MapSource } from '../../types';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import * as llmService from '../../services/llmService';
 import { resolveAgentRuntimeConfig } from '../../services/runtimeConfigResolver';
@@ -11,13 +11,50 @@ interface MapsGroundingConfigPanelProps {
     nodeId: string | null;
     llmConfigs: LLMConfig[];
     onClose: () => void;
-    preloadedResults?: {
-        text: string;
-        mapSources: MapSource[];
-        query?: string;
-    };
+    preloadedResults?: MapsPanelPreloadedResults;
     hideSlideOver?: boolean;
 }
+
+type LeafletMarkerLike = {
+    getLatLng: () => { lat: number; lng: number };
+    openPopup: () => void;
+};
+
+type LeafletLayerLike = object;
+
+type LeafletMapLike = {
+    setView: (center: [number, number], zoom: number) => void;
+    fitBounds: (bounds: unknown, options: { padding: [number, number] }) => void;
+    eachLayer: (callback: (layer: LeafletLayerLike) => void) => void;
+    remove: () => void;
+};
+
+type LeafletNamespace = {
+    map: (element: HTMLDivElement) => LeafletMapLike;
+    tileLayer: (url: string, options: { attribution: string }) => { addTo: (map: LeafletMapLike) => void };
+    marker: (coordinates: [number, number]) => {
+        addTo: (map: LeafletMapLike) => LeafletMarkerLike & { bindPopup: (html: string) => void };
+    };
+    latLngBounds: (coordinates: Array<[number, number]>) => unknown;
+    Marker: new (...args: unknown[]) => LeafletMarkerLike;
+};
+
+type WindowWithLeaflet = Window & {
+    L?: LeafletNamespace;
+};
+
+const getLeafletNamespace = (): LeafletNamespace | undefined => {
+    if (typeof window === 'undefined') {
+        return undefined;
+    }
+
+    return (window as WindowWithLeaflet).L;
+};
+
+const toLeafletCoordinates = (source: MapSource): [number, number] => [
+    source.coordinates.latitude,
+    source.coordinates.longitude,
+];
 
 /**
  * MapsGroundingConfigPanel - Configuration Maps Grounding
@@ -52,11 +89,8 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
     const [showExamples, setShowExamples] = useState(false);
 
     // État pour les résultats de recherche
-    const [searchResults, setSearchResults] = useState<{
-        text: string;
-        mapSources: MapSource[];
-    } | null>(null);
-    const [mapInstance, setMapInstance] = useState<any>(null);
+    const [searchResults, setSearchResults] = useState<MapsPanelPreloadedResults | null>(null);
+    const [mapInstance, setMapInstance] = useState<LeafletMapLike | null>(null);
 
     // Charger les résultats pré-chargés à l'ouverture
     useEffect(() => {
@@ -85,25 +119,26 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
             }
 
             // Charger le script Leaflet
-            if (!(window as any).L) {
-                await new Promise((resolve) => {
+            if (!getLeafletNamespace()) {
+                await new Promise<void>((resolve) => {
                     const script = document.createElement('script');
                     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-                    script.onload = resolve;
+                    script.onload = () => resolve();
                     document.head.appendChild(script);
                 });
             }
 
-            const L = (window as any).L;
+            const L = getLeafletNamespace();
             if (!L || !mapContainerRef.current) return;
 
             // Calculer le centre de la carte
-            const center = searchResults.mapSources.length > 0
-                ? [searchResults.mapSources[0].coordinates.latitude, searchResults.mapSources[0].coordinates.longitude]
+            const center: [number, number] = searchResults.mapSources.length > 0
+                ? toLeafletCoordinates(searchResults.mapSources[0])
                 : [48.8566, 2.3522]; // Paris par défaut
 
             // Créer la carte
-            const map = L.map(mapContainerRef.current).setView(center, 13);
+            const map = L.map(mapContainerRef.current);
+            map.setView(center, 13);
 
             // Ajouter le layer OpenStreetMap
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -112,7 +147,7 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
 
             // Ajouter les markers
             searchResults.mapSources.forEach((source, index) => {
-                const marker = L.marker([source.coordinates.latitude, source.coordinates.longitude]).addTo(map);
+                const marker = L.marker(toLeafletCoordinates(source)).addTo(map);
                 marker.bindPopup(`
                     <div style="min-width: 200px;">
                         <strong>${source.placeTitle}</strong><br/>
@@ -129,7 +164,7 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
             // Ajuster la vue pour afficher tous les markers
             if (searchResults.mapSources.length > 1) {
                 const bounds = L.latLngBounds(
-                    searchResults.mapSources.map(s => [s.coordinates.latitude, s.coordinates.longitude])
+                    searchResults.mapSources.map(toLeafletCoordinates)
                 );
                 map.fitBounds(bounds, { padding: [50, 50] });
             }
@@ -320,14 +355,14 @@ export const MapsGroundingConfigPanel: React.FC<MapsGroundingConfigPanelProps> =
                                          border border-gray-600 hover:border-cyan-500 transition-all
                                          cursor-pointer"
                                 onClick={() => {
-                                    if (mapInstance && (window as any).L) {
-                                        const L = (window as any).L;
+                                    const L = getLeafletNamespace();
+                                    if (mapInstance && L) {
                                         mapInstance.setView(
                                             [source.coordinates.latitude, source.coordinates.longitude],
                                             15
                                         );
                                         // Ouvrir le popup du marker correspondant
-                                        mapInstance.eachLayer((layer: any) => {
+                                        mapInstance.eachLayer((layer) => {
                                             if (layer instanceof L.Marker) {
                                                 const latLng = layer.getLatLng();
                                                 if (

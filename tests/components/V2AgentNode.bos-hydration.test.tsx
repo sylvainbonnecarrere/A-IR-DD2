@@ -2,13 +2,15 @@ import React from 'react';
 import { render, waitFor } from '@testing-library/react';
 import { V2AgentNode } from '../../components/V2AgentNode';
 import { LLMCapability, LLMProvider, RobotId, type Agent, type ChatMessage, type ToolCallRecord } from '../../types';
+import { resetV2AgentNodeHarness } from '../harnesses/v2AgentNodeHarness';
 
 const mockSetNodeMessages = jest.fn();
 const mockHydrateToolMessagesFromPersistedRuns = jest.fn();
 const mockBuildBosHydrationFingerprint = jest.fn();
 
-let runtimeStoreState: Record<string, unknown>;
-let designStoreState: Record<string, unknown>;
+let v2AgentNodeHarness = resetV2AgentNodeHarness();
+let runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
+let designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
 
 jest.mock('reactflow', () => ({
     Handle: () => null,
@@ -63,9 +65,10 @@ jest.mock('../../hooks/useAuth', () => ({
 }));
 
 jest.mock('../../stores/useRuntimeStore', () => ({
-    useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-        selector ? selector(runtimeStoreState) : runtimeStoreState
-    )),
+    useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+        const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().runtimeStore;
+        return selector ? selector(state) : state;
+    }),
 }));
 
 jest.mock('../../stores/useDesignStore', () => {
@@ -73,30 +76,22 @@ jest.mock('../../stores/useDesignStore', () => {
 
     return {
         ...actual,
-        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-            selector ? selector(designStoreState) : designStoreState
-        )),
+        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+            const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().designStore;
+            return selector ? selector(state) : state;
+        }),
     };
 });
 
 jest.mock('../../stores/useFunctionStore', () => ({
-    useFunctionStore: jest.fn((selector?: (state: { functions: unknown[]; loadFunctions: () => Promise<void> }) => unknown) => (
-        selector ? selector({ functions: [], loadFunctions: jest.fn(async () => undefined) }) : { functions: [], loadFunctions: jest.fn(async () => undefined) }
-    )),
+    useFunctionStore: jest.fn((selector?: (state: { functions: unknown[]; loadFunctions: () => Promise<void> }) => unknown) => {
+        const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().functionStore;
+        return selector ? selector(state) : state;
+    }),
 }));
 
 jest.mock('../../contexts/WorkflowCanvasContext', () => ({
-    useWorkflowCanvasContext: jest.fn(() => ({
-        navigationHandler: null,
-        onDeleteNode: jest.fn(),
-        onToggleNodeMinimize: jest.fn(),
-        onUpdateNodePosition: jest.fn(),
-        onOpenImagePanel: jest.fn(),
-        onOpenImageModificationPanel: jest.fn(),
-        onOpenVideoPanel: jest.fn(),
-        onOpenMapsPanel: jest.fn(),
-        onOpenFullscreen: jest.fn(),
-    })),
+    useWorkflowCanvasContext: jest.fn(() => require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().workflowCanvasContext),
 }));
 
 jest.mock('../../services/llmService', () => ({}));
@@ -179,25 +174,31 @@ describe('V2AgentNode Bos hydration', () => {
             },
         ];
 
-        runtimeStoreState = {
-            getIsNodeMinimized: jest.fn(() => false),
-            getNodeMessages: jest.fn(() => messages),
-            addNodeMessage: jest.fn(),
-            setNodeMessages: mockSetNodeMessages,
-            isNodeExecuting: jest.fn(() => false),
-            setNodeExecuting: jest.fn(),
-            setImagePanelOpen: jest.fn(),
-            setImageModificationPanelOpen: jest.fn(),
-            setFullscreenImage: jest.fn(),
-            setFullscreenChatNodeId: jest.fn(),
-            llmConfigs: [],
-            localLLMProfiles: [],
-        };
-
-        designStoreState = {
-            agentInstances: [],
-            selectAgent: jest.fn(),
-        };
+        v2AgentNodeHarness = resetV2AgentNodeHarness({
+            runtimeStore: {
+                getIsNodeMinimized: jest.fn(() => false),
+                getNodeMessages: jest.fn((_nodeId: string) => messages),
+                addNodeMessage: jest.fn(),
+                setNodeMessages: mockSetNodeMessages,
+                isNodeExecuting: jest.fn(() => false),
+                setNodeExecuting: jest.fn(),
+                setImagePanelOpen: jest.fn(),
+                setImageModificationPanelOpen: jest.fn(),
+                setFullscreenImage: jest.fn(),
+                setFullscreenChatNodeId: jest.fn(),
+                llmConfigs: [],
+                localLLMProfiles: [],
+            },
+            designStore: {
+                agentInstances: [],
+            },
+            functionStore: {
+                functions: [],
+                loadFunctions: jest.fn(async () => undefined),
+            },
+        });
+        runtimeStoreState = v2AgentNodeHarness.runtimeStore;
+        designStoreState = v2AgentNodeHarness.designStore;
 
         mockBuildBosHydrationFingerprint
             .mockReturnValueOnce('fingerprint:before')
@@ -258,8 +259,9 @@ describe('V2AgentNode Bos hydration', () => {
 
         runtimeStoreState = {
             ...runtimeStoreState,
-            getNodeMessages: jest.fn(() => hydratedMessages),
+            getNodeMessages: jest.fn((_nodeId: string) => hydratedMessages),
         };
+        v2AgentNodeHarness.runtimeStore = runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
         mockBuildBosHydrationFingerprint.mockReturnValue('fingerprint:hydrated');
 
         render(
@@ -303,6 +305,7 @@ describe('V2AgentNode Bos hydration', () => {
                 },
             ])),
         };
+        v2AgentNodeHarness.runtimeStore = runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
         mockBuildBosHydrationFingerprint.mockReturnValue('');
 
         render(

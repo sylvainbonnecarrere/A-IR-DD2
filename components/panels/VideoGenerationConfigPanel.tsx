@@ -13,16 +13,12 @@ import { useLocalization } from '../../hooks/useLocalization';
 
 interface VideoGenerationConfigPanelProps {
   isOpen: boolean;
-  nodeId?: string;
-  llmConfigs?: any[];
   onClose: () => void;
   hideSlideOver?: boolean;
 }
 
 export const VideoGenerationConfigPanel: React.FC<VideoGenerationConfigPanelProps> = ({
   isOpen,
-  nodeId,
-  llmConfigs,
   onClose,
   hideSlideOver = false
 }) => {
@@ -52,8 +48,6 @@ export const VideoGenerationConfigPanel: React.FC<VideoGenerationConfigPanelProp
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           <VideoGenerationContent
-            nodeId={nodeId}
-            llmConfigs={llmConfigs}
             onClose={onClose}
             onSubmit={(config) => {
               console.log('Video generation config:', config);
@@ -69,8 +63,6 @@ export const VideoGenerationConfigPanel: React.FC<VideoGenerationConfigPanelProp
   return (
     <SlideOver isOpen={isOpen} onClose={onClose} title={`🎬 ${t('videoGen_title')}`}>
       <VideoGenerationContent
-        nodeId={nodeId}
-        llmConfigs={llmConfigs}
         onClose={onClose}
         onSubmit={(config) => {
           console.log('Video generation config:', config);

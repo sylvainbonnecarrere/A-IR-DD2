@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from 'react';
-import { Agent, AgentInstance, NodePositionUpdateOptions } from '../types';
+import { Agent, AgentInstance, MapsPanelPreloadedResults, NodePositionUpdateOptions } from '../types';
 
 interface WorkflowCanvasContextType {
   onEditPrototype?: (nodeId: string) => void;
@@ -10,7 +10,7 @@ interface WorkflowCanvasContextType {
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
-  onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
+  onOpenMapsPanel?: (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
 }
 

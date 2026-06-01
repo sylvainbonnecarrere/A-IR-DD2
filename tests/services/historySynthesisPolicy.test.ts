@@ -1,5 +1,6 @@
 import { computeHistoryLimitStats, getTriggeredHistoryLimits, shouldTriggerHistorySynthesis } from '../../services/historySynthesisPolicy';
 import { HistoryConfig, LLMProvider } from '../../types';
+import { createTestChatMessage } from '../builders/domainBuilders';
 
 const baseHistoryConfig: HistoryConfig = {
     enabled: true,
@@ -27,25 +28,24 @@ describe('historySynthesisPolicy', () => {
     it.each([
         {
             limitKey: 'char',
-            messages: [{ id: 'm-1', sender: 'user' as const, text: 'abcdef', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
+            messages: [createTestChatMessage({ id: 'm-1', text: 'abcdef', timestamp: new Date('2026-05-07T12:00:00.000Z') })],
         },
         {
             limitKey: 'word',
-            messages: [{ id: 'm-1', sender: 'user' as const, text: 'un deux trois quatre cinq six sept huit neuf dix', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
+            messages: [createTestChatMessage({ id: 'm-1', text: 'un deux trois quatre cinq six sept huit neuf dix', timestamp: new Date('2026-05-07T12:00:00.000Z') })],
         },
         {
             limitKey: 'token',
-            messages: [{ id: 'm-1', sender: 'user' as const, text: 'abcdefghijklmnopqrstuvwxabcdefghijklmnopqrstuvwx', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
+            messages: [createTestChatMessage({ id: 'm-1', text: 'abcdefghijklmnopqrstuvwxabcdefghijklmnopqrstuvwx', timestamp: new Date('2026-05-07T12:00:00.000Z') })],
         },
         {
             limitKey: 'sentence',
-            messages: [{ id: 'm-1', sender: 'user' as const, text: 'Un. Deux. Trois. Quatre. Cinq. Six. Sept. Huit. Neuf. Dix.', timestamp: new Date('2026-05-07T12:00:00.000Z') }],
+            messages: [createTestChatMessage({ id: 'm-1', text: 'Un. Deux. Trois. Quatre. Cinq. Six. Sept. Huit. Neuf. Dix.', timestamp: new Date('2026-05-07T12:00:00.000Z') })],
         },
         {
             limitKey: 'message',
-            messages: Array.from({ length: 10 }, (_, index) => ({
+            messages: Array.from({ length: 10 }, (_, index) => createTestChatMessage({
                 id: `m-${index + 1}`,
-                sender: 'user' as const,
                 text: `message ${index + 1}`,
                 timestamp: new Date('2026-05-07T12:00:00.000Z'),
             })),
@@ -59,12 +59,11 @@ describe('historySynthesisPolicy', () => {
 
     it('counts char threshold as a first-class trigger', () => {
         const stats = computeHistoryLimitStats([
-            {
+            createTestChatMessage({
                 id: 'm-1',
-                sender: 'user' as const,
                 text: 'abcdef',
                 timestamp: new Date('2026-05-07T12:00:00.000Z'),
-            },
+            }),
         ]);
 
         expect(stats.char).toBe(6);
@@ -74,12 +73,11 @@ describe('historySynthesisPolicy', () => {
 
     it('ignores disabled thresholds even when the raw value exceeds the limit', () => {
         const stats = computeHistoryLimitStats([
-            {
+            createTestChatMessage({
                 id: 'm-1',
-                sender: 'user' as const,
                 text: 'abcdef',
                 timestamp: new Date('2026-05-07T12:00:00.000Z'),
-            },
+            }),
         ]);
 
         const config: HistoryConfig = {
@@ -96,12 +94,11 @@ describe('historySynthesisPolicy', () => {
 
     it('does not trigger on zero-or-negative limits', () => {
         const stats = computeHistoryLimitStats([
-            {
+            createTestChatMessage({
                 id: 'm-1',
-                sender: 'user' as const,
                 text: 'a b c d e f g h i j',
                 timestamp: new Date('2026-05-07T12:00:00.000Z'),
-            },
+            }),
         ]);
 
         const config: HistoryConfig = {

@@ -211,7 +211,7 @@ export function normalizePersistenceConfig(
     cloudStorageConfig?: CloudStorageConfig | null;
   };
   const saveMedia = config?.saveMedia ?? defaultPersistenceConfig.saveMedia;
-  const mediaStorage = normalizeMediaStorageType(config?.mediaStorage as any);
+  const mediaStorage = normalizeMediaStorageType(config?.mediaStorage);
   const allowWorkspaceWrite = !saveMedia
     ? false
     : mediaStorage === 'workspace'
@@ -878,6 +878,10 @@ export interface WebSearchSource {
 export interface MapsGroundingResponse {
   text: string;
   mapSources: MapSource[];
+}
+
+export interface MapsPanelPreloadedResults extends MapsGroundingResponse {
+  query?: string;
 }
 
 /**

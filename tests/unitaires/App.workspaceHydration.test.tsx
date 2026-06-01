@@ -2,11 +2,13 @@ import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import App from '../../App';
 import { selectResolvedAgentExecutionSelectionContext } from '../../stores/useDesignStore';
+import { LLMProvider } from '../../types';
 import apiClient from '../../utils/apiClient';
 import { useAuth } from '../../contexts/AuthContext';
 import { PersistenceService } from '../../services/persistenceService';
 import type { UserFunction } from '../../types/function.types';
 import { publishHydrationComponentReady } from '../../utils/hydrationComponentReadiness';
+import { getAppHydrationHarness, resetAppHydrationHarness } from '../harnesses/appHydrationHarness';
 import {
     buildEmptyWorkspacePayload,
     buildRuntimeRefreshState,
@@ -17,70 +19,20 @@ import {
 
 const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
 const mockHydrateToolMessagesFromPersistedRuns = jest.fn(async (messages: any[]) => messages);
-let autoSignalWorkflowCanvasReady = true;
+let mockAppHydrationHarness = resetAppHydrationHarness();
+let mockRuntimeStore = mockAppHydrationHarness.runtimeStore;
+let mockDesignStore = mockAppHydrationHarness.designStore;
+let mockWorkflowStore = mockAppHydrationHarness.workflowStore;
+let mockFunctionStore = mockAppHydrationHarness.functionStore;
 
 const waitForHydrationOverlayIdle = () => waitFor(
     () => expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle'),
     { timeout: 2000 }
 );
 
-const mockRuntimeStore = {
-    llmConfigs: [] as any[],
-    localLLMProfiles: [] as any[],
-    nodeMessages: {} as Record<string, any[]>,
-    updateLLMConfigs: jest.fn((configs: any[]) => {
-        mockRuntimeStore.llmConfigs = configs;
-    }),
-    updateLocalLLMProfiles: jest.fn((profiles: any[]) => {
-        mockRuntimeStore.localLLMProfiles = profiles;
-    }),
-    setNavigationHandler: jest.fn(),
-    addNodeMessage: jest.fn(),
-    setNodeMessages: jest.fn((nodeId: string, messages: any[]) => {
-        mockRuntimeStore.nodeMessages[nodeId] = messages;
-    }),
-    getNodeMessages: jest.fn((nodeId: string) => mockRuntimeStore.nodeMessages[nodeId] || []),
-    resetForWorkflowSwitch: jest.fn(),
-    resetAll: jest.fn()
-};
-
-const mockDesignStore = {
-    agents: [] as any[],
-    validateWorkflowIntegrity: jest.fn(() => ({ fixedCount: 0 })),
-    cleanupOrphanedInstances: jest.fn(() => 0),
-    addAgentInstance: jest.fn(),
-    deleteNode: jest.fn(),
-    deleteAgentInstance: jest.fn(),
-    hydrateFromServer: jest.fn(),
-    setCurrentWorkflowId: jest.fn(),
-    updateInstanceId: jest.fn(),
-    updateAgentInstance: jest.fn(),
-    addNode: jest.fn(),
-    updateNode: jest.fn(),
-    agentInstances: [],
-    nodes: [],
-    workflows: [] as any[],
-    currentWorkflowId: 'workflow-1',
-    currentRobotId: 'BO_002',
-    resetAll: jest.fn(),
-    loadUserWorkflows: jest.fn().mockResolvedValue(undefined)
-};
-
-const mockWorkflowStore = {
-    hydrateWorkflowFromServer: jest.fn(),
-    getCurrentWorkflowId: jest.fn(() => 'workflow-1'),
-    resetAll: jest.fn()
-};
-
-const mockFunctionStore = {
-    loadFunctions: jest.fn().mockResolvedValue(undefined),
-    resetStore: jest.fn(),
-};
-
-let documentVisibilityState: DocumentVisibilityState = 'visible';
 Object.defineProperty(document, 'visibilityState', {
     configurable: true,
-    get: () => documentVisibilityState,
+    get: () => getAppHydrationHarness().documentVisibilityState,
 });
 
 jest.mock('../../contexts/AuthContext', () => ({
@@ -102,13 +54,19 @@ jest.mock('../../services/bosRunProjectionService', () => ({
 }));
 
 jest.mock('../../components/NavigationLayout', () => ({
-    NavigationLayout: ({ agents }: { agents: Array<unknown> }) => <div data-testid="agents-count">{agents.length}</div>
+    NavigationLayout: () => {
+        const { getAppHydrationHarness } = require('../harnesses/appHydrationHarness');
+        const harness = getAppHydrationHarness();
+        return <div data-testid="agents-count">{harness.designStore.agents.length}</div>;
+    }
 }));
 
 jest.mock('../../components/RobotPageRouter', () => ({
     RobotPageRouter: ({ onDeleteNode, llmConfigs, onWorkflowCanvasReady, onUpdateNodePosition }: { onDeleteNode?: (nodeId: string) => Promise<void> | void; llmConfigs?: Array<unknown>; onWorkflowCanvasReady?: () => void; onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: { persist?: boolean }) => void }) => {
+        const { getAppHydrationHarness } = require('../harnesses/appHydrationHarness');
+        const harness = getAppHydrationHarness();
         React.useEffect(() => {
-            if (autoSignalWorkflowCanvasReady) {
+            if (harness.autoSignalWorkflowCanvasReady) {
                 onWorkflowCanvasReady?.();
                 emitHydrationComponentsReady();
             }
@@ -116,7 +74,7 @@ jest.mock('../../components/RobotPageRouter', () => ({
 
         return (
             <div data-testid="robot-page-router">
-                <div data-testid="router-node-count">{mockDesignStore.nodes.length}</div>
+                <div data-testid="router-node-count">{harness.designStore.nodes.length}</div>
                 <div data-testid="router-llm-config-count">{llmConfigs?.length ?? 0}</div>
                 <button type="button" data-testid="delete-node-button" onClick={() => onDeleteNode?.('node-instance-1')}>
                     delete node
@@ -219,8 +177,12 @@ jest.mock('../../utils/SettingsStorage', () => ({
 }));
 
 jest.mock('../../stores/useRuntimeStore', () => ({
-    useRuntimeStore: Object.assign((selector?: (state: typeof mockRuntimeStore) => unknown) => selector ? selector(mockRuntimeStore) : mockRuntimeStore, {
-        getState: () => mockRuntimeStore
+    useRuntimeStore: Object.assign((selector?: (state: ReturnType<typeof getAppHydrationHarness>['runtimeStore']) => unknown) => {
+        const { getAppHydrationHarness } = require('../harnesses/appHydrationHarness');
+        const state = getAppHydrationHarness().runtimeStore;
+        return selector ? selector(state) : state;
+    }, {
+        getState: () => require('../harnesses/appHydrationHarness').getAppHydrationHarness().runtimeStore
     })
 }));
 
@@ -229,21 +191,29 @@ jest.mock('../../stores/useDesignStore', () => {
 
     return {
         ...actual,
-        useDesignStore: Object.assign((selector?: (state: typeof mockDesignStore) => unknown) => selector ? selector(mockDesignStore) : mockDesignStore, {
-            getState: () => mockDesignStore
+        useDesignStore: Object.assign((selector?: (state: ReturnType<typeof getAppHydrationHarness>['designStore']) => unknown) => {
+            const { getAppHydrationHarness } = require('../harnesses/appHydrationHarness');
+            const state = getAppHydrationHarness().designStore;
+            return selector ? selector(state) : state;
+        }, {
+            getState: () => require('../harnesses/appHydrationHarness').getAppHydrationHarness().designStore
         })
     };
 });
 
 jest.mock('../../stores/useWorkflowStore', () => ({
-    useWorkflowStore: Object.assign((selector?: (state: typeof mockWorkflowStore) => unknown) => selector ? selector(mockWorkflowStore) : mockWorkflowStore, {
-        getState: () => mockWorkflowStore
+    useWorkflowStore: Object.assign((selector?: (state: ReturnType<typeof getAppHydrationHarness>['workflowStore']) => unknown) => {
+        const { getAppHydrationHarness } = require('../harnesses/appHydrationHarness');
+        const state = getAppHydrationHarness().workflowStore;
+        return selector ? selector(state) : state;
+    }, {
+        getState: () => require('../harnesses/appHydrationHarness').getAppHydrationHarness().workflowStore
     })
 }));
 
 jest.mock('../../stores/useFunctionStore', () => ({
-    useFunctionStore: Object.assign(() => mockFunctionStore, {
-        getState: () => mockFunctionStore
+    useFunctionStore: Object.assign(() => require('../harnesses/appHydrationHarness').getAppHydrationHarness().functionStore, {
+        getState: () => require('../harnesses/appHydrationHarness').getAppHydrationHarness().functionStore
     })
 }));
 
@@ -252,6 +222,11 @@ describe('App workspace hydration orchestration', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockAppHydrationHarness = resetAppHydrationHarness();
+        mockRuntimeStore = mockAppHydrationHarness.runtimeStore;
+        mockDesignStore = mockAppHydrationHarness.designStore;
+        mockWorkflowStore = mockAppHydrationHarness.workflowStore;
+        mockFunctionStore = mockAppHydrationHarness.functionStore;
         mockUseAuth.mockReset();
         mockUseAuth.mockReturnValue({
             isAuthenticated: true,
@@ -265,34 +240,9 @@ describe('App workspace hydration orchestration', () => {
             isLoading: false,
             error: null,
         } as any);
-        autoSignalWorkflowCanvasReady = true;
+        mockAppHydrationHarness.autoSignalWorkflowCanvasReady = true;
         mockHydrateToolMessagesFromPersistedRuns.mockReset().mockImplementation(async (messages: any[]) => messages);
-        mockRuntimeStore.llmConfigs = [];
-        mockRuntimeStore.localLLMProfiles = [];
-        mockRuntimeStore.nodeMessages = {};
-        mockDesignStore.agents = [];
-        mockDesignStore.agentInstances = [];
-        mockDesignStore.nodes = [];
-        mockDesignStore.workflows = [];
-        mockDesignStore.currentWorkflowId = 'workflow-1';
-        documentVisibilityState = 'visible';
-        const clearMock = (value: unknown) => {
-            if (typeof value === 'function' && typeof (value as { mockClear?: unknown }).mockClear === 'function') {
-                (value as jest.Mock).mockClear();
-            }
-        };
-        Object.values(mockRuntimeStore).forEach((value) => {
-            clearMock(value);
-        });
-        Object.values(mockDesignStore).forEach((value) => {
-            clearMock(value);
-        });
-        Object.values(mockWorkflowStore).forEach((value) => {
-            clearMock(value);
-        });
-        Object.values(mockFunctionStore).forEach((value) => {
-            clearMock(value);
-        });
+        mockAppHydrationHarness.documentVisibilityState = 'visible';
         mockDesignStore.hydrateFromServer.mockImplementation((data: { agents?: any[]; agentInstances?: any[]; nodes?: any[] }) => {
             mockDesignStore.agents = data.agents || [];
             mockDesignStore.agentInstances = data.agentInstances || [];
@@ -529,14 +479,14 @@ describe('App workspace hydration orchestration', () => {
         mockRuntimeStore.updateLLMConfigs.mockClear();
         mockRuntimeStore.updateLocalLLMProfiles.mockClear();
 
-        documentVisibilityState = 'hidden';
+        mockAppHydrationHarness.documentVisibilityState = 'hidden';
         act(() => {
             document.dispatchEvent(new Event('visibilitychange'));
         });
 
         expect(apiClient.get).toHaveBeenCalledTimes(1);
 
-        documentVisibilityState = 'visible';
+        mockAppHydrationHarness.documentVisibilityState = 'visible';
         act(() => {
             document.dispatchEvent(new Event('visibilitychange'));
         });
@@ -551,7 +501,7 @@ describe('App workspace hydration orchestration', () => {
     });
 
     it('keeps store-backed runtime config surfaces visible while auth config refresh is still pending', async () => {
-        mockRuntimeStore.llmConfigs = [{ provider: 'gemini' }];
+        mockRuntimeStore.llmConfigs = [{ provider: LLMProvider.Gemini, enabled: true, capabilities: {} }];
         mockRuntimeStore.localLLMProfiles = [{ id: 'local-1', name: 'LM Studio', provider: 'lmstudio', baseUrl: 'http://localhost:1234' }];
 
         mockUseAuth.mockImplementation(() => ({
@@ -665,12 +615,12 @@ describe('App workspace hydration orchestration', () => {
         });
 
         try {
-            documentVisibilityState = 'hidden';
+            mockAppHydrationHarness.documentVisibilityState = 'hidden';
             act(() => {
                 document.dispatchEvent(new Event('visibilitychange'));
             });
 
-            documentVisibilityState = 'visible';
+            mockAppHydrationHarness.documentVisibilityState = 'visible';
             act(() => {
                 document.dispatchEvent(new Event('visibilitychange'));
             });
@@ -907,7 +857,7 @@ describe('App workspace hydration orchestration', () => {
     });
 
     it('keeps the auth hydration overlay active until the workflow canvas reports visual readiness', async () => {
-        autoSignalWorkflowCanvasReady = false;
+        mockAppHydrationHarness.autoSignalWorkflowCanvasReady = false;
 
         mockUseAuth.mockImplementation(() => ({
             isAuthenticated: true,
@@ -945,7 +895,7 @@ describe('App workspace hydration orchestration', () => {
     });
 
     it('ignores legacy generic hydration-ready events until structured canvas readiness is reported', async () => {
-        autoSignalWorkflowCanvasReady = false;
+        mockAppHydrationHarness.autoSignalWorkflowCanvasReady = false;
 
         mockUseAuth.mockImplementation(() => ({
             isAuthenticated: true,
@@ -1004,7 +954,9 @@ describe('App workspace hydration orchestration', () => {
                 {
                     ...workspacePayload.agentInstances[0],
                     configuration_json: {
-                        ...workspacePayload.agentInstances[0].configuration_json,
+                        ...((workspacePayload.agentInstances[0].configuration_json && typeof workspacePayload.agentInstances[0].configuration_json === 'object')
+                            ? workspacePayload.agentInstances[0].configuration_json
+                            : {}),
                         toolSelections: [{
                             toolId: 'tool.web-search',
                             versionRef: {
@@ -1280,7 +1232,9 @@ describe('App workspace hydration orchestration', () => {
                     ...workspacePayload.agentInstances[0],
                     tools: ['legacy-tool-id-1', 'legacy-tool-id-2'],
                     configuration_json: {
-                        ...workspacePayload.agentInstances[0].configuration_json,
+                        ...((workspacePayload.agentInstances[0].configuration_json && typeof workspacePayload.agentInstances[0].configuration_json === 'object')
+                            ? workspacePayload.agentInstances[0].configuration_json
+                            : {}),
                         tools: ['legacy-tool-id-1', 'legacy-tool-id-2'],
                         toolSelections: [
                             { toolId: 'tool.web-fetch' },

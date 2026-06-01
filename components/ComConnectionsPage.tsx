@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { ConnectionPrototype, LLMConfig, RobotId } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
+import { useProvisionalPrototypeCollection } from '../hooks/useProvisionalPrototypeCollection';
 import { Button, Card } from './UI';
+import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
 import { PlusIcon, AntennaIcon, SettingsIcon, CloseIcon } from './Icons';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useLocalization } from '../hooks/useLocalization';
@@ -12,28 +14,14 @@ interface ComConnectionsPageProps {
   onNavigateToWorkflow?: () => void;
 }
 
-// Mock store for connections - à remplacer par un vrai store plus tard
-const useConnectionsStore = () => {
-  const [connections, setConnections] = useState<ConnectionPrototype[]>([]);
+type ConnectionPrototypeType = ConnectionPrototype['type'];
+type ConnectionAuthenticationType = ConnectionPrototype['authentication']['type'];
 
-  const addConnection = (connection: Omit<ConnectionPrototype, 'id' | 'creator_id' | 'created_at' | 'updated_at'>) => {
-    const newConnection: ConnectionPrototype = {
-      ...connection,
-      id: `conn-${Date.now()}`,
-      creator_id: RobotId.Com,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    setConnections(prev => [...prev, newConnection]);
-    return { success: true, connectionId: newConnection.id };
-  };
-
-  const deleteConnection = (id: string) => {
-    setConnections(prev => prev.filter(c => c.id !== id));
-    return { success: true };
-  };
-
-  return { connections, addConnection, deleteConnection };
+type ConnectionDraft = {
+  name: string;
+  type: ConnectionPrototypeType;
+  endpoint: string;
+  authType: ConnectionAuthenticationType;
 };
 
 export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
@@ -42,11 +30,18 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
 }) => {
   const { t } = useLocalization();
   const { addNotification } = useNotifications();
-  const { connections, addConnection, deleteConnection } = useConnectionsStore();
+  const {
+    items: connections,
+    addItem: addConnection,
+    deleteItem: deleteConnection,
+  } = useProvisionalPrototypeCollection<ConnectionPrototype>({
+    prefix: 'conn',
+    creatorId: RobotId.Com,
+  });
   const { currentRobotId } = useDesignStore();
 
   const [isCreating, setIsCreating] = useState(false);
-  const [newConnection, setNewConnection] = useState({
+  const [newConnection, setNewConnection] = useState<ConnectionDraft>({
     name: '',
     type: 'api' as const,
     endpoint: '',
@@ -99,7 +94,7 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
     }
   };
 
-  const getAuthTypeColor = (type: string) => {
+  const getAuthTypeColor = (type: ConnectionAuthenticationType) => {
     switch (type) {
       case 'bearer': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
       case 'api_key': return 'bg-green-500/20 text-green-300 border-green-500/30';
@@ -109,7 +104,7 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
     }
   };
 
-  const getConnectionTypeIcon = (type: string) => {
+  const getConnectionTypeIcon = (type: ConnectionPrototypeType) => {
     switch (type) {
       case 'api': return '🔌';
       case 'webhook': return '🪝';
@@ -172,6 +167,12 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
 
       {/* Main Content */}
       <div className="p-6 space-y-6">
+        <ProvisionalSurfaceNotice
+          description={t(
+            'com_connections_provisional_notice',
+            'Cette page conserve les connexions localement dans la session UI. Elle reste un support provisoire tant que le service canonique COM n est pas branche a cette surface.'
+          )}
+        />
 
         {/* Create New Connection */}
         {isCreating && (
@@ -197,7 +198,7 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
                 <label className="block text-sm font-medium text-gray-300 mb-1">{t('type')}</label>
                 <select
                   value={newConnection.type}
-                  onChange={(e) => setNewConnection({ ...newConnection, type: e.target.value as any })}
+                  onChange={(e) => setNewConnection({ ...newConnection, type: e.target.value as ConnectionPrototypeType })}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value="api">{t('com_api_rest')}</option>
@@ -222,7 +223,7 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
                 <label className="block text-sm font-medium text-gray-300 mb-1">{t('com_authentication')}</label>
                 <select
                   value={newConnection.authType}
-                  onChange={(e) => setNewConnection({ ...newConnection, authType: e.target.value as any })}
+                  onChange={(e) => setNewConnection({ ...newConnection, authType: e.target.value as ConnectionAuthenticationType })}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value="bearer">{t('com_bearer_token')}</option>

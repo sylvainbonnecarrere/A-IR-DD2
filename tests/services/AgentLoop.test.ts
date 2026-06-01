@@ -2,6 +2,12 @@ import { runAgentLoop } from '../../services/llm/AgentLoop';
 import type { ILLMAdapter, LLMResponse } from '../../services/adapters/ILLMAdapter';
 import { LLMProvider } from '../../types';
 import type { ToolRegistryReadModel } from '../../types/function.types';
+import {
+    createTestChatMessage,
+    createTestLLMResponse,
+    createTestParsedToolCall,
+    createTestToolRegistryReadModel,
+} from '../builders/domainBuilders';
 
 describe('AgentLoop canonical tool registry convergence', () => {
     const originalFetch = global.fetch;
@@ -13,22 +19,17 @@ describe('AgentLoop canonical tool registry convergence', () => {
 
     it('executes sandbox runs with canonical toolSelection payload only', async () => {
         const adapterResponses: LLMResponse[] = [
-            {
+            createTestLLMResponse({
                 content: 'Calling tool',
                 finishReason: 'tool_calls',
-                toolCalls: [
-                    {
-                        name: 'hello_test',
-                        arguments: { city: 'Paris' },
-                        raw: '<tool_call />',
-                        confidence: 1,
-                    }
-                ]
-            },
-            {
+                toolCalls: [createTestParsedToolCall({
+                    name: 'hello_test',
+                    arguments: { city: 'Paris' },
+                })],
+            }),
+            createTestLLMResponse({
                 content: 'Done',
-                finishReason: 'stop'
-            }
+            }),
         ];
 
         const requestLog: Array<Record<string, unknown>> = [];
@@ -55,28 +56,23 @@ describe('AgentLoop canonical tool registry convergence', () => {
         } as any)) as typeof fetch;
 
         const tools: ToolRegistryReadModel[] = [
-            {
+            createTestToolRegistryReadModel({
                 id: 'tool-hello',
                 legacyFunctionId: 'fn-hello',
                 name: 'hello_test',
                 description: 'Greets the named user',
-                inputSchema: { type: 'object' },
-                isEnabled: true,
-                versionTag: 'v1',
-                versionNumber: 1,
-                workspaceId: 'ws-hello'
-            }
+                workspaceId: 'ws-hello',
+            }),
         ];
 
         const result = await runAgentLoop(
             adapter,
             [
-                {
+                createTestChatMessage({
                     id: 'msg-hello',
-                    sender: 'user',
                     text: 'Bonjour, je m\'appelle Sylvain',
-                    timestamp: new Date('2026-04-01T09:00:00.000Z')
-                }
+                    timestamp: new Date('2026-04-01T09:00:00.000Z'),
+                }),
             ],
             tools,
             'system'
@@ -105,22 +101,17 @@ describe('AgentLoop canonical tool registry convergence', () => {
 
     it('forwards only visible tool arguments for generic tool execution', async () => {
         const adapterResponses: LLMResponse[] = [
-            {
+            createTestLLMResponse({
                 content: 'Calling web search',
                 finishReason: 'tool_calls',
-                toolCalls: [
-                    {
-                        name: 'web_search_py',
-                        arguments: { query: 'meteo paris demain' },
-                        raw: '<tool_call />',
-                        confidence: 1,
-                    }
-                ]
-            },
-            {
+                toolCalls: [createTestParsedToolCall({
+                    name: 'web_search_py',
+                    arguments: { query: 'meteo paris demain' },
+                })],
+            }),
+            createTestLLMResponse({
                 content: 'Done',
-                finishReason: 'stop'
-            }
+            }),
         ];
 
         const adapter: ILLMAdapter = {
@@ -142,28 +133,23 @@ describe('AgentLoop canonical tool registry convergence', () => {
         } as any)) as typeof fetch;
 
         const tools: ToolRegistryReadModel[] = [
-            {
+            createTestToolRegistryReadModel({
                 id: 'tool-web',
                 legacyFunctionId: 'fn-web',
                 name: 'web_search_py',
                 description: 'Native web search',
-                inputSchema: { type: 'object' },
-                isEnabled: true,
-                versionTag: 'v1',
-                versionNumber: 1,
                 workspaceId: null,
-            }
+            }),
         ];
 
         const result = await runAgentLoop(
             adapter,
             [
-                {
+                createTestChatMessage({
                     id: 'msg-web',
-                    sender: 'user',
                     text: 'cherche la meteo de paris demain',
-                    timestamp: new Date('2026-04-01T09:00:00.000Z')
-                }
+                    timestamp: new Date('2026-04-01T09:00:00.000Z'),
+                }),
             ],
             tools,
             'system',
@@ -203,30 +189,22 @@ describe('AgentLoop canonical tool registry convergence', () => {
 
     it('blocks repeated deterministic tool failures for the same tool signature', async () => {
         const adapterResponses: LLMResponse[] = [
-            {
+            createTestLLMResponse({
                 content: 'Calling native tool',
                 finishReason: 'tool_calls',
-                toolCalls: [
-                    {
-                        name: 'web_search_py',
-                        arguments: { query: 'meteo demain', language: 'fr' },
-                        raw: '<tool_call />',
-                        confidence: 1,
-                    }
-                ]
-            },
-            {
+                toolCalls: [createTestParsedToolCall({
+                    name: 'web_search_py',
+                    arguments: { query: 'meteo demain', language: 'fr' },
+                })],
+            }),
+            createTestLLMResponse({
                 content: 'Retrying same tool',
                 finishReason: 'tool_calls',
-                toolCalls: [
-                    {
-                        name: 'web_search_py',
-                        arguments: { query: 'meteo demain', language: 'fr' },
-                        raw: '<tool_call />',
-                        confidence: 1,
-                    }
-                ]
-            }
+                toolCalls: [createTestParsedToolCall({
+                    name: 'web_search_py',
+                    arguments: { query: 'meteo demain', language: 'fr' },
+                })],
+            }),
         ];
 
         const adapter: ILLMAdapter = {
@@ -248,28 +226,23 @@ describe('AgentLoop canonical tool registry convergence', () => {
         } as any)) as typeof fetch;
 
         const tools: ToolRegistryReadModel[] = [
-            {
+            createTestToolRegistryReadModel({
                 id: 'tool-native',
                 legacyFunctionId: 'fn-native',
                 name: 'web_search_py',
                 description: 'Native web search',
-                inputSchema: { type: 'object' },
-                isEnabled: true,
-                versionTag: 'v1',
-                versionNumber: 1,
-                workspaceId: null
-            }
+                workspaceId: null,
+            }),
         ];
 
         const result = await runAgentLoop(
             adapter,
             [
-                {
+                createTestChatMessage({
                     id: 'msg-1',
-                    sender: 'user',
                     text: 'Cherche la meteo',
-                    timestamp: new Date('2026-03-29T12:00:00.000Z')
-                }
+                    timestamp: new Date('2026-03-29T12:00:00.000Z'),
+                }),
             ],
             tools,
             'system'
@@ -293,7 +266,7 @@ describe('AgentLoop canonical tool registry convergence', () => {
     });
 
     it('stops a qa-style fourfold retry storm on web_search_py after the first deterministic provisioning failure', async () => {
-        const repeatedToolCall = {
+        const repeatedToolCall = createTestParsedToolCall({
             name: 'web_search_py',
             arguments: {
                 query: 'météo demain prévision temps',
@@ -301,31 +274,13 @@ describe('AgentLoop canonical tool registry convergence', () => {
                 language: 'fr',
                 safe_search: true,
             },
-            raw: '<tool_call />',
-            confidence: 1,
-        };
+        });
 
         const adapterResponses: LLMResponse[] = [
-            {
-                content: 'Tentative 1',
-                finishReason: 'tool_calls',
-                toolCalls: [repeatedToolCall]
-            },
-            {
-                content: 'Tentative 2',
-                finishReason: 'tool_calls',
-                toolCalls: [repeatedToolCall]
-            },
-            {
-                content: 'Tentative 3',
-                finishReason: 'tool_calls',
-                toolCalls: [repeatedToolCall]
-            },
-            {
-                content: 'Tentative 4',
-                finishReason: 'tool_calls',
-                toolCalls: [repeatedToolCall]
-            }
+            createTestLLMResponse({ content: 'Tentative 1', finishReason: 'tool_calls', toolCalls: [repeatedToolCall] }),
+            createTestLLMResponse({ content: 'Tentative 2', finishReason: 'tool_calls', toolCalls: [repeatedToolCall] }),
+            createTestLLMResponse({ content: 'Tentative 3', finishReason: 'tool_calls', toolCalls: [repeatedToolCall] }),
+            createTestLLMResponse({ content: 'Tentative 4', finishReason: 'tool_calls', toolCalls: [repeatedToolCall] }),
         ];
 
         const adapter: ILLMAdapter = {
@@ -347,28 +302,23 @@ describe('AgentLoop canonical tool registry convergence', () => {
         } as any)) as typeof fetch;
 
         const tools: ToolRegistryReadModel[] = [
-            {
+            createTestToolRegistryReadModel({
                 id: 'tool-web-search',
                 legacyFunctionId: 'fn-web-search',
                 name: 'web_search_py',
                 description: 'Native web search',
-                inputSchema: { type: 'object' },
-                isEnabled: true,
-                versionTag: 'v1',
-                versionNumber: 1,
-                workspaceId: null
-            }
+                workspaceId: null,
+            }),
         ];
 
         const result = await runAgentLoop(
             adapter,
             [
-                {
+                createTestChatMessage({
                     id: 'msg-qa-web-search',
-                    sender: 'user',
                     text: 'Cherche la météo de demain',
-                    timestamp: new Date('2026-03-29T13:00:00.000Z')
-                }
+                    timestamp: new Date('2026-03-29T13:00:00.000Z'),
+                }),
             ],
             tools,
             'system'
@@ -397,28 +347,17 @@ describe('AgentLoop canonical tool registry convergence', () => {
 
     it('deduplicates identical tool calls emitted in the same iteration', async () => {
         const adapterResponses: LLMResponse[] = [
-            {
+            createTestLLMResponse({
                 content: 'Calling tool twice',
                 finishReason: 'tool_calls',
                 toolCalls: [
-                    {
-                        name: 'demo_tool',
-                        arguments: { city: 'Paris' },
-                        raw: '<tool_call />',
-                        confidence: 1,
-                    },
-                    {
-                        name: 'demo_tool',
-                        arguments: { city: 'Paris' },
-                        raw: '<tool_call />',
-                        confidence: 1,
-                    }
-                ]
-            },
-            {
+                    createTestParsedToolCall({ name: 'demo_tool', arguments: { city: 'Paris' } }),
+                    createTestParsedToolCall({ name: 'demo_tool', arguments: { city: 'Paris' } }),
+                ],
+            }),
+            createTestLLMResponse({
                 content: 'Done',
-                finishReason: 'stop'
-            }
+            }),
         ];
 
         const adapter: ILLMAdapter = {
@@ -440,28 +379,25 @@ describe('AgentLoop canonical tool registry convergence', () => {
         } as any)) as typeof fetch;
 
         const tools: ToolRegistryReadModel[] = [
-            {
+            createTestToolRegistryReadModel({
                 id: 'tool-123',
                 legacyFunctionId: 'fn-legacy-123',
                 name: 'demo_tool',
                 description: 'Demo tool',
-                inputSchema: { type: 'object' },
-                isEnabled: true,
                 versionTag: 'v3',
                 versionNumber: 3,
-                workspaceId: 'ws-1'
-            }
+                workspaceId: 'ws-1',
+            }),
         ];
 
         const result = await runAgentLoop(
             adapter,
             [
-                {
+                createTestChatMessage({
                     id: 'msg-1',
-                    sender: 'user',
                     text: 'Run the demo tool',
-                    timestamp: new Date('2026-03-19T12:00:00.000Z')
-                }
+                    timestamp: new Date('2026-03-19T12:00:00.000Z'),
+                }),
             ],
             tools,
             'system'
@@ -480,7 +416,7 @@ describe('AgentLoop canonical tool registry convergence', () => {
         const adapter: ILLMAdapter = {
             provider: LLMProvider.LMStudio,
             supportsNativeToolCalling: false,
-            complete: jest.fn(async (): Promise<LLMResponse> => ({
+            complete: jest.fn(async (): Promise<LLMResponse> => createTestLLMResponse({
                 content: '',
                 finishReason: 'error',
                 rawContent: 'LMStudio request timeout exceeded after 600000ms',
@@ -497,12 +433,11 @@ describe('AgentLoop canonical tool registry convergence', () => {
         const result = await runAgentLoop(
             adapter,
             [
-                {
+                createTestChatMessage({
                     id: 'msg-1',
-                    sender: 'user',
                     text: 'Run something',
-                    timestamp: new Date('2026-03-31T12:00:00.000Z')
-                }
+                    timestamp: new Date('2026-03-31T12:00:00.000Z'),
+                }),
             ],
             [],
             'system'

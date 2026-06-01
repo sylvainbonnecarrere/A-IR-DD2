@@ -1,8 +1,7 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, AgentDraft, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, NodePositionUpdateOptions, normalizePersistenceConfig } from './types';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, NodePositionUpdateOptions, MapsPanelPreloadedResults, normalizePersistenceConfig } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
-import { AgentFormModal } from './components/modals/AgentFormModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { Header } from './components/Header';
 import { LoginModal } from './components/modals/LoginModal';
@@ -42,6 +41,8 @@ import { useJournalQueue } from './hooks/useJournalQueue';
 import type { WorkspaceSnapshot } from './services/workspaceBootstrapService';
 import { useWorkspaceHydrationOrchestrator } from './hooks/useWorkspaceHydrationOrchestrator';
 import { findAvailableWorkflowNodePosition, findCollisionFreeWorkflowNodePosition } from './utils/workflowNodePlacement';
+import { generateRuntimeMessageId } from './utils/runtimeMessageId';
+import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from './utils/robotPageRouting';
 
 interface EditingImageInfo {
   nodeId: string;
@@ -58,14 +59,12 @@ interface EditingImageInfo {
 export function AppContent() {
   const { isAuthenticated, accessToken, runtimeLLMConfigs: authRuntimeLLMConfigs, localLLMProfiles: authLocalLLMProfiles, user, logout, refreshRuntimeConfigState, sessionStatus, isLoading: authLoading, error: authError } = useAuth();
   const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
-  const [isAgentModalOpen, setAgentModalOpen] = useState(false);
   const [isLoginModalOpen, setLoginModalOpen] = useState(false);
   const [isRegisterModalOpen, setRegisterModalOpen] = useState(false);
   const [isImagePanelOpen, setImagePanelOpen] = useState(false);
   const [isImageModificationPanelOpen, setImageModificationPanelOpen] = useState(false);
   const [isVideoPanelOpen, setVideoPanelOpen] = useState(false);
   const [isMapsPanelOpen, setMapsPanelOpen] = useState(false);
-  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
 
   // ⭐ FIX: Store current agent for media panels - receives fresh data directly from V2AgentNode
   const [currentImageNodeId, setCurrentImageNodeId] = useState<string | null>(null);
@@ -77,12 +76,7 @@ export function AppContent() {
   const [currentMapsNodeId, setCurrentMapsNodeId] = useState<string | null>(null);
 
   const [editingImageInfo, setEditingImageInfo] = useState<EditingImageInfo | null>(null);
-  const [mapsPreloadedResults, setMapsPreloadedResults] = useState<{
-    text: string;
-    mapSources: any[];
-    query?: string;
-  } | null>(null);
-  const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mapsPreloadedResults, setMapsPreloadedResults] = useState<MapsPanelPreloadedResults | null>(null);
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; mimeType: string } | null>(null);
   const { t } = useLocalization();
 
@@ -97,8 +91,9 @@ export function AppContent() {
 
   // Robot Navigation State
   const [currentPath, setCurrentPath] = useState('/bos/dashboard');
-  const currentRouteUsesWorkflowCanvas = currentPath.startsWith('/bos/dashboard')
-    || (currentPath.startsWith('/bos') && !currentPath.startsWith('/bos/workflows/manage'));
+  const currentResolvedRoute = useMemo(() => resolveRobotPageRoute(currentPath), [currentPath]);
+  const currentRouteUsesWorkflowCanvas = currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosDashboard
+    || currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosSupervision;
 
   const handleRobotNavigation = (robotId: RobotId, path: string) => {
     setCurrentPath(path);
@@ -167,7 +162,6 @@ export function AppContent() {
     nodes: storeNodes,
     workflows: designWorkflows,
     currentWorkflowId: designCurrentWorkflowId,
-    currentRobotId,
   } = useDesignStore();
 
   // ⭐ SELF-HEALING: Workflow Store for hydrating workflow ID
@@ -440,73 +434,6 @@ export function AppContent() {
     }
   }, []); // Run only once on mount
 
-  const handleSaveAgent = async (agentData: AgentDraft, agentId?: string) => {
-    try {
-      if (!accessToken) {
-        throw new Error('Missing access token for prototype persistence');
-      }
-
-      let backendId: string;
-      const robotId = editingAgent?.creator_id ?? currentRobotId;
-
-      if (agentId) {
-        // ⭐ ÉTAPE 3: Update existing agent prototype
-        console.log('[App] 📤 Updating agent prototype:', agentId);
-        const apiResult = await updateAgentPrototype(agentId, agentData, accessToken, robotId);
-        if (!apiResult.success || !apiResult.data) {
-          throw new Error(apiResult.error || 'Prototype update failed');
-        }
-
-        backendId = apiResult.data.id || agentId;
-        console.log('[App] ✅ Agent prototype updated:', backendId);
-      } else {
-        // ⭐ ÉTAPE 3: Create new agent prototype
-        console.log('[App] 📤 Creating new agent prototype:', agentData.name);
-        const apiResult = await createAgentPrototype(
-          agentData,
-          accessToken,
-          robotId,
-          resolveCurrentWorkflowId() || undefined,
-        );
-        if (!apiResult.success || !apiResult.data) {
-          throw new Error(apiResult.error || 'Prototype creation failed');
-        }
-
-        backendId = apiResult.data.id;
-        console.log('[App] ✅ Agent prototype created with backendId:', backendId);
-
-        // ⭐ ÉTAPE 3 CRITICAL: Convert tempId → backendId for NEW agents
-        // Find which agent in the store has the same name/role and convert its ID
-        if (!agentId && backendId) {
-          const storeState = useDesignStore.getState();
-          // Look for agent with matching name and role (since we just created it with tempId)
-          const tempAgent = storeState.agents.find(
-            a => a.name === agentData.name && a.role === agentData.role
-          );
-
-          if (tempAgent && tempAgent.id !== backendId) {
-            console.log('[App] ⭐ Converting tempId → backendId:', {
-              tempId: tempAgent.id,
-              backendId: backendId
-            });
-            // This also updates all instances referencing this prototype
-            useDesignStore.getState().updateAgentId(tempAgent.id, backendId);
-          }
-        }
-      }
-
-      // Close the modal
-      setAgentModalOpen(false);
-      setEditingAgent(null);
-
-      // Show success notification
-      console.log('[App] ✅ Agent saved successfully:', backendId);
-    } catch (error) {
-      console.error('[App] ❌ Error saving agent:', error);
-      // TODO: Show error notification to user
-    }
-  };
-
   const handleSaveSettings = async (_newLLMConfigs: LLMConfig[]) => {
     try {
       // Get appropriate storage based on auth state
@@ -543,11 +470,6 @@ export function AppContent() {
     } catch (error) {
       console.error('[App] handleSaveSettings error:', error);
     }
-  };
-
-  const handleOpenEditAgentModal = (agent: Agent) => {
-    setEditingAgent(agent);
-    setAgentModalOpen(true);
   };
 
   /**
@@ -895,14 +817,13 @@ export function AppContent() {
 
   const handleImageGenerated = (nodeId: string, imageBase64: string) => {
     const imageMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: generateRuntimeMessageId('image'),
       sender: 'agent',
       text: t('app_generatedImageText'),
       image: imageBase64,
       mimeType: 'image/png',
       timestamp: new Date()
     };
-    handleUpdateNodeMessages(nodeId, prev => [...prev, imageMessage]);
     addNodeMessage(nodeId, imageMessage);
     
     // ⭐ FIX QA: Persist generated image to journal
@@ -910,6 +831,7 @@ export function AppContent() {
     const workflowId = resolveCurrentWorkflowId();
     if (instanceId && workflowId) {
       enqueueJournalEntry(workflowId, instanceId, 'chat', {
+        messageId: imageMessage.id,
         role: 'agent',
         content: t('app_generatedImageText'),
         imageBase64: imageBase64,
@@ -930,7 +852,7 @@ export function AppContent() {
     setVideoPanelOpen(true);
   };
 
-  const handleOpenMapsPanel = (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => {
+  const handleOpenMapsPanel = (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => {
     setCurrentMapsNodeId(nodeId);
     setMapsPreloadedResults(preloadedResults || null);
     setMapsPanelOpen(true);
@@ -938,14 +860,13 @@ export function AppContent() {
 
   const handleImageModified = (nodeId: string, newImage: string, text: string) => {
     const message: ChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: generateRuntimeMessageId('image-modified'),
       sender: 'agent',
       text: text,
       image: newImage,
       mimeType: 'image/png',
       timestamp: new Date()
     };
-    handleUpdateNodeMessages(nodeId, prev => [...prev, message]);
     addNodeMessage(nodeId, message);
     
     // ⭐ FIX QA: Persist modified image to journal
@@ -953,6 +874,7 @@ export function AppContent() {
     const workflowId = resolveCurrentWorkflowId();
     if (instanceId && workflowId) {
       enqueueJournalEntry(workflowId, instanceId, 'chat', {
+        messageId: message.id,
         role: 'agent',
         content: text,
         imageBase64: newImage,
@@ -1027,12 +949,6 @@ export function AppContent() {
           />
           <div className="flex flex-1 overflow-hidden">
             <NavigationLayout
-              agents={designAgents}
-              isCollapsed={isSidebarCollapsed}
-              onToggleCollapse={() => setSidebarCollapsed(!isSidebarCollapsed)}
-              onAddAgent={() => { setEditingAgent(null); setAgentModalOpen(true); }}
-              onAddToWorkflow={addAgentToWorkflow}
-              onEditAgent={handleOpenEditAgentModal}
               currentPath={currentPath}
               onNavigate={handleRobotNavigation}
             />
@@ -1080,16 +996,6 @@ export function AppContent() {
             />
           )}
 
-          {isAgentModalOpen && (
-            <AgentFormModal
-              onClose={() => { setAgentModalOpen(false); setEditingAgent(null); }}
-              onSave={handleSaveAgent}
-              llmConfigs={llmConfigs}
-              existingAgent={editingAgent}
-              localLLMProfiles={localLLMProfiles}
-            />
-          )}
-
           {isImagePanelOpen && (
             <>
               <ImageGenerationPanel
@@ -1118,8 +1024,6 @@ export function AppContent() {
           {isVideoPanelOpen && (
             <VideoGenerationConfigPanel
               isOpen={isVideoPanelOpen}
-              nodeId={currentVideoNodeId}
-              llmConfigs={llmConfigs}
               onClose={() => setVideoPanelOpen(false)}
             />
           )}

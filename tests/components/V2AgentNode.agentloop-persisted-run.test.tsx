@@ -5,13 +5,15 @@ import { resetBosRunHydrationCache } from '../../services/bosRunProjectionServic
 import { toolRepository } from '../../services/toolRepository';
 import { LLMCapability, LLMProvider, RobotId, type Agent, type ChatMessage } from '../../types';
 import type { UserFunction } from '../../types/function.types';
+import { resetV2AgentNodeHarness } from '../harnesses/v2AgentNodeHarness';
 
 const mockCreateAdapter = jest.fn();
 const mockEnqueueEntry = jest.fn();
 
-let runtimeStoreState: Record<string, unknown>;
-let designStoreState: Record<string, unknown>;
-let functionStoreState: { functions: UserFunction[] };
+let v2AgentNodeHarness = resetV2AgentNodeHarness();
+let runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
+let designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
+let functionStoreState: { functions: UserFunction[] } = v2AgentNodeHarness.functionStore;
 let nodeMessages: Record<string, ChatMessage[]>;
 
 jest.mock('../../services/toolRepository', () => ({
@@ -73,9 +75,10 @@ jest.mock('../../hooks/useAuth', () => ({
 }));
 
 jest.mock('../../stores/useRuntimeStore', () => ({
-    useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-        selector ? selector(runtimeStoreState) : runtimeStoreState
-    )),
+    useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+        const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().runtimeStore;
+        return selector ? selector(state) : state;
+    }),
 }));
 
 jest.mock('../../stores/useDesignStore', () => {
@@ -83,30 +86,22 @@ jest.mock('../../stores/useDesignStore', () => {
 
     return {
         ...actual,
-        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => (
-            selector ? selector(designStoreState) : designStoreState
-        )),
+        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+            const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().designStore;
+            return selector ? selector(state) : state;
+        }),
     };
 });
 
 jest.mock('../../stores/useFunctionStore', () => ({
-    useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[] }) => unknown) => (
-        selector ? selector(functionStoreState) : functionStoreState
-    )),
+    useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[] }) => unknown) => {
+        const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().functionStore;
+        return selector ? selector(state) : state;
+    }),
 }));
 
 jest.mock('../../contexts/WorkflowCanvasContext', () => ({
-    useWorkflowCanvasContext: jest.fn(() => ({
-        navigationHandler: null,
-        onDeleteNode: jest.fn(),
-        onToggleNodeMinimize: jest.fn(),
-        onUpdateNodePosition: jest.fn(),
-        onOpenImagePanel: jest.fn(),
-        onOpenImageModificationPanel: jest.fn(),
-        onOpenVideoPanel: jest.fn(),
-        onOpenMapsPanel: jest.fn(),
-        onOpenFullscreen: jest.fn(),
-    })),
+    useWorkflowCanvasContext: jest.fn(() => require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().workflowCanvasContext),
 }));
 
 jest.mock('../../services/llmService', () => ({
@@ -217,33 +212,37 @@ describe('V2AgentNode AgentLoop persisted run bridge', () => {
 
         nodeMessages = { 'node-1': [] };
 
-        runtimeStoreState = {
-            getIsNodeMinimized: jest.fn(() => false),
-            getNodeMessages: jest.fn((nodeId: string) => nodeMessages[nodeId] ?? []),
-            addNodeMessage: jest.fn((nodeId: string, message: ChatMessage) => {
-                nodeMessages[nodeId] = [...(nodeMessages[nodeId] ?? []), message];
-            }),
-            setNodeMessages: jest.fn((nodeId: string, messages: ChatMessage[]) => {
-                nodeMessages[nodeId] = messages;
-            }),
-            isNodeExecuting: jest.fn(() => false),
-            setNodeExecuting: jest.fn(),
-            setImagePanelOpen: jest.fn(),
-            setImageModificationPanelOpen: jest.fn(),
-            setFullscreenImage: jest.fn(),
-            setFullscreenChatNodeId: jest.fn(),
-            llmConfigs: [],
-            localLLMProfiles: [],
-        };
-
-        designStoreState = {
-            agentInstances: [agentInstance],
-            selectAgent: jest.fn(),
-        };
-
-        functionStoreState = {
-            functions: [createFunction()],
-        };
+        v2AgentNodeHarness = resetV2AgentNodeHarness({
+            runtimeStore: {
+                getIsNodeMinimized: jest.fn(() => false),
+                getNodeMessages: jest.fn((nodeId: string) => nodeMessages[nodeId] ?? []),
+                addNodeMessage: jest.fn((nodeId: string, message: ChatMessage) => {
+                    nodeMessages[nodeId] = [...(nodeMessages[nodeId] ?? []), message];
+                }),
+                setNodeMessages: jest.fn((nodeId: string, messages: ChatMessage[]) => {
+                    nodeMessages[nodeId] = messages;
+                }),
+                isNodeExecuting: jest.fn(() => false),
+                setNodeExecuting: jest.fn(),
+                setImagePanelOpen: jest.fn(),
+                setImageModificationPanelOpen: jest.fn(),
+                setFullscreenImage: jest.fn(),
+                setFullscreenChatNodeId: jest.fn(),
+                llmConfigs: [],
+                localLLMProfiles: [],
+            },
+            designStore: {
+                agents: [],
+                agentInstances: [agentInstance],
+                selectAgent: jest.fn(),
+            },
+            functionStore: {
+                functions: [createFunction()],
+            },
+        });
+        runtimeStoreState = v2AgentNodeHarness.runtimeStore;
+        designStoreState = v2AgentNodeHarness.designStore;
+        functionStoreState = v2AgentNodeHarness.functionStore;
 
         mockCreateAdapter.mockReturnValue({
             provider: LLMProvider.Gemini,

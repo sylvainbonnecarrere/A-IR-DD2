@@ -23,7 +23,7 @@ import { AgentFormModal } from './modals/AgentFormModal';
 import { SavePrototypeButton } from './SavePrototypeButton';
 import { AutoSaveIndicator } from './AutoSaveIndicator';
 import { useAutoSave } from '../hooks/useAutoSave';
-import { Agent, AgentDraft, WorkflowNode, LLMConfig, AgentInstance, NodePositionUpdateOptions, RobotId, V2WorkflowNode } from '../types';
+import { Agent, AgentDraft, WorkflowNode, LLMConfig, AgentInstance, NodePositionUpdateOptions, RobotId, V2WorkflowNode, ChatMessage, MapsPanelPreloadedResults } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useAuth } from '../contexts/AuthContext';
@@ -38,13 +38,13 @@ interface WorkflowCanvasProps {
   llmConfigs?: LLMConfig[];
   onCanvasReady?: () => void;
   onDeleteNode?: (nodeId: string) => void;
-  onUpdateNodeMessages?: (nodeId: string, messages: any[]) => void;
+  onUpdateNodeMessages?: (nodeId: string, messages: ChatMessage[]) => void;
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
-  onOpenMapsPanel?: (nodeId: string, preloadedResults?: { text: string; mapSources: any[]; query?: string }) => void;
+  onOpenMapsPanel?: (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   agents?: Agent[];
   onAddToWorkflow?: (agent: Agent) => void;
@@ -69,6 +69,10 @@ const DEFAULT_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 0.7 });
 const PRO_OPTIONS = Object.freeze({ hideAttribution: true });
 let workflowCanvasMountSequence = 0;
 type ReactFlowNodeWithMeasuredSize = Node & { measured?: { height?: number; width?: number } };
+type ReactFlowNodeLookup = {
+  getNode?: (nodeId: string) => ReactFlowNodeWithMeasuredSize | undefined;
+  getNodes?: () => ReactFlowNodeWithMeasuredSize[];
+};
 
 // Composant interne avec accès à useReactFlow
 const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCanvasProps) {
@@ -119,6 +123,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
   // Hook React Flow pour fitView
   const reactFlowInstance = useReactFlow();
+  const reactFlowLookup = reactFlowInstance as typeof reactFlowInstance & ReactFlowNodeLookup;
 
   // ISOLATION COMPLÈTE: un seul useState pour éviter les conflits React Flow
   const [internalState, setInternalState] = useState({
@@ -371,11 +376,12 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             if (typeof measuredWidth === 'number' || typeof measuredHeight === 'number') {
               setReactFlowNodes((current) => current.map((n) => {
                 if (n.id !== nodeId) return n;
+                const measuredNode = n as ReactFlowNodeWithMeasuredSize;
                 return {
-                  ...n,
+                  ...measuredNode,
                   measured: {
-                    width: measuredWidth ?? n.measured?.width ?? n.width,
-                    height: measuredHeight ?? n.measured?.height ?? n.height,
+                    width: measuredWidth ?? measuredNode.measured?.width ?? measuredNode.width,
+                    height: measuredHeight ?? measuredNode.measured?.height ?? measuredNode.height,
                   },
                 };
               }));
@@ -385,8 +391,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             const movedNode = designState.nodes.find((candidate) => candidate.id === nodeId);
 
             // Prefer live visual position, fall back to design position
-            const liveNode = (reactFlowInstance && typeof (reactFlowInstance as any).getNode === 'function')
-              ? (reactFlowInstance as any).getNode(nodeId)
+            const liveNode = typeof reactFlowLookup.getNode === 'function'
+              ? reactFlowLookup.getNode(nodeId)
               : stableRefs.current.reactFlowNodes.find((n) => n.id === nodeId);
 
             const hasValidLivePosition = liveNode && Number.isFinite(liveNode.position?.x) && Number.isFinite(liveNode.position?.y);
@@ -400,8 +406,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             const subjectHeight = (typeof measuredHeight === 'number' && measuredHeight > 300) ? measuredHeight : expandedFallback.height;
 
             // Build live occupied rects from visual nodes
-            const liveNodes: ReactFlowNodeWithMeasuredSize[] = typeof (reactFlowInstance as typeof reactFlowInstance & { getNodes?: () => ReactFlowNodeWithMeasuredSize[] }).getNodes === 'function'
-              ? (reactFlowInstance as typeof reactFlowInstance & { getNodes: () => ReactFlowNodeWithMeasuredSize[] }).getNodes()
+            const liveNodes: ReactFlowNodeWithMeasuredSize[] = typeof reactFlowLookup.getNodes === 'function'
+              ? reactFlowLookup.getNodes()
               : (stableRefs.current.reactFlowNodes as ReactFlowNodeWithMeasuredSize[]);
 
             const occupiedNodeRects = liveNodes.flatMap((candidate) => {
@@ -434,7 +440,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               if (resolved && (resolved.x !== desiredPosition.x || resolved.y !== desiredPosition.y)) {
                 setReactFlowNodes((current) => current.map((n) => n.id === nodeId ? { ...n, position: resolved } : n));
                 // Apply visual-only correction; do not persist automatically on restore
-                (onUpdateNodePosition || (() => {}))(nodeId, resolved, { persist: false } as any);
+                (onUpdateNodePosition || (() => {}))(nodeId, resolved, { persist: false });
               }
             } catch (traceErr) {
               // Do not break UI on trace calculation failures

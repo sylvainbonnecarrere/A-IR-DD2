@@ -1,12 +1,15 @@
 import React from 'react';
 import { render } from '@testing-library/react';
-import { LLMProvider, RobotId } from '../../types';
+import { createTestAgent, createTestAgentInstance } from '../../tests/builders/domainBuilders';
+import { resetUseAgentChatHarness } from '../../tests/harnesses/useAgentChatHarness';
 
 const mockUseAgentJournalPersistence = jest.fn((_args?: unknown) => ({
     persistJournalEntry: jest.fn(),
     persistToolInvocation: jest.fn(),
     resetToolInvocationDedup: jest.fn(),
 }));
+
+let useAgentChatHarness = resetUseAgentChatHarness();
 
 jest.mock('../useAgentJournalPersistence', () => ({
     useAgentJournalPersistence: (args: unknown) => mockUseAgentJournalPersistence(args),
@@ -19,22 +22,23 @@ jest.mock('../../services/llmService', () => ({
 }));
 
 jest.mock('../../stores/useRuntimeStore', () => ({
-    useRuntimeStore: jest.fn(() => ({
-        getNodeMessages: jest.fn(() => []),
-        addNodeMessage: jest.fn(),
-        setNodeMessages: jest.fn(),
-        setNodeExecuting: jest.fn(),
-        localLLMProfiles: [],
-    })),
+    useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+        const { getUseAgentChatHarness } = require('../../tests/harnesses/useAgentChatHarness');
+        const state = getUseAgentChatHarness().runtimeStore;
+        return selector ? selector(state) : state;
+    }),
 }));
 
 jest.mock('../../stores/useFunctionStore', () => ({
-    useFunctionStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-        const state = {
-            functions: [],
-            loadFunctions: jest.fn(),
-        };
+    useFunctionStore: Object.assign(jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+        const { getUseAgentChatHarness } = require('../../tests/harnesses/useAgentChatHarness');
+        const state = getUseAgentChatHarness().functionStore;
         return selector ? selector(state) : state;
+    }), {
+        getState: () => {
+            const { getUseAgentChatHarness } = require('../../tests/harnesses/useAgentChatHarness');
+            return getUseAgentChatHarness().functionStore;
+        },
     }),
 }));
 
@@ -44,14 +48,8 @@ jest.mock('../../stores/useDesignStore', () => {
     return {
         ...actual,
         useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-            const state = {
-                agentInstances: [
-                    {
-                        id: 'instance-1',
-                        workflowId: 'workflow-1',
-                    }
-                ],
-            };
+            const { getUseAgentChatHarness } = require('../../tests/harnesses/useAgentChatHarness');
+            const state = getUseAgentChatHarness().designStore;
             return selector ? selector(state) : state;
         }),
     };
@@ -62,26 +60,28 @@ const { useAgentChat } = require('../useAgentChat');
 describe('useAgentChat', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        useAgentChatHarness = resetUseAgentChatHarness({
+            agent: createTestAgent({
+                id: 'agent-1',
+                name: 'Fullscreen Agent',
+                role: 'assistant',
+                systemPrompt: 'Be precise',
+            }),
+            agentInstance: createTestAgentInstance({
+                id: 'instance-1',
+                prototypeId: 'agent-1',
+                workflowId: 'workflow-1',
+            }),
+        });
     });
 
     function HookProbe() {
         useAgentChat({
             nodeId: 'node-1',
-            agent: {
-                id: 'agent-1',
-                name: 'Fullscreen Agent',
-                role: 'assistant',
-                systemPrompt: 'Be precise',
-                llmProvider: LLMProvider.OpenAI,
-                model: 'gpt-4o-mini',
-                capabilities: [],
-                creator_id: RobotId.Archi,
-                created_at: '2026-01-01T00:00:00.000Z',
-                updated_at: '2026-01-01T00:00:00.000Z',
-            },
+            agent: useAgentChatHarness.agent,
             llmConfigs: [],
             t: (key: string) => key,
-            instanceId: 'instance-1',
+            instanceId: useAgentChatHarness.agentInstance.id,
             isAuthenticated: true,
             accessToken: 'token-1',
         });

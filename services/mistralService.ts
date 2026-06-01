@@ -39,12 +39,20 @@ const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = 5,
     throw new Error("Request failed after multiple retries.");
 };
 
+const formatEmulatedToolResultMessage = (msg: ChatMessage) => {
+    const toolLabel = msg.toolName || msg.toolCallId || 'tool';
+    return `[TOOL RESULT: ${toolLabel}]\n${msg.text}`;
+};
+
 const formatMessages = (history?: ChatMessage[], systemInstruction?: string) => {
     const messages: any[] = [];
+    const pendingToolCallIds = new Set<string>();
+
     if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
     
     history?.forEach(msg => {
        if (msg.sender === 'user') {
+            pendingToolCallIds.clear();
            let content = msg.text || '';
             if (msg.fileContent && msg.filename) {
                 const formattedFilePreamble = `Voici le contenu du fichier \`${msg.filename}\` pour analyse :\n\n\`\`\`\n${msg.fileContent}\n\`\`\`\n\n`;
@@ -53,14 +61,32 @@ const formatMessages = (history?: ChatMessage[], systemInstruction?: string) => 
             messages.push({ role: 'user', content });
        }
        else if (msg.sender === 'agent' && !msg.toolCalls) {
+            pendingToolCallIds.clear();
             messages.push({ role: 'assistant', content: msg.text });
        }
        else if (msg.sender === 'agent' && msg.toolCalls) {
             // Added content: null as it's required for tool calls in OpenAI-compatible APIs. Fixes 422 error.
+            pendingToolCallIds.clear();
             messages.push({ role: 'assistant', content: null, tool_calls: msg.toolCalls.map(tc => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.arguments } })) });
+            msg.toolCalls.forEach((toolCall) => {
+                if (toolCall.id) {
+                    pendingToolCallIds.add(toolCall.id);
+                }
+            });
        }
-       else if (msg.sender === 'tool_result' || msg.sender === 'tool') {
-            messages.push({ role: 'tool', tool_call_id: msg.toolCallId, name: msg.toolName, content: msg.text });
+       else if (msg.sender === 'tool_result') {
+            if (msg.toolCallId && pendingToolCallIds.has(msg.toolCallId)) {
+                messages.push({ role: 'tool', tool_call_id: msg.toolCallId, name: msg.toolName, content: msg.text });
+                pendingToolCallIds.delete(msg.toolCallId);
+            } else {
+                pendingToolCallIds.clear();
+                messages.push({ role: 'user', content: formatEmulatedToolResultMessage(msg) });
+            }
+       }
+       else if (msg.sender === 'tool') {
+            // UI tool trace blocks are not valid native `tool` messages for Mistral.
+            // Only persisted tool_result messages that directly answer an assistant tool_call
+            // should use the native tool role.
        }
     });
     
