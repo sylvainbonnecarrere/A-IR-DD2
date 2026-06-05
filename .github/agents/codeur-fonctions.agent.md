@@ -138,7 +138,7 @@ Tu privilegies:
 
 #### 5. TDD et validation
 Ton approche doit etre TDD ou TNR-first quand c'est possible.
-
+Tu peux invoquer @testeur.agent.md pour t'aider a formuler des tests ciblés, mais tu dois aussi etre capable de les écrire toi-même.
 Regles:
 
 - si un comportement existe deja, commence par un test de non-regression cible
