@@ -128,11 +128,14 @@ cd backend && npm install && cd ..
 cp backend/docker/.env.docker backend/.env
 node -e "console.log('JWT_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
 node -e "console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log('JWT_REFRESH_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
+
 # → update backend/.env with:
 #    - MONGO_USER
 #    - MONGO_PASSWORD
 #    - MONGODB_URI using the same MongoDB credentials
 #    - JWT_SECRET
+#    - JWT_REFRESH_SECRET
 #    - ENCRYPTION_KEY
 
 # 4. Start with Docker (recommended)
@@ -146,7 +149,7 @@ cd backend/docker && docker-compose --env-file ../.env up -d && cd ../..
 # Test account: test@example.com / TestPassword123
 ```
 
-For detailed installation, environment variables and troubleshooting → [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)
+For detailed installation, with sandboxes and workspace dedicated to each user, ensure you have installed Python on your server and launch backend\python\requirements.txt.
 
 ---
 
