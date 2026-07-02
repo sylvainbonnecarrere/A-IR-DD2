@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
-import { Agent, ChatMessage, LLMCapability, LLMProvider, Tool, ToolCall, AgentInstance, ToolCallRecord } from '../types';
+import { Agent, ChatMessage, LLMCapability, LLMProvider, Tool, ToolCall, AgentInstance, ToolCallRecord, MapSource, MapsPanelPreloadedResults } from '../types';
 import { Button } from './UI';
 import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon, HistorySynthesisIcon, MaximizeIcon } from './Icons';
 import { ConfirmationModal } from './modals/ConfirmationModal';
@@ -338,6 +338,9 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   const clearNodePendingAttachment = useRuntimeStore((state) => state.clearNodePendingAttachment) ?? (() => undefined);
   const getNodeInvisibleHistorySummary = useRuntimeStore((state) => state.getNodeInvisibleHistorySummary) ?? (() => null);
   const setNodeInvisibleHistorySummary = useRuntimeStore((state) => state.setNodeInvisibleHistorySummary) ?? (() => undefined);
+  const setFullscreenChatNodeId = useRuntimeStore((state) => state.setFullscreenChatNodeId) ?? (() => undefined);
+  const setFullscreenChatAgent = useRuntimeStore((state) => state.setFullscreenChatAgent) ?? (() => undefined);
+  const setFullscreenChatAgentInstance = useRuntimeStore((state) => state.setFullscreenChatAgentInstance) ?? (() => undefined);
 
   // WorkflowCanvas context for navigation and node operations
   const {
@@ -388,7 +391,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
   // Résoudre la configuration effective (instance > prototype)
   // Créer un "agent effectif" qui utilise la config de l'instance si disponible
-  const effectiveAgent = agentInstance?.configuration_json ? {
+  const effectiveAgent: Agent = agentInstance?.configuration_json ? ({
     ...agent,
     role: agentInstance.configuration_json.role,
     llmProvider: agentInstance.configuration_json.llmProvider,
@@ -396,12 +399,12 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     systemPrompt: agentInstance.configuration_json.systemPrompt,
     tools: agentInstance.configuration_json.tools,
     toolSelections: agentInstance.configuration_json.toolSelections || (agentInstance as any).toolSelections || agent.toolSelections,
-    capabilities: agentInstance.configuration_json.capabilities,
+    capabilities: agentInstance.configuration_json.capabilities ?? agent.capabilities ?? [],
     outputConfig: agentInstance.configuration_json.outputConfig,
     webSearchParams: agentInstance.configuration_json.webSearchParams || agent.webSearchParams,
     historyConfig: agentInstance.configuration_json.historyConfig,
     localLLMProfileId: (agentInstance.configuration_json as any)?.localLLMProfileId || agent.localLLMProfileId,
-  } : agent;
+  }) as Agent : agent;
 
   const providerTools = useMemo(
     () => mergeProviderTools(effectiveAgent.tools, scopedFunctions),
@@ -682,7 +685,6 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   };
 
   const handleFullscreen = () => {
-    const { setFullscreenChatNodeId, setFullscreenChatAgent, setFullscreenChatAgentInstance } = useRuntimeStore.getState();
     setFullscreenChatNodeId(id);
     setFullscreenChatAgent(agent);
     setFullscreenChatAgentInstance(agentInstance);
@@ -897,15 +899,19 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           {
             authToken: accessToken ?? undefined,  // C1 FIX: JWT pour requireAuth sandbox
             onEvent: (event) => {
-              if (event.type === 'tool_call_start' && event.toolCall) {
-                const pendingKey = `${event.iteration}:${event.toolCall.name}:${JSON.stringify(event.toolCall.arguments)}`;
+              if (event.type === 'tool_call_start') {
+                const startedToolCall = event.toolCall ?? null;
+                if (!startedToolCall) {
+                  return;
+                }
+                const pendingKey = `${event.iteration}:${startedToolCall.name}:${JSON.stringify(startedToolCall.arguments)}`;
                 const pendingMessageId = pendingLocalToolMessageIdsRef.current[pendingKey] ?? generateMessageId('pending-tool');
                 pendingLocalToolMessageIdsRef.current[pendingKey] = pendingMessageId;
-                const matchedFunction = enabledFunctions.find((fn) => fn.name === event.toolCall.name);
-                if (event.toolCall.id) {
+                const matchedFunction = enabledFunctions.find((fn) => fn.name === startedToolCall.name);
+                if (startedToolCall.id) {
                   persistToolInvocation({
-                    toolCallId: event.toolCall.id,
-                    toolName: event.toolCall.name,
+                    toolCallId: startedToolCall.id,
+                    toolName: startedToolCall.name,
                     phase: 'started',
                     toolId: matchedFunction?.toolId ?? matchedFunction?._id,
                     functionId: matchedFunction?._id,
@@ -913,13 +919,14 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
                 }
                 upsertChatMessage(buildPendingToolCallMessage(
                   pendingMessageId,
-                  event.toolCall.name,
-                  event.toolCall.arguments,
+                  startedToolCall.name,
+                  startedToolCall.arguments,
                   new Date()
                 ));
-                setLoadingMessage(`🔧 ${event.toolCall.name}`);
+                setLoadingMessage(`🔧 ${startedToolCall.name}`);
               } else if (event.type === 'tool_call_done' && event.toolCall && event.toolCallRecord) {
-                const pendingKey = `${event.iteration}:${event.toolCall.name}:${JSON.stringify(event.toolCall.arguments)}`;
+                const completedToolCall = event.toolCall;
+                const pendingKey = `${event.iteration}:${completedToolCall.name}:${JSON.stringify(completedToolCall.arguments)}`;
                 const pendingMessageId = pendingLocalToolMessageIdsRef.current[pendingKey];
                 persistToolInvocation({
                   toolCallId: event.toolCallRecord.id,
@@ -1338,7 +1345,8 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
   const handleEditImage = (imageBase64: string, mimeType: string) => {
     if (onOpenImageModificationPanel) {
-      onOpenImageModificationPanel(id, imageBase64, data.agent, data.agentInstance, mimeType);
+      const imageAgent: Agent | undefined = agent ?? undefined;
+      onOpenImageModificationPanel(id, imageBase64, imageAgent, data.agentInstance, mimeType);
     } else {
       console.warn(`[V2AgentNode ${id}] onOpenImageModificationPanel is not available from context`);
     }
@@ -1507,25 +1515,28 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
             )}
 
             {/* Maps Grounding Results */}
-            {message.mapsGrounding && message.mapsGrounding.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-gray-600">
+            {message.mapsGrounding && message.mapsGrounding.length > 0 && (() => {
+              const mapSources: MapSource[] = message.mapsGrounding ? [...message.mapsGrounding] : [];
+              const preloadedResults: MapsPanelPreloadedResults = {
+                text: message.text,
+                mapSources,
+                query: message.text.substring(0, 100),
+              };
+
+              return <div className="mt-3 pt-3 border-t border-gray-600">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs font-semibold text-cyan-400">
-                    🗺️ Lieux trouvés ({message.mapsGrounding.length})
+                    🗺️ Lieux trouvés ({mapSources.length})
                   </div>
                   <button
-                    onClick={() => onOpenMapsPanel && onOpenMapsPanel(id, {
-                      text: message.text,
-                      mapSources: message.mapsGrounding,
-                      query: message.text.substring(0, 100)
-                    })}
+                    onClick={() => onOpenMapsPanel && onOpenMapsPanel(id, preloadedResults)}
                     className="text-xs px-2 py-1 bg-cyan-600 hover:bg-cyan-700 text-white rounded transition-colors"
                   >
                     🗺️ Voir la carte
                   </button>
                 </div>
                 <div className="space-y-2">
-                  {message.mapsGrounding.slice(0, 3).map((place, index) => (
+                  {mapSources.slice(0, 3).map((place, index) => (
                     <div key={index} className="bg-gray-800/50 rounded p-2 text-xs">
                       <div className="font-semibold text-white mb-1">{place.placeTitle}</div>
                       {place.coordinates && (
@@ -1543,14 +1554,14 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
                       </a>
                     </div>
                   ))}
-                  {message.mapsGrounding.length > 3 && (
+                  {mapSources.length > 3 && (
                     <div className="text-xs text-gray-400 text-center py-1">
-                      +{message.mapsGrounding.length - 3} autres lieux (cliquez sur "Voir la carte")
+                      +{mapSources.length - 3} autres lieux (cliquez sur "Voir la carte")
                     </div>
                   )}
                 </div>
-              </div>
-            )}
+              </div>;
+            })()}
 
             {/* Web Search Grounding Results */}
             {message.webSearchGrounding && message.webSearchGrounding.length > 0 && (

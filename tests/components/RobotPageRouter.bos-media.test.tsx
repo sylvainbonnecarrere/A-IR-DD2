@@ -21,11 +21,7 @@ describe('RobotPageRouter BOS media button', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    (useLocalization as unknown as jest.Mock).mockReturnValue({
-      t: (key: string, fallback?: string) => fallback || key,
-    });
-
-    (useDesignStore as unknown as jest.Mock).mockReturnValue({
+    const designStoreState = {
       workflows: [
         {
           _id: 'wf-1',
@@ -33,7 +29,15 @@ describe('RobotPageRouter BOS media button', () => {
         },
       ],
       currentWorkflowId: 'wf-1',
+    };
+
+    (useLocalization as unknown as jest.Mock).mockReturnValue({
+      t: (key: string, fallback?: string) => fallback || key,
     });
+
+    (useDesignStore as unknown as jest.Mock).mockImplementation((selector?: (state: typeof designStoreState) => unknown) => (
+      selector ? selector(designStoreState) : designStoreState
+    ));
   });
 
   it('shows the media button on the BOS workflow map and opens the modal for the active workflow', () => {

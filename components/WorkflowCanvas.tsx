@@ -29,7 +29,7 @@ import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useAuth } from '../contexts/AuthContext';
 import { isValidWorkflowConnection } from './workflow/connectionContracts';
 import { registerReactFlowWarningProbe } from '../utils/reactFlowWarningDiagnostics';
-import { findCollisionFreeWorkflowNodePosition } from '../utils/workflowNodePlacement';
+import { findCollisionFreeWorkflowNodePosition, type WorkflowNodeCollisionRect } from '../utils/workflowNodePlacement';
 import { projectWorkflowNodesToReactFlowNodes, type CanvasWorkflowNode } from '../services/workflowNodeReactFlowAdapter';
 import { publishHydrationComponentReady, recordHydrationLayoutMark } from '../utils/hydrationComponentReadiness';
 
@@ -67,15 +67,36 @@ const EDGE_TYPES = Object.freeze({});
 const REACT_FLOW_STYLE = Object.freeze({ background: 'transparent' });
 const DEFAULT_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 0.7 });
 const PRO_OPTIONS = Object.freeze({ hideAttribution: true });
-const EMPTY_WORKFLOW_NODES = Object.freeze([]) as WorkflowNode[];
-const EMPTY_LLM_CONFIGS = Object.freeze([]) as LLMConfig[];
-const EMPTY_AGENTS = Object.freeze([]) as Agent[];
+const createMutableArray = <T,>(): T[] => Array.from<T>({ length: 0 });
+const EMPTY_WORKFLOW_NODES = createMutableArray<WorkflowNode>();
+const EMPTY_LLM_CONFIGS = createMutableArray<LLMConfig>();
+const EMPTY_AGENTS = createMutableArray<Agent>();
 let workflowCanvasMountSequence = 0;
 type ReactFlowNodeWithMeasuredSize = Node & { measured?: { height?: number; width?: number } };
 type ReactFlowNodeLookup = {
   getNode?: (nodeId: string) => ReactFlowNodeWithMeasuredSize | undefined;
   getNodes?: () => ReactFlowNodeWithMeasuredSize[];
 };
+
+const normalizeOptionalDimension = (value: number | null | undefined): number | undefined => (
+  typeof value === 'number' ? value : undefined
+);
+
+const buildCollisionRect = (params: {
+  nodeId: string;
+  instanceId?: string;
+  position: { x: number; y: number };
+  workflowId: string | null;
+  width?: number;
+  height?: number;
+}): WorkflowNodeCollisionRect => ({
+  nodeId: params.nodeId,
+  instanceId: params.instanceId,
+  position: params.position,
+  workflowId: params.workflowId,
+  width: normalizeOptionalDimension(params.width),
+  height: normalizeOptionalDimension(params.height),
+});
 
 // Composant interne avec accès à useReactFlow
 const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCanvasProps) {
@@ -276,23 +297,30 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     const liveNodes: ReactFlowNodeWithMeasuredSize[] = typeof (reactFlowInstance as typeof reactFlowInstance & { getNodes?: () => ReactFlowNodeWithMeasuredSize[] }).getNodes === 'function'
       ? (reactFlowInstance as typeof reactFlowInstance & { getNodes: () => ReactFlowNodeWithMeasuredSize[] }).getNodes()
       : stableRefs.current.reactFlowNodes as ReactFlowNodeWithMeasuredSize[];
-    const getNodeWidth = (candidate?: ReactFlowNodeWithMeasuredSize) => candidate?.measured?.width ?? candidate?.width;
-    const getNodeHeight = (candidate?: ReactFlowNodeWithMeasuredSize) => candidate?.measured?.height ?? candidate?.height;
+    const getNodeWidth = (candidate?: ReactFlowNodeWithMeasuredSize) => normalizeOptionalDimension(candidate?.measured?.width ?? candidate?.width);
+    const getNodeHeight = (candidate?: ReactFlowNodeWithMeasuredSize) => normalizeOptionalDimension(candidate?.measured?.height ?? candidate?.height);
     const movedLiveNode = liveNodes.find((candidate) => candidate.id === nodeId);
-    const occupiedNodeRects = liveNodes.flatMap((candidate) => {
+    const occupiedNodeRects: WorkflowNodeCollisionRect[] = [];
+    for (const candidate of liveNodes) {
       if (!Number.isFinite(candidate.position?.x) || !Number.isFinite(candidate.position?.y)) {
-        return [];
+        continue;
       }
 
-      return [{
+      const width = getNodeWidth(candidate);
+      const height = getNodeHeight(candidate);
+
+      occupiedNodeRects.push(buildCollisionRect({
         nodeId: candidate.id,
         instanceId: candidate.data?.agentInstance?.id,
         position: candidate.position,
         workflowId: candidate.data?.workflowId ?? candidate.data?.agentInstance?.workflowId ?? nodeWorkflowId ?? null,
-        width: getNodeWidth(candidate),
-        height: getNodeHeight(candidate),
-      }];
-    });
+        width,
+        height,
+      }));
+    }
+
+    const subjectWidth = normalizeOptionalDimension(draggedNodeSize?.width) ?? getNodeWidth(movedLiveNode);
+    const subjectHeight = normalizeOptionalDimension(draggedNodeSize?.height) ?? getNodeHeight(movedLiveNode);
 
     const gestureVector = movedNode?.position && desiredPosition
       ? { x: desiredPosition.x - movedNode.position.x, y: desiredPosition.y - movedNode.position.y }
@@ -308,8 +336,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       agentInstances: designState.agentInstances,
       occupiedNodeRects,
       subjectSize: {
-        width: draggedNodeSize?.width ?? getNodeWidth(movedLiveNode),
-        height: draggedNodeSize?.height ?? getNodeHeight(movedLiveNode),
+        width: subjectWidth,
+        height: subjectHeight,
       },
       gestureVector,
     });
@@ -318,8 +346,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   const onNodeDragStop = useCallback((_: unknown, node: ReactFlowNodeWithMeasuredSize) => {
     try {
       const resolvedPosition = resolveDroppedNodePosition(node.id, node.position, {
-        width: node.measured?.width ?? node.width,
-        height: node.measured?.height ?? node.height,
+        width: normalizeOptionalDimension(node.measured?.width ?? node.width),
+        height: normalizeOptionalDimension(node.measured?.height ?? node.height),
       });
 
       setReactFlowNodes((currentNodes) => currentNodes.map((currentNode) => {
@@ -412,17 +440,24 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               ? reactFlowLookup.getNodes()
               : (stableRefs.current.reactFlowNodes as ReactFlowNodeWithMeasuredSize[]);
 
-            const occupiedNodeRects = liveNodes.flatMap((candidate) => {
-              if (!Number.isFinite(candidate.position?.x) || !Number.isFinite(candidate.position?.y)) return [];
-              return [{
+            const occupiedNodeRects: WorkflowNodeCollisionRect[] = [];
+            for (const candidate of liveNodes) {
+              if (!Number.isFinite(candidate.position?.x) || !Number.isFinite(candidate.position?.y)) {
+                continue;
+              }
+
+              const width = normalizeOptionalDimension(candidate.measured?.width ?? candidate.width);
+              const height = normalizeOptionalDimension(candidate.measured?.height ?? candidate.height);
+
+              occupiedNodeRects.push(buildCollisionRect({
                 nodeId: candidate.id,
                 instanceId: candidate.data?.agentInstance?.id,
                 position: candidate.position,
                 workflowId: candidate.data?.workflowId ?? candidate.data?.agentInstance?.workflowId ?? workflowId ?? null,
-                width: candidate.measured?.width ?? candidate.width,
-                height: candidate.measured?.height ?? candidate.height,
-              }];
-            });
+                width,
+                height,
+              }));
+            }
 
             // Ask placement util for a non-overlapping position using expanded subject size
             try {

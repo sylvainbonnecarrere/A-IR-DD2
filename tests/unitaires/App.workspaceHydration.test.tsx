@@ -25,6 +25,17 @@ let mockDesignStore = mockAppHydrationHarness.designStore;
 let mockWorkflowStore = mockAppHydrationHarness.workflowStore;
 let mockFunctionStore = mockAppHydrationHarness.functionStore;
 
+const requireResolver = <T extends (...args: any[]) => any>(
+    resolver: T | null | undefined,
+    label: string,
+): T => {
+    if (!resolver) {
+        throw new Error(`${label} not initialized`);
+    }
+
+    return resolver;
+};
+
 const waitForHydrationOverlayIdle = () => waitFor(
     () => expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle'),
     { timeout: 2000 }
@@ -639,7 +650,7 @@ describe('App workspace hydration orchestration', () => {
 
         expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('loading');
 
-        resolveWorkspace?.({ data: workspacePayload });
+        requireResolver(resolveWorkspace, 'resolveWorkspace')({ data: workspacePayload });
 
         await waitFor(() => expect(apiClient.get).toHaveBeenCalledTimes(1));
         await waitForHydrationOverlayIdle();
@@ -699,7 +710,7 @@ describe('App workspace hydration orchestration', () => {
             expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle');
             expect(sessionStorage.getItem('_arc_hydrating')).toBeNull();
 
-            resolveDeferredLoad?.();
+            requireResolver(resolveDeferredLoad, 'resolveDeferredLoad')();
             await act(async () => {
                 await Promise.resolve();
             });
@@ -738,7 +749,7 @@ describe('App workspace hydration orchestration', () => {
         await waitFor(() => expect(mockDesignStore.loadUserWorkflows).toHaveBeenCalledTimes(1));
         expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('loading');
 
-        resolveWorkflowLoad?.();
+        requireResolver(resolveWorkflowLoad, 'resolveWorkflowLoad')();
 
         await waitForHydrationOverlayIdle();
         expect(sessionStorage.getItem('_arc_hydrating')).toBeNull();
@@ -890,7 +901,7 @@ describe('App workspace hydration orchestration', () => {
         await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/api/user/workspace'));
         expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('loading');
 
-        resolveProjection?.([
+        requireResolver(resolveProjection, 'resolveProjection')([
             {
                 id: 'persisted-tool-msg',
                 sender: 'tool',
