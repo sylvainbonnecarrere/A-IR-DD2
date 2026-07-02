@@ -52,6 +52,10 @@ interface EditingImageInfo {
   agentInstance?: AgentInstance;
 }
 
+function isRobotId(robotId: string): robotId is RobotId {
+  return Object.values(RobotId).includes(robotId as RobotId);
+}
+
 /**
  * Inner App component that uses Auth context
  * Must be wrapped by AuthProvider to access useAuth()
@@ -95,14 +99,25 @@ export function AppContent() {
   const currentRouteUsesWorkflowCanvas = currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosDashboard
     || currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosSupervision;
 
-  const handleRobotNavigation = (robotId: RobotId, path: string) => {
+  const handleRobotNavigation = useCallback((robotId: RobotId, path: string) => {
     setCurrentPath(path);
     // TODO: Implement proper routing logic
     console.log(`Navigating to robot ${robotId} at path ${path}`);
-  };
+  }, []);
 
-  // Shows when: first load as guest OR after logout
-  const [showHyperspace, setShowHyperspace] = useState(!isAuthenticated);
+  const handleRuntimeNavigation = useCallback((robotId: string, path: string) => {
+    if (!isRobotId(robotId)) {
+      console.warn('[App] Ignoring navigation request with unknown robotId:', robotId);
+      return;
+    }
+
+    handleRobotNavigation(robotId, path);
+  }, [handleRobotNavigation]);
+
+  // Shows only after an authenticated session drops back to guest mode.
+  // Avoid mounting the heavy entry animation on cold guest boot because it can
+  // monopolize the main thread before the canvas becomes interactive.
+  const [showHyperspace, setShowHyperspace] = useState(false);
   const [hyperspaceActive, setHyperspaceActive] = useState(false);
   const wasAuthenticatedRef = React.useRef(isAuthenticated);
   
@@ -138,7 +153,10 @@ export function AppContent() {
   }, []);
 
   // Runtime Store access
-  const { updateLLMConfigs, updateLocalLLMProfiles, setNavigationHandler, addNodeMessage } = useRuntimeStore();
+  const updateLLMConfigs = useRuntimeStore((state) => state.updateLLMConfigs);
+  const updateLocalLLMProfiles = useRuntimeStore((state) => state.updateLocalLLMProfiles);
+  const setNavigationHandler = useRuntimeStore((state) => state.setNavigationHandler);
+  const addNodeMessage = useRuntimeStore((state) => state.addNodeMessage);
   const runtimeStoreLLMConfigs = useRuntimeStore((state) => state.llmConfigs);
   const runtimeStoreLocalLLMProfiles = useRuntimeStore((state) => state.localLLMProfiles);
   const runtimeNodeMessages = useRuntimeStore((state) => state.nodeMessages);
@@ -146,26 +164,24 @@ export function AppContent() {
   const localLLMProfiles = runtimeStoreLocalLLMProfiles.length > 0 ? runtimeStoreLocalLLMProfiles : authLocalLLMProfiles;
 
   // Design Store access for integrity validation  
-  const {
-    agents: designAgents,
-    validateWorkflowIntegrity,
-    cleanupOrphanedInstances,
-    addAgentInstance,
-    deleteNode,
-    deleteAgentInstance,
-    hydrateFromServer,
-    updateInstanceId,
-    updateAgentInstance,
-    addNode,
-    updateNode,
-    agentInstances,
-    nodes: storeNodes,
-    workflows: designWorkflows,
-    currentWorkflowId: designCurrentWorkflowId,
-  } = useDesignStore();
+  const designAgents = useDesignStore((state) => state.agents);
+  const validateWorkflowIntegrity = useDesignStore((state) => state.validateWorkflowIntegrity);
+  const cleanupOrphanedInstances = useDesignStore((state) => state.cleanupOrphanedInstances);
+  const addAgentInstance = useDesignStore((state) => state.addAgentInstance);
+  const deleteNode = useDesignStore((state) => state.deleteNode);
+  const deleteAgentInstance = useDesignStore((state) => state.deleteAgentInstance);
+  const hydrateFromServer = useDesignStore((state) => state.hydrateFromServer);
+  const updateInstanceId = useDesignStore((state) => state.updateInstanceId);
+  const updateAgentInstance = useDesignStore((state) => state.updateAgentInstance);
+  const addNode = useDesignStore((state) => state.addNode);
+  const updateNode = useDesignStore((state) => state.updateNode);
+  const agentInstances = useDesignStore((state) => state.agentInstances);
+  const storeNodes = useDesignStore((state) => state.nodes);
+  const designWorkflows = useDesignStore((state) => state.workflows);
+  const designCurrentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
 
   // ⭐ SELF-HEALING: Workflow Store for hydrating workflow ID
-  const { getCurrentWorkflowId } = useWorkflowStore();
+  const getCurrentWorkflowId = useWorkflowStore((state) => state.getCurrentWorkflowId);
   
   // ⭐ FIX QA: Journal queue for persisting generated images
   const { enqueueEntry: enqueueJournalEntry } = useJournalQueue();
@@ -213,6 +229,19 @@ export function AppContent() {
     setCurrentMapsNodeId(null);
     setMapsPreloadedResults(null);
   }, []);
+
+  const resetGuestShellState = useCallback(() => {
+    clearTransientUiState();
+    setSettingsModalOpen(false);
+    setLoginModalOpen(false);
+    setRegisterModalOpen(false);
+    setFullscreenImage(null);
+    setIsSwitchingWorkflow(false);
+    setSwitchProgress(0);
+    setSwitchWorkflowName('');
+    isSwitchingRef.current = false;
+    setCurrentPath('/bos/dashboard');
+  }, [clearTransientUiState]);
 
   /**
    * ⭐ V2 SWITCH WORKFLOW: Fonction unifiée de réhydratation complète
@@ -347,8 +376,13 @@ export function AppContent() {
       return;
     }
 
+    if (!isAuthenticated) {
+      resetGuestShellState();
+      return;
+    }
+
     clearTransientUiState();
-  }, [clearTransientUiState, isAuthenticated, user?.id]);
+  }, [clearTransientUiState, isAuthenticated, resetGuestShellState, user?.id]);
 
   useEffect(() => {
     if (isAuthenticated && authRuntimeLLMConfigs.length === 0 && runtimeStoreLLMConfigs.length > 0) {
@@ -418,8 +452,8 @@ export function AppContent() {
 
   // Configure navigation handler for agent nodes
   useEffect(() => {
-    setNavigationHandler(handleRobotNavigation);
-  }, [setNavigationHandler]);
+    setNavigationHandler(handleRuntimeNavigation);
+  }, [handleRuntimeNavigation, setNavigationHandler]);
 
   // PHASE 1B: Integrity validation on app startup + Migration legacy nodes
   useEffect(() => {
@@ -539,12 +573,14 @@ export function AppContent() {
         
         // ✅ ÉTAPE 2: Synchroniser l'instance complète du backend avec Zustand
         // Le backend retourne l'instance avec configuration_json enrichie
-        if (result.backendId && result.instance) {
+        const backendId = result.backendId;
+        if (backendId && result.instance) {
+          const persistedBackendId: string = backendId;
           
           // ✅ Remplacer l'instance temporaire par l'instance backend complète
           // Incluant la configuration_json qui sera utilisée dans AgentConfigurationModal
           const backendInstance: AgentInstance = {
-            id: result.backendId,
+            id: persistedBackendId,
             prototypeId: agent.id,
             name: instanceName,
             position,
@@ -570,24 +606,26 @@ export function AppContent() {
           };
           
           // ✅ CRITICAL: Update instance ID AND content in Zustand store
-          if (result.backendId !== instanceId) {
+          if (persistedBackendId !== instanceId) {
             const fromNodeId = `node-${instanceId}`;
-            const toNodeId = `node-${result.backendId}`;
+            const toNodeId = `node-${persistedBackendId}`;
 
-            updateInstanceId(instanceId, result.backendId);
+            updateInstanceId(instanceId, persistedBackendId);
             useRuntimeStore.getState().renameNodeRuntimeState(fromNodeId, toNodeId);
 
             setCurrentImageNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
-            setCurrentImageAgentInstance((agentInstance) => remapAgentInstanceReference(agentInstance, instanceId, result.backendId, workflowId));
+            setCurrentImageAgentInstance((agentInstance) => remapAgentInstanceReference(agentInstance, instanceId, persistedBackendId, workflowId));
             setCurrentVideoNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
-            setCurrentVideoAgentInstance((agentInstance) => remapAgentInstanceReference(agentInstance, instanceId, result.backendId, workflowId));
+            setCurrentVideoAgentInstance((agentInstance) => remapAgentInstanceReference(agentInstance, instanceId, persistedBackendId, workflowId));
             setCurrentMapsNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
-            setEditingImageInfo((imageInfo) => remapEditingImageInfo(imageInfo, fromNodeId, toNodeId, instanceId, result.backendId, workflowId));
+            setEditingImageInfo((imageInfo) => remapEditingImageInfo(imageInfo, fromNodeId, toNodeId, instanceId, persistedBackendId, workflowId));
           }
           // ✅ Ensuite mettre à jour la configuration complète
           // Use getState() for stable reference (avoid dependency on updateAgentInstance)
-          useDesignStore.getState().updateAgentInstance(result.backendId, backendInstance);
-          finalInstanceId = result.backendId;
+          useDesignStore.getState().updateAgentInstance(persistedBackendId, backendInstance);
+          finalInstanceId = persistedBackendId;
+        } else if (!backendId) {
+          console.error('[App] ❌ Persisted agent instance is missing backendId:', result.instance);
         }
       } else {
         console.error('[App] ❌ Failed to persist agent instance:', result.error);

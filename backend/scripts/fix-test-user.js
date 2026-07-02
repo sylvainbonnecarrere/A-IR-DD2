@@ -110,7 +110,7 @@ async function fixTestUser() {
         console.log(`   Status: PRÊT POUR LE TEST D'AUTHENTIFICATION ✅\n`);
         console.log('➡️  Prochaine étape: Tester la connexion via l\'application');
         console.log('   1. Lancez le frontend: npm run dev');
-        console.log('   2. Allez à http://localhost:5173');
+        console.log('   2. Allez à http://127.0.0.1:4000');
         console.log('   3. Cliquez "Connexion"');
         console.log(`   4. Entrez: ${TEST_EMAIL} / ${TEST_PASSWORD}\n`);
 

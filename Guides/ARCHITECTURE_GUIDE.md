@@ -794,7 +794,7 @@ describe('Image Generation Workflow', () => {
 ```typescript
 // e2e/workflow.spec.ts
 test('complete agent workflow', async ({ page }) => {
-  await page.goto('http://localhost:5173');
+  await page.goto('http://127.0.0.1:4000');
   
   // Créer agent
   await page.click('[aria-label="Archi"]');

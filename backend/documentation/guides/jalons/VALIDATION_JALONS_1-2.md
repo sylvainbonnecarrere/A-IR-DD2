@@ -191,7 +191,7 @@ users
 ## ✅ NON-RÉGRESSION GUEST MODE
 
 ### Frontend Test
-**URL**: http://localhost:5173  
+**URL**: http://127.0.0.1:4000  
 **Résultat**: ✅ Mode Guest fonctionne à l'identique
 
 **Vérifications**:

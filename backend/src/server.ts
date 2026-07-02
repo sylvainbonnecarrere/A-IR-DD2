@@ -44,7 +44,7 @@ app.use(helmet());
 app.use(mongoSanitize());
 
 // Configuration CORS
-// In development, accept any localhost port (5173, 5174, 5175, 3000, etc.)
+// In development, accept any localhost port (4000, 5174, 5175, 3000, etc.)
 // In production, use FRONTEND_URL env var
 const corsOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
   if (!origin) {
@@ -55,7 +55,7 @@ const corsOrigin = (origin: string | undefined, callback: (err: Error | null, al
 
   const isLocalhost = origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
   const isProduction = process.env.NODE_ENV === 'production';
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4000';
 
   if (isProduction) {
     // Production: strict CORS - only accept configured frontend URL

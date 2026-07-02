@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ChatMessage, InvisibleHistorySummaryState, LLMConfig, LLMProvider, LocalLLMProfile, PendingNodeAttachment } from '../types';
+import { ChatMessage, InvisibleHistorySummaryState, LLMConfig, LLMProvider, LocalLLMProfile, PendingNodeAttachment, RobotId } from '../types';
 
 const isDevelopmentEnvironment = process.env.NODE_ENV !== 'production';
 
@@ -99,7 +99,7 @@ interface RuntimeStore {
   minimizedNodeIds: Set<string>; // nodeIds currently in minimized state
 
   // Navigation state (for V2AgentNode edit functionality)
-  navigationHandler: ((robotId: string, path: string) => void) | null;
+  navigationHandler: ((robotId: RobotId, path: string) => void) | null;
 
   // ⭐ ÉTAPE 3: Persistence & Deduplication
   lastSavedAt: Record<string, Date | null>; // nodeId -> timestamp of last successful save
@@ -129,7 +129,7 @@ interface RuntimeStore {
   setFullscreenChatAgent: (agent: any | null) => void;
   setFullscreenChatAgentInstance?: (agentInstance: any | null) => void; // ⭐ setter for instanceId
   setConfigModalInstanceId: (instanceId: string | null) => void;
-  setNavigationHandler: (handler: ((robotId: string, path: string) => void) | null) => void;
+  setNavigationHandler: (handler: ((robotId: RobotId, path: string) => void) | null) => void;
 
   // ⭐ NOUVEAU: Node Minimize Actions
   toggleNodeMinimized: (nodeId: string) => void;

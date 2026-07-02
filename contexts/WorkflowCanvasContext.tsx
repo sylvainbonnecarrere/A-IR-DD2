@@ -1,9 +1,9 @@
 import React, { createContext, useContext } from 'react';
-import { Agent, AgentInstance, MapsPanelPreloadedResults, NodePositionUpdateOptions } from '../types';
+import { Agent, AgentInstance, MapsPanelPreloadedResults, NodePositionUpdateOptions, RobotId } from '../types';
 
 interface WorkflowCanvasContextType {
   onEditPrototype?: (nodeId: string) => void;
-  navigationHandler?: (robotId: string, path: string) => void;
+  navigationHandler?: (robotId: RobotId, path: string) => void;
   onDeleteNode?: (nodeId: string) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;

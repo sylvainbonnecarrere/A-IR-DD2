@@ -21,6 +21,18 @@ This professional Docker setup implements a **Code-First** initialization archit
 
 ## 🚀 Quick Start Guide
 
+### Phase 0: Select the Supported Node Runtime
+
+The repository now targets **Node 25.9.x**.
+
+On Windows with `nvm-windows`, open the backend or repo shell with:
+
+```powershell
+. .\scripts\Enter-NodeVersionShell.ps1 -Version 25.9.0
+```
+
+If you launch the command from `backend/docker`, return to the repo root first so the helper path resolves correctly.
+
 ### Phase 1: Reset Infrastructure (First-Time Setup)
 
 **CRITICAL** ⚠️ If you have an existing MongoDB volume from the previous approach:
@@ -148,7 +160,7 @@ After successful installation:
 1. ✅ MongoDB running: `docker-compose ps`
 2. ✅ Backend running: `curl http://localhost:3001/api/health`
 3. ✅ Frontend running: `npm run dev` (from root)
-4. Open http://localhost:5173
+4. Open http://127.0.0.1:4000
 5. Click "Connexion" (Login)
 6. Enter credentials:
    - Email: **`test@example.com`**
@@ -357,6 +369,18 @@ npm run dev
 ---
 
 ## 🔄 Development Workflow
+
+### Node 25 Verification Slice
+```bash
+# From repo root, after selecting Node 25.9.x
+npm install
+cd backend
+npm install
+cd ..
+npm run ci:node25:runtime
+```
+
+This slice validates the workspace runtime roots, Docker sandbox orchestration, and compatibility for user-created tool/function execution before broader manual QA.
 
 ### Daily Startup
 ```bash

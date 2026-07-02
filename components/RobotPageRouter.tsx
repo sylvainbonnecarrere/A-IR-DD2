@@ -140,7 +140,8 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
   onAddToWorkflow,
 }) => {
   const { t } = useLocalization();
-  const { workflows, currentWorkflowId } = useDesignStore();
+  const workflows = useDesignStore((state) => state.workflows);
+  const currentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
   const [showBosMediaModal, setShowBosMediaModal] = useState(false);
   const resolvedRoute = useMemo(() => resolveRobotPageRoute(currentPath), [currentPath]);
   const activeWorkflow = useMemo(

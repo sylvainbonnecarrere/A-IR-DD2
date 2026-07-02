@@ -53,6 +53,15 @@ export const getQueryClient = (): QueryClient => {
     return queryClient;
 };
 
+export const clearQueryClient = (): void => {
+    if (!queryClient) {
+        return;
+    }
+
+    void queryClient.cancelQueries();
+    queryClient.clear();
+};
+
 interface QueryProviderProps {
     children: ReactNode;
 }

@@ -16,6 +16,50 @@ export interface RuntimeBootstrapState {
     localLLMProfiles: LocalLLMProfile[];
 }
 
+const authenticatedBootstrapLoads = new Map<string, Promise<RuntimeBootstrapState>>();
+let guestBootstrapLoad: Promise<RuntimeBootstrapState> | null = null;
+
+function trackAuthenticatedBootstrap(
+    cacheKey: string,
+    promiseFactory: () => Promise<RuntimeBootstrapState>,
+): Promise<RuntimeBootstrapState> {
+    const existingPromise = authenticatedBootstrapLoads.get(cacheKey);
+    if (existingPromise) {
+        return existingPromise;
+    }
+
+    const trackedPromise = promiseFactory().finally(() => {
+        if (authenticatedBootstrapLoads.get(cacheKey) === trackedPromise) {
+            authenticatedBootstrapLoads.delete(cacheKey);
+        }
+    });
+
+    authenticatedBootstrapLoads.set(cacheKey, trackedPromise);
+    return trackedPromise;
+}
+
+function trackGuestBootstrap(
+    promiseFactory: () => Promise<RuntimeBootstrapState>,
+): Promise<RuntimeBootstrapState> {
+    if (guestBootstrapLoad) {
+        return guestBootstrapLoad;
+    }
+
+    const trackedPromise = promiseFactory().finally(() => {
+        if (guestBootstrapLoad === trackedPromise) {
+            guestBootstrapLoad = null;
+        }
+    });
+
+    guestBootstrapLoad = trackedPromise;
+    return trackedPromise;
+}
+
+export function resetRuntimeBootstrapLoadCacheForTests(): void {
+    authenticatedBootstrapLoads.clear();
+    guestBootstrapLoad = null;
+}
+
 async function fetchLLMApiKeys(token: string, retryCount = 0): Promise<LLMApiKey[]> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -63,38 +107,42 @@ async function loadLocalLLMProfiles(token?: string): Promise<LocalLLMProfile[]> 
 }
 
 export async function loadAuthenticatedRuntimeBootstrap(token: string): Promise<RuntimeBootstrapState> {
-    const [keys, profiles] = await Promise.all([
-        fetchLLMApiKeys(token),
-        loadLocalLLMProfiles(token),
-    ]);
-
-    return {
-        llmApiKeys: keys,
-        runtimeLLMConfigs: buildRuntimeConfigsFromApiKeys(keys),
-        localLLMProfiles: profiles,
-    };
-}
-
-export async function loadGuestRuntimeBootstrap(): Promise<RuntimeBootstrapState> {
-    try {
-        const [guestConfigs, guestProfiles] = await Promise.all([
-            llmConfigService.getAllLLMConfigs({ useApi: false }),
-            localLLMProfileService.getAllProfiles({ useApi: false }),
+    return trackAuthenticatedBootstrap(token, async () => {
+        const [keys, profiles] = await Promise.all([
+            fetchLLMApiKeys(token),
+            loadLocalLLMProfiles(token),
         ]);
 
         return {
-            llmApiKeys: null,
-            runtimeLLMConfigs: buildRuntimeConfigsFromUiConfigs(guestConfigs),
-            localLLMProfiles: guestProfiles,
+            llmApiKeys: keys,
+            runtimeLLMConfigs: buildRuntimeConfigsFromApiKeys(keys),
+            localLLMProfiles: profiles,
         };
-    } catch (err) {
-        const log = isTransientNetworkError(err) ? console.warn : console.error;
-        log('[runtimeBootstrapService] Guest runtime config load failed:', getErrorMessage(err));
+    });
+}
 
-        return {
-            llmApiKeys: null,
-            runtimeLLMConfigs: INITIAL_RUNTIME_LLM_CONFIGS,
-            localLLMProfiles: [],
-        };
-    }
+export async function loadGuestRuntimeBootstrap(): Promise<RuntimeBootstrapState> {
+    return trackGuestBootstrap(async () => {
+        try {
+            const [guestConfigs, guestProfiles] = await Promise.all([
+                llmConfigService.getAllLLMConfigs({ useApi: false }),
+                localLLMProfileService.getAllProfiles({ useApi: false }),
+            ]);
+
+            return {
+                llmApiKeys: null,
+                runtimeLLMConfigs: buildRuntimeConfigsFromUiConfigs(guestConfigs),
+                localLLMProfiles: guestProfiles,
+            };
+        } catch (err) {
+            const log = isTransientNetworkError(err) ? console.warn : console.error;
+            log('[runtimeBootstrapService] Guest runtime config load failed:', getErrorMessage(err));
+
+            return {
+                llmApiKeys: null,
+                runtimeLLMConfigs: INITIAL_RUNTIME_LLM_CONFIGS,
+                localLLMProfiles: [],
+            };
+        }
+    });
 }

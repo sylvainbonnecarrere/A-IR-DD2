@@ -16,6 +16,7 @@ import React from 'react';
 import apiClient from '../../utils/apiClient';
 import * as llmConfigService from '../../services/llmConfigService';
 import * as localLLMProfileService from '../../services/localLLMProfileService';
+import { getQueryClient } from '../../providers/QueryProvider';
 
 const TEST_ONLY_PASSWORD = 'test-only-password-123';
 
@@ -62,13 +63,14 @@ global.fetch = jest.fn();
 
 // Test component to access context
 const TestComponent = () => {
-    const { user, isAuthenticated, isLoading, sessionStatus, login, logout, runtimeLLMConfigs, localLLMProfiles } = useAuth();
+    const { user, isAuthenticated, isLoading, sessionStatus, login, logout, runtimeLLMConfigs, localLLMProfiles, llmApiKeys } = useAuth();
     return (
         <div>
             <div data-testid="loading">{isLoading ? 'loading' : 'ready'}</div>
             <div data-testid="session-status">{sessionStatus}</div>
             <div data-testid="auth-status">{isAuthenticated ? 'authenticated' : 'guest'}</div>
             <div data-testid="user-email">{user?.email || 'no-user'}</div>
+            <div data-testid="llm-api-key-count">{llmApiKeys?.length ?? 0}</div>
             <div data-testid="runtime-config-count">{runtimeLLMConfigs.length}</div>
             <div data-testid="local-profile-count">{localLLMProfiles.length}</div>
             <button onClick={() => login('test@example.com', TEST_ONLY_PASSWORD)}>
@@ -83,6 +85,7 @@ describe('AuthContext', () => {
     beforeEach(() => {
         localStorage.clear();
         jest.clearAllMocks();
+        getQueryClient().clear();
     });
 
     describe('Initialization', () => {
@@ -167,6 +170,12 @@ describe('AuthContext', () => {
             };
 
             localStorage.setItem('auth_data_v1', JSON.stringify(mockAuthData));
+            localStorage.setItem('custom_agent_templates', JSON.stringify([{ id: 'template-1' }]));
+            localStorage.setItem('workflow-editor-data', JSON.stringify({ workflows: [{ id: 'workflow-1' }] }));
+            localStorage.setItem('guest_save_mode', 'local');
+
+            const queryClient = getQueryClient();
+            queryClient.setQueryData(['secure-workspace'], { workflowId: 'workflow-1' });
 
             render(
                 <AuthProvider>
@@ -184,6 +193,67 @@ describe('AuthContext', () => {
             await waitFor(() => {
                 expect(screen.getByTestId('auth-status')).toHaveTextContent('guest');
                 expect(localStorage.getItem('auth_data_v1')).toBeNull();
+                expect(localStorage.getItem('custom_agent_templates')).toBeNull();
+                expect(localStorage.getItem('workflow-editor-data')).toBeNull();
+                expect(localStorage.getItem('guest_save_mode')).toBeNull();
+                expect(queryClient.getQueryData(['secure-workspace'])).toBeUndefined();
+            });
+        });
+
+        test('should ignore in-flight runtime bootstrap results that resolve after logout', async () => {
+            let resolveKeys: ((value: { data: Array<{ provider: string; enabled: boolean; apiKey: string }> }) => void) | null = null;
+            let resolveProfiles: ((value: Array<{ id: string; name: string; provider: string; endpoint: string }>) => void) | null = null;
+
+            const keysPromise = new Promise<{ data: Array<{ provider: string; enabled: boolean; apiKey: string }> }>((resolve) => {
+                resolveKeys = resolve;
+            });
+            const profilesPromise = new Promise<Array<{ id: string; name: string; provider: string; endpoint: string }>>((resolve) => {
+                resolveProfiles = resolve;
+            });
+
+            jest.spyOn(apiClient, 'post').mockImplementationOnce(() => keysPromise as any);
+            jest.spyOn(localLLMProfileService, 'getAllProfiles').mockImplementationOnce(() => profilesPromise as any);
+
+            localStorage.setItem('auth_data_v1', JSON.stringify({
+                user: { id: '123', email: 'test@example.com', role: 'user' },
+                accessToken: 'stale-access-token',
+                refreshToken: 'mock-refresh-token',
+            }));
+
+            render(
+                <AuthProvider>
+                    <TestComponent />
+                </AuthProvider>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('auth-status')).toHaveTextContent('authenticated');
+                expect(screen.getByTestId('session-status')).toHaveTextContent('restoring-session');
+            });
+
+            fireEvent.click(screen.getByText('Logout'));
+
+            await waitFor(() => {
+                expect(screen.getByTestId('auth-status')).toHaveTextContent('guest');
+                expect(screen.getByTestId('llm-api-key-count')).toHaveTextContent('0');
+                expect(screen.getByTestId('local-profile-count')).toHaveTextContent('0');
+            });
+
+            await act(async () => {
+                resolveKeys?.({
+                    data: [{ provider: 'openai', enabled: true, apiKey: 'secret' }],
+                });
+                resolveProfiles?.([
+                    { id: 'profile-1', name: 'Local profile', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' },
+                ]);
+                await Promise.resolve();
+            });
+
+            await waitFor(() => {
+                expect(screen.getByTestId('auth-status')).toHaveTextContent('guest');
+                expect(screen.getByTestId('llm-api-key-count')).toHaveTextContent('0');
+                expect(screen.getByTestId('local-profile-count')).toHaveTextContent('0');
+                expect(screen.getByTestId('session-status')).toHaveTextContent('ready');
             });
         });
     });

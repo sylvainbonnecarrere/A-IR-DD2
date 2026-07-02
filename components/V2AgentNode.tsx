@@ -326,20 +326,18 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   }
 
   // Runtime store for messages and execution state
-  const {
-    getNodeMessages,
-    addNodeMessage,
-    setNodeMessages,
-    isNodeExecuting,
-    setNodeExecuting,
-    llmConfigs,
-    localLLMProfiles,
-    getNodePendingAttachment = () => null,
-    setNodePendingAttachment = () => undefined,
-    clearNodePendingAttachment = () => undefined,
-    getNodeInvisibleHistorySummary = () => null,
-    setNodeInvisibleHistorySummary = () => undefined,
-  } = useRuntimeStore();
+  const getNodeMessages = useRuntimeStore((state) => state.getNodeMessages);
+  const addNodeMessage = useRuntimeStore((state) => state.addNodeMessage);
+  const setNodeMessages = useRuntimeStore((state) => state.setNodeMessages);
+  const isNodeExecuting = useRuntimeStore((state) => state.isNodeExecuting);
+  const setNodeExecuting = useRuntimeStore((state) => state.setNodeExecuting);
+  const llmConfigs = useRuntimeStore((state) => state.llmConfigs);
+  const localLLMProfiles = useRuntimeStore((state) => state.localLLMProfiles);
+  const getNodePendingAttachment = useRuntimeStore((state) => state.getNodePendingAttachment) ?? (() => null);
+  const setNodePendingAttachment = useRuntimeStore((state) => state.setNodePendingAttachment) ?? (() => undefined);
+  const clearNodePendingAttachment = useRuntimeStore((state) => state.clearNodePendingAttachment) ?? (() => undefined);
+  const getNodeInvisibleHistorySummary = useRuntimeStore((state) => state.getNodeInvisibleHistorySummary) ?? (() => null);
+  const setNodeInvisibleHistorySummary = useRuntimeStore((state) => state.setNodeInvisibleHistorySummary) ?? (() => undefined);
 
   // WorkflowCanvas context for navigation and node operations
   const {

@@ -16,7 +16,7 @@ QA tester reports `/bos/workflows/manage` page is completely **EMPTY** when load
 
 ### STEP 2: Navigate to Page
 ```
-1. Go to: http://localhost:5173/bos/workflows/manage
+1. Go to: http://127.0.0.1:4000/bos/workflows/manage
 2. Wait 2 seconds for page to load
 3. Right-click → Inspect (or F12)
 ```
@@ -121,7 +121,7 @@ If React DevTools extension is installed:
 When asking for help, copy-paste:
 ```
 Browser: Chrome/Firefox/Edge
-URL: http://localhost:5173/bos/workflows/manage
+URL: http://127.0.0.1:4000/bos/workflows/manage
 Auth: ✅/❌ (logged in or not)
 
 Console logs (paste entire [BosWorkflows] and [Workflows] sections):

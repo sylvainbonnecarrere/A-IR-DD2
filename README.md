@@ -108,48 +108,189 @@ See also: [Guides/Features/MEDIAS/README.md](Guides/Features/MEDIAS/README.md)
 
 ---
 
-## 🚀 Quick start
+## 🚀 Installation and first run
 
-> **Prerequisites:** Node.js 24.15.x, MongoDB 6+ (or Docker), Python 3.11+
+These steps are the supported installation path. If you complete them in order, you end with a working frontend, a working backend, MongoDB persistence, Docker sandboxes for user functions, Python native tooling, and the Node 25 verification slice used to validate workspace and sandbox execution.
+
+> **Prerequisites:** Node.js 25.9.x, Docker Desktop with Compose support, Python 3.11+, Git
+
+### 1. Clone the repository
 
 ```bash
-# 1. Clone
 git clone https://github.com/sylvainbonnecarrere/A-IR-DD2.git
 cd A-IR-DD2
-
-# Runtime pin
-# .nvmrc and .node-version target Node 24.15.0
-
-# 2. Install dependencies
-npm install
-cd backend && npm install && cd ..
-
-# 3. Generate security keys & configure backend
-cp backend/docker/.env.docker backend/.env
-node -e "console.log('JWT_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
-node -e "console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))"
-node -e "console.log('JWT_REFRESH_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
-
-# → update backend/.env with:
-#    - MONGO_USER
-#    - MONGO_PASSWORD
-#    - MONGODB_URI using the same MongoDB credentials
-#    - JWT_SECRET
-#    - JWT_REFRESH_SECRET
-#    - ENCRYPTION_KEY
-
-# 4. Start with Docker (recommended)
-cd backend/docker && docker-compose --env-file ../.env up -d && cd ../..
-
-# 5. Start services
-# Terminal 1 — backend:  cd backend && npm run dev
-# Terminal 2 — frontend: npm run dev
-
-# 6. Open http://localhost:4000
-# Test account: test@example.com / TestPassword123
 ```
 
-For detailed installation, with sandboxes and workspace dedicated to each user, ensure you have installed Python on your server and launch backend\python\requirements.txt.
+### 2. Select the supported Node runtime
+
+The repository is pinned to Node 25.9.0 through `.nvmrc`, `.node-version`, and the `engines.node` fields.
+
+On Windows with `nvm-windows`, open a Node 25 shell before installing or starting anything:
+
+```powershell
+. .\scripts\Enter-NodeVersionShell.ps1 -Version 25.9.0
+```
+
+Check the runtime:
+
+```bash
+node -v
+```
+
+Expected result: `v25.9.0`
+
+### 3. Install frontend and backend dependencies
+
+```bash
+npm install
+cd backend
+npm install
+cd ..
+```
+
+### 4. Create the backend environment file
+
+Copy the template:
+
+```bash
+cp backend/docker/.env.docker backend/.env
+```
+
+Generate the required secrets:
+
+```bash
+node -e "console.log('JWT_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log('JWT_REFRESH_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Then update `backend/.env` with at least these values:
+
+- `MONGO_USER`
+- `MONGO_PASSWORD`
+- `MONGODB_URI` using the same MongoDB credentials
+- `JWT_SECRET`
+- `JWT_REFRESH_SECRET`
+- `ENCRYPTION_KEY`
+
+### 5. Start the infrastructure services
+
+The recommended local path is to start MongoDB and the supporting Docker stack from `backend/docker`:
+
+```bash
+cd backend/docker
+docker-compose --env-file ../.env up -d
+cd ../..
+```
+
+### 6. Install Python dependencies for native agent functions
+
+```bash
+python -m pip install -r backend/python/requirements.txt
+```
+
+If your machine exposes `python3` instead of `python`, use:
+
+```bash
+python3 -m pip install -r backend/python/requirements.txt
+```
+
+### 7. Start the application
+
+Use two terminals.
+
+Terminal 1, backend:
+
+```bash
+cd backend
+npm run dev
+```
+
+Terminal 2, frontend:
+
+```bash
+npm run dev
+```
+
+### 8. Verify the backend is healthy
+
+Open this endpoint in a browser or call it from your shell:
+
+```bash
+http://localhost:3001/api/health
+```
+
+The backend must respond before you continue to the UI.
+
+### 9. Run the Node 25 runtime verification slice
+
+From the repository root:
+
+```bash
+npm run ci:node25:runtime
+```
+
+This command is the minimum CI-grade validation for a local installation. It verifies:
+
+- the Node anchors: `.nvmrc`, `.node-version`, root `package.json`, and `backend/package.json`
+- the repository readiness report for Node 25
+- the backend runtime slice covering workspace runtime roots
+- Docker sandbox execution for user-created functions and tools
+- compatibility for legacy and current function/tool paths used by agents
+
+If this command is green, the installation is aligned with the runtime contract expected by the project for user workspaces, sandboxes, and native function execution.
+
+### 10. Open the UI
+
+Open:
+
+```bash
+http://127.0.0.1:4000
+```
+
+Default test account:
+
+- `test@example.com`
+- `TestPassword123`
+
+### 11. Completion checklist
+
+Your installation is considered complete only when all of these are true:
+
+- `node -v` returns `v25.9.0`
+- frontend dependencies and backend dependencies install without error
+- Docker services are up from `backend/docker`
+- `python -m pip install -r backend/python/requirements.txt` succeeds
+- `http://localhost:3001/api/health` responds correctly
+- the frontend opens on `http://127.0.0.1:4000`
+- `npm run ci:node25:runtime` succeeds
+
+At that point, the application is operational with MongoDB persistence, workspace runtime roots, Docker sandboxes for user functions, and Python native agent tooling enabled.
+
+## 🔎 CI validation strategy
+
+The repository now treats Node 25.9.0 as the supported runtime baseline. The first validation layer to run locally and in CI is:
+
+```bash
+npm run ci:node25:runtime
+```
+
+This script is intentionally narrow and fast enough to be run frequently. It protects the installation/runtime contract before broader QA by checking:
+
+- Node version drift
+- Node engine drift between root and backend
+- readiness of the Node 25 environment
+- backend workspace and sandbox execution behavior for agent functions
+
+Recommended local validation order before pushing a change:
+
+```bash
+npm run ci:node25:runtime
+npm test
+cd backend && npm test
+```
+
+For deeper Docker and MongoDB operational details, see [backend/docker/README.md](backend/docker/README.md). That document is optional and extends this installation guide; it is not required for the standard supported setup above.
 
 ---
 
