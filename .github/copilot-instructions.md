@@ -69,7 +69,7 @@ When implementing: validate `creator_id` matches robot mandate for prototype typ
 
 ## Development Workflows
 
-- **Frontend**: `npm install` → `npm run dev` (Vite, http://localhost:5173)
+- **Frontend**: `npm install` → `npm run dev` (Vite, http://127.0.0.1:4000)
 - **Backend**: `cd backend` → `npm install` → `npm run dev` (ts-node-dev, http://localhost:3001)
 - **Python tools**: Backend executes whitelisted scripts in `utils/pythonTools/` via `backend/src/pythonExecutor.ts`
   - Only scripts in `backend/src/config.ts` WHITELISTED_PYTHON_TOOLS allowed

@@ -62,7 +62,7 @@ BCRYPT_ROUNDS=10
 
 # Server
 PORT=3001
-FRONTEND_URL=http://localhost:5173
+FRONTEND_URL=http://localhost:4000
 NODE_ENV=development
 ```
 

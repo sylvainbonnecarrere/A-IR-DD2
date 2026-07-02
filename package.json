@@ -4,12 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "engines": {
-    "node": ">=24.15.0 <25"
+    "node": ">=25.9.0 <26"
   },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "ci:node25:runtime": "node scripts/ci/verify-node25-runtime.mjs",
     "test": "jest",
     "test:integration:hydration": "jest tests/fonctionnels/App.workspaceHydration.integration.test.tsx --runInBand",
     "test:components:ci": "jest tests/components --runInBand",
@@ -18,6 +19,10 @@
     "ci:web-search-py-runtime": "npm run test:web-search-py && cd backend && npm run runtime:ci",
     "test:j7:editor:semi-e2e": "playwright test tests/fonctionnels/J7.Editor.RealBrowser.semi-e2e.spec.ts",
     "test:smoke:live": "playwright test -c playwright.live.config.ts",
+    "node25:prepare": "node scripts/prepare-node25-validation.mjs 25.9.0",
+    "audit:root": "npm audit",
+    "audit:backend": "npm --prefix backend audit",
+    "audit:all": "npm run audit:root && npm run audit:backend",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:settingsmodal:report": "node scripts/run-jest-report.mjs tests/unitaires/SettingsModal.TNR.test.ts --outputDir tests/temp_rapport_tests/unitaires/settingsmodal --reportBase settingsmodal-jest"
@@ -57,7 +62,7 @@
   },
   "overrides": {
     "brace-expansion@1.1.12": "1.1.14",
-    "dompurify": "3.4.2",
+    "dompurify": "3.4.11",
     "picomatch@2.3.1": "2.3.2",
     "picomatch@4.0.3": "4.0.4",
     "socket.io-parser": "4.2.6"

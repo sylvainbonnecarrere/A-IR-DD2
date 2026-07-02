@@ -124,7 +124,7 @@ curl http://localhost:3001/api/auth/register
 **Résultat attendu** : Erreur MongoDB (normal sans BDD)
 
 ### 4. Non-Régression Guest Mode
-**Test** : Frontend accessible sur http://localhost:5173
+**Test** : Frontend accessible sur http://127.0.0.1:4000
 **Résultat** : ✅ Mode Guest fonctionne (Python tools, WebSocket)
 
 ## 📊 Métriques

@@ -180,7 +180,7 @@ BCRYPT_ROUNDS=10
 # ============================================================================
 NODE_ENV=development
 PORT=3001
-FRONTEND_URL=http://localhost:5173
+FRONTEND_URL=http://localhost:4000
 
 # ============================================================================
 # LLM LOCAL (Optionnel - pour tests sans cloud API)

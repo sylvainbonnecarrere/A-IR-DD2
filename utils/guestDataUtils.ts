@@ -37,16 +37,21 @@ export const GUEST_STORAGE_KEYS = {
     workflowNodes: 'guest_workflow_nodes_v1',
     workflowEdges: 'guest_workflow_edges_v1',
     canvasState: 'guest_canvas_state_v1', // ⭐ ÉTAPE 2: Canvas zoom/pan state
+    workflowEditorData: 'workflow-editor-data',
     
     // Agent data
     agentInstances: 'guest_agent_instances_v1',
+    customAgentTemplates: 'custom_agent_templates',
     
     // LLM configs (API keys in plain text for guest)
     llmConfigs: 'llm_configs_guest',
     llmConfigsLegacy: 'llmAgentWorkflow_configs', // ← J4.4: Old key from App.tsx - must also be wiped!
+    arcLLMApiKey: 'arc_llm_api_key',
 
     // Local LLM profiles (multiple local server configs)
     localLLMProfiles: 'local_llm_profiles_v1',
+    guestLocale: 'guest_app_locale',
+    guestSaveMode: 'guest_save_mode',
     
     // User settings
     userSettings: 'user_settings_guest',
@@ -59,13 +64,18 @@ export const GUEST_STORAGE_KEYS = {
     WORKFLOW: 'guest_workflow_v1',
     WORKFLOW_NODES: 'guest_workflow_nodes_v1',
     WORKFLOW_EDGES: 'guest_workflow_edges_v1',
+    WORKFLOW_EDITOR_DATA: 'workflow-editor-data',
     AGENT_INSTANCES: 'guest_agent_instances_v1',
+    CUSTOM_AGENT_TEMPLATES: 'custom_agent_templates',
     LLM_CONFIGS: 'llm_configs_guest',
     LLM_CONFIGS_LEGACY: 'llmAgentWorkflow_configs',
+    ARC_LLM_API_KEY: 'arc_llm_api_key',
     USER_SETTINGS: 'user_settings_guest',
     LEGACY_SETTINGS: 'settings',
     LEGACY_WORKFLOW: 'workflow',
     LOCAL_LLM_PROFILES: 'local_llm_profiles_v1',
+    GUEST_LOCALE: 'guest_app_locale',
+    GUEST_SAVE_MODE: 'guest_save_mode',
 } as const;
 
 /**

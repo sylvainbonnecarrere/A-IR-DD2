@@ -50,7 +50,7 @@ interface WorkflowCanvasProps {
   onAddToWorkflow?: (agent: Agent) => void;
   onUpdateWorkflowNode?: (nodeId: string, updates: Partial<WorkflowNode>) => void;
   onRemoveFromWorkflow?: (nodeId: string) => void;
-  onNavigate?: (robotId: any, path: string) => void; // Pour navigation vers prototypage
+  onNavigate?: (robotId: RobotId, path: string) => void; // Pour navigation vers prototypage
   // ⭐ ÉTAPE 2: Persistence props
   workflowId?: string;
   workflowName?: string;
@@ -67,6 +67,9 @@ const EDGE_TYPES = Object.freeze({});
 const REACT_FLOW_STYLE = Object.freeze({ background: 'transparent' });
 const DEFAULT_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 0.7 });
 const PRO_OPTIONS = Object.freeze({ hideAttribution: true });
+const EMPTY_WORKFLOW_NODES = Object.freeze([]) as WorkflowNode[];
+const EMPTY_LLM_CONFIGS = Object.freeze([]) as LLMConfig[];
+const EMPTY_AGENTS = Object.freeze([]) as Agent[];
 let workflowCanvasMountSequence = 0;
 type ReactFlowNodeWithMeasuredSize = Node & { measured?: { height?: number; width?: number } };
 type ReactFlowNodeLookup = {
@@ -77,8 +80,8 @@ type ReactFlowNodeLookup = {
 // Composant interne avec accès à useReactFlow
 const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCanvasProps) {
   const {
-    nodes = [],
-    llmConfigs = [],
+    nodes = EMPTY_WORKFLOW_NODES,
+    llmConfigs = EMPTY_LLM_CONFIGS,
     onCanvasReady,
     onDeleteNode,
     onUpdateNodeMessages,
@@ -89,7 +92,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     onOpenVideoPanel,
     onOpenMapsPanel,
     onOpenFullscreen,
-    agents = [],
+    agents = EMPTY_AGENTS,
     onAddToWorkflow,
     onUpdateWorkflowNode,
     onRemoveFromWorkflow,
@@ -114,8 +117,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   }
 
   // ⭐ SELF-HEALING: Get real workflow ID from store (falls back to prop)
-  const { getCurrentWorkflowId } = useWorkflowStore();
-  const storeWorkflowId = getCurrentWorkflowId();
+  const storeWorkflowId = useWorkflowStore((state) => state.getCurrentWorkflowId());
   const workflowId = storeWorkflowId || workflowIdProp || 'default-workflow';
 
   // Hook de thème jour/nuit
@@ -229,7 +231,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
   // ⭐ FIX SOLID: Utiliser la source unique de vérité pour les nodes.
   // Le chemin actif du runtime lit désormais le store, avec `nodes` comme compatibilité explicite.
-  const { nodes: storeNodes } = useDesignStore();
+  const storeNodes = useDesignStore((state) => state.nodes);
   
   // Calculer actualNodes de manière stable
   const actualNodes = useMemo<CanvasWorkflowNode[]>(() => {
@@ -536,7 +538,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   }, [workflowId]);
 
   // Récupérer les instances depuis le store pour synchronisation
-  const { agentInstances, getResolvedInstance } = useDesignStore();
+  const agentInstances = useDesignStore((state) => state.agentInstances);
+  const getResolvedInstance = useDesignStore((state) => state.getResolvedInstance);
 
   // SOLUTION ANTI-BOUCLE: useEffect unique et stable pour éviter les conflits
   useLayoutEffect(() => {
@@ -599,7 +602,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
         return hasChanged ? newReactFlowNodes : currentNodes;
       });
-    } else {
+    } else if (stableRefs.current.reactFlowNodes.length > 0) {
       setReactFlowNodes(currentNodes => currentNodes.length > 0 ? [] : currentNodes);
     }
   }, [actualNodes, agentInstances, agents, getResolvedInstance, reactFlowInstance, workflowId]);
@@ -946,7 +949,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         {/* Bouton flottant redirection vers prototypage Archi - Style Blur futuriste */}
         {onAddToWorkflow && onNavigate && (
           <button
-            onClick={() => onNavigate('AR_001', '/archi/prototyping')}
+            onClick={() => onNavigate(RobotId.Archi, '/archi/prototyping')}
             className="absolute bottom-8 left-8 group"
             style={{
               background: 'linear-gradient(135deg, rgba(0, 255, 255, 0.2) 0%, rgba(0, 0, 0, 0.8) 100%)',

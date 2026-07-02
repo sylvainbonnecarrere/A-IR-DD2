@@ -54,10 +54,22 @@ jest.mock('../../services/bosRunProjectionService', () => ({
 }));
 
 jest.mock('../../components/NavigationLayout', () => ({
-    NavigationLayout: () => {
+    NavigationLayout: ({ currentPath, onNavigate }: { currentPath: string; onNavigate: (robotId: string, path: string) => void }) => {
         const { getAppHydrationHarness } = require('../harnesses/appHydrationHarness');
         const harness = getAppHydrationHarness();
-        return <div data-testid="agents-count">{harness.designStore.agents.length}</div>;
+        return (
+            <div>
+                <div data-testid="agents-count">{harness.designStore.agents.length}</div>
+                <div data-testid="navigation-current-path">{currentPath}</div>
+                <button
+                    type="button"
+                    data-testid="navigate-phil-functions"
+                    onClick={() => onNavigate('PHIL', '/phil/functions')}
+                >
+                    navigate phil functions
+                </button>
+            </div>
+        );
     }
 }));
 
@@ -268,6 +280,27 @@ describe('App workspace hydration orchestration', () => {
         localStorage.clear();
     });
 
+    it('stays in guest mode without triggering hydration loops or workspace bootstrap calls', async () => {
+        mockUseAuth.mockReturnValue({
+            isAuthenticated: false,
+            accessToken: null,
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: null,
+            logout: jest.fn(),
+            refreshRuntimeConfigState: jest.fn(),
+            sessionStatus: 'ready',
+            isLoading: false,
+            error: null,
+        } as any);
+
+        render(<App />);
+
+        await waitFor(() => expect(screen.getByTestId('hydration-overlay')).toHaveTextContent('idle'));
+        expect(apiClient.get).not.toHaveBeenCalled();
+        expect(screen.getByTestId('robot-page-router')).toBeInTheDocument();
+    });
+
     it('persists drag-stop positions only for explicit user move intents', async () => {
         mockUseAuth.mockReturnValue({
             isAuthenticated: true,
@@ -372,6 +405,43 @@ describe('App workspace hydration orchestration', () => {
 
         await waitFor(() => expect(screen.getByTestId('agents-count')).toHaveTextContent('1'));
         expect(apiClient.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns to a neutral guest route after an authenticated session logs out', async () => {
+        let authState: any = {
+            isAuthenticated: true,
+            accessToken: 'token-ready',
+            runtimeLLMConfigs: [],
+            localLLMProfiles: [],
+            user: { id: 'user-1', email: 'user@example.com' },
+            logout: jest.fn(),
+            refreshRuntimeConfigState: jest.fn(),
+            sessionStatus: 'ready',
+            error: null,
+        };
+
+        mockUseAuth.mockImplementation(() => authState);
+
+        const { rerender } = render(<App />);
+
+        await waitFor(() => expect(screen.getByTestId('navigation-current-path')).toHaveTextContent('/bos/dashboard'));
+
+        act(() => {
+            screen.getByTestId('navigate-phil-functions').click();
+        });
+
+        await waitFor(() => expect(screen.getByTestId('navigation-current-path')).toHaveTextContent('/phil/functions'));
+
+        authState = {
+            ...authState,
+            isAuthenticated: false,
+            accessToken: null,
+            user: null,
+        };
+
+        rerender(<App />);
+
+        await waitFor(() => expect(screen.getByTestId('navigation-current-path')).toHaveTextContent('/bos/dashboard'));
     });
 
     it('preserves in-flight runtime chat messages during a silent resume workspace refresh', async () => {

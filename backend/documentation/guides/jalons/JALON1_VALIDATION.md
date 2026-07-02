@@ -56,7 +56,7 @@ curl http://localhost:3001/api/health
 **Résultat** : ✅ `{"status":"OK","message":"Backend is running"}`
 
 ### 5. Non-Régression Guest Mode
-**Test** : Frontend accessible sur http://localhost:5173
+**Test** : Frontend accessible sur http://127.0.0.1:4000
 **Résultat** : ✅ Mode Guest fonctionne (aucune route auth appelée)
 
 ## 🔐 Sécurité Validée

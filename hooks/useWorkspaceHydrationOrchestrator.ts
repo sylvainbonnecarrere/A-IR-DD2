@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
 import type { Agent } from '../types';
 import type { AuthSessionStatus } from '../contexts/types/auth.types';
@@ -128,14 +128,20 @@ export const useWorkspaceHydrationOrchestrator = ({
     const workspaceReloadPromiseRef = useRef<Promise<void> | null>(null);
     const hydratedWorkspaceIdentityRef = useRef<string | null>(null);
     const lastResumeWorkspaceRefreshAtRef = useRef(0);
+    const guestHydrationResetAppliedRef = useRef(false);
     const currentHydrationIdentity = !authLoading && isAuthenticated && userId ? `auth:${userId}` : null;
-    const blockingHydrationExpectedSources: HydrationReadySource[] = [];
-    if (requiresCanvasHydrationReadiness) {
-        blockingHydrationExpectedSources.push('workflow-canvas-stable');
-    }
-    if (requiresBosMediaButtonHydrationReadiness) {
-        blockingHydrationExpectedSources.push('bos-media-button');
-    }
+    const blockingHydrationExpectedSources = useMemo<HydrationReadySource[]>(() => {
+        const expectedSources: HydrationReadySource[] = [];
+
+        if (requiresCanvasHydrationReadiness) {
+            expectedSources.push('workflow-canvas-stable');
+        }
+        if (requiresBosMediaButtonHydrationReadiness) {
+            expectedSources.push('bos-media-button');
+        }
+
+        return expectedSources;
+    }, [requiresBosMediaButtonHydrationReadiness, requiresCanvasHydrationReadiness]);
     const isPreparingBlockingHydration = Boolean(
         currentHydrationIdentity
         && hydratedWorkspaceIdentityRef.current !== currentHydrationIdentity
@@ -446,6 +452,11 @@ export const useWorkspaceHydrationOrchestrator = ({
     useLayoutEffect(() => {
         if (!isAuthenticated) {
             hydratedWorkspaceIdentityRef.current = null;
+            if (guestHydrationResetAppliedRef.current) {
+                return;
+            }
+
+            guestHydrationResetAppliedRef.current = true;
             setHydrationPhase('idle');
             setHydrationProgress(0);
             setHydrationMessage(DEFAULT_HYDRATION_MESSAGE);
@@ -453,6 +464,8 @@ export const useWorkspaceHydrationOrchestrator = ({
             sessionStorage.removeItem('_arc_hydrating');
             return;
         }
+
+        guestHydrationResetAppliedRef.current = false;
 
         if (!sessionReadyForWorkspaceHydration || !userId) {
             return;

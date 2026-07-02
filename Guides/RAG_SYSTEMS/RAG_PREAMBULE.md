@@ -1537,7 +1537,7 @@ Comme nouvel architecte RAG, voici les étapes recommandées :
 - [ ] **Setup local environment**
   - [ ] Install Node.js 20+ & MongoDB 6.0+
   - [ ] Run: `npm install` + `cd backend && npm install`
-  - [ ] Start frontend: `npm run dev` (http://localhost:5173)
+  - [ ] Start frontend: `npm run dev` (http://127.0.0.1:4000)
   - [ ] Start backend: `cd backend && npm run dev` (http://localhost:3001)
 
 - [ ] **Understand current stack**

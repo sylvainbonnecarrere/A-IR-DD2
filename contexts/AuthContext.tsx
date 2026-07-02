@@ -18,7 +18,8 @@ import React, {
     useState,
     useEffect,
     ReactNode,
-    useCallback
+    useCallback,
+    useRef
 } from 'react';
 import { User, AuthContextType, StoredAuthData, AuthResponse, AuthLoadingState, LLMApiKey, AuthSessionStatus } from './types/auth.types';
 import { LLMConfig, LocalLLMProfile } from '../types';
@@ -42,6 +43,7 @@ import {
     loadGuestRuntimeBootstrap,
     type RuntimeBootstrapState,
 } from '../services/runtimeBootstrapService';
+import { clearQueryClient } from '../providers/QueryProvider';
 
 import { API_BASE_URL } from '../config/api.config';
 
@@ -75,6 +77,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const [runtimeLLMConfigs, setRuntimeLLMConfigs] = useState<LLMConfig[]>(INITIAL_RUNTIME_LLM_CONFIGS);
     const [localLLMProfiles, setLocalLLMProfiles] = useState<LocalLLMProfile[]>([]);
     const [isMounted, setIsMounted] = useState(false); // ⭐ J4.4: Prevent async cleanup errors
+    const runtimeBootstrapRequestIdRef = useRef(0);
 
     /**
      * ⭐ J4.4: Track mount state to prevent async state updates after unmount
@@ -112,6 +115,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             clearStorage = true,
         } = options ?? {};
 
+        runtimeBootstrapRequestIdRef.current += 1;
+
         setUser(null);
         setAccessToken(null);
         setRefreshToken(null);
@@ -120,6 +125,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setLocalLLMProfiles([]);
         setError(nextError);
         setSessionStatus(nextSessionStatus);
+
+        clearQueryClient();
 
         if (clearStorage) {
             authSessionStorage.clear();
@@ -246,11 +253,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         const effectiveToken = tokenOverride ?? accessToken ?? undefined;
         const shouldUseApi = !!effectiveToken;
+        const requestId = runtimeBootstrapRequestIdRef.current + 1;
+        runtimeBootstrapRequestIdRef.current = requestId;
 
         if (shouldUseApi) {
             const runtimeState = await loadAuthenticatedRuntimeBootstrap(effectiveToken);
 
-            if (!isMounted) return runtimeState;
+            if (!isMounted || requestId !== runtimeBootstrapRequestIdRef.current) return runtimeState;
 
             setLlmApiKeys(runtimeState.llmApiKeys);
             setRuntimeLLMConfigs(runtimeState.runtimeLLMConfigs);
@@ -261,7 +270,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         const runtimeState = await loadGuestRuntimeBootstrap();
 
-        if (!isMounted) return runtimeState;
+        if (!isMounted || requestId !== runtimeBootstrapRequestIdRef.current) return runtimeState;
 
         setLlmApiKeys(runtimeState.llmApiKeys);
         setRuntimeLLMConfigs(runtimeState.runtimeLLMConfigs);
@@ -279,9 +288,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
      * - Session restore from localStorage (hydrateFromStorage doesn't call fetchLLMApiKeys)
      */
     useEffect(() => {
-        if (!isMounted || isLoading) return;
-        void refreshRuntimeConfigState();
-    }, [accessToken, isMounted, isLoading, refreshRuntimeConfigState, user]);
+        if (!isMounted || isLoading || !accessToken) return;
+        if (sessionStatus !== 'restoring-session') return;
+        void refreshRuntimeConfigState(accessToken);
+    }, [accessToken, isMounted, isLoading, refreshRuntimeConfigState, sessionStatus]);
 
     /**     * Login with email & password
      * POST /api/auth/login

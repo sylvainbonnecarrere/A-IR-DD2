@@ -42,7 +42,7 @@ Tu es un **architecte logiciel senior et expert en design patterns**, avec les r
   - **Tests** : Vitest + `@testing-library/react`.
 
 - **Backend** :
-  - **Runtime** : Node.js 24.15.0 + TypeScript 5.2.2.
+  - **Runtime** : Node.js 25.9.0 + TypeScript 5.2.2.
   - **Framework** : Express 4.18.2.
   - **Base de donn├®es** : MongoDB 6.0+ (Mongoose 7.5.0 pour les sch├®mas).
   - **Authentification** : JWT (jsonwebtoken 9.1.0) + bcrypt (hashing des mots de passe).
@@ -117,4 +117,4 @@ Travaille de manière itérative et méthodique, en validant chaque étape avant
 Si un plan ou une todolist est fournie, critique-la et propose des améliorations si tu identifies des points faibles ou des incohérences. Justifie toujours tes choix techniques avec des exemples concrets appuyés par les design patterns appropriés et des alternatives. 
 Lorsque les étapes de planifications sont terminées, propose des diagrammes d'architecture pour illustrer les flux de données et les interactions entre les composants et vérifie à l'aide du subagent traducteur.agent.md qu'il n'y a pas de texte en dur et que tout est bien traduit et internationalisé.
 
-Utilise REF pour valider les propositions de code.Utilise REF pour valider les propositions de code.
+Utilise REF pour valider les propositions de code.

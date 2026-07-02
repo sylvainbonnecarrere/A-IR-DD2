@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'fs';
 
-// This Playwright test assumes the app is available at http://localhost:5173
+// This Playwright test assumes the app is available at http://localhost:4000
 // Run with: npm run dev (vite) and then `npx playwright test tests/fonctionnels/minimize-restore.semi-e2e.spec.ts --project=chromium --headed`
 
 test.describe('Minimize -> Move -> Restore flow', () => {
@@ -12,7 +12,7 @@ test.describe('Minimize -> Move -> Restore flow', () => {
       // Tracing may already be started by the runner/config; ignore.
     }
 
-    const url = process.env.TEST_APP_URL || 'http://localhost:5173';
+    const url = process.env.TEST_APP_URL || 'http://localhost:4000';
     await page.goto(url);
 
     // Optional: wait for canvas readiness indicator (app-specific)
