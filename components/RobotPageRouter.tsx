@@ -1,18 +1,37 @@
-import React, { useMemo, useState } from 'react';
+import React, { Suspense, lazy, useMemo, useState } from 'react';
 import { RobotId, LLMConfig, Agent, AgentInstance, AgentBatchDeleteResult, AgentDeletionMediaPolicy, NodePositionUpdateOptions, ChatMessage, MapsPanelPreloadedResults } from '../types';
-import { ArchiPrototypingPage } from './ArchiPrototypingPage';
-import WorkflowCanvas from './WorkflowCanvas';
-import { ComDatabasesPage } from './ComDatabasesPage';
-import { ComApiPage } from './ComApiPage';
-import { PhilDataPage } from './PhilDataPage';
-import { PhilFunctionsPage } from './PhilFunctionsPage';
-import { TimEventsPage } from './TimEventsPage';
-import BosWorkflowManagementPage from './BosWorkflowManagementPage';
-import BosMediaModal from './modals/BosMediaModal';
 import { useLocalization } from '../hooks/useLocalization';
 import { useDesignStore } from '../stores/useDesignStore';
 import { publishHydrationComponentReady } from '../utils/hydrationComponentReadiness';
 import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from '../utils/robotPageRouting';
+
+const LazyWorkflowCanvas = lazy(() => import('./WorkflowCanvas'));
+const LazyArchiPrototypingPage = lazy(async () => {
+  const module = await import('./ArchiPrototypingPage');
+  return { default: module.ArchiPrototypingPage };
+});
+const LazyComDatabasesPage = lazy(async () => {
+  const module = await import('./ComDatabasesPage');
+  return { default: module.ComDatabasesPage };
+});
+const LazyComApiPage = lazy(async () => {
+  const module = await import('./ComApiPage');
+  return { default: module.ComApiPage };
+});
+const LazyPhilDataPage = lazy(async () => {
+  const module = await import('./PhilDataPage');
+  return { default: module.PhilDataPage };
+});
+const LazyPhilFunctionsPage = lazy(async () => {
+  const module = await import('./PhilFunctionsPage');
+  return { default: module.PhilFunctionsPage };
+});
+const LazyTimEventsPage = lazy(async () => {
+  const module = await import('./TimEventsPage');
+  return { default: module.TimEventsPage };
+});
+const LazyBosWorkflowManagementPage = lazy(() => import('./BosWorkflowManagementPage'));
+const LazyBosMediaModal = lazy(() => import('./modals/BosMediaModal'));
 
 interface RobotPageRouterProps {
   currentPath: string;
@@ -88,21 +107,23 @@ const WorkflowPage: React.FC<{
 
         {/* Workflow Canvas avec toutes les props nécessaires */}
         <div className="flex-1">
-          <WorkflowCanvas
-            agents={agents}
-            llmConfigs={llmConfigs}
-            onCanvasReady={onWorkflowCanvasReady}
-            onDeleteNode={onDeleteNode}
-            onUpdateNodeMessages={onUpdateNodeMessages}
-            onUpdateNodePosition={onUpdateNodePosition}
-            onToggleNodeMinimize={onToggleNodeMinimize}
-            onOpenImagePanel={onOpenImagePanel}
-            onOpenImageModificationPanel={onOpenImageModificationPanel}
-            onOpenVideoPanel={onOpenVideoPanel}
-            onOpenMapsPanel={onOpenMapsPanel}
-            onOpenFullscreen={onOpenFullscreen}
-            onAddToWorkflow={onAddToWorkflow}
-          />
+          <Suspense fallback={<RouteFallback message="Chargement du workflow..." />}>
+            <LazyWorkflowCanvas
+              agents={agents}
+              llmConfigs={llmConfigs}
+              onCanvasReady={onWorkflowCanvasReady}
+              onDeleteNode={onDeleteNode}
+              onUpdateNodeMessages={onUpdateNodeMessages}
+              onUpdateNodePosition={onUpdateNodePosition}
+              onToggleNodeMinimize={onToggleNodeMinimize}
+              onOpenImagePanel={onOpenImagePanel}
+              onOpenImageModificationPanel={onOpenImageModificationPanel}
+              onOpenVideoPanel={onOpenVideoPanel}
+              onOpenMapsPanel={onOpenMapsPanel}
+              onOpenFullscreen={onOpenFullscreen}
+              onAddToWorkflow={onAddToWorkflow}
+            />
+          </Suspense>
         </div>
       </div>
     );
@@ -120,6 +141,14 @@ const PlaceholderPage: React.FC<{ robotName: string; description: string }> = ({
     </div>
   );
 };
+
+const RouteFallback: React.FC<{ message?: string }> = ({ message = 'Chargement de la page...' }) => (
+  <div className="flex h-full items-center justify-center bg-gray-900 text-gray-300">
+    <div className="rounded-lg border border-gray-700 bg-gray-800/60 px-4 py-3 text-sm">
+      {message}
+    </div>
+  </div>
+);
 
 export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
   currentPath,
@@ -204,18 +233,26 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
       >
         {t('bos_media_button', 'Gestion des fichiers')}
       </button>
-      <BosMediaModal
-        isOpen={showBosMediaModal}
-        workflowId={activeWorkflow?._id ?? null}
-        workflowName={activeWorkflow?.name ?? null}
-        onClose={() => setShowBosMediaModal(false)}
-      />
+      {showBosMediaModal ? (
+        <Suspense fallback={null}>
+          <LazyBosMediaModal
+            isOpen={showBosMediaModal}
+            workflowId={activeWorkflow?._id ?? null}
+            workflowName={activeWorkflow?.name ?? null}
+            onClose={() => setShowBosMediaModal(false)}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 
   switch (resolvedRoute) {
     case ROBOT_PAGE_ROUTE_IDS.archi:
-      return <ArchiPrototypingPage llmConfigs={llmConfigs} onNavigateToWorkflow={handleNavigateToWorkflow} onAddToWorkflow={onAddToWorkflow} onDeleteNodes={onDeleteNodes} />;
+      return (
+        <Suspense fallback={<RouteFallback />}>
+          <LazyArchiPrototypingPage llmConfigs={llmConfigs} onNavigateToWorkflow={handleNavigateToWorkflow} onAddToWorkflow={onAddToWorkflow} onDeleteNodes={onDeleteNodes} />
+        </Suspense>
+      );
     case ROBOT_PAGE_ROUTE_IDS.bosDashboard:
       return (
         <WorkflowPage
@@ -236,27 +273,45 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
       );
     case ROBOT_PAGE_ROUTE_IDS.bosWorkflowManagement:
       return (
-        <div className="h-full">
-          <BosWorkflowManagementPage />
-        </div>
+        <Suspense fallback={<RouteFallback />}>
+          <div className="h-full">
+            <LazyBosWorkflowManagementPage />
+          </div>
+        </Suspense>
       );
     case ROBOT_PAGE_ROUTE_IDS.comDatabases:
-      return <ComDatabasesPage />;
+      return (
+        <Suspense fallback={<RouteFallback />}>
+          <LazyComDatabasesPage />
+        </Suspense>
+      );
     case ROBOT_PAGE_ROUTE_IDS.comApi:
-      return <ComApiPage />;
+      return (
+        <Suspense fallback={<RouteFallback />}>
+          <LazyComApiPage />
+        </Suspense>
+      );
     case ROBOT_PAGE_ROUTE_IDS.philFunctions:
-      return <PhilFunctionsPage />;
+      return (
+        <Suspense fallback={<RouteFallback />}>
+          <LazyPhilFunctionsPage />
+        </Suspense>
+      );
     case ROBOT_PAGE_ROUTE_IDS.philData:
       return (
-        <PhilDataPage
-          onNavigateToWorkflow={handleNavigateToWorkflow}
-        />
+        <Suspense fallback={<RouteFallback />}>
+          <LazyPhilDataPage
+            onNavigateToWorkflow={handleNavigateToWorkflow}
+          />
+        </Suspense>
       );
     case ROBOT_PAGE_ROUTE_IDS.timEvents:
       return (
-        <TimEventsPage
-          onNavigateToWorkflow={handleNavigateToWorkflow}
-        />
+        <Suspense fallback={<RouteFallback />}>
+          <LazyTimEventsPage
+            onNavigateToWorkflow={handleNavigateToWorkflow}
+          />
+        </Suspense>
       );
     case ROBOT_PAGE_ROUTE_IDS.fallback:
     default:

@@ -68,8 +68,13 @@ describe('Auth and workflow routes', () => {
 
         const persistedUser = await User.findOne({ email: response.body.user.email });
         expect(persistedUser).not.toBeNull();
+        expect(persistedUser?.password).toBeUndefined();
         expect(persistedUser?.defaultWorkflowId).toBeDefined();
         expect(persistedUser?.workflowCount).toBe(1);
+
+        const persistedUserWithPassword = await User.findOne({ email: response.body.user.email }).select('+password').lean();
+        expect(persistedUserWithPassword?.password).toEqual(expect.any(String));
+        expect(persistedUserWithPassword?.password).not.toBe('Password123');
 
         const workflows = await Workflow.find({ userId: persistedUser?._id }).lean();
         expect(workflows).toHaveLength(1);

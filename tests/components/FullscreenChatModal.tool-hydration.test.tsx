@@ -249,7 +249,7 @@ describe('FullscreenChatModal tool projection hydration', () => {
     render(<FullscreenChatModal onImageGenerated={onImageGenerated} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Image' }));
-    fireEvent.click(screen.getByTestId('mock-image-generation-add'));
+    fireEvent.click(await screen.findByTestId('mock-image-generation-add'));
 
     expect(onImageGenerated).toHaveBeenCalledWith('node-instance-1', 'generated-image-base64');
     expect(runtimeStoreState.addNodeMessage).not.toHaveBeenCalledWith(

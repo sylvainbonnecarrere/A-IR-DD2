@@ -32,7 +32,8 @@ const UserSchema = new Schema<IUser>({
     password: {
         type: String,
         required: [true, 'Mot de passe requis'],
-        minlength: [8, 'Minimum 8 caractères']
+        minlength: [8, 'Minimum 8 caractères'],
+        select: false
     },
     role: {
         type: String,
@@ -94,6 +95,10 @@ UserSchema.pre('save', async function (next) {
 
 // Méthode: Vérifier mot de passe
 UserSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {
+    if (!this.password) {
+        return false;
+    }
+
     return bcrypt.compare(candidatePassword, this.password);
 };
 

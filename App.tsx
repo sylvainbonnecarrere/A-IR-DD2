@@ -1,15 +1,8 @@
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { Suspense, lazy, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, NodePositionUpdateOptions, MapsPanelPreloadedResults, normalizePersistenceConfig } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
-import { SettingsModal } from './components/modals/SettingsModal';
 import { Header } from './components/Header';
-import { LoginModal } from './components/modals/LoginModal';
-import { RegisterModal } from './components/modals/RegisterModal';
-import { ImageGenerationPanel } from './components/panels/ImageGenerationPanel';
-import { ImageModificationPanel } from './components/panels/ImageModificationPanel';
-import { VideoGenerationConfigPanel } from './components/panels/VideoGenerationConfigPanel';
-import { MapsGroundingConfigPanel } from './components/panels/MapsGroundingConfigPanel';
 import { useLocalization } from './hooks/useLocalization';
 import { Button } from './components/UI';
 import { FullscreenChatModal } from './components/modals/FullscreenChatModal';
@@ -27,8 +20,6 @@ import { getSettingsStorage } from './utils/SettingsStorage';
 import { HydrationOverlay } from './components/HydrationOverlay';
 // ⭐ V2: Import WorkflowSwitchOverlay for workflow switch (Bos amber)
 import { WorkflowSwitchOverlay } from './components/WorkflowSwitchOverlay';
-// ⭐ UX Polish: Import HyperspaceReveal for guest entry animation
-import { HyperspaceReveal } from './components/HyperspaceReveal';
 // ⭐ AUTO-SAVE: Import PersistenceService for immediate instance creation
 import { PersistenceService } from './services/persistenceService';
 import { createAgentPrototype, updateAgentPrototype } from './services/agentPrototypeAPI';
@@ -43,6 +34,41 @@ import { useWorkspaceHydrationOrchestrator } from './hooks/useWorkspaceHydration
 import { findAvailableWorkflowNodePosition, findCollisionFreeWorkflowNodePosition } from './utils/workflowNodePlacement';
 import { generateRuntimeMessageId } from './utils/runtimeMessageId';
 import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from './utils/robotPageRouting';
+
+const LazySettingsModal = lazy(async () => {
+  const module = await import('./components/modals/SettingsModal');
+  return { default: module.SettingsModal };
+});
+const LazyLoginModal = lazy(async () => {
+  const module = await import('./components/modals/LoginModal');
+  return { default: module.LoginModal };
+});
+const LazyRegisterModal = lazy(async () => {
+  const module = await import('./components/modals/RegisterModal');
+  return { default: module.RegisterModal };
+});
+const LazyImageGenerationPanel = lazy(async () => {
+  const module = await import('./components/panels/ImageGenerationPanel');
+  return { default: module.ImageGenerationPanel };
+});
+const LazyImageModificationPanel = lazy(async () => {
+  const module = await import('./components/panels/ImageModificationPanel');
+  return { default: module.ImageModificationPanel };
+});
+const LazyVideoGenerationConfigPanel = lazy(async () => {
+  const module = await import('./components/panels/VideoGenerationConfigPanel');
+  return { default: module.VideoGenerationConfigPanel };
+});
+const LazyMapsGroundingConfigPanel = lazy(async () => {
+  const module = await import('./components/panels/MapsGroundingConfigPanel');
+  return { default: module.MapsGroundingConfigPanel };
+});
+const LazyHyperspaceReveal = lazy(async () => {
+  const module = await import('./components/HyperspaceReveal');
+  return { default: module.HyperspaceReveal };
+});
+
+const DeferredUiFallback: React.FC = () => null;
 
 interface EditingImageInfo {
   nodeId: string;
@@ -957,14 +983,15 @@ export function AppContent() {
       <NotificationProvider>
         {/* ⭐ UX Polish: Hyperspace Entry Animation for Guests */}
         {showHyperspace && !isAuthenticated && (
-          <HyperspaceReveal
-            isActive={hyperspaceActive}
-            onComplete={handleHyperspaceComplete}
-            className="fixed inset-0 z-[100]"
-          >
-            {/* Empty children - the app will be revealed underneath */}
-            <div className="w-full h-full" />
-          </HyperspaceReveal>
+          <Suspense fallback={<DeferredUiFallback />}>
+            <LazyHyperspaceReveal
+              isActive={hyperspaceActive}
+              onComplete={handleHyperspaceComplete}
+              className="fixed inset-0 z-[100]"
+            >
+              <div className="w-full h-full" />
+            </LazyHyperspaceReveal>
+          </Suspense>
         )}
 
         {/* ⭐ V2: Overlay dédié au switch workflow (jaune Bos) */}
@@ -1013,30 +1040,36 @@ export function AppContent() {
           </div>
 
           {isSettingsModalOpen && (
-            <SettingsModal
-              llmConfigs={llmConfigs}
-              onClose={() => setSettingsModalOpen(false)}
-              onSave={handleSaveSettings}
-            />
+            <Suspense fallback={<DeferredUiFallback />}>
+              <LazySettingsModal
+                llmConfigs={llmConfigs}
+                onClose={() => setSettingsModalOpen(false)}
+                onSave={handleSaveSettings}
+              />
+            </Suspense>
           )}
 
           {isLoginModalOpen && (
-            <LoginModal
-              isOpen={isLoginModalOpen}
-              onClose={() => setLoginModalOpen(false)}
-            />
+            <Suspense fallback={<DeferredUiFallback />}>
+              <LazyLoginModal
+                isOpen={isLoginModalOpen}
+                onClose={() => setLoginModalOpen(false)}
+              />
+            </Suspense>
           )}
 
           {isRegisterModalOpen && (
-            <RegisterModal
-              isOpen={isRegisterModalOpen}
-              onClose={() => setRegisterModalOpen(false)}
-            />
+            <Suspense fallback={<DeferredUiFallback />}>
+              <LazyRegisterModal
+                isOpen={isRegisterModalOpen}
+                onClose={() => setRegisterModalOpen(false)}
+              />
+            </Suspense>
           )}
 
           {isImagePanelOpen && (
-            <>
-              <ImageGenerationPanel
+            <Suspense fallback={<DeferredUiFallback />}>
+              <LazyImageGenerationPanel
                 isOpen={isImagePanelOpen}
                 nodeId={currentImageNodeId}
                 agent={currentImageAgent}
@@ -1046,37 +1079,43 @@ export function AppContent() {
                 onImageGenerated={handleImageGenerated}
                 onOpenImageModificationPanel={handleOpenImageModificationPanel}
               />
-            </>
+            </Suspense>
           )}
 
           {isImageModificationPanelOpen && (
-            <ImageModificationPanel
-              isOpen={isImageModificationPanelOpen}
-              editingImageInfo={editingImageInfo}
-              llmConfigs={llmConfigs}
-              onClose={() => setImageModificationPanelOpen(false)}
-              onImageModified={handleImageModified}
-            />
+            <Suspense fallback={<DeferredUiFallback />}>
+              <LazyImageModificationPanel
+                isOpen={isImageModificationPanelOpen}
+                editingImageInfo={editingImageInfo}
+                llmConfigs={llmConfigs}
+                onClose={() => setImageModificationPanelOpen(false)}
+                onImageModified={handleImageModified}
+              />
+            </Suspense>
           )}
 
           {isVideoPanelOpen && (
-            <VideoGenerationConfigPanel
-              isOpen={isVideoPanelOpen}
-              onClose={() => setVideoPanelOpen(false)}
-            />
+            <Suspense fallback={<DeferredUiFallback />}>
+              <LazyVideoGenerationConfigPanel
+                isOpen={isVideoPanelOpen}
+                onClose={() => setVideoPanelOpen(false)}
+              />
+            </Suspense>
           )}
 
           {isMapsPanelOpen && (
-            <MapsGroundingConfigPanel
-              isOpen={isMapsPanelOpen}
-              nodeId={currentMapsNodeId}
-              llmConfigs={llmConfigs}
-              onClose={() => {
-                setMapsPanelOpen(false);
-                setMapsPreloadedResults(null);
-              }}
-              preloadedResults={mapsPreloadedResults || undefined}
-            />
+            <Suspense fallback={<DeferredUiFallback />}>
+              <LazyMapsGroundingConfigPanel
+                isOpen={isMapsPanelOpen}
+                nodeId={currentMapsNodeId}
+                llmConfigs={llmConfigs}
+                onClose={() => {
+                  setMapsPanelOpen(false);
+                  setMapsPreloadedResults(null);
+                }}
+                preloadedResults={mapsPreloadedResults || undefined}
+              />
+            </Suspense>
           )}
 
           {fullscreenImage && (

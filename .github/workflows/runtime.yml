@@ -1,0 +1,95 @@
+name: Runtime
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - backend/docker/runtime/**
+      - backend/scripts/runtime/**
+      - backend/package.json
+      - backend/package-lock.json
+      - scripts/ci/verify-node25-runtime.mjs
+      - .github/workflows/runtime.yml
+  schedule:
+    - cron: '11 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node25-runtime-slice:
+    name: Node25 Runtime Slice
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Run Node25 runtime validation slice
+        run: npm run ci:node25:runtime
+
+  runtime-ci:
+    name: Runtime CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Rebuild and verify runtime images
+        run: npm --prefix backend run runtime:ci
+
+  runtime-scan:
+    name: Runtime Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Scan runtime images
+        run: npm --prefix backend run runtime:scan

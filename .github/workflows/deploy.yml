@@ -1,0 +1,426 @@
+name: Deploy
+
+'on':
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment target environment
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      ref:
+        description: Git ref to deploy (`main` for staging, `v*.*.*` tag for production)
+        required: true
+        default: main
+        type: string
+      run_runtime_checks:
+        description: Run runtime validation before deployment
+        required: true
+        default: false
+        type: boolean
+      confirm_production:
+        description: Type DEPLOY_PRODUCTION to authorize a production deployment
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Deploy Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      deploy_ref: ${{ steps.validate.outputs.deploy_ref }}
+      deploy_sha: ${{ steps.resolve-sha.outputs.deploy_sha }}
+
+    steps:
+      - name: Validate deployment request
+        id: validate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          deploy_env='${{ inputs.environment }}'
+          deploy_ref='${{ inputs.ref }}'
+          production_confirmation='${{ inputs.confirm_production }}'
+
+          if [[ -z "$deploy_ref" ]]; then
+            echo "The deployment ref input is required." >&2
+            exit 1
+          fi
+
+          case "$deploy_env" in
+            staging)
+              if [[ "$deploy_ref" != "main" && "$deploy_ref" != "refs/heads/main" ]]; then
+                echo "Staging deployments are restricted to the main branch." >&2
+                exit 1
+              fi
+              ;;
+            production)
+              if [[ "$production_confirmation" != "DEPLOY_PRODUCTION" ]]; then
+                echo "Production deployments require confirm_production=DEPLOY_PRODUCTION." >&2
+                exit 1
+              fi
+
+              if [[ ! "$deploy_ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && ! "$deploy_ref" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "Production deployments are restricted to semantic version tags." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unsupported deployment environment: $deploy_env" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "deploy_ref=$deploy_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout deployment ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.validate.outputs.deploy_ref }}
+
+      - name: Resolve deployment sha
+        id: resolve-sha
+        shell: bash
+        run: echo "deploy_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  security-gates:
+    name: Security Gates
+    runs-on: ubuntu-latest
+    needs: preflight
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Audit root dependencies
+        run: npm audit --audit-level=high
+
+      - name: Audit backend dependencies
+        run: npm --prefix backend audit --audit-level=high
+
+  application-gates:
+    name: Application Gates
+    runs-on: ubuntu-latest
+    needs: preflight
+    timeout-minutes: 50
+    services:
+      mongo:
+        image: mongo:6.0
+        ports:
+          - 27018:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval \"db.runCommand({ ping: 1 }).ok\""
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MONGODB_URI: mongodb://127.0.0.1:27018/irdd-test
+      JWT_SECRET: ci-jwt-secret-not-for-production
+      REFRESH_TOKEN_SECRET: ci-refresh-secret-not-for-production
+      ENCRYPTION_KEY: ci-master-encryption-key-32-chars-minimum-length-required
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Run frontend component tests
+        run: npm run test:components:ci
+
+      - name: Run frontend hydration integration tests
+        run: npm run test:integration:hydration
+
+      - name: Run frontend canvas non-regression tests
+        run: npm run test:canvas:non-regression
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run backend test suite
+        run: npm --prefix backend test -- --runInBand
+
+      - name: Build backend
+        run: npm --prefix backend run build
+
+  runtime-gates:
+    name: Runtime Gates
+    runs-on: ubuntu-latest
+    needs: preflight
+    timeout-minutes: 60
+
+    steps:
+      - name: Runtime checks skipped
+        if: ${{ !inputs.run_runtime_checks }}
+        run: echo "Runtime checks skipped for this deployment request."
+
+      - name: Checkout repository
+        if: ${{ inputs.run_runtime_checks }}
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_ref }}
+
+      - name: Setup Node.js
+        if: ${{ inputs.run_runtime_checks }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install root dependencies
+        if: ${{ inputs.run_runtime_checks }}
+        run: npm ci
+
+      - name: Install backend dependencies
+        if: ${{ inputs.run_runtime_checks }}
+        run: npm --prefix backend ci
+
+      - name: Verify Node 25 runtime slice
+        if: ${{ inputs.run_runtime_checks }}
+        run: npm run ci:node25:runtime
+
+      - name: Verify backend runtime provisioning
+        if: ${{ inputs.run_runtime_checks }}
+        run: npm --prefix backend run runtime:ci
+
+      - name: Scan backend runtime images
+        if: ${{ inputs.run_runtime_checks }}
+        run: npm --prefix backend run runtime:scan
+
+  package-release:
+    name: Package Deployable Bundle
+    runs-on: ubuntu-latest
+    needs:
+      - preflight
+      - security-gates
+      - application-gates
+      - runtime-gates
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build backend
+        run: npm --prefix backend run build
+
+      - name: Assemble deploy bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf deploy-bundle release-metadata
+          mkdir -p deploy-bundle/frontend-dist deploy-bundle/backend deploy-bundle/metadata release-metadata
+
+          cp -R dist/. deploy-bundle/frontend-dist/
+          mkdir -p deploy-bundle/backend/dist
+          cp -R backend/dist/. deploy-bundle/backend/dist/
+          cp backend/package.json deploy-bundle/backend/package.json
+          cp backend/package-lock.json deploy-bundle/backend/package-lock.json
+
+          cat <<'EOF' > deploy-bundle/metadata/deploy-metadata.json
+          {
+            "repository": "${{ github.repository }}",
+            "sha": "${{ needs.preflight.outputs.deploy_sha }}",
+            "ref": "${{ needs.preflight.outputs.deploy_ref }}",
+            "environment": "${{ inputs.environment }}",
+            "run_id": "${{ github.run_id }}",
+            "run_number": "${{ github.run_number }}",
+            "runtime_checks": "${{ inputs.run_runtime_checks }}"
+          }
+          EOF
+
+          tar -czf deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}.tgz deploy-bundle
+          sha256sum deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}.tgz > deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}.tgz.sha256
+
+      - name: Upload deploy bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}
+          path: |
+            deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}.tgz
+            deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}.tgz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    name: Deploy To Environment
+    runs-on: ubuntu-latest
+    needs:
+      - preflight
+      - package-release
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ vars.DEPLOY_URL }}
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+      DEPLOY_BASE_DIR: ${{ vars.DEPLOY_BASE_DIR }}
+      DEPLOY_ACTIVATE_COMMAND: ${{ vars.DEPLOY_ACTIVATE_COMMAND }}
+      DEPLOY_SHARED_ENV_FILE: ${{ vars.DEPLOY_SHARED_ENV_FILE }}
+
+    steps:
+      - name: Download deploy bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}
+
+      - name: Validate deployment environment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_values=(DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS DEPLOY_BASE_DIR DEPLOY_ACTIVATE_COMMAND)
+          for key in "${required_values[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required deployment setting: $key" >&2
+              exit 1
+            fi
+          done
+
+          if [[ -z "${DEPLOY_PORT:-}" ]]; then
+            echo "DEPLOY_PORT=22" >> "$GITHUB_ENV"
+          fi
+
+      - name: Prepare SSH configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload deploy bundle to target host
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          scp -i ~/.ssh/id_ed25519 -P "$DEPLOY_PORT" \
+            deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}.tgz \
+            deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}.tgz.sha256 \
+            "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
+
+      - name: Activate remote release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          activate_command_b64="$(printf '%s' "$DEPLOY_ACTIVATE_COMMAND" | base64 -w0)"
+
+          ssh -i ~/.ssh/id_ed25519 -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DEPLOY_BASE_DIR='$DEPLOY_BASE_DIR' DEPLOY_ENVIRONMENT='${{ inputs.environment }}' DEPLOY_SHARED_ENV_FILE='$DEPLOY_SHARED_ENV_FILE' RELEASE_SHA='${{ needs.preflight.outputs.deploy_sha }}' ACTIVATE_COMMAND_B64='$activate_command_b64' bash -se" <<'EOF'
+          set -euo pipefail
+
+          archive_path="/tmp/deploy-bundle-${RELEASE_SHA}.tgz"
+          checksum_path="/tmp/deploy-bundle-${RELEASE_SHA}.tgz.sha256"
+          release_dir="${DEPLOY_BASE_DIR}/releases/${RELEASE_SHA}"
+
+          mkdir -p "${DEPLOY_BASE_DIR}/releases"
+          cd /tmp
+          sha256sum -c "$(basename "$checksum_path")"
+
+          rm -rf "$release_dir"
+          mkdir -p "$release_dir"
+          tar -xzf "$archive_path" -C "$release_dir"
+
+          if [[ -n "${DEPLOY_SHARED_ENV_FILE:-}" ]]; then
+            ln -sfn "$DEPLOY_SHARED_ENV_FILE" "$release_dir/deploy-bundle/backend/.env"
+          fi
+
+          export RELEASE_DIR="$release_dir"
+          export RELEASE_SHA
+          export DEPLOY_ENVIRONMENT
+
+          activate_command="$(printf '%s' "$ACTIVATE_COMMAND_B64" | base64 -d)"
+          eval "$activate_command"
+
+          rm -f "$archive_path" "$checksum_path"
+          EOF
+
+      - name: Publish deployment summary
+        shell: bash
+        run: |
+          {
+            echo "## Deployment completed"
+            echo "- Environment: ${{ inputs.environment }}"
+            echo "- Ref: ${{ needs.preflight.outputs.deploy_ref }}"
+            echo "- Commit: ${{ needs.preflight.outputs.deploy_sha }}"
+            echo "- Runtime checks: ${{ inputs.run_runtime_checks }}"
+          } >> "$GITHUB_STEP_SUMMARY"

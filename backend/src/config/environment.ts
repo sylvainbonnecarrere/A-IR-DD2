@@ -77,12 +77,26 @@ export function validateConfig(): void {
         { key: 'ENCRYPTION_KEY', value: config.encryption.key }
     ];
 
+    if (!isTestEnvironment) {
+        required.push({ key: 'REFRESH_TOKEN_SECRET', value: config.jwt.refreshSecret });
+    }
+
     const missing = required.filter(r => !r.value);
 
     if (missing.length > 0) {
         console.error('❌ CRITICAL: Missing required environment variables:');
         missing.forEach(m => console.error(`   - ${m.key}`));
         console.error('\nPlease check your .env file or environment variables');
+        process.exit(1);
+    }
+
+    if (!isTestEnvironment && config.jwt.refreshSecret === config.jwt.secret) {
+        console.error('❌ CRITICAL: REFRESH_TOKEN_SECRET must be configured and different from JWT_SECRET');
+        process.exit(1);
+    }
+
+    if (config.bcrypt.rounds < 10) {
+        console.error('❌ CRITICAL: BCRYPT_ROUNDS must be at least 10');
         process.exit(1);
     }
 

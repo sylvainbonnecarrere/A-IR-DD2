@@ -1,11 +1,18 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { SettingsIcon, LogoIcon } from './Icons';
 import { Button } from './UI';
 import { useLocalization } from '../hooks/useLocalization';
 import { useAuth } from '../hooks/useAuth';
-import { LoginModal } from './modals/LoginModal';
-import { RegisterModal } from './modals/RegisterModal';
 // RestoreTraceButton removed after QA; export UI cleaned up.
+
+const LazyLoginModal = lazy(async () => {
+  const module = await import('./modals/LoginModal');
+  return { default: module.LoginModal };
+});
+const LazyRegisterModal = lazy(async () => {
+  const module = await import('./modals/RegisterModal');
+  return { default: module.RegisterModal };
+});
 
 interface HeaderProps {
   onOpenSettings: () => void;
@@ -85,28 +92,30 @@ export const Header = ({ onOpenSettings }: HeaderProps) => {
       </header>
 
       {/* Auth Modals */}
-      <LoginModal
-        isOpen={showLoginModal}
-        onClose={() => setShowLoginModal(false)}
-        onSuccess={() => {
-          // Optional: Show notification on successful login
-        }}
-        onSwitchToRegister={() => {
-          setShowLoginModal(false);
-          setShowRegisterModal(true);
-        }}
-      />
-      <RegisterModal
-        isOpen={showRegisterModal}
-        onClose={() => setShowRegisterModal(false)}
-        onSuccess={() => {
-          // Optional: Show notification on successful registration
-        }}
-        onSwitchToLogin={() => {
-          setShowRegisterModal(false);
-          setShowLoginModal(true);
-        }}
-      />
+      <Suspense fallback={null}>
+        <LazyLoginModal
+          isOpen={showLoginModal}
+          onClose={() => setShowLoginModal(false)}
+          onSuccess={() => {
+            // Optional: Show notification on successful login
+          }}
+          onSwitchToRegister={() => {
+            setShowLoginModal(false);
+            setShowRegisterModal(true);
+          }}
+        />
+        <LazyRegisterModal
+          isOpen={showRegisterModal}
+          onClose={() => setShowRegisterModal(false)}
+          onSuccess={() => {
+            // Optional: Show notification on successful registration
+          }}
+          onSwitchToLogin={() => {
+            setShowRegisterModal(false);
+            setShowLoginModal(true);
+          }}
+        />
+      </Suspense>
     </>
   );
 };
