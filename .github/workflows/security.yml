@@ -1,0 +1,120 @@
+name: Security
+
+'on':
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+
+  npm-audit-root:
+    name: Root Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Audit root dependencies
+        run: npm audit --audit-level=high
+
+  npm-audit-backend:
+    name: Backend Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Audit backend dependencies
+        run: npm --prefix backend audit --audit-level=high
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - javascript-typescript
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build backend
+        run: npm --prefix backend run build
+
+      - name: Analyze with CodeQL
+        uses: github/codeql-action/analyze@v3

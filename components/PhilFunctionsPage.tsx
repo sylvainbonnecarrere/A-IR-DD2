@@ -9,15 +9,19 @@
  * Couleur Phil : cyan-500
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { useFunctionStore } from '../stores/useFunctionStore';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useAuth } from '../hooks/useAuth';
 import { useLocalization } from '../hooks/useLocalization';
-import { FunctionEditorTab } from './FunctionEditorTab';
 import { SandboxHealthLoader } from './SandboxHealthLoader';
 import type { UserFunction, FunctionOrigin, FunctionLanguage, RuntimeCompatibilityContext, ToolReadinessStatus } from '../types/function.types';
+
+const LazyFunctionEditorTab = lazy(async () => {
+    const module = await import('./FunctionEditorTab');
+    return { default: module.FunctionEditorTab };
+});
 
 // ─── Icônes inline ────────────────────────────────────────────────────────────
 const PyIcon = () => (
@@ -921,12 +925,22 @@ export const PhilFunctionsPage: React.FC = () => {
 
                 {activeTab === 'editor' && (
                     <div className="h-full">
-                        <FunctionEditorTab />
+                        <Suspense fallback={<FunctionEditorTabFallback />}>
+                            <LazyFunctionEditorTab />
+                        </Suspense>
                     </div>
                 )}
             </div>
         </div>
     );
 };
+
+const FunctionEditorTabFallback: React.FC = () => (
+    <div className="flex h-full items-center justify-center bg-gray-900 text-gray-300">
+        <div className="rounded-lg border border-cyan-500/20 bg-cyan-950/20 px-4 py-3 text-sm">
+            Chargement de l'editeur...
+        </div>
+    </div>
+);
 
 export default PhilFunctionsPage;

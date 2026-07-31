@@ -1,0 +1,182 @@
+name: CI
+
+'on':
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Upload frontend dist
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist-${{ github.sha }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 14
+
+  frontend-component-tests:
+    name: Frontend Component Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run component Jest suite
+        run: npm run test:components:ci
+
+  frontend-hydration-integration:
+    name: Frontend Hydration Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run hydration integration tests
+        run: npm run test:integration:hydration
+
+  frontend-canvas-non-regression:
+    name: Frontend Canvas Non-Regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run canvas non-regression suite
+        run: npm run test:canvas:non-regression
+
+  backend-build:
+    name: Backend Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Build backend
+        run: npm --prefix backend run build
+
+      - name: Upload backend dist
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-dist-${{ github.sha }}
+          path: backend/dist
+          if-no-files-found: error
+          retention-days: 14
+
+  backend-tests-mongo:
+    name: Backend Tests With Mongo
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mongo:
+        image: mongo:6.0
+        ports:
+          - 27018:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval \"db.runCommand({ ping: 1 }).ok\""
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MONGODB_URI: mongodb://127.0.0.1:27018/irdd-test
+      JWT_SECRET: ci-jwt-secret-not-for-production
+      ENCRYPTION_KEY: ci-master-encryption-key-32-chars-minimum-length-required
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 25.9.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Run backend Jest suite
+        run: npm --prefix backend test -- --runInBand

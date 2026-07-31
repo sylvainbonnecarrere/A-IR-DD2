@@ -1,0 +1,14 @@
+# Global ownership
+* @sylvainbonnecarrere
+
+# CI/CD and repository governance
+/.github/ @sylvainbonnecarrere
+/.github/workflows/ @sylvainbonnecarrere
+/.github/agents/ @sylvainbonnecarrere
+
+# Application domains
+/backend/ @sylvainbonnecarrere
+/components/ @sylvainbonnecarrere
+/services/ @sylvainbonnecarrere
+/stores/ @sylvainbonnecarrere
+/scripts/ @sylvainbonnecarrere

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useRef, useEffect } from 'react';
 import { Button } from '../UI';
 import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon, ErrorIcon, HistorySynthesisIcon } from '../Icons';
 import { ToolCallBlock } from '../workflow/ToolCallBlock';
@@ -11,14 +11,24 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ChatMessage, Agent, LLMCapability, WorkflowNode, AgentInstance, MapsPanelPreloadedResults } from '../../types';
 import { ConfirmationModal } from './ConfirmationModal';
 import { WebSearchParamsModal } from './WebSearchParamsModal';
-import { ImageGenerationPanel } from '../panels/ImageGenerationPanel';
-import { VideoGenerationConfigPanel } from '../panels/VideoGenerationConfigPanel';
-import { MapsGroundingConfigPanel } from '../panels/MapsGroundingConfigPanel';
 import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from '../../services/persistedChatMessages';
 import { persistInstanceWebSearchParams } from '../../services/webSearchParamsConfigService';
 import apiClient from '../../utils/apiClient';
 import { shouldSuppressVisualToolResult } from '../../utils/toolResultVisibility';
 import { generateRuntimeMessageId } from '../../utils/runtimeMessageId';
+
+const LazyImageGenerationPanel = lazy(async () => {
+  const module = await import('../panels/ImageGenerationPanel');
+  return { default: module.ImageGenerationPanel };
+});
+const LazyVideoGenerationConfigPanel = lazy(async () => {
+  const module = await import('../panels/VideoGenerationConfigPanel');
+  return { default: module.VideoGenerationConfigPanel };
+});
+const LazyMapsGroundingConfigPanel = lazy(async () => {
+  const module = await import('../panels/MapsGroundingConfigPanel');
+  return { default: module.MapsGroundingConfigPanel };
+});
 
 // Minimize icon
 const MinimizeIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -694,53 +704,59 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
               {/* Side Panel Content - Scrollable (No Header - let child components manage it) */}
               <div className="flex-1 overflow-y-auto">
                 {activeSidePanel === 'image' && agent?.capabilities?.includes(LLMCapability.ImageGeneration) && (
-                  <ImageGenerationPanel
-                    isOpen={true}
-                    nodeId={fullscreenChatNodeId || null}
-                    agent={agent}
-                    agentInstance={agentInstance}
-                    llmConfigs={llmConfigs}
-                    onClose={handleCloseSidePanel}
-                    onImageGenerated={(nodeId: string, imageBase64: string) => {
-                      if (onImageGenerated) {
-                        onImageGenerated(nodeId, imageBase64);
-                        return;
-                      }
+                  <Suspense fallback={null}>
+                    <LazyImageGenerationPanel
+                      isOpen={true}
+                      nodeId={fullscreenChatNodeId || null}
+                      agent={agent}
+                      agentInstance={agentInstance}
+                      llmConfigs={llmConfigs}
+                      onClose={handleCloseSidePanel}
+                      onImageGenerated={(nodeId: string, imageBase64: string) => {
+                        if (onImageGenerated) {
+                          onImageGenerated(nodeId, imageBase64);
+                          return;
+                        }
 
-                      const imageMessage: ChatMessage = {
-                        id: generateRuntimeMessageId('image'),
-                        sender: 'agent',
-                        text: t('app_generatedImageText'),
-                        image: imageBase64,
-                        mimeType: 'image/png',
-                        timestamp: new Date()
-                      };
+                        const imageMessage: ChatMessage = {
+                          id: generateRuntimeMessageId('image'),
+                          sender: 'agent',
+                          text: t('app_generatedImageText'),
+                          image: imageBase64,
+                          mimeType: 'image/png',
+                          timestamp: new Date()
+                        };
 
-                      addNodeMessage(nodeId, imageMessage);
-                    }}
-                    onOpenImageModificationPanel={(nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => {
-                      onOpenImageModificationPanel?.(nodeId, sourceImage, agent, agentInstance, mimeType);
-                    }}
-                    hideSlideOver={true}
-                  />
+                        addNodeMessage(nodeId, imageMessage);
+                      }}
+                      onOpenImageModificationPanel={(nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => {
+                        onOpenImageModificationPanel?.(nodeId, sourceImage, agent, agentInstance, mimeType);
+                      }}
+                      hideSlideOver={true}
+                    />
+                  </Suspense>
                 )}
 
                 {activeSidePanel === 'video' && agent?.capabilities?.includes(LLMCapability.VideoGeneration) && (
-                  <VideoGenerationConfigPanel
-                    isOpen={true}
-                    onClose={handleCloseSidePanel}
-                    hideSlideOver={true}
-                  />
+                  <Suspense fallback={null}>
+                    <LazyVideoGenerationConfigPanel
+                      isOpen={true}
+                      onClose={handleCloseSidePanel}
+                      hideSlideOver={true}
+                    />
+                  </Suspense>
                 )}
 
                 {activeSidePanel === 'maps' && agent?.capabilities?.includes(LLMCapability.MapsGrounding) && (
-                  <MapsGroundingConfigPanel
-                    isOpen={true}
-                    nodeId={fullscreenChatNodeId || null}
-                    llmConfigs={llmConfigs}
-                    onClose={handleCloseSidePanel}
-                    hideSlideOver={true}
-                  />
+                  <Suspense fallback={null}>
+                    <LazyMapsGroundingConfigPanel
+                      isOpen={true}
+                      nodeId={fullscreenChatNodeId || null}
+                      llmConfigs={llmConfigs}
+                      onClose={handleCloseSidePanel}
+                      hideSlideOver={true}
+                    />
+                  </Suspense>
                 )}
               </div>
             </div>

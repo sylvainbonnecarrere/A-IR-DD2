@@ -98,7 +98,7 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
         const { email, password } = req.body;
 
         // Rechercher utilisateur
-        const user = await User.findOne({ email: email.toLowerCase() });
+        const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
         if (!user || !user.isActive) {
             return res.status(401).json({
                 error: 'Email ou mot de passe invalide',
