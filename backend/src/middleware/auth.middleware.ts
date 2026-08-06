@@ -3,10 +3,7 @@ import passport from 'passport';
 import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
 import mongoose from 'mongoose';
 import { User, IUser } from '../models/User.model';
-import dotenv from 'dotenv';
-
-// Charger .env en premier (au cas où)
-dotenv.config();
+import config from '../config/environment';
 
 // Étendre Request d'Express pour inclure user
 declare global {
@@ -19,17 +16,12 @@ declare global {
  * Configuration Passport JWT Strategy
  * Vérifie le token JWT dans le header Authorization: Bearer <token>
  */
-const JWT_SECRET = process.env.JWT_SECRET;
-
-if (!JWT_SECRET) {
-    throw new Error('JWT_SECRET not configured in .env - Run: node scripts/generate-secrets.js');
-}
-
 passport.use(
     new JwtStrategy(
         {
             jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-            secretOrKey: JWT_SECRET
+            // Validation is enforced centrally during server bootstrap.
+            secretOrKey: config.jwt.secret || '__missing_jwt_secret__'
         },
         async (payload, done) => {
             try {

@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 const isTestEnvironment = process.env.NODE_ENV === 'test';
+const legacyEnvWarnings: string[] = [];
 
 // Charger .env - chercher à partir du répertoire src et remonter
 // src est à src/, donc ../ = backend/, ../../ = racine du projet
@@ -20,6 +21,23 @@ if (result.error) {
     }
 }
 
+function readCanonicalEnv(key: string, legacyKeys: string[] = []): string {
+    const directValue = process.env[key]?.trim();
+    if (directValue) {
+        return directValue;
+    }
+
+    for (const legacyKey of legacyKeys) {
+        const legacyValue = process.env[legacyKey]?.trim();
+        if (legacyValue) {
+            legacyEnvWarnings.push(`${legacyKey} is deprecated. Rename it to ${key}.`);
+            return legacyValue;
+        }
+    }
+
+    return '';
+}
+
 /**
  * Configuration centralisée
  * Principe: Single Responsibility - une source de vérité pour la config
@@ -36,9 +54,9 @@ export const config = {
 
     // Security - Secrets (Dependency Injection pattern)
     jwt: {
-        secret: process.env.JWT_SECRET || '',
-        expiration: process.env.JWT_EXPIRATION || '24h',
-        refreshSecret: process.env.REFRESH_TOKEN_SECRET || '',
+        secret: readCanonicalEnv('JWT_SECRET'),
+        expiration: readCanonicalEnv('JWT_EXPIRATION', ['JWT_EXPIRY']) || '24h',
+        refreshSecret: readCanonicalEnv('REFRESH_TOKEN_SECRET', ['JWT_REFRESH_SECRET']),
         refreshExpiration: process.env.REFRESH_TOKEN_EXPIRATION || '7d'
     },
 
@@ -101,6 +119,10 @@ export function validateConfig(): void {
     }
 
     if (!isTestEnvironment) {
+        if (legacyEnvWarnings.length > 0) {
+            console.warn('⚠️  Legacy environment variables detected:');
+            legacyEnvWarnings.forEach((warning) => console.warn(`   - ${warning}`));
+        }
         console.log('✅ Configuration validated');
     }
 }

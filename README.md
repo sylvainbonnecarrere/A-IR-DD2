@@ -159,9 +159,9 @@ cp backend/docker/.env.docker backend/.env
 Generate the required secrets:
 
 ```bash
-node -e "console.log('JWT_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
-node -e "console.log('JWT_REFRESH_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
-node -e "console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))"
+cd backend
+node scripts/generate-secrets.js
+cd ..
 ```
 
 Then update `backend/.env` with at least these values:
@@ -170,8 +170,14 @@ Then update `backend/.env` with at least these values:
 - `MONGO_PASSWORD`
 - `MONGODB_URI` using the same MongoDB credentials
 - `JWT_SECRET`
-- `JWT_REFRESH_SECRET`
+- `REFRESH_TOKEN_SECRET`
 - `ENCRYPTION_KEY`
+- `JWT_EXPIRATION` (for example `1h`)
+
+If you already have an older local `.env`, rename these deprecated keys:
+
+- `JWT_REFRESH_SECRET` -> `REFRESH_TOKEN_SECRET`
+- `JWT_EXPIRY` -> `JWT_EXPIRATION`
 
 ### 5. Start the infrastructure services
 
@@ -204,6 +210,14 @@ Terminal 1, backend:
 ```bash
 cd backend
 npm run dev
+```
+
+If the backend reports `EADDRINUSE` on port `3001`, another Node backend process is still running. On Windows, identify it with:
+
+```powershell
+Get-NetTCPConnection -LocalPort 3001 -State Listen
+Get-CimInstance Win32_Process -Filter "ProcessId = <PID>" | Select-Object ProcessId, CommandLine
+Stop-Process -Id <PID>
 ```
 
 Terminal 2, frontend:

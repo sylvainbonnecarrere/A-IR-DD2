@@ -26,9 +26,9 @@ A-IR-DD2 est un orchestrateur de workflows agentiques ambitieux, avec:
 
 ### 2.2 Constat de l'existant
 
-Le depot possede deja des briques utiles:
+ Le depot possede deja des briques utiles:
 
-- un workflow GitHub Actions frontend dans `.github/workflows/frontend-tests.yml` ;
+- un workflow GitHub Actions monorepo dans `.github/workflows/ci.yml` ;
 - des scripts `npm` cibles pour le frontend ;
 - des scripts `npm` cibles pour le backend ;
 - des scripts runtime backend plus couteux (`runtime:ci`, `runtime:scan`, `runtime:maintain`) ;
@@ -106,9 +106,9 @@ But: fournir un feedback fiable en quelques minutes sur les changements courants
 Jobs cibles:
 
 - `frontend-build`
-- `frontend-tests-components`
-- `frontend-tests-hydration`
-- `frontend-tests-canvas`
+- `frontend-component-tests`
+- `frontend-hydration-integration`
+- `frontend-canvas-non-regression`
 - `backend-build`
 - `backend-tests-mongo`
 
@@ -278,7 +278,7 @@ But:
 - verifier que le frontend est compilable ;
 - produire `dist/` pour livraison.
 
-#### `frontend-tests-components`
+#### `frontend-component-tests`
 
 Commande:
 
@@ -287,7 +287,7 @@ npm ci
 npm run test:components:ci
 ```
 
-#### `frontend-tests-hydration`
+#### `frontend-hydration-integration`
 
 Commande:
 
@@ -296,7 +296,7 @@ npm ci
 npm run test:integration:hydration
 ```
 
-#### `frontend-tests-canvas`
+#### `frontend-canvas-non-regression`
 
 Commande:
 
@@ -381,9 +381,9 @@ Le DAG cible est le suivant:
 
 Jobs paralleles:
 
-- `frontend-tests-components`
-- `frontend-tests-hydration`
-- `frontend-tests-canvas`
+- `frontend-component-tests`
+- `frontend-hydration-integration`
+- `frontend-canvas-non-regression`
 - `backend-tests-mongo`
 - `npm-audit-root`
 - `npm-audit-backend`
@@ -436,7 +436,7 @@ Verifier l'etat initial avant toute modification GitHub Actions.
 ### Taches
 
 1. Lire les fichiers suivants:
-	- `.github/workflows/frontend-tests.yml`
+	- `.github/workflows/ci.yml`
 	- `package.json`
 	- `backend/package.json`
 	- `backend/src/__tests__/setup.ts`
@@ -444,7 +444,7 @@ Verifier l'etat initial avant toute modification GitHub Actions.
 2. Confirmer les scripts npm effectivement disponibles.
 3. Confirmer que Node 25.9.0 est la ligne officielle.
 4. Confirmer que les tests backend necessitent MongoDB.
-5. Ne pas supprimer le workflow existant avant d'avoir prepare son equivalent ou son remplacement.
+5. Verifier que `ci.yml` reste la source de verite pour les slices frontend et backend.
 
 ### Critere d'acceptation
 
@@ -454,14 +454,14 @@ Verifier l'etat initial avant toute modification GitHub Actions.
 
 ### Objectif
 
-Remplacer la CI frontend partielle par une CI monorepo coherent frontend + backend.
+Maintenir la CI monorepo coherent frontend + backend comme source de verite.
 
 ### Taches
 
 1. Creer `.github/workflows/ci.yml`.
 2. Definir `name`, `on`, `concurrency` et `permissions` minimales.
 3. Ajouter un job `frontend-build`.
-4. Reporter les trois jobs frontend existants depuis `frontend-tests.yml`.
+4. Maintenir dans `ci.yml` les trois jobs frontend existants.
 5. Ajouter un job `backend-build`.
 6. Ajouter un job `backend-tests-mongo` avec service MongoDB.
 7. Utiliser `actions/setup-node@v5` avec `node-version: 25.9.0`.
@@ -482,18 +482,16 @@ Remplacer la CI frontend partielle par une CI monorepo coherent frontend + backe
 
 - le workflow `ci.yml` execute frontend + backend sans dependance implicite au poste local.
 
-## Jalon 2. Rationaliser le workflow frontend existant
+## Jalon 2. Rationaliser la source de verite CI
 
 ### Objectif
 
-Eviter les doublons et clarifier la source de verite.
+Eviter les doublons et clarifier la source de verite autour des workflows actuellement versionnes.
 
 ### Taches
 
-1. Choisir l'une des deux strategies suivantes:
-	- soit supprimer `frontend-tests.yml` une fois `ci.yml` stable ;
-	- soit le conserver temporairement mais le documenter comme legacy.
-2. Preferer la suppression si `ci.yml` couvre strictement les memes slices.
+1. Verifier que `ci.yml` couvre strictement les slices frontend et backend attendues.
+2. Supprimer toute reference documentaire ou agentique a `frontend-tests.yml`.
 3. Eviter deux workflows qui lancent les memes tests sur les memes evenements.
 
 ### Critere d'acceptation
@@ -697,12 +695,12 @@ Ordre strict conseille:
 
 - `.github/workflows/ci.yml`
 - `.github/workflows/security.yml`
-- `.github/workflows/runtime.yml`
-- `.github/workflows/release-artifacts.yml`
-- `.github/dependabot.yml`
-- `.github/CODEOWNERS`
-- mise a jour ou suppression de `.github/workflows/frontend-tests.yml`
-- note de gouvernance GitHub si necessaire
+ `.github/workflows/runtime.yml`
+ `.github/workflows/release-artifacts.yml`
+ `.github/dependabot.yml`
+ `.github/CODEOWNERS`
+ verification qu'aucune reference residuelle ne pointe vers `.github/workflows/frontend-tests.yml`
+ note de gouvernance GitHub si necessaire
 
 ## 14. Resume executif pour l'agent
 

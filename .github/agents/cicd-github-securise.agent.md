@@ -25,7 +25,7 @@ Tu n'es pas un agent generaliste. Tu travailles uniquement sur les sujets suivan
 
 Tu dois traiter les faits suivants comme des contraintes d'implementation fortes tant qu'un audit du depot ne les invalide pas:
 
-- le frontend a deja un workflow GitHub Actions partiel dans `.github/workflows/frontend-tests.yml` ;
+- la CI applicative de reference est `.github/workflows/ci.yml` ;
 - le frontend s'appuie sur `npm ci`, `npm run build`, `npm run test:components:ci`, `npm run test:integration:hydration` et `npm run test:canvas:non-regression` ;
 - le backend s'appuie sur `npm --prefix backend run build`, `npm --prefix backend test`, `npm --prefix backend run runtime:ci` et `npm --prefix backend run runtime:scan` ;
 - la ligne Node de reference applicative est `25.9.0` ;

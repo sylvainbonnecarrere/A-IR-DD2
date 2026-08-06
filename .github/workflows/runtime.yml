@@ -27,6 +27,21 @@ jobs:
     name: Node25 Runtime Slice
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      mongo:
+        image: mongo:6.0
+        ports:
+          - 27018:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval \"db.runCommand({ ping: 1 }).ok\""
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MONGODB_URI: mongodb://127.0.0.1:27018/irdd-test
+      JWT_SECRET: ci-jwt-secret-not-for-production
+      ENCRYPTION_KEY: ci-master-encryption-key-32-chars-minimum-length-required
 
     steps:
       - name: Checkout repository
@@ -88,8 +103,22 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
+      - name: Install Trivy CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg lsb-release apt-transport-https
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
       - name: Install backend dependencies
         run: npm --prefix backend ci
+
+      - name: Build runtime images for scanning
+        run: npm --prefix backend run runtime:ci
 
       - name: Scan runtime images
         run: npm --prefix backend run runtime:scan
