@@ -176,37 +176,41 @@ body {
 
 /* MiniMap position fixe - Force absolute positioning pour éviter déplacement vertical */
 .workflow-minimap-fixed {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
+  position: absolute !important;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px)) !important;
+  right: calc(20px + env(safe-area-inset-right, 0px)) !important;
+  box-sizing: border-box !important;
   z-index: 4 !important;
   pointer-events: auto !important;
 }
 
 /* Controls position fixe - Collés à gauche de la minimap */
 .workflow-controls-fixed {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 240px !important;
+  position: absolute !important;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px)) !important;
+  right: calc(240px + env(safe-area-inset-right, 0px)) !important;
   /* 200px (minimap width) + 40px (gap) */
+  box-sizing: border-box !important;
   z-index: 4 !important;
   pointer-events: auto !important;
 }
 
 /* SaveButton position fixe - Au-dessus des Controls, aligné verticalement */
 .workflow-save-button-fixed {
-  position: fixed !important;
-  bottom: 150px !important;
-  right: 249px !important;
+  position: absolute !important;
+  bottom: calc(150px + env(safe-area-inset-bottom, 0px)) !important;
+  right: calc(249px + env(safe-area-inset-right, 0px)) !important;
+  box-sizing: border-box !important;
   z-index: 4 !important;
   pointer-events: auto !important;
 }
 
 /* AutoSave Indicator - Mode automatique, position discrète */
 .workflow-autosave-indicator-fixed {
-  position: fixed !important;
-  bottom: 85px !important;
-  right: 15px !important;
+  position: absolute !important;
+  bottom: calc(85px + env(safe-area-inset-bottom, 0px)) !important;
+  right: calc(15px + env(safe-area-inset-right, 0px)) !important;
+  box-sizing: border-box !important;
   z-index: 4 !important;
   pointer-events: auto !important;
 }
