@@ -1,0 +1,17 @@
+name: Frontend Tests Legacy Compatibility
+
+'on':
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deprecated-entrypoint:
+    name: Deprecated Entry Point
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain legacy workflow status
+        run: |
+          echo "frontend-tests.yml is a manual compatibility shim."
+          echo "The active CI workflow is .github/workflows/ci.yml."

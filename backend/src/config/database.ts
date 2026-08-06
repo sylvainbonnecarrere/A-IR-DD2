@@ -106,12 +106,4 @@ mongoose.connection.on('disconnected', () => {
     isConnected = false;
 });
 
-/**
- * Gestion graceful shutdown
- */
-process.on('SIGINT', async () => {
-    await disconnectDatabase();
-    process.exit(0);
-});
-
 export { isConnected };

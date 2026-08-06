@@ -5,7 +5,7 @@ import { WebSocketManager } from './websocket/WebSocketManager';
 import helmet from 'helmet';
 import mongoSanitize from 'express-mongo-sanitize';
 import passport from './middleware/auth.middleware';
-import { connectDatabase } from './config/database';
+import { connectDatabase, disconnectDatabase } from './config/database';
 import config, { validateConfig } from './config/environment';
 import { LMSTUDIO_CONFIG } from './config/lmstudio.config';
 import lmstudioRoutes from './routes/lmstudio.routes';
@@ -144,6 +144,7 @@ httpServer.requestTimeout = Math.max(httpServer.requestTimeout, lmStudioRequestT
 httpServer.keepAliveTimeout = Math.max(httpServer.keepAliveTimeout, 65_000);
 
 let wsManager: WebSocketManager | null = null;
+let isShuttingDown = false;
 
 function ensureWebSocketManager(): WebSocketManager {
   if (!wsManager) {
@@ -204,36 +205,76 @@ async function startServer() {
 
     return httpServer;
   } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'EADDRINUSE') {
+      console.error(`❌ Port ${PORT} is already in use.`);
+      console.error('   Another backend process is likely still running.');
+      console.error('   Windows check: Get-NetTCPConnection -LocalPort 3001 -State Listen');
+      console.error('   Then stop it with: Stop-Process -Id <PID>');
+    }
     console.error('💀 Erreur critique au démarrage:', error);
     process.exit(1);
   }
 }
 
 async function stopServer() {
-  if (!serverStarted) {
-    return;
-  }
-
   if (wsManager) {
     await wsManager.close();
     wsManager = null;
   }
 
-  await new Promise<void>((resolve, reject) => {
-    httpServer.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
+  if (serverStarted) {
+    await new Promise<void>((resolve, reject) => {
+      httpServer.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
 
-      serverStarted = false;
-      resolve();
+        serverStarted = false;
+        resolve();
+      });
+    });
+  }
+
+  await disconnectDatabase();
+}
+
+async function shutdown(signal: string) {
+  if (isShuttingDown) {
+    return;
+  }
+
+  isShuttingDown = true;
+
+  if (!isTestEnvironment) {
+    console.log(`\n🛑 Received ${signal}. Shutting down backend gracefully...`);
+  }
+
+  try {
+    await stopServer();
+    process.exit(0);
+  } catch (error) {
+    console.error('💥 Graceful shutdown failed:', error);
+    process.exit(1);
+  }
+}
+
+function registerShutdownHandlers() {
+  const shutdownSignals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+  if (process.platform === 'win32') {
+    shutdownSignals.push('SIGBREAK');
+  }
+
+  shutdownSignals.forEach((signal) => {
+    process.on(signal, () => {
+      void shutdown(signal);
     });
   });
 }
 
 // Lancer le serveur uniquement en exécution directe
 if (require.main === module) {
+  registerShutdownHandlers();
   void startServer();
 }
 
