@@ -40,7 +40,7 @@ describe('RobotPageRouter BOS media button', () => {
     ));
   });
 
-  it('shows the media button on the BOS workflow map and opens the modal for the active workflow', () => {
+  it('shows the media button on the BOS workflow map and opens the modal for the active workflow', async () => {
     render(
       <RobotPageRouter
         currentPath="/bos/dashboard"
@@ -50,10 +50,10 @@ describe('RobotPageRouter BOS media button', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Gestion des fichiers' })).toBeInTheDocument();
-    expect(screen.getByTestId('workflow-canvas')).toBeInTheDocument();
+    expect(await screen.findByTestId('workflow-canvas')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Gestion des fichiers' }));
 
-    expect(screen.getByTestId('bos-media-modal')).toHaveTextContent('wf-1:Workflow Alpha');
+    expect(await screen.findByTestId('bos-media-modal')).toHaveTextContent('wf-1:Workflow Alpha');
   });
 });
