@@ -202,33 +202,44 @@ describe('RuntimeHealthService', () => {
     });
 
     it('uses the rootless user socket fallback when security options do not expose rootless', async () => {
-        const runner = new FakeCommandRunner({
-            'node --version': { exitCode: 0, stdout: 'v22.14.0\n' },
-            'python3 --version': { exitCode: 0, stdout: 'Python 3.12.6\n' },
-            'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"29.1.3"\n' },
-            'docker info --format {{json .SecurityOptions}}': { exitCode: 0, stdout: '["name=seccomp","name=cgroupns"]\n' },
-            'docker info --format {{json .Rootless}}': { exitCode: 1, stderr: 'template failure' },
-            'docker image inspect airdd2-runtime-node:22.22.2-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
-            'docker image inspect airdd2-runtime-python:3.12-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
-            ...nativeImportProbeResponses()
-        });
+        const previousXdgRuntimeDir = process.env.XDG_RUNTIME_DIR;
+        process.env.XDG_RUNTIME_DIR = '/run/user/1000';
 
-        const service = new RuntimeHealthService({
-            runner,
-            socketExists: async (socketPath) => socketPath === '/run/user/1000/docker.sock',
-            runtimeConfig: {
-                nodeExecutable: 'node',
-                pythonExecutables: ['python3', 'python'],
-                dockerExecutable: 'docker',
-                backendPythonRoot: 'C:/backend/python'
-            },
-            kvmAvailable: async () => false
-        });
+        try {
+            const runner = new FakeCommandRunner({
+                'node --version': { exitCode: 0, stdout: 'v22.14.0\n' },
+                'python3 --version': { exitCode: 0, stdout: 'Python 3.12.6\n' },
+                'docker version --format {{json .Server.Version}}': { exitCode: 0, stdout: '"29.1.3"\n' },
+                'docker info --format {{json .SecurityOptions}}': { exitCode: 0, stdout: '["name=seccomp","name=cgroupns"]\n' },
+                'docker info --format {{json .Rootless}}': { exitCode: 1, stderr: 'template failure' },
+                'docker image inspect airdd2-runtime-node:22.22.2-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:node"\n' },
+                'docker image inspect airdd2-runtime-python:3.12-ubuntu-noble --format {{json .Id}}': { exitCode: 0, stdout: '"sha256:python"\n' },
+                ...nativeImportProbeResponses()
+            });
 
-        const report = await service.getHealthReport();
+            const service = new RuntimeHealthService({
+                runner,
+                socketExists: async (socketPath) => socketPath === '/run/user/1000/docker.sock',
+                runtimeConfig: {
+                    nodeExecutable: 'node',
+                    pythonExecutables: ['python3', 'python'],
+                    dockerExecutable: 'docker',
+                    backendPythonRoot: 'C:/backend/python'
+                },
+                kvmAvailable: async () => false
+            });
 
-        expect(report.runtime.docker.rootless).toBe(true);
-        expect(report.status).toBe('healthy');
+            const report = await service.getHealthReport();
+
+            expect(report.runtime.docker.rootless).toBe(true);
+            expect(report.status).toBe('healthy');
+        } finally {
+            if (previousXdgRuntimeDir === undefined) {
+                delete process.env.XDG_RUNTIME_DIR;
+            } else {
+                process.env.XDG_RUNTIME_DIR = previousXdgRuntimeDir;
+            }
+        }
     });
 
     it('treats Docker Desktop as execution-ready with degraded security instead of unhealthy', async () => {
