@@ -1,9 +1,9 @@
-FROM ubuntu:noble-20260410@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b AS node_runtime_builder
+FROM ubuntu:noble@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea AS node_runtime_builder
 
 # Run-only image: keep Node runtime, remove package installation tooling.
 # Dependency installation belongs to a separate preparation workflow.
 
-ARG NODE_VERSION=22.22.2
+ARG NODE_VERSION=24.19.0
 
 RUN set -eux; \
     arch=''; \
@@ -41,7 +41,7 @@ RUN set -eux; \
         | sort -u > /tmp/node-runtime-packages.txt; \
     /opt/node-runtime/bin/node --version
 
-FROM ubuntu:noble-20260410@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b
+FROM ubuntu:noble@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
 
 ENV NODE_ENV=production \
     HOME=/home/sandbox

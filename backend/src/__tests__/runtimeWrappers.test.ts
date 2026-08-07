@@ -1,17 +1,67 @@
+import { existsSync } from 'fs';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { buildPythonNativeWrapper } from '../services/runtime/runtimeWrappers';
 
 function resolveWorkspaceRoot(): string {
     return path.resolve(__dirname, '../../../');
 }
 
-function resolvePythonExecutable(workspaceRoot: string): string {
+function appendCandidate(candidates: string[], candidate?: string | null): void {
+    const normalizedCandidate = candidate?.trim();
+    if (!normalizedCandidate || candidates.includes(normalizedCandidate)) {
+        return;
+    }
+
+    candidates.push(normalizedCandidate);
+}
+
+function resolveVirtualEnvPython(virtualEnv: string): string {
     return process.platform === 'win32'
-        ? path.join(workspaceRoot, '.venv', 'Scripts', 'python.exe')
-        : path.join(workspaceRoot, '.venv', 'bin', 'python');
+        ? path.join(virtualEnv, 'Scripts', 'python.exe')
+        : path.join(virtualEnv, 'bin', 'python');
+}
+
+function looksLikePath(candidate: string): boolean {
+    return candidate.includes(path.sep) || candidate.includes('/') || candidate.includes('\\');
+}
+
+function isPythonExecutableAvailable(candidate: string): boolean {
+    if (looksLikePath(candidate) && !existsSync(candidate)) {
+        return false;
+    }
+
+    const probe = spawnSync(candidate, ['--version'], {
+        stdio: 'ignore',
+        windowsHide: true,
+    });
+
+    return !probe.error && probe.status === 0;
+}
+
+function resolvePythonExecutable(workspaceRoot: string): string {
+    const candidates: string[] = [];
+    appendCandidate(candidates, process.env.PYTHON_BIN);
+    appendCandidate(candidates, process.env.PYTHON_EXECUTABLE);
+
+    if (process.env.VIRTUAL_ENV) {
+        appendCandidate(candidates, resolveVirtualEnvPython(process.env.VIRTUAL_ENV));
+    }
+
+    appendCandidate(candidates, resolveVirtualEnvPython(path.join(workspaceRoot, '.venv')));
+    appendCandidate(candidates, 'python3');
+    appendCandidate(candidates, 'python');
+
+    const resolvedCandidate = candidates.find(isPythonExecutableAvailable);
+    if (resolvedCandidate) {
+        return resolvedCandidate;
+    }
+
+    throw new Error(
+        `Python runtime not found. Set PYTHON_BIN or PYTHON_EXECUTABLE, activate a virtual environment, or install python3/python. Checked candidates: ${candidates.join(', ')}`,
+    );
 }
 
 async function runPythonWrapper(

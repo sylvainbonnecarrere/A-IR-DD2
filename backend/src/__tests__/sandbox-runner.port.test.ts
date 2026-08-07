@@ -21,7 +21,7 @@ function createReport(overrides: Partial<RuntimeHealthReport> = {}): RuntimeHeal
                 executionReady: true
             },
             images: {
-                node: { available: true, status: 'healthy', image: 'airdd2-runtime-node:22.22.2-ubuntu-noble' },
+                node: { available: true, status: 'healthy', image: 'airdd2-runtime-node:24.19.0-ubuntu-noble' },
                 python: { available: true, status: 'healthy', image: 'airdd2-runtime-python:3.12-ubuntu-noble' }
             },
             runners: {
@@ -68,7 +68,7 @@ describe('SandboxRunner port', () => {
                     executionReady: false
                 },
                 images: {
-                    node: { available: true, status: 'healthy', image: 'airdd2-runtime-node:22.22.2-ubuntu-noble' },
+                    node: { available: true, status: 'healthy', image: 'airdd2-runtime-node:24.19.0-ubuntu-noble' },
                     python: { available: true, status: 'healthy', image: 'airdd2-runtime-python:3.12-ubuntu-noble' }
                 },
                 runners: {
@@ -110,7 +110,7 @@ describe('SandboxRunner port', () => {
                     warning: 'Docker Desktop détecté : mode dev-only explicite. Acceptable en développement/test, sans sécurité de production.'
                 },
                 images: {
-                    node: { available: true, status: 'healthy', image: 'airdd2-runtime-node:22.22.2-ubuntu-noble' },
+                    node: { available: true, status: 'healthy', image: 'airdd2-runtime-node:24.19.0-ubuntu-noble' },
                     python: { available: true, status: 'healthy', image: 'airdd2-runtime-python:3.12-ubuntu-noble' }
                 },
                 runners: {
@@ -149,7 +149,7 @@ describe('SandboxRunner port', () => {
                     executionReady: true
                 },
                 images: {
-                    node: { available: true, status: 'healthy', image: 'airdd2-runtime-node:22.22.2-ubuntu-noble' },
+                    node: { available: true, status: 'healthy', image: 'airdd2-runtime-node:24.19.0-ubuntu-noble' },
                     python: { available: true, status: 'healthy', image: 'airdd2-runtime-python:3.12-ubuntu-noble' }
                 },
                 runners: {

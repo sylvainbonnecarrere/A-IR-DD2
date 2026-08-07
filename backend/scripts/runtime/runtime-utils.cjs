@@ -12,7 +12,7 @@ const runtimeArtifacts = [
         key: 'node',
         category: 'runtime',
         label: 'Node.js runtime',
-        image: process.env.RUNTIME_NODE_IMAGE || 'airdd2-runtime-node:22.22.2-ubuntu-noble',
+        image: process.env.RUNTIME_NODE_IMAGE || 'airdd2-runtime-node:24.19.0-ubuntu-noble',
         dockerfile: path.resolve(backendRoot, 'docker/runtime/node/Dockerfile'),
         context: path.resolve(backendRoot, 'docker/runtime/node'),
         probeCommand: ['node', '--version'],
