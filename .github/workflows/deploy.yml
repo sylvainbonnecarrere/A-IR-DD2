@@ -231,6 +231,19 @@ jobs:
             package-lock.json
             backend/package-lock.json
 
+      - name: Setup Python
+        if: ${{ inputs.run_runtime_checks }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Expose Python runtime for Node25 slice
+        if: ${{ inputs.run_runtime_checks }}
+        shell: bash
+        run: |
+          echo "PYTHON_BIN=python3" >> "$GITHUB_ENV"
+          echo "PYTHON_EXECUTABLE=python3" >> "$GITHUB_ENV"
+
       - name: Install Trivy CLI
         if: ${{ inputs.run_runtime_checks }}
         shell: bash

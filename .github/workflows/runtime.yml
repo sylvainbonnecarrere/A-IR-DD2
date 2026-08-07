@@ -42,6 +42,8 @@ jobs:
       MONGODB_URI: mongodb://127.0.0.1:27018/irdd-test
       JWT_SECRET: ci-jwt-secret-not-for-production
       ENCRYPTION_KEY: ci-master-encryption-key-32-chars-minimum-length-required
+      PYTHON_BIN: python3
+      PYTHON_EXECUTABLE: python3
 
     steps:
       - name: Checkout repository
@@ -55,6 +57,11 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             backend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install root dependencies
         run: npm ci

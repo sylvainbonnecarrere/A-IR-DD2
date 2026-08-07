@@ -99,7 +99,7 @@ describe('DockerSandboxRunner', () => {
             '/sandbox/tmp:size=64m,noexec,nosuid,nodev',
             '--workdir',
             '/persistent-workspace/source',
-            'airdd2-runtime-node:22.22.2-ubuntu-noble'
+            'airdd2-runtime-node:24.19.0-ubuntu-noble'
         ]));
         expect(call.args.join(' ')).toContain('type=bind,src=C:/sandbox/workspace-root,dst=/persistent-workspace');
         expect(call.timeoutMs).toBe(12000);

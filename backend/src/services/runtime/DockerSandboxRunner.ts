@@ -280,7 +280,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
 
         return [
             ...baseArgs,
-            'airdd2-runtime-node:22.22.2-ubuntu-noble',
+            'airdd2-runtime-node:24.19.0-ubuntu-noble',
             'node',
             '--input-type=commonjs',
             '--eval',
