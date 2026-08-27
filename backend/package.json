@@ -51,7 +51,7 @@
     "isolated-vm": "^4.7.2"
   },
   "devDependencies": {
-    "@types/bcrypt": "^5.0.2",
+    "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.25",
     "@types/jest": "^30.0.0",
