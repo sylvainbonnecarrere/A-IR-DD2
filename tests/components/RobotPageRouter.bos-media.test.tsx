@@ -56,4 +56,26 @@ describe('RobotPageRouter BOS media button', () => {
 
     expect(await screen.findByTestId('bos-media-modal')).toHaveTextContent('wf-1:Workflow Alpha');
   });
+
+  it('keeps the media button disabled when workflows is malformed instead of crashing', async () => {
+    const malformedDesignStoreState = {
+      workflows: { _id: 'wf-1', name: 'Workflow Alpha' },
+      currentWorkflowId: 'wf-1',
+    };
+
+    (useDesignStore as unknown as jest.Mock).mockImplementation((selector?: (state: typeof malformedDesignStoreState) => unknown) => (
+      selector ? selector(malformedDesignStoreState) : malformedDesignStoreState
+    ));
+
+    render(
+      <RobotPageRouter
+        currentPath="/bos/dashboard"
+        llmConfigs={[]}
+        agents={[]}
+      />,
+    );
+
+    expect(await screen.findByTestId('workflow-canvas')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gestion des fichiers' })).toBeDisabled();
+  });
 });
