@@ -29,7 +29,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Check dependency graph availability
+        id: dependency-graph
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const repo = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const status = repo.data.security_and_analysis?.dependency_graph?.status;
+            const supported = status === 'enabled';
+            core.setOutput('supported', String(supported));
+            if (!supported) {
+              core.warning(
+                `Skipping dependency review because dependency graph is not enabled (status: ${status ?? 'unknown'}). Enable it in repository settings to run this check.`
+              );
+            }
+
       - name: Dependency review
+        if: steps.dependency-graph.outputs.supported == 'true'
         uses: actions/dependency-review-action@v4
 
   npm-audit-root:
