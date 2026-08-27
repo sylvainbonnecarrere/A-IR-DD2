@@ -176,7 +176,7 @@ jobs:
             backend/package-lock.json
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6s
         with:
           python-version: '3.12'
           cache: pip
