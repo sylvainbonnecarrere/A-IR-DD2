@@ -51,6 +51,8 @@
     "isolated-vm": "^4.7.2"
   },
   "devDependencies": {
+    "@emnapi/core": "^1.11.3",
+    "@emnapi/runtime": "^1.11.3",
     "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.25",
@@ -75,7 +77,7 @@
     "form-data@4.0.5": "4.0.6",
     "engine.io": "6.6.9",
     "js-yaml": "5.2.3",
-	"@istanbuljs/load-nyc-config": {
+    "@istanbuljs/load-nyc-config": {
       "js-yaml": "5.2.3"
     },
     "minimatch@3.1.2": "3.1.5",
