@@ -173,9 +173,10 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
   const currentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
   const [showBosMediaModal, setShowBosMediaModal] = useState(false);
   const resolvedRoute = useMemo(() => resolveRobotPageRoute(currentPath), [currentPath]);
+  const workflowsList = useMemo(() => (Array.isArray(workflows) ? workflows : []), [workflows]);
   const activeWorkflow = useMemo(
-    () => workflows.find((workflow) => workflow._id === currentWorkflowId) ?? workflows[0] ?? null,
-    [currentWorkflowId, workflows],
+    () => workflowsList.find((workflow) => workflow._id === currentWorkflowId) ?? workflowsList[0] ?? null,
+    [currentWorkflowId, workflowsList],
   );
 
   React.useEffect(() => {
