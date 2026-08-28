@@ -9,7 +9,7 @@ import { Workflow } from '../models/Workflow.model';
 import { WorkflowNodeV2 } from '../models/WorkflowNodeV2.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { requireRobotGovernance } from '../middleware/robot-governance.middleware';
-import { validateRequest } from '../middleware/validation.middleware';
+import { formatZodValidationDetails, validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 import { journalService } from '../services/journal.service';
 import { buildChatMessagesByInstance } from '../utils/chatMessageProjection';
@@ -517,11 +517,7 @@ router.post('/from-prototype', requireAuth,
         if (error instanceof z.ZodError) {
             return res.status(400).json({
                 error: 'Validation échouée',
-                details: error.errors.map((e) => ({
-                    field: e.path.join('.'),
-                    message: e.message,
-                    code: e.code,
-                })),
+                details: formatZodValidationDetails(error),
             });
         }
 
@@ -739,11 +735,7 @@ router.put('/:id',
             if (error instanceof z.ZodError) {
                 return res.status(400).json({
                     error: 'Validation échouée',
-                    details: error.errors.map((e) => ({
-                        field: e.path.join('.'),
-                        message: e.message,
-                        code: e.code,
-                    })),
+                    details: formatZodValidationDetails(error),
                 });
             }
             res.status(500).json({ error: 'Erreur mise à jour instance' });

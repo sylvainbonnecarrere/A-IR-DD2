@@ -6,7 +6,7 @@ import { AgentInstance } from '../models/AgentInstance.model';
 import { WorkflowNodeV2 } from '../models/WorkflowNodeV2.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { requireRobotGovernance } from '../middleware/robot-governance.middleware';
-import { validateRequest } from '../middleware/validation.middleware';
+import { formatZodValidationDetails, validateRequest } from '../middleware/validation.middleware';
 import { IUser } from '../models/User.model';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
 import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
@@ -271,11 +271,7 @@ router.post('/',
             if (error instanceof z.ZodError) {
                 return res.status(400).json({
                     error: 'Validation échouée',
-                    details: error.errors.map((e) => ({
-                        field: e.path.join('.'),
-                        message: e.message,
-                        code: e.code,
-                    })),
+                    details: formatZodValidationDetails(error),
                 });
             }
             res.status(500).json({ error: 'Erreur création prototype' });
@@ -355,11 +351,7 @@ router.put('/:id',
             if (error instanceof z.ZodError) {
                 return res.status(400).json({
                     error: 'Validation échouée',
-                    details: error.errors.map((e) => ({
-                        field: e.path.join('.'),
-                        message: e.message,
-                        code: e.code,
-                    })),
+                    details: formatZodValidationDetails(error),
                 });
             }
             res.status(500).json({ error: 'Erreur mise à jour prototype' });
