@@ -39,7 +39,7 @@ import { CanonicalRobotIdEnum, DEFAULT_ROBOT_ID } from '../types/robotIds';
 const ToolConfigSchema = z.object({
     name: z.string().min(1),
     enabled: z.boolean().default(true),
-    parameters: z.record(z.unknown()).optional()
+    parameters: z.record(z.string(),z.unknown()).optional()
 });
 
 const AgentConfigurationSchema = z.object({
@@ -53,7 +53,7 @@ const AgentConfigurationSchema = z.object({
         maxMessages: z.number().positive().optional(),
         summarizeAfter: z.number().positive().optional()
     }).optional(),
-    outputConfig: z.record(z.unknown()).optional()
+    outputConfig: z.record(z.string(),z.unknown()).optional()
 });
 
 const PersistenceOptionsSchema = z.object({

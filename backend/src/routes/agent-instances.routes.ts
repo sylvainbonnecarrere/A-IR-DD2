@@ -1294,7 +1294,7 @@ router.delete('/:id',
             if (!queryParseResult.success) {
                 return res.status(400).json({
                     error: 'Paramètres invalides',
-                    details: queryParseResult.error.errors,
+                    details: queryParseResult.error.issues,
                 });
             }
 
