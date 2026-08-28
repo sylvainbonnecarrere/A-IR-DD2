@@ -48,7 +48,7 @@
     "zod": "^4.4.3"
   },
   "optionalDependencies": {
-    "isolated-vm": "^4.7.2"
+    "isolated-vm": "^7.0.1"
   },
   "devDependencies": {
     "@emnapi/core": "^1.11.3",
