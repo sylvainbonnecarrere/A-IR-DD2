@@ -67,7 +67,7 @@
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.11",
     "tsx": "^4.22.4",
-    "typescript": "^5.4.5"
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "@babel/core": "7.29.7",
