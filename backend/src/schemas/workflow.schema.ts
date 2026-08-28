@@ -30,7 +30,7 @@ export const WorkflowNodeSchema = z.object({
         x: z.number(),
         y: z.number()
     }),
-    data: z.record(z.any())
+    data: z.record(z.string(),z.any())
 });
 
 /**
@@ -43,7 +43,7 @@ export const WorkflowEdgeSchema = z.object({
     sourceHandle: z.string().optional(),
     targetHandle: z.string().optional(),
     type: z.string().optional(),
-    data: z.record(z.any()).optional()
+    data: z.record(z.string(), z.any()).optional()
 });
 
 // ============================================

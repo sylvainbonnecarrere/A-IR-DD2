@@ -27,7 +27,7 @@ export const AgentPositionSchema = z.object({
 export const AgentToolSchema = z.object({
     name: z.string().min(1),
     description: z.string(),
-    inputSchema: z.record(z.any())
+    inputSchema: z.record(z.string(), z.any())
 });
 
 /**

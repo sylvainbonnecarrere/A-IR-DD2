@@ -13,7 +13,7 @@ const router = Router();
 const profileSchema = z.object({
     name: z.string().min(1).max(100).trim(),
     endpoint: z.string().url().trim(),
-    capabilities: z.record(z.boolean()).optional().default({}),
+    capabilities: z.record(z.string(),z.boolean()).optional().default({}),
     enabled: z.boolean().default(true),
     detectedModel: z.string().trim().nullable().optional()
 });

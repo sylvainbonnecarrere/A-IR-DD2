@@ -48,10 +48,10 @@ const runFunctionSchema = z.object({
         .optional(),
     toolSelection: toolSelectionSchema.optional(),
     testArgs: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .optional()
         .default({}),
-    privateContext: z.record(z.unknown()).optional()
+    privateContext: z.record(z.string(), z.unknown()).optional()
 }).superRefine((value, ctx) => {
     if (!value.functionId && !value.toolSelection) {
         ctx.addIssue({

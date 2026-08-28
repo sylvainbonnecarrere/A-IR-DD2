@@ -205,7 +205,7 @@ router.get('/workflows/:workflowId/explorer', requireAuth, async (req: Request, 
         if (!parseResult.success) {
             return res.status(400).json({
                 error: 'Paramètres invalides',
-                details: parseResult.error.errors,
+                details: parseResult.error.issues,
             });
         }
 
@@ -247,7 +247,7 @@ router.post('/workflows/:workflowId/explorer/repair-legacy-catalog', requireAuth
         if (!parseResult.success) {
             return res.status(400).json({
                 error: 'Paramètres invalides',
-                details: parseResult.error.errors,
+                details: parseResult.error.issues,
             });
         }
 
@@ -378,7 +378,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         if (!parseResult.success) {
             return res.status(400).json({ 
                 error: 'Paramètres invalides',
-                details: parseResult.error.errors 
+                details: parseResult.error.issues 
             });
         }
         
@@ -529,7 +529,7 @@ router.post('/test-cloud', requireAuth, async (req: Request, res: Response) => {
         if (!parseResult.success) {
             return res.status(400).json({
                 error: 'Configuration invalide',
-                details: parseResult.error.errors
+                details: parseResult.error.issues
             });
         }
         

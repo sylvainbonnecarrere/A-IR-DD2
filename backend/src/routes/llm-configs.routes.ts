@@ -29,7 +29,7 @@ const upsertConfigSchema = z.object({
     enabled: z.boolean(),
     apiKey: z.string().optional(), // For cloud providers
     localEndpoint: z.string().optional(), // For local providers (e.g., http://localhost:3928)
-    capabilities: z.record(z.boolean()).optional().default({})
+    capabilities: z.record(z.string(),z.boolean()).optional().default({})
 });
 
 /**
