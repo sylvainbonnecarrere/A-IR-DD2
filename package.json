@@ -28,7 +28,7 @@
     "test:settingsmodal:report": "node scripts/run-jest-report.mjs tests/unitaires/SettingsModal.TNR.test.ts --outputDir tests/temp_rapport_tests/unitaires/settingsmodal --reportBase settingsmodal-jest"
   },
   "dependencies": {
-    "@google/genai": "^2.18.0",
+    "@google/genai": "^2.20.0",
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-query": "^5.90.12",
     "axios": "^1.16.0",
