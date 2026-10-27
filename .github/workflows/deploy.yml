@@ -233,7 +233,7 @@ jobs:
 
       - name: Setup Python
         if: ${{ inputs.run_runtime_checks }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
