@@ -38,6 +38,21 @@ describe('WorkflowValidator', () => {
       ],
       [],
       ['inst-1'],
+      true,
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.issues[0]).toEqual(expect.objectContaining({ code: 'MISSING_AGENT_INSTANCE' }));
+  });
+
+  it('rejects agent nodes bound to instance ids when the workflow instance set is empty in strict activation mode', () => {
+    const result = validator.validateGraph(
+      [
+        { _id: 'node-1', nodeType: 'agent', instanceId: 'inst-2' } as any,
+      ],
+      [],
+      [],
+      true,
     );
 
     expect(result.valid).toBe(false);

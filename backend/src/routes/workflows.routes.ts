@@ -22,6 +22,7 @@ import { AgentInstanceRepository } from '../repositories/AgentInstanceRepository
 import { UserRepository } from '../repositories/UserRepository';
 import { WorkflowRepository } from '../repositories/WorkflowRepository';
 import { WorkflowValidationError, WorkflowValidator } from '../validators/workflow-validator';
+import { buildWorkflowOwnershipResolver } from './workflowAccess';
 
 // ⭐ V2 IMPORTS - Nouvelle architecture de persistance (Jalon 1-2)
 import {
@@ -37,6 +38,12 @@ const workflowRepository = new WorkflowRepository();
 const userRepository = new UserRepository();
 const agentInstanceRepository = new AgentInstanceRepository();
 const workflowValidator = new WorkflowValidator();
+const resolveWorkflowOwnership = buildWorkflowOwnershipResolver(workflowRepository);
+const resolveWorkflowOwnershipByRequest = async (req: Request) => {
+    const user = req.user as IUser | undefined;
+    const userId = user?._id?.toString() ?? user?.id;
+    return resolveWorkflowOwnership(req.params.id, userId);
+};
 const listUserWorkflowsUseCase = new ListUserWorkflowsUseCase(
     workflowRepository,
     userRepository,
@@ -130,13 +137,10 @@ router.get('/', requireAuth, async (req, res) => {
 // GET /api/workflows/:id - Workflow spécifique avec agents et edges
 router.get('/:id',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     async (req, res) => {
         try {
-            const workflow = await Workflow.findById(req.params.id);
+            const workflow = await workflowRepository.findById(req.params.id);
 
             if (!workflow) {
                 return res.status(404).json({ error: 'Workflow introuvable' });
@@ -251,10 +255,7 @@ router.put('/:id',
 // DELETE /api/workflows/:id - Supprimer workflow (cascade atomique)
 router.delete('/:id',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     // ⭐ V4 FIX: Transactions retirées (MongoDB standalone)
     async (req, res) => {
         try {
@@ -295,10 +296,7 @@ router.delete('/:id',
 // ⭐ PHASE 1: POST /api/workflows/:id/select - Activer un workflow
 router.post('/:id/select',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     // ⭐ V4 FIX: Transactions retirées (MongoDB standalone)
     async (req, res) => {
         try {
@@ -356,13 +354,10 @@ router.post('/:id/select',
 // ⭐ PHASE 1: GET /api/workflows/:id/stats - Obtenir les stats d'un workflow
 router.get('/:id/stats',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     async (req, res) => {
         try {
-            const workflow = await Workflow.findById(req.params.id);
+            const workflow = await workflowRepository.findById(req.params.id);
             
             if (!workflow) {
                 return res.status(404).json({ error: 'Workflow introuvable' });
@@ -400,10 +395,7 @@ router.get('/:id/stats',
 // POST /api/workflows/:id/save - Sauvegarder état workflow (reset isDirty)
 router.post('/:id/save',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -442,10 +434,7 @@ router.post('/:id/save',
  */
 router.patch('/:id/patch',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -509,10 +498,7 @@ router.patch('/:id/patch',
  */
 router.patch('/:id/nodes/:nodeId/position',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -570,10 +556,7 @@ router.patch('/:id/nodes/:nodeId/position',
  */
 router.post('/:id/edges',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -629,10 +612,7 @@ router.post('/:id/edges',
  */
 router.delete('/:id/edges/:edgeId',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -667,10 +647,7 @@ router.delete('/:id/edges/:edgeId',
 // POST /api/workflows/:id/mark-dirty - Marquer workflow comme modifié
 router.post('/:id/mark-dirty',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     async (req, res) => {
         try {
             const user = req.user as IUser;
@@ -714,10 +691,7 @@ router.post('/:id/mark-dirty',
  */
 router.get('/:id/v2/graph',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     (req: Request, res: Response) => getWorkflowGraph(req as Request & { user: IUser }, res)
 );
 
@@ -740,10 +714,7 @@ router.get('/:id/v2/graph',
  */
 router.post('/:id/v2/instances',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     (req: Request, res: Response) => createInstance(req as Request & { user: IUser }, res)
 );
 
@@ -765,10 +736,7 @@ router.post('/:id/v2/instances',
  */
 router.delete('/:id/v2/nodes/:nodeId',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     (req: Request, res: Response) => deleteNode(req as Request & { user: IUser }, res)
 );
 
@@ -787,10 +755,7 @@ router.delete('/:id/v2/nodes/:nodeId',
  */
 router.patch('/:id/v2/nodes/:nodeId',
     requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const workflow = await Workflow.findById(req.params.id);
-        return workflow ? workflow.userId.toString() : null;
-    }),
+    requireOwnershipAsync(resolveWorkflowOwnershipByRequest),
     (req: Request, res: Response) => updateNode(req as Request & { user: IUser }, res)
 );
 

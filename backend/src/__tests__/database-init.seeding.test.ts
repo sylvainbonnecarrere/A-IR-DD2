@@ -1,5 +1,15 @@
+import mongoose from 'mongoose';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
-import { seedNativeFunctions, seedSharedExampleFunctions } from '../services/databaseInit';
+import * as databaseInitModule from '../services/databaseInit';
+
+const {
+    initializeDatabase,
+    runDatabaseBootstrap,
+    runDatabaseMigrations,
+    runSeedPhase,
+    seedNativeFunctions,
+    seedSharedExampleFunctions,
+} = databaseInitModule;
 
 describe('databaseInit canonical tool seeding', () => {
     it('seeds native startup tools directly into user_tools without touching legacy persistence', async () => {
@@ -81,5 +91,15 @@ describe('databaseInit canonical tool seeding', () => {
             { upsert: true },
         );
         expect(db.collection).not.toHaveBeenCalledWith('user_functions');
+    });
+
+    it('exposes distinct bootstrap, migration, and seed phases in the lifecycle API', () => {
+        expect(typeof runDatabaseBootstrap).toBe('function');
+        expect(typeof runDatabaseMigrations).toBe('function');
+        expect(typeof runSeedPhase).toBe('function');
+
+        expect(runDatabaseBootstrap).not.toBe(runDatabaseMigrations);
+        expect(runDatabaseMigrations).not.toBe(runSeedPhase);
+        expect(runDatabaseBootstrap).not.toBe(runSeedPhase);
     });
 });
