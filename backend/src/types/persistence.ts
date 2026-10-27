@@ -475,9 +475,10 @@ export interface CreateInstanceRequestBody {
         name: string;
         role: string;
         prototypeId?: string;
+        robotId?: string;
         configuration: AgentInstanceConfiguration;
     };
-    persistenceOptions: Partial<PersistenceConfig>;
+    persistenceOptions?: Partial<PersistenceConfig>;
     position: { x: number; y: number };
 }
 

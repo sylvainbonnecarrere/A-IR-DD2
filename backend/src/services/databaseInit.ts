@@ -442,6 +442,93 @@ const INDEX_DEFINITIONS = {
 };
 
 /**
+ * Bootstrap phase: ensure collection schema, indexes, and development test accounts exist.
+ * This is the base runtime initialization layer, intentionally separated from data migrations.
+ */
+export async function runDatabaseBootstrap(db: any): Promise<void> {
+  console.info('🔧 Starting database bootstrap (Phase 1: schema and index check)...');
+
+  const admin = db.admin();
+  void admin;
+
+  let currentDbCollections: any[] = [];
+  try {
+    currentDbCollections = await Promise.race([
+      db.listCollections().toArray(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('listCollections timeout')), 5000))
+    ]) as any[];
+  } catch (timeoutError) {
+    console.warn('[Database] listCollections timeout - proceeding with empty collection list');
+    currentDbCollections = [];
+  }
+
+  const existingCollectionNames = new Set(
+    Array.isArray(currentDbCollections) ? currentDbCollections.map((c: any) => c.name) : []
+  );
+  const testUserExists = await db.collection('users').findOne({ email: 'test@example.com' });
+
+  if (existingCollectionNames.size === 0) {
+    console.info('📋 Creating collections with schema validation...');
+    await createCollectionsWithValidation(db);
+    console.info('✅ Collections created');
+
+    console.info('🗂️  Creating indexes for performance...');
+    await createIndexes(db);
+    console.info('✅ Indexes created');
+
+    console.info('👤 Creating test user...');
+    await createTestUser(db);
+    console.info('✅ Test user created');
+  } else {
+    console.info(`✅ Database already initialized (${existingCollectionNames.size} collections found)`);
+
+    const newCollectionNames = Object.keys(COLLECTION_SCHEMAS)
+      .filter(name => !existingCollectionNames.has(name));
+
+    if (newCollectionNames.length > 0) {
+      console.info(`🆕 Detected ${newCollectionNames.length} new collection(s) not in database`);
+      await createNewCollections(db, existingCollectionNames);
+      await createIndexesForNewCollections(db, newCollectionNames);
+    }
+
+    console.info('🔄 Ensuring collection schemas are up to date...');
+    await updateCollectionSchemas(db);
+
+    if (!testUserExists && process.env.NODE_ENV === 'development') {
+      console.info('👤 Injecting test user...');
+      await createTestUser(db);
+      console.info('✅ Test user injected');
+    }
+
+    try {
+      await verifyIndexes(db);
+      console.info('✅ Indexes verified');
+    } catch (indexError) {
+      console.warn('⚠️  Index verification warning (non-blocking):',
+        indexError instanceof Error ? indexError.message : String(indexError));
+    }
+  }
+}
+
+/**
+ * Migration phase: data backfills and schema evolution tasks that must be run explicitly.
+ */
+export async function runDatabaseMigrations(db: any): Promise<void> {
+  console.info('🧩 Starting database migrations (Phase 2: data backfills and compatibility updates)...');
+  await runMediaReferenceCatalogBackfill(db);
+}
+
+/**
+ * Seed phase: canonical runtime tools and local examples for the current environment.
+ */
+export async function runSeedPhase(db: any): Promise<void> {
+  console.info('🌱 Starting database seed phase (Phase 3: runtime seeders)...');
+  await seedNativeFunctions(db);
+  await seedSharedExampleFunctions(db);
+  await provisionNativePythonToolsOnStartup();
+}
+
+/**
  * Main initialization function
  * Idempotent: Checks if collections exist before creating
  */
@@ -453,90 +540,16 @@ export async function initializeDatabase(): Promise<void> {
     }
 
     const db = mongoose.connection.db;
-    console.info('🔧 Starting database initialization (Phase 1: Check)...');
-
-    // PHASE 1: Check existing collections and test user
-    // NOTE: Use native MongoDB client, not Mongoose connection to avoid blocking
-    const admin = db.admin();
-    
-    // Get current database collections with timeout protection
-    let currentDbCollections: any[] = [];
-    try {
-      currentDbCollections = await Promise.race([
-        db.listCollections().toArray(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('listCollections timeout')), 5000))
-      ]) as any[];
-    } catch (timeoutError) {
-      console.warn('[Database] listCollections timeout - proceeding with empty collection list');
-      currentDbCollections = [];
-    }
-    
-    const existingCollectionNames = new Set(
-      Array.isArray(currentDbCollections) ? currentDbCollections.map((c: any) => c.name) : []
-    );
-    const testUserExists = await db.collection('users').findOne({ email: 'test@example.com' });
-
-    // PHASE 2: Create only if absent
-    if (existingCollectionNames.size === 0) {
-      console.info('📋 Creating collections with schema validation...');
-      await createCollectionsWithValidation(db);
-      console.info('✅ Collections created');
-
-      console.info('🗂️  Creating indexes for performance...');
-      await createIndexes(db);
-      console.info('✅ Indexes created');
-
-      console.info('👤 Creating test user...');
-      await createTestUser(db);
-      console.info('✅ Test user created');
-    } else {
-      // Existing collections found
-      console.info(`✅ Database already initialized (${existingCollectionNames.size} collections found)`);
-      
-      // CRITICAL FIX: Detect NEW collections added to COLLECTION_SCHEMAS
-      // This allows adding new collections after database initialization
-      const newCollectionNames = Object.keys(COLLECTION_SCHEMAS)
-        .filter(name => !existingCollectionNames.has(name));
-
-      if (newCollectionNames.length > 0) {
-        console.info(`🆕 Detected ${newCollectionNames.length} new collection(s) not in database`);
-        await createNewCollections(db, existingCollectionNames);
-        await createIndexesForNewCollections(db, newCollectionNames);
-      }
-      
-      // Self-healing: Update schemas to ensure they match current code
-      console.info('🔄 Ensuring collection schemas are up to date...');
-      await updateCollectionSchemas(db);
-
-      if (!testUserExists && process.env.NODE_ENV === 'development') {
-        console.info('👤 Injecting test user...');
-        await createTestUser(db);
-        console.info('✅ Test user injected');
-      }
-
-      try {
-        await verifyIndexes(db);
-        console.info('✅ Indexes verified');
-      } catch (indexError) {
-        console.warn('⚠️  Index verification warning (non-blocking):', 
-          indexError instanceof Error ? indexError.message : String(indexError));
-      }
-    }
-
-    await runMediaReferenceCatalogBackfill(db);
-
-    // ─── Toujours seeder les fonctions natives (idempotent) ───────────────
-    await seedNativeFunctions(db);
-    await seedSharedExampleFunctions(db);
-    await provisionNativePythonToolsOnStartup();
+    await runDatabaseBootstrap(db);
+    await runDatabaseMigrations(db);
+    await runSeedPhase(db);
 
     console.info('🎯 Database initialization complete!');
   } catch (error) {
-    console.error('💀 Database initialization error:', 
+    console.error('💀 Database initialization error:',
       error instanceof Error ? error.message : String(error));
-    // Non-blocking: Log but don't crash startup
     if (process.env.NODE_ENV === 'production') {
-      throw error; // In production, fail fast
+      throw error;
     }
   }
 }

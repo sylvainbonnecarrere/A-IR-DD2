@@ -23,14 +23,12 @@ import type { DeleteAgentInstancePolicyAudit } from '../services/agentInstanceDe
 import {
     CreateInstanceRequestBody,
     CreateInstanceResponse,
-    DEFAULT_PERSISTENCE_CONFIG,
-    PersistenceConfig,
-    AgentInstanceConfiguration,
-    normalizePersistenceConfigForPersistence,
     sanitizePersistenceConfigForInstanceEgress,
 } from '../types/persistence';
 import { IUser } from '../models/User.model';
 import { CanonicalRobotIdEnum, DEFAULT_ROBOT_ID } from '../types/robotIds';
+import { WorkflowRepository } from '../repositories/WorkflowRepository';
+import { CreateWorkflowInstanceUseCase } from '../application/workflows/createWorkflowInstance.usecase';
 
 // ============================================
 // SCHÉMAS DE VALIDATION ZOD
@@ -145,146 +143,67 @@ export class WorkflowController {
 
             const body = parseResult.data;
 
-            // Vérifier que le workflow existe et appartient à l'utilisateur
-            const workflow = await Workflow.findOne({
-                _id: workflowId,
-                userId: user.id
-            });
-
-            if (!workflow) {
-                res.status(404).json({ error: 'Workflow introuvable' });
-                return;
-            }
-
-            // Démarrer la transaction
             session.startTransaction();
 
+            const workflowRepository = new WorkflowRepository();
+            const createWorkflowInstanceUseCase = new CreateWorkflowInstanceUseCase(
+                workflowRepository,
+                AgentInstance,
+                WorkflowNodeV2,
+                AgentJournal,
+            );
+
             try {
-                // 1. Créer l'instance d'agent
-                const persistenceConfig: PersistenceConfig = {
-                    ...normalizePersistenceConfigForPersistence({
-                        ...DEFAULT_PERSISTENCE_CONFIG,
-                        ...body.persistenceOptions
-                    })
-                };
-
-                // ✅ ÉTAPE 1: Créer en AgentInstance (table réelle, pas V2)
-                const config = body.agentConfig.configuration;
-                
-                const instanceData = {
-                    workflowId: new mongoose.Types.ObjectId(workflowId),
-                    userId: new mongoose.Types.ObjectId(user.id),
-                    prototypeId: body.agentConfig.prototypeId
-                        ? new mongoose.Types.ObjectId(body.agentConfig.prototypeId)
-                        : undefined,
-                    
-                    // ✅ Identifiant d'exécution unique
-                    executionId: `exec-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                    
-                    // ✅ Snapshot du prototype (config du moment de la création)
-                    name: body.agentConfig.name,
-                    role: body.agentConfig.role,
-                    robotId: body.agentConfig.robotId,
-                    llmProvider: config.llmProvider || 'openai',
-                    llmModel: config.llmModel || 'gpt-4',
-                    systemPrompt: config.systemPrompt || '',
-                    tools: config.tools || [],
-                    // ✅ Capabilities initialisé à vide (pas dans le schema input)
-                    capabilities: [],
-                    outputConfig: config.outputConfig,
-                    historyConfig: config.historyConfig,
-                    
-                    // ✅ Canvas properties
-                    position: body.position,
-                    isMinimized: false,
-                    isMaximized: false,
-                    zIndex: 0,
-                    
-                    // ✅ Contenu et métriques
-                    content: [],
-                    metrics: {
-                        executionCount: 0,
-                        totalTokensUsed: 0,
-                        averageResponseTime: 0,
-                        lastExecutionTime: new Date(),
-                        errorCount: 0
-                    },
-                    
-                    // ✅ État
-                    status: 'running',
-                    persistenceConfig
-                };
-
-                const [instance] = await AgentInstance.create([instanceData], { session });
-
-                // 2. Créer le nœud visuel lié
-                const nodeData = {
-                    workflowId: new mongoose.Types.ObjectId(workflowId),
-                    ownerId: new mongoose.Types.ObjectId(user.id),
-                    instanceId: instance._id,
-                    nodeType: 'agent' as const,
-                    position: body.position,
-                    uiConfig: {
-                        label: body.agentConfig.name,
-                        expanded: true
-                    }
-                };
-
-                const [node] = await WorkflowNodeV2.create([nodeData], { session });
-
-                // 3. Logger l'événement système dans le journal
-                await AgentJournal.create([{
-                    agentInstanceId: instance._id,
-                    workflowId: new mongoose.Types.ObjectId(workflowId),
-                    type: 'system',
-                    severity: 'info',
-                    payload: {
-                        event: 'instance_created',
-                        details: {
-                            name: instance.name,
-                            role: instance.role,
-                            nodeId: node._id.toString()
+                const result = await createWorkflowInstanceUseCase.execute(
+                    {
+                        workflowId,
+                        userId: user.id,
+                        body: {
+                            agentConfig: {
+                                ...body.agentConfig,
+                                robotId: body.agentConfig.robotId || DEFAULT_ROBOT_ID,
+                            },
+                            persistenceOptions: body.persistenceOptions,
+                            position: body.position,
                         },
-                        triggeredBy: user.id
                     },
-                    timestamp: new Date()
-                }], { session });
+                    session,
+                );
 
-                // 4. Commit la transaction
-                await session.commitTransaction();
+                if (result.kind === 'not_found') {
+                    await session.abortTransaction();
+                    res.status(404).json({ error: 'Workflow introuvable' });
+                    return;
+                }
 
-                // 5. Préparer la réponse
                 const response: CreateInstanceResponse = {
                     instance: {
-                        _id: instance._id.toString(),
-                        name: instance.name,
-                        role: instance.role,
-                        status: instance.status,
-                        persistenceConfig: sanitizePersistenceConfigForInstanceEgress(instance.persistenceConfig),
-                        // ✅ ÉTAPE 1: Inclure configuration complète pour le frontend
+                        _id: result.instance._id.toString(),
+                        name: result.instance.name,
+                        role: result.instance.role,
+                        status: result.instance.status,
+                        persistenceConfig: sanitizePersistenceConfigForInstanceEgress(result.instance.persistenceConfig),
                         configuration_json: {
-                            llmProvider: instance.llmProvider,
-                            llmModel: instance.llmModel,
-                            systemPrompt: instance.systemPrompt,
-                            role: instance.role,
-                            tools: instance.tools || [],
-                            capabilities: instance.capabilities || [],
-                            outputConfig: instance.outputConfig,
-                            historyConfig: instance.historyConfig
+                            llmProvider: result.instance.llmProvider,
+                            llmModel: result.instance.llmModel,
+                            systemPrompt: result.instance.systemPrompt,
+                            role: result.instance.role,
+                            tools: result.instance.tools || [],
+                            capabilities: result.instance.capabilities || [],
+                            outputConfig: result.instance.outputConfig,
+                            historyConfig: result.instance.historyConfig
                         }
                     },
                     node: {
-                        _id: node._id.toString(),
-                        instanceId: instance._id.toString(),
-                        position: node.position
+                        _id: result.node._id.toString(),
+                        instanceId: result.instance._id.toString(),
+                        position: result.node.position
                     }
                 };
 
-                console.log(`[WorkflowController] Instance créée: ${instance._id} dans workflow ${workflowId}`);
+                console.log(`[WorkflowController] Instance créée: ${result.instance._id} dans workflow ${workflowId}`);
                 res.status(201).json(response);
-
             } catch (transactionError) {
-                // Rollback en cas d'erreur
                 await session.abortTransaction();
                 throw transactionError;
             }

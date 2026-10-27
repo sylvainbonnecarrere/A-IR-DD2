@@ -99,8 +99,9 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 
 - `J0` : valide, avec inventaire et garde-fous anti-derive en place.
 - `J1` : valide sur le plan des contrats metier, des permissions, de la validation d'entree et de la journalisation.
-- `J2` : en cours, priorite backend, avec extraction des repositories et use cases poursuivie par l'agent `03-backend.agent.md`.
-- `J3` a `J6` : non demarres ou a lancer uniquement apres la stabilisation backend et les validations de migration associees.
+- `J2` : valide et clos sur le plan backend V2, avec repositories, use cases et validation d'IR stabilises, et avec couverture de non-regression sur les points de securite critiques.
+- `J3` : devient le jalon actif suivant et doit etre pris en charge par l'agent `04-cicd-installation.agent.md` avec la logique de migration, runtime et bootstrap comme priorite.
+- `J4` a `J6` : non demarres ou a lancer selon les validations de migration, de resilience et de cutover associees.
 
 | Jalon | Intitule | Criticite | Agent pilote | Resultat attendu |
 |---|---|---|---|---|
@@ -325,9 +326,10 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 
 **Etat d'avancement au 2026-10-27 :**
 - `J0` et `J1` sont stabilises sur la ligne runtime supportee Node 24.22.1 LTS et sur les garde-fous de securite / validation documentes dans le backlog.
-- `J2` est la phase active de refactor backend. Les extractions de repository/use case sont poursuivies sur les routes critiques, avec concentration sur les endpoints de workflow, runs et activations.
+- `J2` est valide et ferme : extraction des repositories/use cases, validation d'IR sur activation et non-regression sur les nœuds agent dont `instanceId` n'existe pas dans le workflow courant, ainsi que stabilisation des erreurs metier sur les routes workflow.
 - Les endpoints legacy restent a surveiller comme surfaces de derive, mais ils sont maintenant encadres par des validations et une politique de non-regression.
-- **Point de securite J2 impose :** toute validation d'activation de workflow doit rejeter les nœuds agent dont `instanceId` ne correspond pas a une instance existante dans le workflow. Ce garde-fou doit rester documente dans le backlog et couvert par test de non-regression avant tout nouveau jalon backend.
+- **Point de securite J2 impose :** toute validation d'activation de workflow doit rejeter les nœuds agent dont `instanceId` ne correspond pas a une instance existante dans le workflow. Ce garde-fou est documente dans le backlog et couvert par test de non-regression ; la main bascule maintenant vers le jalon J3.
+- **Basculement de jalon :** la suite du backlog est transferee a l'agent `04-cicd-installation.agent.md` pour `J3 - Migrations et runtime infra`, avec focus sur bootstrap, migrations idempotentes, workers, queues et health checks.
 
 ### US-J2-01 - Extraire les repositories canoniques
 
@@ -405,6 +407,7 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - un idempotency key est pris en compte sur les commandes critiques ;
 - les codes d'erreur sont stables ;
 - les tests couvrent doublons, annulation et reprise.
+**Etat de transfert au 2026-10-27 :** la main est passee au pilote CI/CD et installation apres validation de J2 sur le backend V2, avec les garde-fous de securite et la non-regression backend confirmee.
 
 ## J3 - Migrations et runtime infra
 

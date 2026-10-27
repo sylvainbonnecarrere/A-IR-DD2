@@ -37,6 +37,7 @@ export class WorkflowValidator {
       nodes,
       edges,
       instances.map((instance) => instance._id.toString()),
+      true,
     );
   }
 
@@ -56,6 +57,7 @@ export class WorkflowValidator {
       targetHandle?: string;
     }>,
     existingInstanceIds: string[] = [],
+    requireExistingInstanceIds: boolean = false,
   ): WorkflowValidationResult {
     const issues: WorkflowValidationIssue[] = [];
 
@@ -76,7 +78,7 @@ export class WorkflowValidator {
         return;
       }
 
-      if (existingInstanceIds.length > 0 && !agentInstanceIds.has(instanceId)) {
+      if (requireExistingInstanceIds && !agentInstanceIds.has(instanceId)) {
         issues.push({
           code: 'MISSING_AGENT_INSTANCE',
           message: 'Un nœud agent référence une instance absente du workflow.',

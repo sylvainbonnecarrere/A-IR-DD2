@@ -537,6 +537,51 @@ describe('Auth and workflow routes', () => {
         const sourceInstanceId = new mongoose.Types.ObjectId();
         const targetInstanceId = new mongoose.Types.ObjectId();
 
+        await AgentInstance.create([
+            {
+                workflowId: workflow._id,
+                userId: fixture.user._id,
+                prototypeId: new mongoose.Types.ObjectId(),
+                executionId: new mongoose.Types.ObjectId().toString(),
+                status: 'running',
+                name: 'A',
+                role: 'assistant',
+                systemPrompt: 'assistant',
+                llmProvider: 'openai',
+                llmModel: 'gpt-4o-mini',
+                capabilities: [],
+                robotId: 'AR_001',
+                position: { x: 10, y: 20 },
+                isMinimized: false,
+                isMaximized: false,
+                zIndex: 0,
+                metrics: { totalTokens: 0, totalErrors: 0, totalMediaGenerated: 0, callCount: 0 },
+                persistenceConfig: { saveChat: true, saveErrors: true, saveHistorySummary: false, saveLinks: false, saveTasks: false, saveMedia: false, allowWorkspaceWrite: false, mediaStorage: 'db', cloudStorageConfig: null },
+                _id: sourceInstanceId,
+            },
+            {
+                workflowId: workflow._id,
+                userId: fixture.user._id,
+                prototypeId: new mongoose.Types.ObjectId(),
+                executionId: new mongoose.Types.ObjectId().toString(),
+                status: 'running',
+                name: 'B',
+                role: 'assistant',
+                systemPrompt: 'assistant',
+                llmProvider: 'openai',
+                llmModel: 'gpt-4o-mini',
+                capabilities: [],
+                robotId: 'AR_001',
+                position: { x: 30, y: 40 },
+                isMinimized: false,
+                isMaximized: false,
+                zIndex: 0,
+                metrics: { totalTokens: 0, totalErrors: 0, totalMediaGenerated: 0, callCount: 0 },
+                persistenceConfig: { saveChat: true, saveErrors: true, saveHistorySummary: false, saveLinks: false, saveTasks: false, saveMedia: false, allowWorkspaceWrite: false, mediaStorage: 'db', cloudStorageConfig: null },
+                _id: targetInstanceId,
+            }
+        ]);
+
         await WorkflowNodeV2.create([
             {
                 workflowId: workflow._id,
