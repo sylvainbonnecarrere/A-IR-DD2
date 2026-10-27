@@ -110,9 +110,9 @@ See also: [Guides/Features/MEDIAS/README.md](Guides/Features/MEDIAS/README.md)
 
 ## 🚀 Installation and first run
 
-These steps are the supported installation path. If you complete them in order, you end with a working frontend, a working backend, MongoDB persistence, Docker sandboxes for user functions, Python native tooling, and the Node 25 verification slice used to validate workspace and sandbox execution.
+These steps are the supported installation path. If you complete them in order, you end with a working frontend, a working backend, MongoDB persistence, Docker sandboxes for user functions, Python native tooling, and the Node 24 verification slice used to validate workspace and sandbox execution.
 
-> **Prerequisites:** Node.js 25.9.x, Docker Desktop with Compose support, Python 3.11+, Git
+> **Prerequisites:** Node.js 24.22.1 LTS, Docker Desktop with Compose support, Python 3.11+, Git
 
 ### 1. Clone the repository
 
@@ -123,12 +123,12 @@ cd A-IR-DD2
 
 ### 2. Select the supported Node runtime
 
-The repository is pinned to Node 25.9.0 through `.nvmrc`, `.node-version`, and the `engines.node` fields.
+The repository is pinned to Node 24.22.1 through `.nvmrc`, `.node-version`, and the `engines.node` fields.
 
-On Windows with `nvm-windows`, open a Node 25 shell before installing or starting anything:
+On Windows with `nvm-windows`, open a Node 24 shell before installing or starting anything:
 
 ```powershell
-. .\scripts\Enter-NodeVersionShell.ps1 -Version 25.9.0
+. .\scripts\Enter-NodeVersionShell.ps1 -Version 24.22.1
 ```
 
 Check the runtime:
@@ -137,14 +137,14 @@ Check the runtime:
 node -v
 ```
 
-Expected result: `v25.9.0`
+Expected result: `v24.22.1`
 
 ### 3. Install frontend and backend dependencies
 
 ```bash
-npm install
+npm ci
 cd backend
-npm install
+npm ci
 cd ..
 ```
 
@@ -236,7 +236,7 @@ http://localhost:3001/api/health
 
 The backend must respond before you continue to the UI.
 
-### 9. Run the Node 25 runtime verification slice
+### 9. Run the Node 24 runtime verification slice
 
 From the repository root:
 
@@ -244,10 +244,10 @@ From the repository root:
 npm run ci:node25:runtime
 ```
 
-This command is the minimum CI-grade validation for a local installation. It verifies:
+This command remains the local CI-grade validation alias for the supported Node 24.22.1 baseline. It verifies:
 
 - the Node anchors: `.nvmrc`, `.node-version`, root `package.json`, and `backend/package.json`
-- the repository readiness report for Node 25
+- the repository readiness report for the supported Node 24 runtime
 - the backend runtime slice covering workspace runtime roots
 - Docker sandbox execution for user-created functions and tools
 - compatibility for legacy and current function/tool paths used by agents
@@ -271,7 +271,7 @@ Default test account:
 
 Your installation is considered complete only when all of these are true:
 
-- `node -v` returns `v25.9.0`
+- `node -v` returns `v24.22.1`
 - frontend dependencies and backend dependencies install without error
 - Docker services are up from `backend/docker`
 - `python -m pip install -r backend/python/requirements.txt` succeeds
@@ -283,7 +283,7 @@ At that point, the application is operational with MongoDB persistence, workspac
 
 ## 🔎 CI validation strategy
 
-The repository now treats Node 25.9.0 as the supported runtime baseline. The first validation layer to run locally and in CI is:
+The repository now treats Node 24.22.1 as the supported runtime baseline. The first validation layer to run locally and in CI is:
 
 ```bash
 npm run ci:node25:runtime
@@ -293,7 +293,7 @@ This script is intentionally narrow and fast enough to be run frequently. It pro
 
 - Node version drift
 - Node engine drift between root and backend
-- readiness of the Node 25 environment
+- readiness of the supported Node 24 runtime baseline
 - backend workspace and sandbox execution behavior for agent functions
 
 Recommended local validation order before pushing a change:

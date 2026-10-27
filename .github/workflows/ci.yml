@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
 
       - name: Install frontend dependencies
@@ -58,7 +58,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
 
       - name: Install frontend dependencies
@@ -79,7 +79,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
 
       - name: Install frontend dependencies
@@ -100,7 +100,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
 
       - name: Install frontend dependencies
@@ -121,7 +121,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -169,7 +169,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: |
             package-lock.json

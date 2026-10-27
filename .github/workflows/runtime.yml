@@ -23,8 +23,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  node25-runtime-slice:
-    name: Node25 Runtime Slice
+  node24-runtime-slice:
+    name: Node24 Runtime Slice
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -52,7 +52,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -69,7 +69,7 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
-      - name: Run Node25 runtime validation slice
+      - name: Run Node24 runtime validation slice
         run: npm run ci:node25:runtime
 
   runtime-ci:
@@ -84,7 +84,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
@@ -106,7 +106,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: backend/package-lock.json
 

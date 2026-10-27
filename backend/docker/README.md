@@ -23,12 +23,12 @@ This professional Docker setup implements a **Code-First** initialization archit
 
 ### Phase 0: Select the Supported Node Runtime
 
-The repository now targets **Node 25.9.x**.
+The repository now targets **Node 24.22.1 LTS**.
 
 On Windows with `nvm-windows`, open the backend or repo shell with:
 
 ```powershell
-. .\scripts\Enter-NodeVersionShell.ps1 -Version 25.9.0
+. .\scripts\Enter-NodeVersionShell.ps1 -Version 24.22.1
 ```
 
 If you launch the command from `backend/docker`, return to the repo root first so the helper path resolves correctly.
@@ -370,9 +370,9 @@ npm run dev
 
 ## 🔄 Development Workflow
 
-### Node 25 Verification Slice
+### Node 24 Verification Slice
 ```bash
-# From repo root, after selecting Node 25.9.x
+# From repo root, after selecting Node 24.22.1
 npm install
 cd backend
 npm install
@@ -380,7 +380,7 @@ cd ..
 npm run ci:node25:runtime
 ```
 
-This slice validates the workspace runtime roots, Docker sandbox orchestration, and compatibility for user-created tool/function execution before broader manual QA.
+This slice validates the workspace runtime roots, Docker sandbox orchestration, and compatibility for user-created tool/function execution before broader manual QA. The command name remains as a legacy compatibility alias, but the active supported runtime is Node 24.22.1 LTS.
 
 ### Daily Startup
 ```bash

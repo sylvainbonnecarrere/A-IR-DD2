@@ -3,7 +3,7 @@ FROM ubuntu:24.04@sha256:24737cef17f4e22b1977df7d9a05e77c4e28b7da5b8911f8d8ccda1
 # Run-only image: keep Node runtime, remove package installation tooling.
 # Dependency installation belongs to a separate preparation workflow.
 
-ARG NODE_VERSION=25.9.0
+ARG NODE_VERSION=24.22.1
 
 RUN set -eux; \
     arch=''; \

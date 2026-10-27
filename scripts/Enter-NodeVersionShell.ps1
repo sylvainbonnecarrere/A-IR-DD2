@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '25.9.0',
+    [string]$Version = '24.22.1',
     [switch]$InstallIfMissing
 )
 
