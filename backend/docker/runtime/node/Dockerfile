@@ -1,9 +1,9 @@
-FROM ubuntu:noble@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea AS node_runtime_builder
+FROM ubuntu:noble@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS node_runtime_builder
 
 # Run-only image: keep Node runtime, remove package installation tooling.
 # Dependency installation belongs to a separate preparation workflow.
 
-ARG NODE_VERSION=24.19.0
+ARG NODE_VERSION=25.9.0
 
 RUN set -eux; \
     arch=''; \
@@ -19,7 +19,7 @@ RUN set -eux; \
         *) echo "unsupported architecture: ${dpkg_arch}"; exit 1 ;; \
     esac; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl xz-utils; \
+    apt-get install -y --no-install-recommends ca-certificates curl xz-utils libgcc-s1 libstdc++6 libatomic1; \
     rm -rf /var/lib/apt/lists/*; \
     curl -fsSLO --compressed "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${arch}.tar.xz"; \
     curl -fsSLO --compressed "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt"; \
@@ -41,7 +41,7 @@ RUN set -eux; \
         | sort -u > /tmp/node-runtime-packages.txt; \
     /opt/node-runtime/bin/node --version
 
-FROM ubuntu:noble@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
+FROM ubuntu:noble@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
 
 ENV NODE_ENV=production \
     HOME=/home/sandbox

@@ -1,15 +1,20 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { UserToolRunStatusSchema } from '../domain/execution/userToolRun.contract';
 import { requireAuth } from '../middleware/auth.middleware';
 import { IUser } from '../models/User.model';
 import { RuntimeCompatibilityService } from '../services/runtimeCompatibility.service';
+import { SandboxService } from '../services/sandbox.service';
 import { UserToolRunQueryService } from '../services/userToolRunQuery.service';
 import { UserToolRunRetentionService } from '../services/userToolRunRetention.service';
+import { UserToolRunService } from '../services/userToolRun.service';
 
 const router = Router();
 const runtimeCompatibilityService = new RuntimeCompatibilityService();
+const sandboxService = new SandboxService();
 const userToolRunQueryService = new UserToolRunQueryService();
 const userToolRunRetentionService = new UserToolRunRetentionService();
+const userToolRunService = new UserToolRunService();
 
 const idParamSchema = z.string().regex(/^[a-f\d]{24}$/i, 'ID doit être un ObjectId MongoDB valide');
 const artifactQuerySchema = z.object({
@@ -29,9 +34,120 @@ const listRunsQuerySchema = z.object({
     agentInstanceId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional().default(20),
     page: z.coerce.number().int().min(1).optional().default(1),
-    status: z.enum(['queued', 'running', 'completed', 'failed', 'stopped', 'timed_out']).optional(),
+    status: UserToolRunStatusSchema.optional(),
     sortBy: z.enum(['createdAt', 'durationMs', 'status']).optional().default('createdAt'),
     sortOrder: z.enum(['asc', 'desc']).optional().default('desc')
+});
+
+const toolSelectionSchema = z.object({
+    toolId: z.string().regex(/^[a-f\d]{24}$/i, 'toolId doit être un ObjectId MongoDB valide'),
+    versionRef: z.object({
+        versionTag: z.string().optional(),
+        versionNumber: z.number().optional(),
+        workspaceId: z.string().nullable().optional()
+    }).optional()
+});
+
+const executeRunSchema = z.object({
+    functionId: z.string().regex(/^[a-f\d]{24}$/i, 'functionId doit être un ObjectId MongoDB valide').optional(),
+    agentInstanceId: z.string().regex(/^[a-f\d]{24}$/i, 'agentInstanceId doit être un ObjectId MongoDB valide').optional(),
+    toolSelection: toolSelectionSchema.optional(),
+    testArgs: z.record(z.string(), z.unknown()).optional().default({}),
+    privateContext: z.record(z.string(), z.unknown()).optional()
+}).superRefine((value, ctx) => {
+    if (!value.functionId && !value.toolSelection) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'functionId ou toolSelection est requis',
+            path: ['functionId'],
+        });
+    }
+});
+
+function readIdempotencyKey(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+}
+
+router.post('/execute', requireAuth, async (req, res) => {
+    try {
+        const bodyResult = executeRunSchema.safeParse(req.body);
+        if (!bodyResult.success) {
+            return res.status(400).json({ error: 'Paramètres run invalides', details: bodyResult.error.issues });
+        }
+
+        const user = req.user as IUser;
+        const idempotencyKey = readIdempotencyKey(req.header('Idempotency-Key'));
+        const { functionId, agentInstanceId, toolSelection, testArgs, privateContext } = bodyResult.data;
+
+        const result = await sandboxService.runFunction(
+            functionId,
+            user.id,
+            testArgs,
+            toolSelection,
+            agentInstanceId,
+            privateContext,
+            req.headers.authorization,
+            idempotencyKey,
+        );
+
+        res.json({
+            ...result,
+            idempotency: {
+                key: idempotencyKey ?? null,
+                replayed: result.replayed ?? false,
+            }
+        });
+    } catch (error) {
+        console.error('[RunsRoute] POST /execute error:', error);
+        res.status(500).json({ error: 'Erreur lors du lancement du run' });
+    }
+});
+
+router.post('/executions/:executionId/cancel', requireAuth, async (req, res) => {
+    try {
+        const executionId = String(req.params.executionId || '').trim();
+        if (!executionId) {
+            return res.status(400).json({ error: 'executionId invalide' });
+        }
+
+        const user = req.user as IUser;
+        const run = await userToolRunService.getRunByExecutionId(executionId);
+        if (!run || run.ownerUserId.toString() !== user.id) {
+            return res.status(404).json({ error: 'Run introuvable' });
+        }
+
+        if (run.status !== 'queued' && run.status !== 'running') {
+            return res.status(409).json({
+                error: 'Run non annulable',
+                code: 'RUN_NOT_CANCELLABLE',
+                status: run.status,
+            });
+        }
+
+        const updatedRun = await userToolRunService.stopRun(executionId, {
+            error: {
+                code: 'RUN_CANCELLED',
+                subsystem: 'validation',
+                failureKind: 'cancelled',
+                message: 'Run annulé par l’utilisateur',
+                retryable: false,
+            },
+        });
+
+        res.json({
+            success: true,
+            executionId: updatedRun.executionId,
+            status: updatedRun.status,
+        });
+    } catch (error) {
+        console.error('[RunsRoute] POST /executions/:executionId/cancel error:', error);
+        res.status(500).json({ error: 'Erreur lors de l’annulation du run' });
+    }
 });
 
 router.get('/', requireAuth, async (req, res) => {

@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { ChatMessage } from '../types';
+import { authSessionStorage } from '../utils/authSessionStorage';
 
 // Types pour les événements (synchronisés avec le backend)
 interface ServerToClientEvents {
@@ -43,6 +44,7 @@ type EventCallback = (...args: any[]) => void;
 class WebSocketService {
   private socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
   private currentWorkspaceId: string | null = null;
+  private lastHandshakeToken: string | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
@@ -70,12 +72,16 @@ class WebSocketService {
       return;
     }
 
+    const accessToken = this.readAccessToken();
+    this.lastHandshakeToken = accessToken;
+
     this.connectionState.isConnecting = true;
     this.connectionState.error = null;
     this.emit('connectionStateChanged', this.connectionState);
 
     try {
       this.socket = io('http://localhost:3001', {
+        auth: accessToken ? { token: accessToken } : undefined,
         transports: ['websocket', 'polling'],
         timeout: 5000,
         forceNew: true,
@@ -229,10 +235,18 @@ class WebSocketService {
   // === MÉTHODES PUBLIQUES ===
   
   public joinWorkspace(workspaceId: string) {
+    this.currentWorkspaceId = workspaceId;
+    this.connectionState.workspaceId = workspaceId;
+
+    const accessToken = this.readAccessToken();
+    if (accessToken && accessToken !== this.lastHandshakeToken) {
+      this.reconnectWithFreshAuthToken();
+      this.emit('connectionStateChanged', this.connectionState);
+      return;
+    }
+
     if (this.socket?.connected) {
       this.socket.emit('workspace:join', workspaceId);
-      this.currentWorkspaceId = workspaceId;
-      this.connectionState.workspaceId = workspaceId;
       this.emit('connectionStateChanged', this.connectionState);
     }
   }
@@ -324,6 +338,29 @@ class WebSocketService {
   public reconnect() {
     this.isManualDisconnect = false;
     this.reconnectAttempts = 0;
+    this.connect();
+  }
+
+  private readAccessToken(): string | null {
+    const storedSession = authSessionStorage.read();
+    if (storedSession.status !== 'ok') {
+      return null;
+    }
+
+    return storedSession.data.accessToken || null;
+  }
+
+  private reconnectWithFreshAuthToken() {
+    if (this.socket) {
+      this.isManualDisconnect = true;
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+      this.isManualDisconnect = false;
+    }
+
+    this.connectionState.isConnected = false;
+    this.connectionState.isConnecting = false;
     this.connect();
   }
 }

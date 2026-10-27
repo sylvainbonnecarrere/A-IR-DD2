@@ -5,6 +5,11 @@
 
 import { IWorkflow } from '../models/Workflow.model';
 
+export type WorkflowPatchResult =
+  | { kind: 'updated'; workflow: IWorkflow }
+  | { kind: 'not_found' }
+  | { kind: 'version_conflict'; currentVersion: number | null };
+
 export interface IWorkflowRepository {
   /**
    * Récupère tous les workflows d'un utilisateur
@@ -15,6 +20,11 @@ export interface IWorkflowRepository {
    * Récupère un workflow par ID
    */
   findById(workflowId: string): Promise<IWorkflow | null>;
+
+  /**
+   * Récupère un workflow par ID appartenant à un utilisateur donné
+   */
+  findOwnedById(workflowId: string, userId: string): Promise<IWorkflow | null>;
 
   /**
    * Crée un nouveau workflow
@@ -40,4 +50,24 @@ export interface IWorkflowRepository {
    * Récupère le premier workflow d'un utilisateur (workflow par défaut fallback)
    */
   findFirstByUserId(userId: string): Promise<IWorkflow | null>;
+
+  /**
+   * Désactive les autres workflows d'un utilisateur
+   */
+  deactivateOthers(userId: string, exceptWorkflowId: string): Promise<number>;
+
+  /**
+   * Retire le statut par défaut des autres workflows d'un utilisateur
+   */
+  unsetDefaultForOthers(userId: string, exceptWorkflowId: string): Promise<number>;
+
+  /**
+   * Met à jour partiellement un workflow avec contrôle de version optionnel
+   */
+  patchOwned(
+    workflowId: string,
+    userId: string,
+    setFields: Record<string, unknown>,
+    expectedVersion?: number,
+  ): Promise<WorkflowPatchResult>;
 }

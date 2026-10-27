@@ -4,7 +4,7 @@
  */
 
 import { Workflow, IWorkflow } from '../models/Workflow.model';
-import { IWorkflowRepository } from './IWorkflowRepository';
+import { IWorkflowRepository, WorkflowPatchResult } from './IWorkflowRepository';
 
 export class WorkflowRepository implements IWorkflowRepository {
   async findByUserId(userId: string): Promise<IWorkflow[]> {
@@ -23,6 +23,15 @@ export class WorkflowRepository implements IWorkflowRepository {
       return await Workflow.findById(workflowId).exec();
     } catch (error) {
       console.error(`[WorkflowRepository] findById error for ${workflowId}:`, error);
+      throw error;
+    }
+  }
+
+  async findOwnedById(workflowId: string, userId: string): Promise<IWorkflow | null> {
+    try {
+      return await Workflow.findOne({ _id: workflowId, userId }).exec();
+    } catch (error) {
+      console.error(`[WorkflowRepository] findOwnedById error for workflow ${workflowId} and user ${userId}:`, error);
       throw error;
     }
   }
@@ -88,6 +97,79 @@ export class WorkflowRepository implements IWorkflowRepository {
         .exec();
     } catch (error) {
       console.error(`[WorkflowRepository] findFirstByUserId error for ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  async deactivateOthers(userId: string, exceptWorkflowId: string): Promise<number> {
+    try {
+      const result = await Workflow.updateMany(
+        { userId, _id: { $ne: exceptWorkflowId } },
+        { isActive: false }
+      ).exec();
+
+      return result.modifiedCount ?? 0;
+    } catch (error) {
+      console.error(`[WorkflowRepository] deactivateOthers error for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  async unsetDefaultForOthers(userId: string, exceptWorkflowId: string): Promise<number> {
+    try {
+      const result = await Workflow.updateMany(
+        { userId, _id: { $ne: exceptWorkflowId } },
+        { isDefault: false }
+      ).exec();
+
+      return result.modifiedCount ?? 0;
+    } catch (error) {
+      console.error(`[WorkflowRepository] unsetDefaultForOthers error for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  async patchOwned(
+    workflowId: string,
+    userId: string,
+    setFields: Record<string, unknown>,
+    expectedVersion?: number,
+  ): Promise<WorkflowPatchResult> {
+    try {
+      const query: Record<string, unknown> = { _id: workflowId, userId };
+      if (expectedVersion !== undefined) {
+        query.__v = expectedVersion;
+      }
+
+      const updated = await Workflow.findOneAndUpdate(
+        query,
+        {
+          $set: {
+            ...setFields,
+            updatedAt: new Date(),
+            isDirty: false,
+            lastSavedAt: new Date(),
+          },
+          $inc: { __v: 1 },
+        },
+        {
+          new: true,
+          runValidators: true,
+        }
+      ).exec();
+
+      if (updated) {
+        return { kind: 'updated', workflow: updated };
+      }
+
+      const existing = await Workflow.findOne({ _id: workflowId, userId }).select('__v').exec();
+      if (!existing) {
+        return { kind: 'not_found' };
+      }
+
+      return { kind: 'version_conflict', currentVersion: typeof existing.__v === 'number' ? existing.__v : null };
+    } catch (error) {
+      console.error(`[WorkflowRepository] patchOwned error for ${workflowId}:`, error);
       throw error;
     }
   }

@@ -11,6 +11,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "ci:node25:runtime": "node scripts/ci/verify-node25-runtime.mjs",
+    "audit:workflow-architecture": "node scripts/audit-workflow-architecture.ts",
+    "audit:workflow-architecture:strict": "node scripts/audit-workflow-architecture.ts --strict",
     "test": "jest",
     "test:integration:hydration": "jest tests/fonctionnels/App.workspaceHydration.integration.test.tsx --runInBand",
     "test:components:ci": "jest tests/components --runInBand",

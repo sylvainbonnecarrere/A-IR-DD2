@@ -1,10 +1,16 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import {
+    USER_TOOL_RUN_NETWORK_MODE_VALUES,
+    USER_TOOL_RUN_RUNNER_VALUES,
+    USER_TOOL_RUN_RUNTIME_VALUES,
+    USER_TOOL_RUN_STATUS_VALUES,
+} from '../domain/execution/userToolRun.contract';
 
 export type UserToolRunLaunchContext = 'editor_test' | 'workflow_run' | 'system_validation';
-export type UserToolRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out';
-export type UserToolRunRuntime = 'typescript' | 'python';
-export type UserToolRunRunner = 'docker_sandbox' | 'docker_rootless' | 'firecracker';
-export type UserToolRunNetworkMode = 'none' | 'restricted';
+export type UserToolRunStatus = (typeof USER_TOOL_RUN_STATUS_VALUES)[number];
+export type UserToolRunRuntime = (typeof USER_TOOL_RUN_RUNTIME_VALUES)[number];
+export type UserToolRunRunner = (typeof USER_TOOL_RUN_RUNNER_VALUES)[number];
+export type UserToolRunNetworkMode = (typeof USER_TOOL_RUN_NETWORK_MODE_VALUES)[number];
 export type UserToolRunArtifactKind = 'file' | 'json' | 'log';
 
 export interface IUserToolRunArtifact {
@@ -87,7 +93,7 @@ const UserToolRunPolicySnapshotSchema = new Schema<IUserToolRunPolicySnapshot>({
     networkMode: {
         type: String,
         required: true,
-        enum: ['none', 'restricted']
+        enum: [...USER_TOOL_RUN_NETWORK_MODE_VALUES]
     },
     timeoutSeconds: { type: Number, min: 1 },
     maxMemoryMb: { type: Number, min: 1 },
@@ -169,18 +175,18 @@ const UserToolRunSchema = new Schema<IUserToolRun>({
     status: {
         type: String,
         required: true,
-        enum: ['queued', 'running', 'completed', 'failed', 'stopped', 'timed_out'],
+        enum: [...USER_TOOL_RUN_STATUS_VALUES],
         default: 'queued'
     },
     runtime: {
         type: String,
         required: true,
-        enum: ['typescript', 'python']
+        enum: [...USER_TOOL_RUN_RUNTIME_VALUES]
     },
     runner: {
         type: String,
         required: true,
-        enum: ['docker_sandbox', 'docker_rootless', 'firecracker'],
+        enum: [...USER_TOOL_RUN_RUNNER_VALUES],
         default: 'docker_sandbox'
     },
     inputs: {
