@@ -1,5 +1,17 @@
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
+import type { ZodType } from 'zod';
+import {
+  AgentMessageAddSchema,
+  AgentPositionUpdateSchema,
+  AgentToggleMinimizeSchema,
+  UserCursorUpdateSchema,
+  WorkspaceJoinSchema,
+  WorkspaceLeaveSchema,
+} from '../domain/workflow/workspaceCollaboration.contract';
+import { User } from '../models/User.model';
+import { Workflow } from '../models/Workflow.model';
+import { verifyAccessToken } from '../utils/jwt';
 
 // Types pour les événements WebSocket
 interface ClientToServerEvents {
@@ -37,12 +49,16 @@ interface InterServerEvents {
 
 interface SocketData {
   userId: string;
+  role?: string;
+  isAuthenticated: boolean;
   workspaceId?: string;
   userInfo?: {
     name: string;
     color: string;
   };
 }
+
+type WorkspaceSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 export class WebSocketManager {
   private io: SocketIOServer<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -79,6 +95,14 @@ export class WebSocketManager {
       transports: ['websocket', 'polling']
     });
 
+    this.io.use((socket, next) => {
+      void this.authenticateSocket(socket)
+        .then(() => next())
+        .catch((error) => {
+          next(error instanceof Error ? error : new Error('Socket authentication failed'));
+        });
+    });
+
     this.setupEventHandlers();
   }
 
@@ -86,16 +110,12 @@ export class WebSocketManager {
     this.io.on('connection', (socket) => {
       console.log(`[WebSocket] Client connecté: ${socket.id}`);
       
-      // Générer un userId temporaire (à améliorer avec auth)
-      const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      socket.data.userId = userId;
-      
       // Envoyer confirmation de connexion
       socket.emit('connection:status', 'connected');
 
       // === GESTION DES WORKSPACES ===
       socket.on('workspace:join', (workspaceId) => {
-        this.handleWorkspaceJoin(socket, workspaceId);
+        void this.handleWorkspaceJoin(socket, workspaceId);
       });
 
       socket.on('workspace:leave', (workspaceId) => {
@@ -104,31 +124,40 @@ export class WebSocketManager {
 
       // === SYNCHRONISATION AGENTS ===
       socket.on('agent:position:update', (data) => {
-        this.broadcastToWorkspace(socket, 'agent:position:updated', {
-          ...data,
-          userId: socket.data.userId
+        this.handleValidatedWorkspaceEvent(socket, 'agent:position:update', data, AgentPositionUpdateSchema, (payload) => {
+          this.broadcastToWorkspace(socket, 'agent:position:updated', {
+            ...payload,
+            userId: socket.data.userId
+          });
         });
       });
 
       socket.on('agent:message:add', (data) => {
-        this.broadcastToWorkspace(socket, 'agent:message:added', {
-          ...data,
-          userId: socket.data.userId
+        this.handleValidatedWorkspaceEvent(socket, 'agent:message:add', data, AgentMessageAddSchema, (payload) => {
+          this.broadcastToWorkspace(socket, 'agent:message:added', {
+            ...payload,
+            userId: socket.data.userId
+          });
         });
       });
 
       socket.on('agent:toggle:minimize', (data) => {
-        this.broadcastToWorkspace(socket, 'agent:toggle:minimized', {
-          ...data,
-          userId: socket.data.userId
+        this.handleValidatedWorkspaceEvent(socket, 'agent:toggle:minimize', data, AgentToggleMinimizeSchema, (payload) => {
+          this.broadcastToWorkspace(socket, 'agent:toggle:minimized', {
+            ...payload,
+            userId: socket.data.userId
+          });
         });
       });
 
       // === CURSEUR UTILISATEUR ===
       socket.on('user:cursor:update', (data) => {
-        this.broadcastToWorkspace(socket, 'user:cursor:updated', {
-          ...data,
-          userId: socket.data.userId
+        this.handleValidatedWorkspaceEvent(socket, 'user:cursor:update', data, UserCursorUpdateSchema, (payload) => {
+          this.broadcastToWorkspace(socket, 'user:cursor:updated', {
+            x: payload.x,
+            y: payload.y,
+            userId: socket.data.userId
+          });
         });
       });
 
@@ -140,7 +169,82 @@ export class WebSocketManager {
     });
   }
 
-  private handleWorkspaceJoin(socket: any, workspaceId: string) {
+  private async authenticateSocket(socket: WorkspaceSocket): Promise<void> {
+    const token = this.extractHandshakeToken(socket);
+
+    if (!token) {
+      socket.data.userId = `guest:${socket.id}`;
+      socket.data.isAuthenticated = false;
+      socket.data.userInfo = {
+        name: 'guest',
+        color: this.generateUserColor(socket.id)
+      };
+      return;
+    }
+
+    let payload;
+    try {
+      payload = verifyAccessToken(token);
+    } catch {
+      throw new Error('Socket authentication failed');
+    }
+
+    const user = await User.findById(payload.sub).select('_id email username role isActive').lean();
+    if (!user || !user.isActive) {
+      throw new Error('Socket authentication failed');
+    }
+
+    socket.data.userId = user._id.toString();
+    socket.data.role = user.role;
+    socket.data.isAuthenticated = true;
+    socket.data.userInfo = {
+      name: typeof user.username === 'string' && user.username.trim().length > 0 ? user.username : user.email,
+      color: this.generateUserColor(user._id.toString())
+    };
+  }
+
+  private extractHandshakeToken(socket: WorkspaceSocket): string | null {
+    const authToken = typeof socket.handshake.auth?.token === 'string'
+      ? socket.handshake.auth.token.trim()
+      : '';
+
+    if (authToken) {
+      return authToken;
+    }
+
+    const authorizationHeader = socket.handshake.headers.authorization;
+    if (typeof authorizationHeader === 'string' && authorizationHeader.startsWith('Bearer ')) {
+      const bearerToken = authorizationHeader.slice('Bearer '.length).trim();
+      return bearerToken || null;
+    }
+
+    return null;
+  }
+
+  private async handleWorkspaceJoin(socket: WorkspaceSocket, workspaceId: string) {
+    const workspaceParseResult = WorkspaceJoinSchema.safeParse(workspaceId);
+    if (!workspaceParseResult.success) {
+      this.denySocketAction(socket, 'workspace:join', 'invalid_workspace_id');
+      return;
+    }
+
+    if (!socket.data.isAuthenticated) {
+      this.denySocketAction(socket, 'workspace:join', 'auth_required');
+      return;
+    }
+
+    const canAccessWorkspace = await Workflow.exists({
+      _id: workspaceParseResult.data,
+      userId: socket.data.userId,
+    });
+
+    if (!canAccessWorkspace) {
+      this.denySocketAction(socket, 'workspace:join', 'workspace_forbidden', {
+        workspaceId: workspaceParseResult.data,
+      });
+      return;
+    }
+
     // Quitter l'ancien workspace si nécessaire
     if (socket.data.workspaceId) {
       this.handleWorkspaceLeave(socket, socket.data.workspaceId);
@@ -159,13 +263,19 @@ export class WebSocketManager {
     // Notifier les autres utilisateurs
     socket.to(workspaceId).emit('workspace:user:joined', {
       userId: socket.data.userId,
-      userInfo: socket.data.userInfo || { name: socket.data.userId, color: this.generateUserColor() }
+      userInfo: socket.data.userInfo || { name: socket.data.userId, color: this.generateUserColor(socket.data.userId) }
     });
 
     console.log(`[WebSocket] User ${socket.data.userId} rejoint workspace ${workspaceId}`);
   }
 
-  private handleWorkspaceLeave(socket: any, workspaceId: string) {
+  private handleWorkspaceLeave(socket: WorkspaceSocket, workspaceId: string) {
+    const workspaceParseResult = WorkspaceLeaveSchema.safeParse(workspaceId);
+    if (!workspaceParseResult.success) {
+      this.denySocketAction(socket, 'workspace:leave', 'invalid_workspace_id');
+      return;
+    }
+
     socket.leave(workspaceId);
     
     // Retirer de la liste des utilisateurs connectés
@@ -184,21 +294,74 @@ export class WebSocketManager {
     console.log(`[WebSocket] User ${socket.data.userId} quitte workspace ${workspaceId}`);
   }
 
-  private handleDisconnect(socket: any) {
+  private handleDisconnect(socket: WorkspaceSocket) {
     if (socket.data.workspaceId) {
       this.handleWorkspaceLeave(socket, socket.data.workspaceId);
     }
   }
 
-  private broadcastToWorkspace(socket: any, event: keyof ServerToClientEvents, data: any) {
+  private broadcastToWorkspace(socket: WorkspaceSocket, event: keyof ServerToClientEvents, data: any) {
     if (socket.data.workspaceId) {
       socket.to(socket.data.workspaceId).emit(event, data);
     }
   }
 
-  private generateUserColor(): string {
+  private handleValidatedWorkspaceEvent<T>(
+    socket: WorkspaceSocket,
+    eventName: string,
+    payload: unknown,
+    schema: ZodType<T>,
+    forward: (data: T) => void,
+  ) {
+    if (!this.ensureWorkspaceAccess(socket, eventName)) {
+      return;
+    }
+
+    const parseResult = schema.safeParse(payload);
+    if (!parseResult.success) {
+      this.denySocketAction(socket, eventName, 'invalid_payload');
+      return;
+    }
+
+    forward(parseResult.data);
+  }
+
+  private ensureWorkspaceAccess(socket: WorkspaceSocket, eventName: string): boolean {
+    if (!socket.data.isAuthenticated) {
+      this.denySocketAction(socket, eventName, 'auth_required');
+      return false;
+    }
+
+    if (!socket.data.workspaceId) {
+      this.denySocketAction(socket, eventName, 'workspace_required');
+      return false;
+    }
+
+    return true;
+  }
+
+  private denySocketAction(
+    socket: WorkspaceSocket,
+    eventName: string,
+    reason: string,
+    metadata: Record<string, unknown> = {},
+  ) {
+    console.warn('[WebSocket][Denied]', {
+      socketId: socket.id,
+      eventName,
+      reason,
+      userId: socket.data.userId,
+      isAuthenticated: socket.data.isAuthenticated,
+      workspaceId: socket.data.workspaceId,
+      ...metadata,
+    });
+    socket.emit('connection:status', 'error');
+  }
+
+  private generateUserColor(seed: string): string {
     const colors = ['#00ff88', '#ff6b00', '#0066ff', '#ff0066', '#66ff00', '#ff6600'];
-    return colors[Math.floor(Math.random() * colors.length)];
+    const hash = Array.from(seed).reduce((acc, character) => acc + character.charCodeAt(0), 0);
+    return colors[Math.abs(hash) % colors.length];
   }
 
   // Méthodes publiques pour monitoring

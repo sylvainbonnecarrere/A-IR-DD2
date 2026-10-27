@@ -1,4 +1,5 @@
 import { Dirent, promises as fs } from 'fs';
+import crypto from 'crypto';
 import path from 'path';
 import mongoose from 'mongoose';
 import ts from 'typescript';
@@ -31,6 +32,7 @@ export interface ExecutionOrchestratorRequest {
     privateContext?: Record<string, unknown>;
     launchContext: UserToolRunLaunchContext;
     agentInstanceId?: string;
+    idempotencyKey?: string;
 }
 
 export class ExecutionOrchestrator {
@@ -76,7 +78,14 @@ export class ExecutionOrchestrator {
 
     async execute(request: ExecutionOrchestratorRequest): Promise<OrchestratedExecutionResult> {
         const executionMetadata = deriveExecutionMetadataFromLegacyFunction(request.fn);
-        const executionId = `utr-${new mongoose.Types.ObjectId().toString()}`;
+        const executionId = this.buildExecutionId(request, executionMetadata.toolId.toString());
+        if (request.idempotencyKey) {
+            const existingRun = await this.userToolRunService.getRunByExecutionId(executionId);
+            if (existingRun) {
+                return this.mapPersistedRun(existingRun, true);
+            }
+        }
+
         const { report: runtimeReport, runner: selectedRunnerPort, readiness } = await this.getPreferredRunnerReadiness(executionMetadata.runtime);
         const selectedRunnerId = this.normalizeRunnerId(selectedRunnerPort.getRunnerId());
 
@@ -103,20 +112,31 @@ export class ExecutionOrchestrator {
             launchContext: request.launchContext
         });
 
-        await this.userToolRunService.createQueuedRun({
-            executionId,
-            ownerUserId: request.userId,
-            toolId: executionMetadata.toolId,
-            toolVersionTag: executionMetadata.toolVersionTag,
-            toolContentHash: executionMetadata.toolContentHash,
-            workflowId: executionMetadata.workflowId,
-            launchContext: request.launchContext,
-            runtime: executionMetadata.runtime,
-            runner: selectedRunnerId,
-            inputs: request.args,
-            agentInstanceId: request.agentInstanceId,
-            policySnapshot: executionMetadata.policySnapshot
-        });
+        try {
+            await this.userToolRunService.createQueuedRun({
+                executionId,
+                ownerUserId: request.userId,
+                toolId: executionMetadata.toolId,
+                toolVersionTag: executionMetadata.toolVersionTag,
+                toolContentHash: executionMetadata.toolContentHash,
+                workflowId: executionMetadata.workflowId,
+                launchContext: request.launchContext,
+                runtime: executionMetadata.runtime,
+                runner: selectedRunnerId,
+                inputs: request.args,
+                agentInstanceId: request.agentInstanceId,
+                policySnapshot: executionMetadata.policySnapshot
+            });
+        } catch (error) {
+            if (request.idempotencyKey && this.isDuplicateKeyError(error)) {
+                const existingRun = await this.userToolRunService.getRunByExecutionId(executionId);
+                if (existingRun) {
+                    return this.mapPersistedRun(existingRun, true);
+                }
+            }
+
+            throw error;
+        }
 
         return this.executeSerializedForWorkspace(executionRequest.workspace, async () => {
             await this.userToolRunService.markRunning(executionId);
@@ -178,6 +198,7 @@ export class ExecutionOrchestrator {
                 return {
                     ...executionResult,
                     executionId,
+                    replayed: false,
                     metadata: {
                         exitCode: executionResult.exitCode,
                         ...(executionResult.metadata ?? {}),
@@ -548,5 +569,52 @@ export class ExecutionOrchestrator {
             retryable: false,
             failureKind,
         });
+    }
+
+    private buildExecutionId(request: ExecutionOrchestratorRequest, toolId: string): string {
+        if (!request.idempotencyKey) {
+            return `utr-${new mongoose.Types.ObjectId().toString()}`;
+        }
+
+        const digest = crypto
+            .createHash('sha256')
+            .update(JSON.stringify({
+                userId: request.userId,
+                toolId,
+                agentInstanceId: request.agentInstanceId ?? null,
+                launchContext: request.launchContext,
+                idempotencyKey: request.idempotencyKey,
+            }))
+            .digest('hex')
+            .slice(0, 32);
+
+        return `utr-idem-${digest}`;
+    }
+
+    private isDuplicateKeyError(error: unknown): boolean {
+        if (typeof error !== 'object' || error === null) {
+            return false;
+        }
+
+        const code = 'code' in error ? (error as { code?: number }).code : undefined;
+        const message = error instanceof Error ? error.message : '';
+        return code === 11000 || /E11000|duplicate key/i.test(message);
+    }
+
+    private mapPersistedRun(run: Awaited<ReturnType<UserToolRunService['getRunByExecutionId']>> extends infer T ? NonNullable<T> : never, replayed: boolean): OrchestratedExecutionResult {
+        return {
+            success: run.status === 'completed',
+            output: run.outputs?.result ?? null,
+            stdout: run.outputs?.stdout,
+            stderr: run.outputs?.stderr ?? run.error?.message,
+            durationMs: run.timing.durationMs ?? 0,
+            timedOut: run.status === 'timed_out',
+            exitCode: run.status === 'completed' ? 0 : 1,
+            runner: run.runner,
+            executionId: run.executionId,
+            replayed,
+            metadata: run.outputs?.artifacts ? { artifacts: run.outputs.artifacts } : undefined,
+            resourceUsage: run.resourceUsage,
+        };
     }
 }

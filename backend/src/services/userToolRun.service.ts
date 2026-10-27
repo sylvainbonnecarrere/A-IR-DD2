@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { assertUserToolRunTransition } from '../domain/execution/userToolRun.contract';
 import {
     IUserToolRun,
     IUserToolRunError,
@@ -13,15 +14,6 @@ import {
 } from '../models';
 
 type ObjectIdLike = mongoose.Types.ObjectId | string | null | undefined;
-
-const ALLOWED_STATUS_TRANSITIONS: Record<UserToolRunStatus, UserToolRunStatus[]> = {
-    queued: ['running', 'failed', 'stopped', 'timed_out'],
-    running: ['completed', 'failed', 'stopped', 'timed_out'],
-    completed: [],
-    failed: [],
-    stopped: [],
-    timed_out: []
-};
 
 export interface CreateUserToolRunData {
     executionId: string;
@@ -338,9 +330,13 @@ export class UserToolRunService {
         nextStatus: UserToolRunStatus,
         executionId: string
     ): void {
-        if (!ALLOWED_STATUS_TRANSITIONS[currentStatus].includes(nextStatus)) {
+        try {
+            assertUserToolRunTransition(currentStatus, nextStatus, executionId);
+        } catch (error) {
             throw new UserToolRunStateError(
-                `Invalid UserToolRun transition for ${executionId}: ${currentStatus} -> ${nextStatus}`
+                error instanceof Error
+                    ? error.message
+                    : `Invalid UserToolRun transition for ${executionId}: ${currentStatus} -> ${nextStatus}`
             );
         }
     }

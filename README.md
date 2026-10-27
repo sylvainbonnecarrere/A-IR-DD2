@@ -38,7 +38,7 @@ A-IR-DD2 lets you build complex AI workflows through a **visual node-based edito
 ```
 ┌─────────────────┐         ┌──────────────────┐         ┌─────────────────┐
 │   Frontend      │         │   Backend Proxy  │         │  Local Models   │
-│  React 18 + TS  │◄───────►│  Node.js + TS    │◄───────►│exLMStudio/Ollama│
+│  React 19 + TS  │◄───────►│  Node.js + TS    │◄───────►│exLMStudio/Ollama│
 │  React Flow     │         │  Express + JWT   │         └─────────────────┘
 └─────────────────┘         └──────────────────┘
                                     │
@@ -104,7 +104,7 @@ flowchart LR
 
 See also: [Guides/Features/MEDIAS/README.md](Guides/Features/MEDIAS/README.md)
 
-**Stack:** React 18 · TypeScript · Tailwind · Zustand · React Flow · Node.js · Express · MongoDB · Docker · Python · Workspace runtime roots · S3/GCS profiles
+**Stack:** React 19 · TypeScript · Tailwind · Zustand · React Flow · Node.js · Express · MongoDB · Docker · Python · Workspace runtime roots · S3/GCS profiles
 
 ---
 

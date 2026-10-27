@@ -14,7 +14,7 @@ const {
 
 const baseImageSpecs = [
     {
-        image: 'debian:bookworm-slim',
+        image: 'ubuntu:noble',
         files: [
             path.resolve(backendRoot, 'docker/runtime/node/Dockerfile'),
             path.resolve(backendRoot, 'docker/runtime/python/Dockerfile')

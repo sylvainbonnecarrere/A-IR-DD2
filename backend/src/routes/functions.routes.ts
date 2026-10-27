@@ -12,6 +12,7 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
+import { UserToolRunStatusSchema } from '../domain/execution/userToolRun.contract';
 import { requireAuth } from '../middleware/auth.middleware';
 import { BuildService } from '../services/build.service';
 import { RuntimeCompatibilityService } from '../services/runtimeCompatibility.service';
@@ -52,7 +53,7 @@ const idParamSchema = z
 const listRunsQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(50).optional().default(20),
     page: z.coerce.number().int().min(1).optional().default(1),
-    status: z.enum(['queued', 'running', 'completed', 'failed', 'stopped', 'timed_out']).optional(),
+    status: UserToolRunStatusSchema.optional(),
     sortBy: z.enum(['createdAt', 'durationMs', 'status']).optional().default('createdAt'),
     sortOrder: z.enum(['asc', 'desc']).optional().default('desc')
 });

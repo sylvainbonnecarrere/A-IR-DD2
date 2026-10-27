@@ -5,6 +5,137 @@ import mongoose from 'mongoose';
 import { ExecutionOrchestrator } from '../services/runtime/ExecutionOrchestrator';
 
 describe('ExecutionOrchestrator', () => {
+    it('replays the persisted result when the same idempotency key is reused', async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'airdd2-orchestrator-idem-'));
+        const outputRoot = path.join(tempRoot, 'output');
+        await fs.mkdir(outputRoot, { recursive: true });
+
+        const orchestrator = new ExecutionOrchestrator();
+        const runStore = new Map<string, any>();
+        const createQueuedRun = jest.fn().mockImplementation(async (data) => {
+            if (runStore.has(data.executionId)) {
+                const error = new Error('E11000 duplicate key error collection: user_tool_runs index: uq_user_tool_runs_execution_id');
+                (error as any).code = 11000;
+                throw error;
+            }
+
+            runStore.set(data.executionId, {
+                executionId: data.executionId,
+                status: 'queued',
+                runner: data.runner,
+                outputs: null,
+                timing: { queuedAt: new Date(), startedAt: null, finishedAt: null, durationMs: null },
+                resourceUsage: undefined,
+                error: null,
+            });
+        });
+        const markRunning = jest.fn().mockImplementation(async (executionId: string) => {
+            const run = runStore.get(executionId);
+            run.status = 'running';
+            run.timing.startedAt = new Date();
+        });
+        const completeRun = jest.fn().mockImplementation(async (executionId: string, payload: any) => {
+            const run = runStore.get(executionId);
+            run.status = 'completed';
+            run.outputs = payload.outputs;
+            run.resourceUsage = payload.resourceUsage;
+            run.timing.finishedAt = new Date();
+            run.timing.durationMs = payload.resourceUsage?.wallTimeMs ?? 5;
+        });
+
+        (orchestrator as any).runtimeHealthService = {
+            getHealthReport: jest.fn().mockResolvedValue({ summary: 'ready' })
+        };
+        (orchestrator as any).buildService = {
+            getBuildStatus: jest.fn().mockResolvedValue(null)
+        };
+        (orchestrator as any).workspaceManager = {
+            ensureWorkflowWorkspace: jest.fn().mockResolvedValue({
+                workspaceId: 'workspace-idem',
+                wasCreated: false,
+                logicalRoot: tempRoot,
+                runtimeRoots: {
+                    sourceRoot: path.join(tempRoot, 'source'),
+                    manifestsRoot: path.join(tempRoot, 'manifests'),
+                    buildRoot: path.join(tempRoot, 'build'),
+                    outputRoot
+                },
+                manifests: {
+                    packageJson: false,
+                    packageLockJson: false,
+                    requirementsTxt: false,
+                    pyprojectToml: false
+                },
+                status: 'active',
+                lastScanAt: null
+            })
+        };
+        (orchestrator as any).sandboxRunnerFactory = {
+            getPreferredRunner: jest.fn().mockReturnValue({
+                getRunnerId: () => 'docker_sandbox',
+                getReadiness: () => ({ ready: true })
+            })
+        };
+        (orchestrator as any).dockerRunner = {
+            execute: jest.fn().mockResolvedValue({
+                success: true,
+                output: { ok: true },
+                stdout: 'ok',
+                stderr: '',
+                durationMs: 5,
+                exitCode: 0,
+                runner: 'docker_sandbox',
+                metadata: { exitCode: 0 },
+                resourceUsage: { wallTimeMs: 5, memoryLimitMb: 256 }
+            })
+        };
+        (orchestrator as any).firecrackerRunner = { execute: jest.fn() };
+        (orchestrator as any).userToolRunService = {
+            createQueuedRun,
+            markRunning,
+            completeRun,
+            failRun: jest.fn(),
+            timeoutRun: jest.fn(),
+            getRunByExecutionId: jest.fn().mockImplementation(async (executionId: string) => runStore.get(executionId) ?? null),
+        };
+
+        const requestPayload = {
+            fn: {
+                _id: new mongoose.Types.ObjectId(),
+                userId: new mongoose.Types.ObjectId(),
+                workflowId: new mongoose.Types.ObjectId(),
+                name: 'idem_test',
+                description: 'Idempotent replay test',
+                language: 'typescript',
+                origin: 'custom',
+                tags: [],
+                inputSchema: { type: 'object' },
+                outputSchema: { type: 'object' },
+                codeInline: 'function run() { return { ok: true }; }',
+                dependencies: { npm: [], python: [] },
+                isEnabled: true,
+                isReadonly: false,
+                version: 1,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            } as any,
+            userId: new mongoose.Types.ObjectId().toString(),
+            args: { value: 'same' },
+            launchContext: 'editor_test' as const,
+            idempotencyKey: 'same-run',
+        };
+
+        const firstResult = await orchestrator.execute(requestPayload);
+        const secondResult = await orchestrator.execute(requestPayload);
+
+        expect(firstResult.executionId).toBe(secondResult.executionId);
+        expect(secondResult.replayed).toBe(true);
+        expect((orchestrator as any).dockerRunner.execute).toHaveBeenCalledTimes(1);
+        expect(createQueuedRun).toHaveBeenCalledTimes(1);
+
+        await fs.rm(tempRoot, { recursive: true, force: true });
+    });
+
     it('projects agent-scoped runtime artifacts into the media catalog after run completion', async () => {
         const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'airdd2-orchestrator-catalog-'));
         const outputRoot = path.join(tempRoot, 'output');

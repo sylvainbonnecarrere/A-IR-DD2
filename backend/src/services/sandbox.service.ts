@@ -67,7 +67,8 @@ export class SandboxService {
         toolSelection?: SandboxToolSelection,
         agentInstanceId?: string,
         privateContext?: Record<string, unknown>,
-        authHeader?: string
+        authHeader?: string,
+        idempotencyKey?: string,
     ): Promise<SandboxResult> {
         // 1. Resoudre la cible d'execution depuis le catalogue canonique user_tools
         const fn = toolSelection
@@ -134,7 +135,8 @@ export class SandboxService {
             args: testArgs,
             agentInstanceId,
             privateContext,
-            launchContext: agentInstanceId ? 'workflow_run' : 'editor_test'
+            launchContext: agentInstanceId ? 'workflow_run' : 'editor_test',
+            idempotencyKey,
         });
 
         const errorDetails = getSandboxErrorDetailsFromExecutionResult(executionResult);

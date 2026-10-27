@@ -27,6 +27,11 @@ export interface IUserRepository {
   setDefaultWorkflow(userId: string, defaultWorkflowId: string): Promise<IUser>;
 
   /**
+   * Synchronise uniquement le dernier workflow actif d'un utilisateur
+   */
+  setLastActiveWorkflow(userId: string, workflowId: string): Promise<IUser>;
+
+  /**
    * Synchronise les compteurs de workflow de l'utilisateur
    * @param userId ID de l'utilisateur
    * @param workflowCount Nombre total de workflows

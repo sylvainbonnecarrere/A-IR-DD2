@@ -53,6 +53,31 @@ export class UserRepository implements IUserRepository {
     }
   }
 
+  async setLastActiveWorkflow(userId: string, workflowId: string): Promise<IUser> {
+    try {
+      const user = await User.findByIdAndUpdate(
+        userId,
+        {
+          $set: {
+            lastActiveWorkflowId: workflowId,
+            updatedAt: new Date()
+          }
+        },
+        { new: true }
+      ).exec();
+
+      if (!user) {
+        throw new Error(`User ${userId} not found`);
+      }
+
+      console.log(`[UserRepository] Last active workflow set for user ${userId}: ${workflowId}`);
+      return user;
+    } catch (error) {
+      console.error(`[UserRepository] setLastActiveWorkflow error:`, error);
+      throw error;
+    }
+  }
+
   async syncWorkflowCount(userId: string, workflowCount: number): Promise<IUser> {
     try {
       const user = await User.findByIdAndUpdate(

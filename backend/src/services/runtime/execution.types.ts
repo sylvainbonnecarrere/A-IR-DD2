@@ -105,4 +105,5 @@ export interface SandboxExecutionResult {
 
 export interface OrchestratedExecutionResult extends SandboxExecutionResult {
     executionId: string;
+    replayed?: boolean;
 }

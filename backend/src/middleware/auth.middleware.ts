@@ -123,32 +123,32 @@ export const requireOwnershipAsync = (
     return async (req: Request, res: Response, next: NextFunction) => {
         try {
             if (!req.user) {
-                return res.status(401).json({ error: 'Non authentifié' });
+                return res.status(401).json({ error: 'Non authentifié', code: 'AUTH_REQUIRED' });
             }
 
             // CORRECTION SOLID: Validation ObjectId AVANT query DB
             // Cela prévient CastError → 500 et retourne 400 Bad Request
             const resourceId = req.params.id || req.params.instanceId || req.params.workflowId;
             if (resourceId && !mongoose.Types.ObjectId.isValid(resourceId)) {
-                return res.status(400).json({ error: 'Format d\'ID invalide.' });
+                return res.status(400).json({ error: 'Format d\'ID invalide.', code: 'INVALID_ID_FORMAT' });
             }
 
             const user = req.user as IUser;
             const resourceUserId = await getResourceUserId(req);
 
             if (!resourceUserId) {
-                return res.status(404).json({ error: 'Ressource introuvable' });
+                return res.status(404).json({ error: 'Ressource introuvable', code: 'RESOURCE_NOT_FOUND' });
             }
 
             // Admin bypass ownership check
             if (user.id !== resourceUserId && user.role !== 'admin') {
-                return res.status(403).json({ error: 'Accès non autorisé à cette ressource' });
+                return res.status(403).json({ error: 'Accès non autorisé à cette ressource', code: 'OWNERSHIP_DENIED' });
             }
 
             next();
         } catch (error) {
             console.error('[requireOwnershipAsync] Error:', error);
-            res.status(500).json({ error: 'Erreur vérification ownership' });
+            res.status(500).json({ error: 'Erreur vérification ownership', code: 'INTERNAL_SERVER_ERROR' });
         }
     };
 };
