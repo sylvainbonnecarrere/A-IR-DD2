@@ -8,6 +8,7 @@ export interface ICanvasState {
 }
 
 export interface IWorkflow extends Document {
+    __v?: number;
     userId: mongoose.Types.ObjectId;
     name: string;
     description?: string;

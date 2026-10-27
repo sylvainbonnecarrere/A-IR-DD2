@@ -22,16 +22,21 @@ describe('ListUserWorkflowsUseCase', () => {
   const workflowRepository: jest.Mocked<IWorkflowRepository> = {
     findByUserId: jest.fn(),
     findById: jest.fn(),
+    findOwnedById: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
     countByUserId: jest.fn(),
-    findFirstByUserId: jest.fn()
+    findFirstByUserId: jest.fn(),
+    deactivateOthers: jest.fn(),
+    unsetDefaultForOthers: jest.fn(),
+    patchOwned: jest.fn(),
   };
   const userRepository: jest.Mocked<IUserRepository> = {
     findById: jest.fn(),
     findByEmail: jest.fn(),
     setDefaultWorkflow: jest.fn(),
+    setLastActiveWorkflow: jest.fn(),
     syncWorkflowCount: jest.fn(),
     getDefaultWorkflowId: jest.fn()
   };
