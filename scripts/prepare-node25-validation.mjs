@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const repoRoot = process.cwd();
-const targetVersion = process.argv[2] || '25.9.0';
+const targetVersion = process.argv[2] || '24.22.1';
 
 function readTrimmedFile(relativePath) {
   const absolutePath = path.join(repoRoot, relativePath);
@@ -82,7 +82,7 @@ const pinnedNodeVersion = readTrimmedFile('.node-version');
 const engineRange = readPackageEngines();
 const installedManagers = buildManagers(targetVersion).filter((manager) => manager.path);
 
-console.log('Node 25 readiness check');
+console.log('Node 24 readiness check');
 console.log('================================');
 console.log(`Current runtime        : ${process.version}`);
 console.log(`Pinned .nvmrc          : ${pinnedNvmVersion ?? 'missing'}`);
@@ -91,14 +91,14 @@ console.log(`package.json engines   : ${engineRange ?? 'missing'}`);
 console.log(`Target validation line : ${targetVersion}`);
 
 printSection('Recommended workflow');
-console.log('1. Open a dedicated Node 25 shell before installing dependencies or starting the app.');
+  console.log('1. Open a dedicated Node 24 shell before installing dependencies or starting the app.');
 console.log('2. Reinstall dependencies in that shell when switching from a previous major Node line.');
 console.log('3. Validate the backend workspace and sandbox test slice before broader manual QA.');
 console.log('4. Run the guest and authenticated startup scenarios after the focused verification slice passes.');
 
 if (installedManagers.length === 0) {
   printSection('No version manager detected');
-  console.log('Install one of the following before the Node 25 manual pass:');
+  console.log('Install one of the following before the Node 24 manual pass:');
   console.log('- nvm-windows: https://github.com/coreybutler/nvm-windows');
   console.log('- Volta: https://volta.sh');
   console.log('- fnm: https://github.com/Schniz/fnm');

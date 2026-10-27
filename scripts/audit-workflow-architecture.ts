@@ -348,16 +348,26 @@ async function scanFile(absolutePath) {
   return results;
 }
 
-function summarize(results) {
-  const byClassification = new Map();
-  const byFile = new Map();
+type AuditResult = {
+  relPath: string;
+  lineNumber: number;
+  lineText: string;
+  token: string;
+  classification: 'V1_READ' | 'V1_WRITE' | 'V2_READ' | 'V2_WRITE' | 'COMPATIBILITY' | 'MIGRATION' | 'TEST_ONLY' | 'UNKNOWN';
+  reason: string;
+  surface: string;
+};
+
+function summarize(results: AuditResult[]) {
+  const byClassification = new Map<string, number>();
+  const byFile = new Map<string, AuditResult[]>();
 
   for (const result of results) {
     byClassification.set(result.classification, (byClassification.get(result.classification) || 0) + 1);
     if (!byFile.has(result.relPath)) {
       byFile.set(result.relPath, []);
     }
-    byFile.get(result.relPath).push(result);
+    byFile.get(result.relPath)?.push(result);
   }
 
   return { byClassification, byFile };
@@ -365,7 +375,7 @@ function summarize(results) {
 
 async function main() {
   const files = await collectFiles(repoRoot);
-  const occurrences = [];
+  const occurrences: AuditResult[] = [];
 
   for (const filePath of files) {
     occurrences.push(...await scanFile(filePath));
@@ -392,7 +402,7 @@ async function main() {
   console.log('## Inventory');
   for (const [relPath, entries] of [...byFile.entries()].sort((left, right) => left[0].localeCompare(right[0]))) {
     const first = entries[0];
-    const lineNumbers = [...new Set(entries.map((entry) => entry.lineNumber))].sort((a, b) => a - b).join(', ');
+    const lineNumbers = [...new Set(entries.map((entry) => Number(entry.lineNumber)))].sort((a, b) => a - b).join(', ');
     const tokens = [...new Set(entries.map((entry) => entry.token))].join(', ');
     console.log(`- ${relPath}`);
     console.log(`  classification=${first.classification}; lines=${lineNumbers}; tokens=${tokens}; surface=${first.surface}`);

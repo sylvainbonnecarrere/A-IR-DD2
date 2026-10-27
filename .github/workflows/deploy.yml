@@ -110,7 +110,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -159,7 +159,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -225,7 +225,7 @@ jobs:
         if: ${{ inputs.run_runtime_checks }}
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -264,7 +264,7 @@ jobs:
         if: ${{ inputs.run_runtime_checks }}
         run: npm --prefix backend ci
 
-      - name: Verify Node 25 runtime slice
+      - name: Verify Node 24 runtime slice
         if: ${{ inputs.run_runtime_checks }}
         run: npm run ci:node25:runtime
 
@@ -295,7 +295,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 25.9.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: |
             package-lock.json

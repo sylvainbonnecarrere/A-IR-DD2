@@ -93,6 +93,15 @@ Toute evolution de contrat ou de comportement touchant workflow, hydratation, ru
 
 ## 5. Vue d'ensemble des jalons
 
+### Mise a jour d'etat (2026-10-27)
+
+Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec les garde-fous de securite et de qualite valides sur les zones critiques. Le backlog doit donc etre lu comme suit :
+
+- `J0` : valide, avec inventaire et garde-fous anti-derive en place.
+- `J1` : valide sur le plan des contrats metier, des permissions, de la validation d'entree et de la journalisation.
+- `J2` : en cours, priorite backend, avec extraction des repositories et use cases poursuivie par l'agent `03-backend.agent.md`.
+- `J3` a `J6` : non demarres ou a lancer uniquement apres la stabilisation backend et les validations de migration associees.
+
 | Jalon | Intitule | Criticite | Agent pilote | Resultat attendu |
 |---|---|---|---|---|
 | J0 | Gel architectural et inventaire | Critique | `01-architecte-bdd.agent.md` | Carte exacte de la derive V1/V2 et garde-fous anti-regression |
@@ -314,10 +323,10 @@ Toute evolution de contrat ou de comportement touchant workflow, hydratation, ru
 **Surfaces de fixtures a verifier :** fixtures runs, snapshots backend, transitions workflow, routes legacy encore supportees.
 **Changements fonctionnels a anticiper :** nouvelles erreurs metier homogenes, publication bloquee sur IR invalide, annulation et reprise plus strictes, payloads de runs susceptibles d'evoluer.
 
-**Etat d'avancement au 2026-09-30 :**
-- `GET /api/workflows` et `POST /api/workflows` sont extraits vers `ListUserWorkflowsUseCase` et `CreateWorkflowUseCase`.
-- `PUT /api/workflows/:id` et `POST /api/workflows/:id/select` sont extraits vers `UpdateWorkflowUseCase` et `SelectWorkflowUseCase`, avec synchronisation centralisee de `isActive`, `isDefault`, `defaultWorkflowId` et `lastActiveWorkflowId`.
-- les prochaines extractions prioritaires restent `DELETE /api/workflows/:id`, `POST /api/workflows/:id/save`, `PATCH /api/workflows/:id/patch` et les endpoints legacy V1 encore portes par `backend/src/routes/workflows.routes.ts`.
+**Etat d'avancement au 2026-10-27 :**
+- `J0` et `J1` sont stabilises sur la ligne runtime supportee Node 24.22.1 LTS et sur les garde-fous de securite / validation documentes dans le backlog.
+- `J2` est la phase active de refactor backend. Les extractions de repository/use case sont poursuivies sur les routes critiques, avec concentration sur les endpoints de workflow, runs et activations.
+- Les endpoints legacy restent a surveiller comme surfaces de derive, mais ils sont maintenant encadres par des validations et une politique de non-regression.
 - **Point de securite J2 impose :** toute validation d'activation de workflow doit rejeter les nœuds agent dont `instanceId` ne correspond pas a une instance existante dans le workflow. Ce garde-fou doit rester documente dans le backlog et couvert par test de non-regression avant tout nouveau jalon backend.
 
 ### US-J2-01 - Extraire les repositories canoniques

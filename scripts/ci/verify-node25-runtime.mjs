@@ -5,8 +5,8 @@ import process from 'node:process';
 
 const repoRoot = process.cwd();
 const backendRoot = path.join(repoRoot, 'backend');
-const expectedVersion = '25.9.0';
-const expectedEngineRange = '>=25.9.0 <26';
+const expectedVersion = '24.22.1';
+const expectedEngineRange = '>=24.22.1 <25';
 const backendSliceArgs = [
   'src/__tests__/runtimeWrappers.test.ts',
   'src/__tests__/execution-orchestrator.test.ts',
@@ -56,7 +56,7 @@ function verifyAnchors() {
 }
 
 function main() {
-  console.log('[ci:node25:runtime] verifying Node 25 anchors');
+  console.log('[ci:node25:runtime] verifying Node 24 anchors');
   verifyAnchors();
 
   console.log('[ci:node25:runtime] running readiness report');
@@ -65,7 +65,7 @@ function main() {
   console.log('[ci:node25:runtime] running backend workspace and sandbox verification slice');
   runNodeScript(backendRoot, 'node_modules/jest/bin/jest.js', backendSliceArgs);
 
-  console.log('[ci:node25:runtime] Node 25 runtime verification succeeded');
+  console.log('[ci:node25:runtime] Node 24 runtime verification succeeded');
 }
 
 main();
