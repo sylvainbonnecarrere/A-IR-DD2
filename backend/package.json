@@ -45,8 +45,8 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
-    "socket.io": "^4.8.3",
-    "zod": "^4.4.3"
+    "socket.io": "^4.8.4",
+    "zod": "^4.6.7"
   },
   "optionalDependencies": {
     "isolated-vm": "^4.7.2"
@@ -64,23 +64,27 @@
     "@types/passport-jwt": "^4.0.0",
     "@types/passport-local": "^1.0.38",
     "@types/supertest": "^7.2.1",
-    "jest": "^30.4.2",
+    "jest": "^30.5.2",
+    "socket.io-client": "^4.8.4",
     "supertest": "^7.2.2",
-    "ts-jest": "^29.4.11",
+    "ts-jest": "^29.4.15",
     "tsx": "^4.22.4",
     "typescript": "^5.4.5"
   },
   "overrides": {
     "@babel/core": "7.29.7",
-    "body-parser": "1.20.6",
+    "body-parser": "1.20.9",
+    "brace-expansion": "2.1.7",
     "brace-expansion@1.1.12": "1.1.18",
+    "engine.io": "6.6.11",
+    "handlebars": "4.7.10",
     "form-data@2.5.5": "2.5.6",
     "form-data@4.0.5": "4.0.6",
-    "engine.io": "6.6.9",
-    "js-yaml": "5.2.3",
+    "js-yaml": "5.5.0",
     "@istanbuljs/load-nyc-config": {
-      "js-yaml": "5.2.3"
+      "js-yaml": "5.5.0"
     },
+    "minimatch": "9.0.9",
     "minimatch@3.1.2": "3.1.5",
     "minimatch@3.1.5": {
       "brace-expansion": "1.1.18"
@@ -91,6 +95,8 @@
     "path-to-regexp@0.1.12": "0.1.13",
     "picomatch@2.3.1": "2.3.2",
     "picomatch@4.0.3": "4.0.4",
+    "proxy-addr": "2.0.8",
+    "qs": "6.16.0",
     "socket.io-parser": "^4.2.7",
     "uuid": "11.1.1",
     "ws": "8.21.0"

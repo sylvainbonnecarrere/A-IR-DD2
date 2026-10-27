@@ -318,6 +318,7 @@ Toute evolution de contrat ou de comportement touchant workflow, hydratation, ru
 - `GET /api/workflows` et `POST /api/workflows` sont extraits vers `ListUserWorkflowsUseCase` et `CreateWorkflowUseCase`.
 - `PUT /api/workflows/:id` et `POST /api/workflows/:id/select` sont extraits vers `UpdateWorkflowUseCase` et `SelectWorkflowUseCase`, avec synchronisation centralisee de `isActive`, `isDefault`, `defaultWorkflowId` et `lastActiveWorkflowId`.
 - les prochaines extractions prioritaires restent `DELETE /api/workflows/:id`, `POST /api/workflows/:id/save`, `PATCH /api/workflows/:id/patch` et les endpoints legacy V1 encore portes par `backend/src/routes/workflows.routes.ts`.
+- **Point de securite J2 impose :** toute validation d'activation de workflow doit rejeter les nœuds agent dont `instanceId` ne correspond pas a une instance existante dans le workflow. Ce garde-fou doit rester documente dans le backlog et couvert par test de non-regression avant tout nouveau jalon backend.
 
 ### US-J2-01 - Extraire les repositories canoniques
 
@@ -374,7 +375,8 @@ Toute evolution de contrat ou de comportement touchant workflow, hydratation, ru
 **Criteres d'acceptation :**
 - la publication echoue sur IR invalide ;
 - les erreurs de validation sont explicites et stables ;
-- des tests couvrent ports, cycles, references et permissions.
+- des tests couvrent ports, cycles, references et permissions ;
+- un test de non-regression confirme que les nœuds agent ne peuvent plus pointer vers une `instanceId` absente du workflow courant.
 
 ### US-J2-04 - Introduire l'API de run et d'annulation idempotente
 

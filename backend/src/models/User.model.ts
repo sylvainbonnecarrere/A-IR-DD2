@@ -5,6 +5,7 @@ import config from '../config/environment';
 export interface IUser extends Document {
     id: string; // Mongoose virtual getter for _id.toString()
     email: string;
+    username?: string;
     password: string; // Hash uniquement
     role: 'admin' | 'user' | 'viewer';
     isActive: boolean;
@@ -28,6 +29,13 @@ const UserSchema = new Schema<IUser>({
         lowercase: true,
         trim: true,
         match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Email invalide']
+    },
+    username: {
+        type: String,
+        required: false,
+        trim: true,
+        sparse: true,
+        maxlength: 60
     },
     password: {
         type: String,

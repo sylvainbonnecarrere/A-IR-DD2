@@ -21,6 +21,9 @@ app.use('/api/workflows/:workflowId/instances', agentInstancesRoutes);
 
 describe('agent instance deletion media policy', () => {
     const testWorkspaceStorageRoot = path.join(process.cwd(), 'storage-test-instance-delete-policy');
+    const makeUniqueUsername = (prefix: string, suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`) => {
+        return `${prefix}${suffix}`.slice(0, 60);
+    };
 
     beforeEach(() => {
         process.env.WORKSPACE_STORAGE_PATH = testWorkspaceStorageRoot;
@@ -41,7 +44,7 @@ describe('agent instance deletion media policy', () => {
         const user = await User.create({
             email: `agent-instance-delete-policy-${Date.now()}@test.com`,
             password: 'hashedpassword12345',
-            username: `agentinstancedeletepolicy${Date.now()}`,
+            username: makeUniqueUsername('agentinstancedeletepolicy'),
         });
         const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
 
@@ -184,7 +187,7 @@ describe('agent instance deletion media policy', () => {
         const user = await User.create({
             email: `agent-instance-delete-policy-uncatalogued-output-${suffix}@test.com`,
             password: 'hashedpassword12345',
-            username: `agentinstancedeletepolicyuncatalogued${suffix}`,
+            username: makeUniqueUsername('agentinstancedeletepolicyuncatalogued', suffix),
         });
         const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
 
@@ -275,7 +278,7 @@ describe('agent instance deletion media policy', () => {
         const user = await User.create({
             email: `agent-instance-delete-policy-orphan-repair-${suffix}@test.com`,
             password: 'hashedpassword12345',
-            username: `agentinstancedeletepolicyorphanrepair${suffix}`,
+            username: makeUniqueUsername('agentinstancedeletepolicyorphanrepair', suffix),
         });
         const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
 
@@ -393,7 +396,7 @@ describe('agent instance deletion media policy', () => {
         const user = await User.create({
             email: `agent-instance-delete-policy-local-${Date.now()}@test.com`,
             password: 'hashedpassword12345',
-            username: `agentinstancedeletepolicylocal${Date.now()}`,
+            username: makeUniqueUsername('agentinstancedeletepolicylocal'),
         });
         const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
 
@@ -525,7 +528,7 @@ describe('agent instance deletion media policy', () => {
         const user = await User.create({
             email: `agent-instance-delete-policy-cloud-${suffix}@test.com`,
             password: 'hashedpassword12345',
-            username: `agentinstancedeletepolicycloud${suffix}`,
+            username: makeUniqueUsername('agentinstancedeletepolicycloud', suffix),
         });
         const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
 
@@ -644,7 +647,7 @@ describe('agent instance deletion media policy', () => {
         const user = await User.create({
             email: `agent-instance-delete-policy-cloud-runtime-fallback-${suffix}@test.com`,
             password: 'hashedpassword12345',
-            username: `agentinstancedeletepolicycloudruntimefallback${suffix}`,
+            username: makeUniqueUsername('agentinstancedeletepolicycloudruntimefallback', suffix),
         });
         const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
 
@@ -762,7 +765,7 @@ describe('agent instance deletion media policy', () => {
         const user = await User.create({
             email: `agent-instance-delete-policy-anomalies-${suffix}@test.com`,
             password: 'hashedpassword12345',
-            username: `agentinstancedeletepolicyanomalies${suffix}`,
+            username: makeUniqueUsername('agentinstancedeletepolicyanomalies', suffix),
         });
         const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
 

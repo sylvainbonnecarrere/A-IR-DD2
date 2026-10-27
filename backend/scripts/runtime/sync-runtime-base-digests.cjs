@@ -14,10 +14,11 @@ const {
 
 const baseImageSpecs = [
     {
-        image: 'ubuntu:noble',
+        image: 'ubuntu:24.04',
         files: [
             path.resolve(backendRoot, 'docker/runtime/node/Dockerfile'),
-            path.resolve(backendRoot, 'docker/runtime/python/Dockerfile')
+            path.resolve(backendRoot, 'docker/runtime/python/Dockerfile'),
+            path.resolve(backendRoot, 'docker/runtime/python-provisioning/Dockerfile')
         ]
     },
     {
@@ -53,7 +54,8 @@ async function resolveRemoteDigest(image) {
 function syncSpecInFiles(spec, digest, options = {}) {
     const dryRun = options.dryRun === true;
     const checkOnly = options.checkOnly === true;
-    const pattern = new RegExp(`${escapeRegExp(spec.image)}@sha256:[a-f0-9]{64}`, 'g');
+    const escapedImage = escapeRegExp(spec.image);
+    const pattern = new RegExp(`(${escapedImage}(?:-[A-Za-z0-9._-]+)?)(?:@sha256:[a-f0-9]{64})?`, 'g');
     let replacements = 0;
     let outdatedFiles = 0;
 
@@ -61,11 +63,10 @@ function syncSpecInFiles(spec, digest, options = {}) {
         const currentContent = fs.readFileSync(filePath, 'utf8');
         const matches = currentContent.match(pattern) || [];
         if (matches.length === 0) {
-            throw new Error(`Référence ${spec.image}@sha256:<digest> introuvable dans ${path.relative(backendRoot, filePath)}`);
+            throw new Error(`Référence ${spec.image} introuvable dans ${path.relative(backendRoot, filePath)}`);
         }
 
-        const expectedReference = `${spec.image}@${digest}`;
-        const nextContent = currentContent.replace(pattern, expectedReference);
+        const nextContent = currentContent.replace(pattern, (_, baseRef) => `${baseRef}@${digest}`);
 
         if (nextContent !== currentContent) {
             outdatedFiles += 1;

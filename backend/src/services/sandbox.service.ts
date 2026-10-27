@@ -19,6 +19,7 @@ export interface SandboxResult {
     executionId?: string;
     runner?: string;
     exitCode?: number;
+    replayed?: boolean;
     metadata?: SandboxExecutionMetadata;
     resourceUsage?: SandboxExecutionResourceUsage;
     errorDetails?: SandboxErrorDetails;
