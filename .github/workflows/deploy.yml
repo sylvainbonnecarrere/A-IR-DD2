@@ -86,7 +86,7 @@ jobs:
           echo "deploy_ref=$deploy_ref" >> "$GITHUB_OUTPUT"
 
       - name: Checkout deployment ref
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.validate.outputs.deploy_ref }}
 
@@ -103,7 +103,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.deploy_ref }}
 
@@ -152,7 +152,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.deploy_ref }}
 
@@ -217,7 +217,7 @@ jobs:
 
       - name: Checkout repository
         if: ${{ inputs.run_runtime_checks }}
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.deploy_ref }}
 
@@ -288,7 +288,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.deploy_ref }}
 
