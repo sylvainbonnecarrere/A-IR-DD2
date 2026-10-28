@@ -308,4 +308,63 @@ describe('workflow V1 -> V2 migration', () => {
         expect(summary.edgesCreated).toBe(0);
         expect(summary.duplicatesPrevented).toBe(2);
     });
+
+    it('resumes a stale completed checkpoint when the V2 graph is only partially materialized', async () => {
+        const workflowId = new mongoose.Types.ObjectId();
+        const userId = new mongoose.Types.ObjectId();
+        const instanceA = new mongoose.Types.ObjectId();
+        const instanceB = new mongoose.Types.ObjectId();
+
+        const existingNode = {
+            _id: new mongoose.Types.ObjectId(),
+            workflowId: workflowId.toString(),
+            ownerId: userId.toString(),
+            nodeType: 'agent',
+            instanceId: instanceA,
+            position: { x: 10, y: 20 },
+            uiConfig: { label: 'Alpha' },
+            nodeData: { label: 'Alpha' },
+            metadata: { legacyNodeId: 'node-a' },
+        };
+
+        const db = new FakeDb({
+            workflows: new FakeCollection([
+                {
+                    _id: workflowId,
+                    userId,
+                    name: 'Legacy workflow',
+                    nodes: [
+                        { _id: new mongoose.Types.ObjectId(), id: 'node-a', instanceId: instanceA, nodeType: 'agent', position: { x: 10, y: 20 }, data: { label: 'Alpha' } },
+                        { _id: new mongoose.Types.ObjectId(), id: 'node-b', instanceId: instanceB, nodeType: 'agent', position: { x: 30, y: 40 }, data: { label: 'Bravo' } },
+                    ],
+                    edges: [
+                        { _id: new mongoose.Types.ObjectId(), id: 'edge-1', source: instanceA.toString(), target: instanceB.toString(), type: 'smoothstep', label: 'primary' },
+                    ],
+                },
+            ]),
+            workflow_nodes_v2: new FakeCollection([existingNode]),
+            workflow_edges: new FakeCollection([]),
+            workflow_migrations: new FakeCollection([
+                {
+                    _id: new mongoose.Types.ObjectId(),
+                    workflowId: workflowId.toString(),
+                    sourceVersion: 'v1',
+                    targetVersion: 'v2',
+                    status: 'completed',
+                    migratedAt: new Date('2026-01-02T00:00:00Z'),
+                },
+            ]),
+            schema_migrations: new FakeCollection([]),
+        });
+
+        const summary = await migrateLegacyWorkflowGraphsToV2(db as any);
+
+        expect(summary.workflowsScanned).toBe(1);
+        expect(summary.workflowsMigrated).toBe(1);
+        expect(summary.nodesCreated).toBe(1);
+        expect(summary.edgesCreated).toBe(1);
+        expect(summary.duplicatesPrevented).toBe(1);
+        expect(db.collection('workflow_nodes_v2').snapshot()).toHaveLength(2);
+        expect(db.collection('workflow_edges').snapshot()).toHaveLength(1);
+    });
 });

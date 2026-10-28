@@ -74,19 +74,17 @@ function normalizeDate(value: unknown): Date {
 }
 
 function buildLegacyNodeSignature(node: LegacyWorkflowNodeLike): string {
-    const workflowNodeId = toStringValue(node._id ?? node.id ?? node.instanceId ?? '');
+    const workflowNodeId = toStringValue(node.id ?? node.instanceId ?? node._id ?? '');
     const instanceId = toStringValue(node.instanceId ?? '');
     const nodeType = node.nodeType ?? 'agent';
-    const position = node.position ?? { x: 0, y: 0 };
-    return `${workflowNodeId}:${instanceId}:${nodeType}:${position.x ?? 0}:${position.y ?? 0}`;
+    return `${workflowNodeId}:${instanceId}:${nodeType}`;
 }
 
 function buildLegacyEdgeSignature(edge: LegacyWorkflowEdgeLike): string {
     const source = toStringValue(edge.sourceInstanceId ?? edge.source ?? '');
     const target = toStringValue(edge.targetInstanceId ?? edge.target ?? '');
     const type = edge.edgeType ?? edge.type ?? 'default';
-    const label = edge.label ?? '';
-    return `${source}->${target}:${type}:${label}`;
+    return `${source}->${target}:${type}`;
 }
 
 function buildV2NodeRecord(workflow: any, node: LegacyWorkflowNodeLike) {
@@ -95,6 +93,7 @@ function buildV2NodeRecord(workflow: any, node: LegacyWorkflowNodeLike) {
     const instanceId = node.instanceId ? toStringValue(node.instanceId) : undefined;
     const persistedPosition = node.position ?? { x: 0, y: 0 };
     const uiLabel = node.data?.label ?? node.data?.name ?? node.id ?? 'node';
+    const legacyNodeId = toStringValue(node.id ?? node.instanceId ?? node._id ?? '');
 
     return {
         workflowId: objectId,
@@ -111,7 +110,7 @@ function buildV2NodeRecord(workflow: any, node: LegacyWorkflowNodeLike) {
         },
         nodeData: node.data ?? {},
         metadata: {
-            legacyNodeId: toStringValue(node._id ?? node.id ?? ''),
+            legacyNodeId,
             legacyInstanceId: instanceId,
             importedFromV1: true,
         },
@@ -172,6 +171,26 @@ export async function migrateLegacyWorkflowGraphsToV2(db: any): Promise<Workflow
             continue;
         }
 
+        const legacyNodes = Array.isArray(workflow.nodes) ? workflow.nodes as LegacyWorkflowNodeLike[] : [];
+        const legacyEdges = Array.isArray(workflow.edges) ? workflow.edges as LegacyWorkflowEdgeLike[] : [];
+
+        const currentNodes = await nodeCollection.find({ workflowId }).toArray();
+        const currentEdges = await edgeCollection.find({ workflowId }).toArray();
+        const existingNodeSignatures = new Set(currentNodes.map((node: any) => buildLegacyNodeSignature({
+            _id: node.metadata?.legacyNodeId ?? node._id,
+            id: node.metadata?.legacyNodeId ?? node.id ?? node.instanceId,
+            instanceId: node.instanceId,
+            nodeType: node.nodeType,
+            position: node.position,
+            data: node.nodeData,
+        })));
+        const existingEdgeSignatures = new Set(currentEdges.map((edge: any) => buildLegacyEdgeSignature({
+            sourceInstanceId: edge.sourceInstanceId,
+            targetInstanceId: edge.targetInstanceId,
+            edgeType: edge.edgeType,
+            label: edge.label,
+        })));
+
         const checkpoint = await migrationCollection.findOne({
             workflowId,
             sourceVersion: 'v1',
@@ -179,23 +198,15 @@ export async function migrateLegacyWorkflowGraphsToV2(db: any): Promise<Workflow
             status: 'completed',
         });
 
-        if (checkpoint) {
-            const existingNodes = await nodeCollection.find({ workflowId }).toArray();
-            summary.duplicatesPrevented += existingNodes.length;
+        const legacyNodeSignatures = new Set(legacyNodes.map((node) => buildLegacyNodeSignature(node)));
+        const legacyEdgeSignatures = new Set(legacyEdges.map((edge) => buildLegacyEdgeSignature(edge)));
+        const hasMissingNodeRecords = [...legacyNodeSignatures].some((signature) => !existingNodeSignatures.has(signature));
+        const hasMissingEdgeRecords = [...legacyEdgeSignatures].some((signature) => !existingEdgeSignatures.has(signature));
+
+        if (checkpoint && !hasMissingNodeRecords && !hasMissingEdgeRecords) {
+            summary.duplicatesPrevented += currentNodes.length;
             continue;
         }
-
-        const legacyNodes = Array.isArray(workflow.nodes) ? workflow.nodes as LegacyWorkflowNodeLike[] : [];
-        const legacyEdges = Array.isArray(workflow.edges) ? workflow.edges as LegacyWorkflowEdgeLike[] : [];
-        const currentNodes = await nodeCollection.find({ workflowId }).toArray();
-        const existingNodeSignatures = new Set(currentNodes.map((node: any) => buildLegacyNodeSignature({
-            _id: node.metadata?.legacyNodeId ?? node._id,
-            id: node.metadata?.legacyNodeId,
-            instanceId: node.instanceId,
-            nodeType: node.nodeType,
-            position: node.position,
-            data: node.nodeData,
-        })));
 
         for (const node of legacyNodes) {
             const signature = buildLegacyNodeSignature(node);
@@ -208,14 +219,6 @@ export async function migrateLegacyWorkflowGraphsToV2(db: any): Promise<Workflow
             existingNodeSignatures.add(signature);
             summary.nodesCreated += 1;
         }
-
-        const existingEdges = await edgeCollection.find({ workflowId }).toArray();
-        const existingEdgeSignatures = new Set(existingEdges.map((edge: any) => buildLegacyEdgeSignature({
-            sourceInstanceId: edge.sourceInstanceId,
-            targetInstanceId: edge.targetInstanceId,
-            edgeType: edge.edgeType,
-            label: edge.label,
-        })));
 
         for (const edge of legacyEdges) {
             const signature = buildLegacyEdgeSignature(edge);

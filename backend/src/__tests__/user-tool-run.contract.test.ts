@@ -33,10 +33,35 @@ describe('UserToolRun domain contract', () => {
         expect(parseResult.success).toBe(false);
     });
 
-    it('allows only declared transitions', () => {
-        expect(canTransitionUserToolRun('queued', 'running')).toBe(true);
-        expect(canTransitionUserToolRun('running', 'completed')).toBe(true);
-        expect(canTransitionUserToolRun('completed', 'running')).toBe(false);
+    it('allows only declared transitions and closes terminal states', () => {
+        const validTransitions: Array<[string, string]> = [
+            ['queued', 'running'],
+            ['queued', 'failed'],
+            ['queued', 'stopped'],
+            ['queued', 'timed_out'],
+            ['running', 'completed'],
+            ['running', 'failed'],
+            ['running', 'stopped'],
+            ['running', 'timed_out'],
+        ];
+
+        validTransitions.forEach(([from, to]) => {
+            expect(canTransitionUserToolRun(from as any, to as any)).toBe(true);
+        });
+
+        const forbiddenTransitions: Array<[string, string]> = [
+            ['completed', 'running'],
+            ['failed', 'running'],
+            ['failed', 'completed'],
+            ['stopped', 'running'],
+            ['timed_out', 'completed'],
+            ['queued', 'completed'],
+            ['running', 'queued'],
+        ];
+
+        forbiddenTransitions.forEach(([from, to]) => {
+            expect(canTransitionUserToolRun(from as any, to as any)).toBe(false);
+        });
     });
 
     it('throws on forbidden transitions', () => {

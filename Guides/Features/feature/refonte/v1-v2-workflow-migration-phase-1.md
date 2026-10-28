@@ -53,7 +53,19 @@ L'US-J3-02 est validée et la phase 2 de cutover opérationnel a été clôturé
 - neutralisation des points de lecture legacy actifs dans les routes et snapshots de compatibilité ;
 - remplacement effectif des chemins de lecture V1 par V2 pour les workflows, nœuds, arêtes et snapshot d'hydratation ;
 - validation fonctionnelle sur les jeux de fixtures workflow/snapshot et sur le contrat de sortie expose au frontend ;
-- clôture de la phase 2 de cutover avant J5 avec V2 comme source de vérité opérationnelle explicite.
+- clôture de la phase 2 de cutover avant J5 avec V2 comme source de vérité opérationnelle explicite ;
+- validation J4 ciblée sur migrations, idempotence, compatibilité legacy, retries et annulations, avec le runtime stabilisé pour le cutover frontend.
+
+## Handoff vers J5 — Cutover frontend V2
+
+Le travail de validation V2 est maintenant prêt à être relayé au frontend :
+
+- `J4` a validé les invariants métier, la reprise après interruption et l’arrêt propre des tâches ;
+- le runtime est industrialisé avec des leases, retries bornées et annulations terminales ;
+- le contrat de runtime versionné est stabilisé et les événements émis restent filtrés et sécurisés ;
+- le frontend ne doit plus reconstruire une source de vérité locale à partir des graphes V1 ou des objets legacy.
+
+La main est donc donnée à `06-frontend.agent.md` pour le `J5 - Cutover frontend V2`, avec la responsabilité de consommer uniquement le contrat V2 et les événements runtime versionnés, sans réintroduire de logique de compatibilité côté client.
 
 ## Impact sur le code existant
 

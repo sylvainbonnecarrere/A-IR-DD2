@@ -477,7 +477,7 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - une execution interrompue peut reprendre ;
 - des tests couvrent une base historique et une base deja partiellement migree ;
 - la phase suivante doit commencer avec un plan de remplacement explicite des chemins de lecture legacy encore actifs.
-**Etat de transfert au 2026-10-28 :** l'US-J3-02 est validée. La migration V1 -> V2 est idempotente, rejouable et couverte par tests de rerun et de reprise. La source de vérité pour le graphe workflow est orientée vers V2, et la phase 2 de cutover opérationnel a été validée par neutralisation explicite des lectures legacy restantes et par la garde-fou V2-only sur les snapshots / routes de compatibilité.
+**Etat de transfert au 2026-10-28 :** l'US-J3-02 est validée. La migration V1 -> V2 est idempotente, rejouable et couverte par tests de rerun et de reprise. La source de vérité pour le graphe workflow est orientée vers V2, et la phase 2 de cutover opérationnel a été validée par neutralisation explicite des lectures legacy restantes et par la garde-fou V2-only sur les snapshots / routes de compatibilité. La main est transmise au jalon J3 suivant avec les composants runtime, les workers et les health checks en priorité.
 
 **Livrables confirmes :**
 - migration `008_workflow_v1_to_v2_migration.ts` et script npm `migrate:workflow-v1-v2` ;
@@ -491,6 +491,8 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - lancer `US-J3-03` sur worker, queue, scheduler et health checks ;
 - poursuivre avec `US-J3-04` sur les evenements runtime versionnes ;
 - maintenir la vigilance sur les compatibilites explicites qui doivent rester marquées comme V2-only.
+
+**Handoff J3-02 -> J3-03 :** la migration est fermée sur le plan V1->V2; la suite est désormais pilotée par l'agent `04-cicd-installation.agent.md` pour le runtime infra, avec l'agent `03-backend.agent.md` qui reprend la responsabilité des événements runtime versionnés dès la livraison de la base runtime stabilisée.
 ### Phase 2 - Remplacement des lectures legacy / cutover V2 operationnel
 
 **Objet :** achever la bascule de V1 vers V2 en faisant de V2 la source de verite operationnelle et en supprimant les reliquats de lecture legacy.
@@ -508,6 +510,28 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - les chemins V1 legacy sont desactivees ou supprimes avec compatibilite explicite et tracee ;
 - les tests et fixtures critiques restent verts ;
 - le projet est capable de fonctionner en V2 operationnelle sans reliquat de la V1.
+
+### Cartographie runtime et delegation frontend
+
+**Producteurs backend :**
+- `backend/src/services/userToolRun.service.ts` publie les transitions de run et de task au moment des changements d'etat critiques ;
+- `backend/src/services/taskRuntimeInfra.service.ts` pilote la file, le lease et les retries, en produisant les etats de runtime utilises pour le suivi ;
+- `backend/src/services/runtimeEventPublisher.service.ts` normalise le type d'evenement, le payload et la deduplication par workspace / aggregate.
+
+**Consommateurs / canaux :**
+- `backend/src/websocket/WebSocketManager.ts` autorise uniquement les sockets authentifiees et appartenant au bon workspace avant l'emission ;
+- le client consomme `runtime:event` via un pont d'observation runtime (bridge / router / reducer), sans reconstruire de source de verite locale V1 ;
+- le frontend affiche uniquement l'etat serveur expose par le flux event-sourcing versionne, avec gestion propre des etats loading, error, offline et partial.
+
+**Regles de semantique a conserver :**
+- `run:queued`, `run:started`, `run:progressed`, `run:completed`, `run:failed`, `run:stopped` sont exclusifs et interpretes comme des evenements de cycle, pas comme des proprietes ad hoc ;
+- `task:queued`, `task:started`, `task:progressed`, `task:completed`, `task:failed`, `task:cancelled`, `task:blocked` suivent la meme logique de versionnage et de filtration ;
+- les payloads ne doivent jamais contenir des champs secrets, tokens ou cles d'API ; les filtres doivent rester centralises dans le contrat V2 et le publisher.
+
+**Delegation frontend :**
+- la vue front ne doit plus recalculer l'etat de run depuis une reconstruction locale de `Workflow.nodes` ;
+- l'UI doit se brancher sur le contrat backend V2 et sur les evenements runtime versionnes, avec un reducer de state dedie pour le suivi des runs et tasks activement executés ;
+- toute adaptation de fixtures d'hydratation ou de canvas doit rester liee a une evolution fonctionnelle explicite du contrat, pas a une correction locale d'UI.
 
 ### US-J3-03 - Industrialiser worker, queue et scheduler
 
@@ -528,7 +552,7 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - health checks et scripts de demarrage existent ;
 - les tests couvrent panne worker, tache abandonnee et redemarrage.
 
-**Etat de transfert au 2026-10-28 :** l'US-J3-03 est validée. Le worker, la queue, le scheduler, les leases de task, les retries et les chemins de reprise après redémarrage sont stabilisés, et les health checks couvrent la disponibilité du runtime sans dépendance Redis comme source de vérité métier. La main est transmise à la suite du jalon J3 avec les événements runtime versionnés et la validation finale en perspective.
+**Etat de transfert au 2026-10-28 :** l'US-J3-03 est validée. Le worker, la queue, le scheduler, les leases de task, les retries et les chemins de reprise après redémarrage sont stabilisés, et les health checks couvrent la disponibilité du runtime sans dépendance Redis comme source de vérité métier. La main est transmise à l'agent `03-backend.agent.md` pour `US-J3-04`, avec la responsabilité de livrer les événements runtime versionnés, filtrés et cohérents avec le runtime J3 validé. Le contrat d'exécution asynchrone est désormais stable et la suite backend doit s'appuyer sur ce socle sans réintroduire de lecture legacy dans le flux temps réel.
 
 ### US-J3-04 - Publier les evenements runtime versionnes
 
@@ -548,6 +572,8 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - les evenements runtime utiles sont identifies et versionnes ;
 - les donnees sensibles sont exclues ;
 - des tests couvrent le payload et le filtrage utilisateur.
+
+**Etat de transfert au 2026-10-28 :** l'US-J3-04 est validée. Les événements runtime sont désormais versionnés, filtrés, sécurisés par workspace et couverts par tests de contrat et de publication. Le socle runtime J3/J3-04 est stable et le handoff est explicitement donné à l'agent `05-testeur-domaine.agent.md` pour `J4 - Validation domaine et resilience`. La validation J4 doit s'appuyer sur les invariants runtime déjà stabilisés, les fixtures backend et les suites de migration / runtime déjà vertes, sans reintroduire de reconstruction V1 dans le parcours de suivi temps réel.
 
 ## J4 - Validation domaine et resilience
 
@@ -608,6 +634,8 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - tests de migration verte, relance et reprise apres echec ;
 - verification des donnees V1 converties ;
 - rapport des ecarts residuels documente.
+
+**Etat de transfert au 2026-10-28 :** l'US-J4-02 est validée. Les migrations V1 -> V2, l'idempotence, la reprise après interruption et la compatibilité legacy ont été vérifiées sur les scénarios de réexécution et de données historiques. Le garde-fou V2-only est resté effectif sur les chemins de compatibilité, et le runtime est désormais prêt à être piloté par le cutover frontend sans reconstitution locale de `V1`. La main est transmise à l'agent `06-frontend.agent.md` pour `J5 - Cutover frontend V2`, avec la consigne de ne plus reconstruire une source de vérité locale à partir des structures legacy et de ne consommer que les DTO et événements runtime V2 validés.
 
 ### US-J4-03 - Tester resilience runtime, retries et annulations
 

@@ -12,13 +12,46 @@ describe('TaskInstance domain contract', () => {
     });
 
     it('declares legal task transitions', () => {
-        expect(canTransitionTaskInstance('pending', 'ready')).toBe(true);
-        expect(canTransitionTaskInstance('running', 'completed')).toBe(true);
-        expect(canTransitionTaskInstance('running', 'timed_out')).toBe(true);
-        expect(canTransitionTaskInstance('completed', 'running')).toBe(false);
+        const validTransitions: Array<[string, string]> = [
+            ['pending', 'ready'],
+            ['pending', 'blocked'],
+            ['pending', 'cancelled'],
+            ['pending', 'timed_out'],
+            ['ready', 'running'],
+            ['ready', 'cancelled'],
+            ['ready', 'timed_out'],
+            ['running', 'completed'],
+            ['running', 'failed'],
+            ['running', 'blocked'],
+            ['running', 'cancelled'],
+            ['running', 'timed_out'],
+            ['blocked', 'ready'],
+            ['blocked', 'cancelled'],
+            ['blocked', 'timed_out'],
+        ];
+
+        validTransitions.forEach(([from, to]) => {
+            expect(canTransitionTaskInstance(from as any, to as any)).toBe(true);
+        });
     });
 
-    it('rejects illegal task transitions', () => {
+    it('rejects illegal task transitions and terminal re-entry', () => {
+        const forbiddenTransitions: Array<[string, string]> = [
+            ['completed', 'running'],
+            ['completed', 'ready'],
+            ['failed', 'ready'],
+            ['failed', 'running'],
+            ['cancelled', 'ready'],
+            ['timed_out', 'running'],
+            ['pending', 'running'],
+            ['ready', 'completed'],
+            ['blocked', 'running'],
+        ];
+
+        forbiddenTransitions.forEach(([from, to]) => {
+            expect(canTransitionTaskInstance(from as any, to as any)).toBe(false);
+        });
+
         expect(() => assertTaskInstanceTransition('failed', 'ready', 'task-1')).toThrow(
             'Invalid TaskInstance transition for task-1: failed -> ready'
         );

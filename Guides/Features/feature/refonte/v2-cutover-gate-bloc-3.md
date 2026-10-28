@@ -112,8 +112,20 @@ Le bloc 3 est validé au niveau du cutover opérationnel : la migration V1 -> V2
 ### 8.2 Ce qui reste à faire avant la validation finale J5
 
 - sécuriser l’industrialisation runtime via `US-J3-03` et `US-J3-04` ;
+- confirmer la clôture de `US-J4-02` et `US-J4-03` sur invariants, migration et runtime resilience ;
 - maintenir le contrôle de compatibilité explicite sur les routes historiques encore supportées ;
 - poursuivre la validation de livraison finale sur les parcours frontend et E2E.
+
+### 8.3 Handoff J4 -> J5
+
+Le gate opérationnel est désormais prêt pour le frontend :
+
+- les migrations V1 -> V2 sont idempotentes et robustes à la reprise ;
+- les tâches peuvent être annulées de façon terminale sans relance automatique ;
+- les retries sont bornées et ne réactivent pas des états terminaux ;
+- le runtime versionné reste conforme au contrat V2 et ne publie pas de payloads sensibles.
+
+La main est transmise à `06-frontend.agent.md` pour le `J5 - Cutover frontend V2`, avec l’objectif de remplacer la couche hybride de persistance locale par un consommateur strict du contrat V2 et des événements runtime validés.
 
 ## 9. Verdict de gate
 
