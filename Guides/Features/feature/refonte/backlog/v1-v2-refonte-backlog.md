@@ -635,8 +635,6 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - verification des donnees V1 converties ;
 - rapport des ecarts residuels documente.
 
-**Etat de transfert au 2026-10-28 :** l'US-J4-02 est validée. Les migrations V1 -> V2, l'idempotence, la reprise après interruption et la compatibilité legacy ont été vérifiées sur les scénarios de réexécution et de données historiques. Le garde-fou V2-only est resté effectif sur les chemins de compatibilité, et le runtime est désormais prêt à être piloté par le cutover frontend sans reconstitution locale de `V1`. La main est transmise à l'agent `06-frontend.agent.md` pour `J5 - Cutover frontend V2`, avec la consigne de ne plus reconstruire une source de vérité locale à partir des structures legacy et de ne consommer que les DTO et événements runtime V2 validés.
-
 ### US-J4-03 - Tester resilience runtime, retries et annulations
 
 **Agent responsable :** `05-testeur-domaine.agent.md` - Testeur domaine
@@ -655,6 +653,8 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - panne worker et reprise validees ;
 - tache dupliquee et abandonnee testees ;
 - timeout, retry et annulation couverts avec assertions precises.
+
+**Etat de transfert au 2026-10-28 :** l'US-J4-03 est validée. Le runtime a été vérifié sur les scénarios de retry, annulation terminale, lease expiré, tâche abandonnée, worker redémarré et reprise après panne, avec les familles de tests backend associées vertes. Les invariants V2 sont donc confirmés pour la validation métier du J4, et le J4 est clos sur les critères de résilience runtime. La main est transmise à l'agent `06-frontend.agent.md` pour `J5 - Cutover frontend V2`, avec la consigne de ne plus reconstruire une source de vérité locale à partir des structures legacy et de ne consommer que les DTO et événements runtime V2 validés.
 
 ## J5 - Cutover frontend V2
 

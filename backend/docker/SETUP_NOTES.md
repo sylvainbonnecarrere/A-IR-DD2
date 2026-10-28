@@ -212,16 +212,16 @@ Created automatically in development mode:
 ```
 
 **Credentials**:
-- Email: `test@example.com`
-- Password: `TestPassword123` (plaintext)
-- Hash Algorithm: bcrypt (10 rounds)
+- Email: set through `DEV_TEST_USER_EMAIL` (default: `test@example.com`)
+- Password: set through `DEV_TEST_USER_PASSWORD` at runtime
+- Hash Algorithm: bcrypt (12 rounds)
 
 **Purpose**: Testing authentication and user workflows without manual account creation.
 
 **Security Note**: 
-- Only created in `NODE_ENV === 'development'`
+- Only created in `NODE_ENV === 'development'` when `DEV_TEST_USER_PASSWORD` is configured
 - Not created in production
-- Password is bcrypt-hashed (never stored plaintext)
+- Password is bcrypt-hashed and never committed to the repository
 
 ---
 
@@ -229,7 +229,7 @@ Created automatically in development mode:
 
 ### Authentication Flow
 ```
-User login (test@example.com / TestPassword123)
+User login (configured through DEV_TEST_USER_EMAIL / DEV_TEST_USER_PASSWORD)
     ↓
 Backend: Find user by email
     ↓

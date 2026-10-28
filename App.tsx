@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, NodePositionUpdateOptions, MapsPanelPreloadedResults, normalizePersistenceConfig } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
@@ -11,17 +11,20 @@ import { useRuntimeStore } from './stores/useRuntimeStore';
 import { useDesignStore } from './stores/useDesignStore';
 import { useFunctionStore } from './stores/useFunctionStore';
 import { useWorkflowStore } from './stores/useWorkflowStore';
+import { useAppShellStore } from './stores/useAppShellStore';
 import { NotificationProvider } from './contexts';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationDisplay } from './components/NotificationDisplay';
 import { QueryProvider } from './providers';
 import { getSettingsStorage } from './utils/SettingsStorage';
+import { webSocketService } from './services/webSocketService';
 // ⭐ ÉTAPE 5: Import HydrationOverlay for loading state
 import { HydrationOverlay } from './components/HydrationOverlay';
 // ⭐ V2: Import WorkflowSwitchOverlay for workflow switch (Bos amber)
 import { WorkflowSwitchOverlay } from './components/WorkflowSwitchOverlay';
 // ⭐ AUTO-SAVE: Import PersistenceService for immediate instance creation
 import { PersistenceService } from './services/persistenceService';
+import { deleteWorkflowInstance, deleteWorkflowInstances, persistNodePosition } from './services/appWorkflowPersistenceService';
 import { createAgentPrototype, updateAgentPrototype } from './services/agentPrototypeAPI';
 import { resolveActiveWorkflowId } from './services/workflowIdResolver';
 import { remapAgentInstanceReference, remapEditingImageInfo, remapPanelNodeId } from './utils/mediaPanelRuntimeSync';
@@ -30,7 +33,7 @@ import apiClient from './utils/apiClient';
 // ⭐ FIX QA: Import useJournalQueue for image persistence
 import { useJournalQueue } from './hooks/useJournalQueue';
 import type { WorkspaceSnapshot } from './services/workspaceBootstrapService';
-import { useWorkspaceHydrationOrchestrator } from './hooks/useWorkspaceHydrationOrchestrator';
+import { useAppWorkflowController } from './hooks/useAppWorkflowController';
 import { findAvailableWorkflowNodePosition, findCollisionFreeWorkflowNodePosition } from './utils/workflowNodePlacement';
 import { generateRuntimeMessageId } from './utils/runtimeMessageId';
 import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from './utils/robotPageRouting';
@@ -70,14 +73,6 @@ const LazyHyperspaceReveal = lazy(async () => {
 
 const DeferredUiFallback: React.FC = () => null;
 
-interface EditingImageInfo {
-  nodeId: string;
-  sourceImage: string;
-  mimeType: string;
-  agent?: Agent;
-  agentInstance?: AgentInstance;
-}
-
 function isRobotId(robotId: string): robotId is RobotId {
   return Object.values(RobotId).includes(robotId as RobotId);
 }
@@ -88,39 +83,52 @@ function isRobotId(robotId: string): robotId is RobotId {
  */
 export function AppContent() {
   const { isAuthenticated, accessToken, runtimeLLMConfigs: authRuntimeLLMConfigs, localLLMProfiles: authLocalLLMProfiles, user, logout, refreshRuntimeConfigState, sessionStatus, isLoading: authLoading, error: authError } = useAuth();
-  const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
-  const [isLoginModalOpen, setLoginModalOpen] = useState(false);
-  const [isRegisterModalOpen, setRegisterModalOpen] = useState(false);
-  const [isImagePanelOpen, setImagePanelOpen] = useState(false);
-  const [isImageModificationPanelOpen, setImageModificationPanelOpen] = useState(false);
-  const [isVideoPanelOpen, setVideoPanelOpen] = useState(false);
-  const [isMapsPanelOpen, setMapsPanelOpen] = useState(false);
-
-  // ⭐ FIX: Store current agent for media panels - receives fresh data directly from V2AgentNode
-  const [currentImageNodeId, setCurrentImageNodeId] = useState<string | null>(null);
-  const [currentImageAgent, setCurrentImageAgent] = useState<Agent | null>(null);
-  const [currentImageAgentInstance, setCurrentImageAgentInstance] = useState<AgentInstance | null>(null);
-  const [currentVideoNodeId, setCurrentVideoNodeId] = useState<string | null>(null);
-  const [currentVideoAgent, setCurrentVideoAgent] = useState<Agent | null>(null);
-  const [currentVideoAgentInstance, setCurrentVideoAgentInstance] = useState<AgentInstance | null>(null);
-  const [currentMapsNodeId, setCurrentMapsNodeId] = useState<string | null>(null);
-
-  const [editingImageInfo, setEditingImageInfo] = useState<EditingImageInfo | null>(null);
-  const [mapsPreloadedResults, setMapsPreloadedResults] = useState<MapsPanelPreloadedResults | null>(null);
-  const [fullscreenImage, setFullscreenImage] = useState<{ src: string; mimeType: string } | null>(null);
+  const isSettingsModalOpen = useAppShellStore((state) => state.isSettingsModalOpen);
+  const isLoginModalOpen = useAppShellStore((state) => state.isLoginModalOpen);
+  const isRegisterModalOpen = useAppShellStore((state) => state.isRegisterModalOpen);
+  const isImagePanelOpen = useAppShellStore((state) => state.isImagePanelOpen);
+  const isImageModificationPanelOpen = useAppShellStore((state) => state.isImageModificationPanelOpen);
+  const isVideoPanelOpen = useAppShellStore((state) => state.isVideoPanelOpen);
+  const isMapsPanelOpen = useAppShellStore((state) => state.isMapsPanelOpen);
+  const currentImageNodeId = useAppShellStore((state) => state.currentImageNodeId);
+  const currentImageAgent = useAppShellStore((state) => state.currentImageAgent);
+  const currentImageAgentInstance = useAppShellStore((state) => state.currentImageAgentInstance);
+  const currentVideoNodeId = useAppShellStore((state) => state.currentVideoNodeId);
+  const currentVideoAgent = useAppShellStore((state) => state.currentVideoAgent);
+  const currentVideoAgentInstance = useAppShellStore((state) => state.currentVideoAgentInstance);
+  const currentMapsNodeId = useAppShellStore((state) => state.currentMapsNodeId);
+  const editingImageInfo = useAppShellStore((state) => state.editingImageInfo);
+  const mapsPreloadedResults = useAppShellStore((state) => state.mapsPreloadedResults);
+  const fullscreenImage = useAppShellStore((state) => state.fullscreenImage);
+  const currentPath = useAppShellStore((state) => state.currentPath);
+  const showHyperspace = useAppShellStore((state) => state.showHyperspace);
+  const hyperspaceActive = useAppShellStore((state) => state.hyperspaceActive);
+  const setSettingsModalOpen = useAppShellStore((state) => state.setSettingsModalOpen);
+  const setLoginModalOpen = useAppShellStore((state) => state.setLoginModalOpen);
+  const setRegisterModalOpen = useAppShellStore((state) => state.setRegisterModalOpen);
+  const setImagePanelOpen = useAppShellStore((state) => state.setImagePanelOpen);
+  const setImageModificationPanelOpen = useAppShellStore((state) => state.setImageModificationPanelOpen);
+  const setVideoPanelOpen = useAppShellStore((state) => state.setVideoPanelOpen);
+  const setMapsPanelOpen = useAppShellStore((state) => state.setMapsPanelOpen);
+  const setCurrentImageNodeId = useAppShellStore((state) => state.setCurrentImageNodeId);
+  const setCurrentImageAgent = useAppShellStore((state) => state.setCurrentImageAgent);
+  const setCurrentImageAgentInstance = useAppShellStore((state) => state.setCurrentImageAgentInstance);
+  const setCurrentVideoNodeId = useAppShellStore((state) => state.setCurrentVideoNodeId);
+  const setCurrentVideoAgent = useAppShellStore((state) => state.setCurrentVideoAgent);
+  const setCurrentVideoAgentInstance = useAppShellStore((state) => state.setCurrentVideoAgentInstance);
+  const setCurrentMapsNodeId = useAppShellStore((state) => state.setCurrentMapsNodeId);
+  const setEditingImageInfo = useAppShellStore((state) => state.setEditingImageInfo);
+  const setMapsPreloadedResults = useAppShellStore((state) => state.setMapsPreloadedResults);
+  const setFullscreenImage = useAppShellStore((state) => state.setFullscreenImage);
+  const setCurrentPath = useAppShellStore((state) => state.setCurrentPath);
+  const setShowHyperspace = useAppShellStore((state) => state.setShowHyperspace);
+  const setHyperspaceActive = useAppShellStore((state) => state.setHyperspaceActive);
   const { t } = useLocalization();
 
   // ⭐ V2: Flag to distinguish initial login hydration from user-initiated workflow switch
   // isInitialHydrationRef removed (was dead code — never read)
 
-  // ⭐ V2: State dédié au switch overlay (séparé de l'hydratation login)
-  const [isSwitchingWorkflow, setIsSwitchingWorkflow] = useState(false);
-  const [switchProgress, setSwitchProgress] = useState(0);
-  const [switchWorkflowName, setSwitchWorkflowName] = useState('');
-  const isSwitchingRef = useRef(false);  // Guard anti-re-entrance (pas de useState pour éviter re-render)
-
   // Robot Navigation State
-  const [currentPath, setCurrentPath] = useState('/bos/dashboard');
   const currentResolvedRoute = useMemo(() => resolveRobotPageRoute(currentPath), [currentPath]);
   const currentRouteUsesWorkflowCanvas = currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosDashboard
     || currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosSupervision;
@@ -143,8 +151,6 @@ export function AppContent() {
   // Shows only after an authenticated session drops back to guest mode.
   // Avoid mounting the heavy entry animation on cold guest boot because it can
   // monopolize the main thread before the canvas becomes interactive.
-  const [showHyperspace, setShowHyperspace] = useState(false);
-  const [hyperspaceActive, setHyperspaceActive] = useState(false);
   const wasAuthenticatedRef = React.useRef(isAuthenticated);
   
   // ⭐ UX: Trigger hyperspace on logout (auth → guest transition)
@@ -183,11 +189,39 @@ export function AppContent() {
   const updateLocalLLMProfiles = useRuntimeStore((state) => state.updateLocalLLMProfiles);
   const setNavigationHandler = useRuntimeStore((state) => state.setNavigationHandler);
   const addNodeMessage = useRuntimeStore((state) => state.addNodeMessage);
+  const setRuntimeConnectionState = useRuntimeStore((state) => state.setRuntimeConnectionState);
+  const recordRuntimeEvent = useRuntimeStore((state) => state.recordRuntimeEvent);
   const runtimeStoreLLMConfigs = useRuntimeStore((state) => state.llmConfigs);
   const runtimeStoreLocalLLMProfiles = useRuntimeStore((state) => state.localLLMProfiles);
   const runtimeNodeMessages = useRuntimeStore((state) => state.nodeMessages);
   const llmConfigs = runtimeStoreLLMConfigs.length > 0 ? runtimeStoreLLMConfigs : authRuntimeLLMConfigs;
   const localLLMProfiles = runtimeStoreLocalLLMProfiles.length > 0 ? runtimeStoreLocalLLMProfiles : authLocalLLMProfiles;
+
+  useEffect(() => {
+    const handleConnectionStateChange = (state: { isConnected: boolean; isConnecting: boolean; error: string | null }) => {
+      if (state.isConnected) {
+        setRuntimeConnectionState('connected');
+        return;
+      }
+      if (state.isConnecting) {
+        setRuntimeConnectionState('reconnecting');
+        return;
+      }
+      setRuntimeConnectionState(state.error ? 'degraded' : 'offline');
+    };
+
+    const handleRuntimeEvent = (event: { id: string; type: string; version: number; aggregateType: 'run' | 'task'; aggregateId: string; workspaceId: string; correlationId?: string; occurredAt: string; payload: Record<string, unknown> }) => {
+      recordRuntimeEvent(event);
+    };
+
+    webSocketService.on('connectionStateChanged', handleConnectionStateChange);
+    webSocketService.on('runtimeEvent', handleRuntimeEvent);
+
+    return () => {
+      webSocketService.off('connectionStateChanged', handleConnectionStateChange);
+      webSocketService.off('runtimeEvent', handleRuntimeEvent);
+    };
+  }, [recordRuntimeEvent, setRuntimeConnectionState]);
 
   // Design Store access for integrity validation  
   const designAgents = useDesignStore((state) => state.agents);
@@ -219,172 +253,35 @@ export function AppContent() {
   }), [designCurrentWorkflowId, designWorkflows, getCurrentWorkflowId]);
 
   const {
-    beginBlockingHydrationVisualGate,
-    completeBlockingHydrationVisualGate,
-    awaitingBlockingHydrationVisualGate,
-    isBlockingHydration,
-    isPreparingBlockingHydration,
-    hydrationProgress,
-    hydrationMessage,
-    hydrateInteractiveWorkspaceState,
-  } = useWorkspaceHydrationOrchestrator({
+    switchToWorkflow,
+    handleWorkflowCanvasReady,
+    isSwitchingWorkflow,
+    switchProgress,
+    switchWorkflowName,
+    shouldShowHydrationOverlay,
+    hydrationOverlayProgress,
+    hydrationOverlayMessage,
+  } = useAppWorkflowController({
     accessToken,
     authError,
     authLoading,
     isAuthenticated,
-    isSwitchingRef,
     refreshRuntimeConfigState,
-    requiresBosMediaButtonHydrationReadiness: currentRouteUsesWorkflowCanvas,
-    requiresCanvasHydrationReadiness: currentRouteUsesWorkflowCanvas,
     sessionStatus,
     userId: user?.id ?? null,
+    currentRouteUsesWorkflowCanvas,
+    t,
   });
 
   const clearTransientUiState = useCallback(() => {
-    setImagePanelOpen(false);
-    setCurrentImageNodeId(null);
-    setCurrentImageAgent(null);
-    setCurrentImageAgentInstance(null);
-    setImageModificationPanelOpen(false);
-    setEditingImageInfo(null);
-    setVideoPanelOpen(false);
-    setCurrentVideoNodeId(null);
-    setCurrentVideoAgent(null);
-    setCurrentVideoAgentInstance(null);
-    setMapsPanelOpen(false);
-    setCurrentMapsNodeId(null);
-    setMapsPreloadedResults(null);
+    useAppShellStore.getState().clearTransientUiState();
   }, []);
 
   const resetGuestShellState = useCallback(() => {
-    clearTransientUiState();
-    setSettingsModalOpen(false);
-    setLoginModalOpen(false);
-    setRegisterModalOpen(false);
-    setFullscreenImage(null);
-    setIsSwitchingWorkflow(false);
-    setSwitchProgress(0);
-    setSwitchWorkflowName('');
-    isSwitchingRef.current = false;
-    setCurrentPath('/bos/dashboard');
-  }, [clearTransientUiState]);
+    useAppShellStore.getState().resetGuestShellState();
+  }, []);
 
-  /**
-   * ⭐ V2 SWITCH WORKFLOW: Fonction unifiée de réhydratation complète
-   * Orchestre le switch de workflow avec feedback UX (WorkflowSwitchOverlay jaune Bos)
-   * 
-   * ⭐ V2 RÉÉCRITURE COMPLÈTE — Corrige P0-1, P0-2, P0-3, P2-1
-   * 
-   * SÉQUENCE:
-   * 0. Guard clauses (anti-re-entrance, auth, hydration)
-   * 1. Reset runtime store → nettoyer chat/execution du workflow précédent
-   * 2. Fetch les données du workflow via POST /select (avec agentPrototypes)
-   * 3. Mapper les prototypes (copie exacte de l'hydratation initiale L310-329)
-  * 4. Hydratation atomique → hydrateFromServer + hydrateWorkflowFromServer
-   * 5. Recharger les journals → restaurer l'historique chat
-   * 6. Reconstruire le React state legacy → workflowNodes pour le canvas
-   * 7. Refresh liste workflows
-   * 8. Succès → événement + notification
-   */
-  const switchToWorkflow = useCallback(async (workflowId: string, workflowName?: string) => {
-    // ═══ ÉTAPE 0 : GUARD CLAUSES ═══
-    if (isSwitchingRef.current) {
-      console.warn('[SwitchWorkflow] ⚠️ Switch already in progress, ignoring');
-      return;
-    }
-    if (isBlockingHydration) {
-      console.warn('[SwitchWorkflow] ⚠️ Initial hydration in progress, ignoring');
-      return;
-    }
-    if (!accessToken) {
-      console.warn('[SwitchWorkflow] ⚠️ No accessToken — aborting switch');
-      window.dispatchEvent(new CustomEvent('workflow:switch:error', {
-        detail: { message: t('workflow_switch_error_message').replace('{name}', workflowName || '') }
-      }));
-      return;
-    }
 
-    isSwitchingRef.current = true;
-    setIsSwitchingWorkflow(true);
-    setSwitchWorkflowName(workflowName || 'Workflow');
-    setSwitchProgress(0);
-    
-    console.log('[SwitchWorkflow] ⭐ Starting full workflow switch to:', workflowId, workflowName);
-    
-    try {
-      // ═══ ÉTAPE 1 : RESET RUNTIME (progress 10%) ═══
-      // ⭐ V2 FIX: Use resetForWorkflowSwitch() to PRESERVE llmConfigs (user-level, not workflow-scoped)
-      setSwitchProgress(10);
-      useRuntimeStore.getState().resetForWorkflowSwitch();
-      
-      // ═══ ÉTAPE 2 : APPEL API (progress 30%) ═══
-      setSwitchProgress(30);
-      const { data } = await apiClient.post(`/api/workflows/${workflowId}/select`);
-
-      if (!data.success) {
-        throw new Error(data.message || 'Switch failed');
-      }
-      // ═══ ÉTAPE 3 : APPLIQUER LE SNAPSHOT (progress 70%) ═══
-      setSwitchProgress(70);
-      await hydrateInteractiveWorkspaceState(data.reloadedData, {
-        preserveRuntimeMessages: false,
-        onSnapshotApplied: () => setSwitchProgress(85),
-      });
-
-      // ═══ ÉTAPE 4 : REFRESH LISTE WORKFLOWS (progress 95%) ═══
-      setSwitchProgress(95);
-      try {
-        await useDesignStore.getState().loadUserWorkflows();
-      } catch (refreshErr) {
-        console.warn('[SwitchWorkflow] Workflows list refresh failed (non-blocking):', refreshErr);
-      }
-
-      // ═══ ÉTAPE 8 : SUCCÈS (progress 100%) ═══
-      setSwitchProgress(100);
-      
-      console.log('[SwitchWorkflow] ✅ Workflow switch complete:', {
-        workflowId,
-        workflowName,
-        prototypesCount: Array.isArray(data.reloadedData?.agentPrototypes) ? data.reloadedData.agentPrototypes.length : 0,
-        instancesCount: Array.isArray(data.reloadedData?.agentInstances) ? data.reloadedData.agentInstances.length : 0
-      });
-      
-      // ⭐ V2: Notify observers of successful switch
-      window.dispatchEvent(new CustomEvent('workflow:switch:success', {
-        detail: { workflowId, workflowName }
-      }));
-      
-    } catch (error: any) {
-      console.error('[SwitchWorkflow] ❌ Error:', error);
-      window.dispatchEvent(new CustomEvent('workflow:switch:error', {
-        detail: { message: error.message || 'Unknown error', workflowId }
-      }));
-    } finally {
-      // ═══ CLEANUP ═══
-      setTimeout(() => {
-        setIsSwitchingWorkflow(false);
-        setSwitchProgress(0);
-        setSwitchWorkflowName('');
-      }, 300);
-      isSwitchingRef.current = false;
-    }
-  }, [accessToken, hydrateInteractiveWorkspaceState, t, isBlockingHydration]);
-
-  /**
-   * ⭐ V2: Listen for workflow:switch custom events from BosWorkflowManagementPage
-   * Pattern Observer — découplage entre la page BOS et l'orchestration App.tsx
-   */
-  useEffect(() => {
-    const handleWorkflowSwitch = (event: Event) => {
-      const { workflowId, workflowName } = (event as CustomEvent).detail;
-      if (workflowId) {
-        switchToWorkflow(workflowId, workflowName || 'Workflow');
-      }
-    };
-    
-    window.addEventListener('workflow:switch', handleWorkflowSwitch);
-    return () => window.removeEventListener('workflow:switch', handleWorkflowSwitch);
-  }, [switchToWorkflow]);
 
   /**
    * ⭐ CRITICAL J4.4: Strong-clean state on auth change (login/logout)
@@ -426,51 +323,6 @@ export function AppContent() {
 
     updateLocalLLMProfiles(authLocalLLMProfiles);
   }, [authLocalLLMProfiles, isAuthenticated, runtimeStoreLocalLLMProfiles.length, updateLocalLLMProfiles]);
-
-  useEffect(() => {
-    if (isBlockingHydration && currentRouteUsesWorkflowCanvas) {
-      beginBlockingHydrationVisualGate();
-      return;
-    }
-
-    if (!currentRouteUsesWorkflowCanvas) {
-      completeBlockingHydrationVisualGate();
-    }
-  }, [beginBlockingHydrationVisualGate, completeBlockingHydrationVisualGate, currentRouteUsesWorkflowCanvas, isBlockingHydration]);
-
-  const shouldShowHydrationOverlay = isPreparingBlockingHydration || isBlockingHydration || awaitingBlockingHydrationVisualGate;
-  const hydrationOverlayProgress = isPreparingBlockingHydration
-    ? 5
-    : isBlockingHydration
-    ? hydrationProgress
-    : awaitingBlockingHydrationVisualGate
-      ? 100
-      : 0;
-  const hydrationOverlayMessage = isPreparingBlockingHydration
-    ? 'Restauration de la session...'
-    : isBlockingHydration
-    ? hydrationMessage
-    : awaitingBlockingHydrationVisualGate
-      ? 'Preparation de la carte...'
-      : 'Chargement du workspace...';
-
-  const handleWorkflowCanvasReady = useCallback(() => {
-    completeBlockingHydrationVisualGate();
-
-    // Signal global UI readiness for hydration finalization.
-    // Use double rAF to ensure child components have mounted and measured their DOM.
-    try {
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        try {
-          window.dispatchEvent(new Event('hydration:components:ready'));
-        } catch (e) {
-          // ignore - non-critical
-        }
-      }));
-    } catch (e) {
-      // ignore
-    }
-  }, [completeBlockingHydrationVisualGate]);
 
   // ⭐ V2: L'ancien watcher PHASE 2 (resetAll sur currentWorkflowId change) est supprimé.
   // switchToWorkflow() orchestre désormais le reset + rechargement complet.
@@ -750,76 +602,44 @@ export function AppContent() {
     const v2Node = storeNodes.find((node) => node.id === nodeId);
     const finalInstanceId = v2Node?.data?.agentInstance?.id
       || (nodeId.startsWith('node-') ? nodeId.replace(/^node-/, '') : undefined);
-    
-    console.log('[App] Delete node resolution:', { 
-      nodeId, 
+
+    console.log('[App] Delete node resolution:', {
+      nodeId,
       storeInstanceId: v2Node?.data?.agentInstance?.id,
-      finalInstanceId 
+      finalInstanceId,
     });
 
-    // 4. Supprimer du store Zustand
     deleteNode(nodeId);
 
-    // 5. Supprimer l'instance du store si trouvée
     if (finalInstanceId) {
       deleteAgentInstance(finalInstanceId);
-      
-      // 6. ⭐ CRITICAL: Persister la suppression au backend
-      if (isAuthenticated) {
-        const workflowId = resolveCurrentWorkflowId();
-        if (workflowId) {
-          try {
-            await apiClient.delete(`/api/workflows/${workflowId}/instances/${finalInstanceId}`);
-            console.log('[App] ✅ Agent instance deleted from backend:', finalInstanceId);
-          } catch (error) {
-            console.error('[App] ❌ Error deleting instance from backend:', error);
-          }
-        }
+      const workflowId = resolveCurrentWorkflowId();
+      const deleted = await deleteWorkflowInstance({
+        workflowId,
+        instanceId: finalInstanceId,
+        isAuthenticated,
+        accessToken,
+      });
+
+      if (deleted) {
+        console.log('[App] ✅ Agent instance deleted from backend:', finalInstanceId);
       }
     }
-  }, [storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, resolveCurrentWorkflowId]);
+  }, [storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId]);
 
   const handleDeleteNodes = useCallback(async (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy = 'delete_media'): Promise<AgentBatchDeleteResult> => {
-    // Batch delete multiple nodes by instanceId (used when deleting prototype with instances)
     console.log('[App] handleDeleteNodes called with:', instanceIds, 'policy:', mediaPolicy);
 
-    const failedInstanceIds: string[] = [];
-
-    for (const instanceId of instanceIds) {
-      let backendDeleted = true;
-
-      if (isAuthenticated) {
-        const workflowId = resolveCurrentWorkflowId();
-        if (workflowId) {
-          try {
-            await apiClient.delete(`/api/workflows/${workflowId}/instances/${instanceId}`, {
-              params: {
-                mediaPolicy,
-              },
-            });
-          } catch (error) {
-            backendDeleted = false;
-            failedInstanceIds.push(instanceId);
-            console.error('[App] Error deleting instance:', instanceId, error);
-          }
-        }
-      }
-
-      if (!backendDeleted) {
-        continue;
-      }
-
-      deleteNode(`node-${instanceId}`);
-      deleteAgentInstance(instanceId);
-    }
-
-    return failedInstanceIds.length > 0
-      ? {
-          success: false,
-          failedInstanceIds,
-          error: `${failedInstanceIds.length} instance(s) n'ont pas pu etre supprimees avec la politique media demandee.`,
-        }
-      : { success: true };
+    const workflowId = resolveCurrentWorkflowId();
+    return deleteWorkflowInstances({
+      workflowId,
+      instanceIds,
+      mediaPolicy,
+      isAuthenticated,
+      accessToken,
+      onDeleteLocalNode: (nodeId) => deleteNode(nodeId),
+      onDeleteLocalInstance: (instanceId) => deleteAgentInstance(instanceId),
+    });
   }, [deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId]);
 
   const handleUpdateNodePosition = useCallback((nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => {
@@ -836,39 +656,14 @@ export function AppContent() {
       return;
     }
 
-    if (isAuthenticated && !accessToken) {
-      console.warn('[App] Skipping node position persistence because the authenticated session has no access token yet:', {
-        nodeId,
-        instanceId,
-      });
-      return;
-    }
-
-    void PersistenceService.saveAgentInstance(
-      {
-        id: instanceId,
-        position,
-      },
-      {
-        isAuthenticated,
-        accessToken: accessToken ?? undefined,
-      },
-    ).then((result) => {
-      if (!result.success) {
-        console.error('[App] Failed to persist node position after drag-stop:', {
-          nodeId,
-          instanceId,
-          position,
-          error: result.error,
-        });
-      }
-    }).catch((error) => {
-      console.error('[App] Unexpected error while persisting node position after drag-stop:', {
-        nodeId,
-        instanceId,
-        position,
-        error,
-      });
+    void persistNodePosition({
+      nodeId,
+      position,
+      instanceId,
+      isAuthenticated,
+      accessToken,
+      updateNode,
+      updateAgentInstance,
     });
   }, [accessToken, isAuthenticated, updateAgentInstance, updateNode]);
 

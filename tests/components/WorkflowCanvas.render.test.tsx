@@ -9,12 +9,20 @@ let workflowCanvasHarness = resetWorkflowCanvasHarness();
 jest.mock('reactflow', () => {
     const React = require('react');
 
+    const Controls = ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+        <div data-testid="workflow-controls" className={className} style={style} />
+    );
+
+    const MiniMap = ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+        <div data-testid="workflow-minimap" className={className} style={style} />
+    );
+
     return {
         __esModule: true,
         default: ({ children }: { children?: React.ReactNode }) => <div data-testid="workflow-canvas-root">{children}</div>,
         Background: () => null,
-        Controls: () => null,
-        MiniMap: () => null,
+        Controls,
+        MiniMap,
         ReactFlowProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
         ConnectionMode: { Strict: 'strict' },
         Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
@@ -112,5 +120,12 @@ describe('WorkflowCanvas render smoke test', () => {
         render(<WorkflowCanvas workflowName="QA Workflow" />);
 
         expect(screen.getByTestId('workflow-canvas-root')).toBeInTheDocument();
+    });
+
+    it('keeps the workflow controls visually offset from the minimap in the bottom-right corner', () => {
+        render(<WorkflowCanvas workflowName="QA Workflow" />);
+
+        expect(screen.getByTestId('workflow-controls')).toHaveClass('workflow-controls-fixed');
+        expect(screen.getByTestId('workflow-minimap')).toHaveClass('workflow-minimap-fixed');
     });
 });

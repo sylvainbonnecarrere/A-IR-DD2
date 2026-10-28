@@ -151,11 +151,11 @@ export const useWorkspaceHydrationOrchestrator = ({
     const isHydrating = isBlockingHydration;
 
     const beginBlockingHydrationVisualGate = useCallback(() => {
-        setAwaitingBlockingHydrationVisualGate(true);
+        setAwaitingBlockingHydrationVisualGate((current) => (current ? current : true));
     }, []);
 
     const completeBlockingHydrationVisualGate = useCallback(() => {
-        setAwaitingBlockingHydrationVisualGate(false);
+        setAwaitingBlockingHydrationVisualGate((current) => (current ? false : current));
     }, []);
 
     const applyRuntimeBootstrapState = useCallback((runtimeState: RuntimeBootstrapState | null) => {
@@ -476,8 +476,12 @@ export const useWorkspaceHydrationOrchestrator = ({
             return;
         }
 
+        if (workspaceReloadPromiseRef.current || hydrationPhase === 'blocking-bootstrap' || hydrationPhase === 'blocking-bootstrap-finalize') {
+            return;
+        }
+
         void runBlockingBootstrapHydration('initial-auth-hydration');
-    }, [isAuthenticated, runBlockingBootstrapHydration, sessionReadyForWorkspaceHydration, userId]);
+    }, [hydrationPhase, isAuthenticated, runBlockingBootstrapHydration, sessionReadyForWorkspaceHydration, userId]);
 
     useEffect(() => {
         if (!sessionReadyForWorkspaceHydration || !userId) {

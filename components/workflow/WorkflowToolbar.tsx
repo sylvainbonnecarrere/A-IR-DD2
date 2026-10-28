@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PlayIcon, PauseIcon, StopIcon, SaveIcon, DownloadIcon, UploadIcon, 
          CheckCircleIcon, ExclamationTriangleIcon, CogIcon } from '../Icons';
 import { useWorkflowStore } from '../../stores/useWorkflowStore';
 import { useLocalization } from '../../hooks/useLocalization';
+import WorkflowRunService from '../../services/workflowRunService';
+import { resolveRuntimeActionPolicy } from '../../services/runtimeActionPolicy';
+import type { FunctionRunRecord } from '../../types/function.types';
 
 interface WorkflowToolbarProps {
   className?: string;
@@ -20,9 +23,43 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
     toggleConfigPanel,
     isConfigPanelOpen
   } = useWorkflowStore();
-  
+
+  const [serverRunStatus, setServerRunStatus] = useState<FunctionRunRecord['status'] | null>(null);
   const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
   const [showValidation, setShowValidation] = useState(false);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const syncStatus = async () => {
+      if (!currentWorkflow?.id) {
+        setServerRunStatus(null);
+        return;
+      }
+
+      try {
+        const response = await WorkflowRunService.listWorkflowRuns(currentWorkflow.id, {
+          limit: 1,
+          sortBy: 'createdAt',
+          sortOrder: 'desc',
+        });
+
+        if (!isCancelled) {
+          setServerRunStatus(response.items[0]?.status ?? null);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setServerRunStatus(null);
+        }
+        console.warn('[WorkflowToolbar] Unable to fetch workflow run status:', error);
+      }
+    };
+
+    syncStatus();
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentWorkflow?.id]);
   
   // Validate workflow before execution
   const validateWorkflow = (): string[] => {
@@ -64,16 +101,32 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
     return warnings;
   };
   
+  const effectiveRunStatus = execution?.status ?? serverRunStatus ?? null;
+  const runtimeActionPolicy = resolveRuntimeActionPolicy({
+    status: effectiveRunStatus,
+    hasWorkflow: Boolean(currentWorkflow),
+    hasNodes: Boolean(currentWorkflow && currentWorkflow.nodes.length > 0),
+    isLoading: false,
+    isOffline: false,
+    isPartial: false,
+  });
+
   const handleExecute = async () => {
     const warnings = validateWorkflow();
     setValidationWarnings(warnings);
-    
+
     if (warnings.length > 0) {
       setShowValidation(true);
       return;
     }
-    
+
     await executeWorkflow();
+    const refreshed = await WorkflowRunService.listWorkflowRuns(currentWorkflow!.id, {
+      limit: 1,
+      sortBy: 'createdAt',
+      sortOrder: 'desc',
+    });
+    setServerRunStatus(refreshed.items[0]?.status ?? null);
   };
   
   const handleSave = () => {
@@ -127,9 +180,9 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
   };
   
   const getExecutionStatus = () => {
-    if (!execution) return null;
-    
-    switch (execution.status) {
+    if (!effectiveRunStatus) return null;
+
+    switch (effectiveRunStatus) {
       case 'running':
         return (
           <div className="flex items-center gap-2 text-blue-600">
@@ -163,8 +216,10 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
     }
   };
   
-  const isExecuting = execution?.status === 'running';
-  const canExecute = currentWorkflow && currentWorkflow.nodes.length > 0 && !isExecuting;
+  const isExecuting = effectiveRunStatus === 'running';
+  const canExecute = runtimeActionPolicy.canLaunch;
+  const canStop = runtimeActionPolicy.canStop;
+  const canResume = runtimeActionPolicy.canResume;
   
   return (
     <div className={`bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 ${className}`}>
@@ -185,39 +240,53 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
         
         {/* Center Section - Execution Controls */}
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleExecute}
-            disabled={!canExecute}
-            className={`
-              flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium
-              transition-colors duration-200
-              ${canExecute
-                ? 'bg-green-600 hover:bg-green-700 text-white'
-                : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-              }
-            `}
-            title={t('workflow.execute')}
-          >
-            <PlayIcon className="w-4 h-4" />
-            {t('workflow.execute')}
-          </button>
-          
-          {isExecuting && (
+          {canResume ? (
+            <button
+              onClick={handleExecute}
+              disabled={!canResume}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-green-600 hover:bg-green-700 text-white transition-colors duration-200"
+              title={t('workflow.resume') || 'Reprendre'}
+            >
+              <PlayIcon className="w-4 h-4" />
+              {t('workflow.resume') || 'Reprendre'}
+            </button>
+          ) : (
+            <button
+              onClick={handleExecute}
+              disabled={!canExecute}
+              className={`
+                flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium
+                transition-colors duration-200
+                ${canExecute
+                  ? 'bg-green-600 hover:bg-green-700 text-white'
+                  : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                }
+              `}
+              title={t('workflow.execute')}
+            >
+              <PlayIcon className="w-4 h-4" />
+              {t('workflow.execute')}
+            </button>
+          )}
+
+          {(canStop || isExecuting) && (
             <>
               <button
                 onClick={pauseExecution}
+                disabled={!canStop && !isExecuting}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium
-                         bg-yellow-600 hover:bg-yellow-700 text-white transition-colors duration-200"
+                         bg-yellow-600 hover:bg-yellow-700 text-white transition-colors duration-200 disabled:cursor-not-allowed disabled:bg-gray-500"
                 title={t('workflow.pause')}
               >
                 <PauseIcon className="w-4 h-4" />
                 {t('workflow.pause')}
               </button>
-              
+
               <button
                 onClick={stopExecution}
+                disabled={!canStop && !isExecuting}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium
-                         bg-red-600 hover:bg-red-700 text-white transition-colors duration-200"
+                         bg-red-600 hover:bg-red-700 text-white transition-colors duration-200 disabled:cursor-not-allowed disabled:bg-gray-500"
                 title={t('workflow.stop')}
               >
                 <StopIcon className="w-4 h-4" />

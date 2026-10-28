@@ -67,12 +67,32 @@ const renameNodeInSet = (values: Set<string>, fromNodeId: string, toNodeId: stri
  * Responsabilité : Messages de chat, exécution des agents,
  * WebSocket states, logs, données volatiles
  */
+export type RuntimeConnectionState = 'connected' | 'reconnecting' | 'offline' | 'degraded';
+
+export interface RuntimeEventEnvelope {
+  id: string;
+  type: string;
+  version: 1;
+  aggregateType: 'run' | 'task';
+  aggregateId: string;
+  workspaceId: string;
+  correlationId?: string;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}
+
 interface RuntimeStore {
   // Chat & Execution State
   nodeMessages: Record<string, ChatMessage[]>; // nodeId -> messages[]
   nodePendingAttachments: Record<string, PendingNodeAttachment | null>;
   nodeInvisibleHistorySummaries: Record<string, InvisibleHistorySummaryState | null>;
   executingNodes: Set<string>; // nodeIds currently executing
+
+  // Runtime observation state
+  runtimeConnectionState: RuntimeConnectionState;
+  latestRuntimeEvent: RuntimeEventEnvelope | null;
+  runStatuses: Record<string, string>;
+  taskStatuses: Record<string, string>;
 
   // LLM Configuration (runtime)
   llmConfigs: LLMConfig[];
@@ -114,6 +134,9 @@ interface RuntimeStore {
   clearNodePendingAttachment: (nodeId: string) => void;
   setNodeInvisibleHistorySummary: (nodeId: string, summaryState: InvisibleHistorySummaryState | null) => void;
   getNodeInvisibleHistorySummary: (nodeId: string) => InvisibleHistorySummaryState | null;
+  setRuntimeConnectionState: (state: RuntimeConnectionState) => void;
+  recordRuntimeEvent: (event: RuntimeEventEnvelope) => void;
+  clearRuntimeObservation: () => void;
 
   setNodeExecuting: (nodeId: string, isExecuting: boolean) => void;
 
@@ -153,12 +176,37 @@ interface RuntimeStore {
   resetForWorkflowSwitch: () => void;
 }
 
+const normalizeRuntimeStatus = (event: RuntimeEventEnvelope): string | null => {
+  const payloadStatus = typeof event.payload?.status === 'string' ? event.payload.status : null;
+
+  if (payloadStatus === 'queued' || payloadStatus === 'running' || payloadStatus === 'completed' || payloadStatus === 'failed' || payloadStatus === 'stopped' || payloadStatus === 'timed_out') {
+    return payloadStatus;
+  }
+
+  const eventType = event.type;
+  if (eventType === 'run:queued' || eventType === 'task:queued') return 'queued';
+  if (eventType === 'run:started' || eventType === 'task:started') return 'running';
+  if (eventType === 'run:completed' || eventType === 'task:completed') return 'completed';
+  if (eventType === 'run:failed' || eventType === 'task:failed') return 'failed';
+  if (eventType === 'run:stopped' || eventType === 'task:cancelled') return 'stopped';
+  if (eventType === 'task:blocked') return 'queued';
+  if (eventType === 'run:progressed' || eventType === 'task:progressed') {
+    return payloadStatus ?? null;
+  }
+
+  return payloadStatus ?? null;
+};
+
 export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   // Initial state
   nodeMessages: {},
   nodePendingAttachments: {},
   nodeInvisibleHistorySummaries: {},
   executingNodes: new Set(),
+  runtimeConnectionState: 'offline',
+  latestRuntimeEvent: null,
+  runStatuses: {},
+  taskStatuses: {},
   llmConfigs: [],
   localLLMProfiles: [],
   isImagePanelOpen: false,
@@ -236,6 +284,28 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       [nodeId]: summaryState,
     }
   })),
+
+  setRuntimeConnectionState: (stateValue) => set({ runtimeConnectionState: stateValue }),
+  recordRuntimeEvent: (event) => set((state) => {
+    const nextStatus = normalizeRuntimeStatus(event);
+    const nextRunStatuses = { ...state.runStatuses };
+    const nextTaskStatuses = { ...state.taskStatuses };
+
+    if (event.aggregateType === 'run' && nextStatus) {
+      nextRunStatuses[event.aggregateId] = nextStatus;
+    }
+
+    if (event.aggregateType === 'task' && nextStatus) {
+      nextTaskStatuses[event.aggregateId] = nextStatus;
+    }
+
+    return {
+      latestRuntimeEvent: event,
+      runStatuses: nextRunStatuses,
+      taskStatuses: nextTaskStatuses,
+    };
+  }),
+  clearRuntimeObservation: () => set({ latestRuntimeEvent: null, runStatuses: {}, taskStatuses: {} }),
 
   // Execution state
   setNodeExecuting: (nodeId, isExecuting) => set((state) => {
@@ -428,6 +498,10 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     executingNodes: new Set(),
     minimizedNodeIds: new Set(), // ⭐ RESET: Restore à normal
     lastSavedAt: {}, // ⭐ ÉTAPE 3: Reset save timestamps on logout
+    runtimeConnectionState: 'offline',
+    latestRuntimeEvent: null,
+    runStatuses: {},
+    taskStatuses: {},
     llmConfigs: [],
     localLLMProfiles: [],
     isImagePanelOpen: false,
@@ -457,6 +531,10 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       executingNodes: new Set(),
       minimizedNodeIds: new Set(),
       lastSavedAt: {},
+      runtimeConnectionState: 'offline',
+      latestRuntimeEvent: null,
+      runStatuses: {},
+      taskStatuses: {},
       llmConfigs: currentConfigs, // ⭐ PRÉSERVÉ: configs sont user-level
       localLLMProfiles: currentProfiles, // ⭐ PRÉSERVÉ: profiles sont user-level
       isImagePanelOpen: false,

@@ -220,20 +220,25 @@ console.log('\nÔ£à All collections created successfully!');
 console.log('Ô£à Schema validation enabled on all collections');
 console.log('Ô£à Indexes created for optimal performance\n');
 
-// Create default development seed user
-// Email: test@example.com
-// NOTE: Schema uses 'password' field (not 'passwordHash') to match backend Mongoose model
-db.users.insertOne({
-  email: 'test@example.com',
-  password: '$2b$10$JkttyuwNvLIxq.f2p9rW8uKD7CFyZZvPZP8jKgRPrBXf2wq8Z2j6u',
-  role: 'user',
-  isActive: true,
-  createdAt: new Date(),
-  updatedAt: new Date()
-});
-console.log('Ô£ô Created test user account');
-console.log('  Email: test@example.com');
-console.log('  Password: [redacted in seed logs]\n');
+// Create default development seed user only when explicitly configured
+const seedEmail = process.env.DEV_TEST_USER_EMAIL || 'test@example.com';
+const seedPassword = process.env.DEV_TEST_USER_PASSWORD;
+
+if (seedPassword) {
+  db.users.insertOne({
+    email: seedEmail,
+    password: require('bcryptjs').hashSync(seedPassword, 12),
+    role: 'user',
+    isActive: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  });
+  console.log('Ô£ô Created test user account');
+  console.log(`  Email: ${seedEmail}`);
+  console.log('  Password: [stored as bcrypt hash only]\n');
+} else {
+  console.log('Ô£à Skipped test user creation: set DEV_TEST_USER_PASSWORD to create a local dev account.');
+}
 
 // Verify collections
 const collections = db.getCollectionNames();
