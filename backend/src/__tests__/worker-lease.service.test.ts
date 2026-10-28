@@ -29,6 +29,9 @@ describe('TaskRuntimeInfra service', () => {
         const second = service.acquireLease('task-2', 'worker-b', 30_000, expiredNow);
 
         expect(second.ok).toBe(true);
+        if (!second.lease) {
+            throw new Error('Expected renewal lease to be present after expiry');
+        }
         expect(second.lease.workerId).toBe('worker-b');
     });
 

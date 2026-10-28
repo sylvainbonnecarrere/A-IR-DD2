@@ -90,7 +90,7 @@ describe('WorkflowValidator', () => {
   });
 
   it('blocks workflow activation when validator findings are invalid', () => {
-    const invalid = {
+    const invalid: import('../validators/workflow-validator').WorkflowValidationResult = {
       valid: false,
       issues: [{
         code: 'MISSING_AGENT_INSTANCE',
