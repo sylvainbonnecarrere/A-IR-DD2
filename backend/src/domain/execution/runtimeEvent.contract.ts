@@ -93,7 +93,7 @@ const containsSensitiveRuntimeData = (value: unknown): boolean => {
 };
 
 export const RuntimeEventPayloadSchema = z
-  .record(z.unknown())
+  .record(z.string(), z.unknown())
   .refine((value) => !containsSensitiveRuntimeData(value), {
     message: 'runtime event payload contains sensitive data',
   })

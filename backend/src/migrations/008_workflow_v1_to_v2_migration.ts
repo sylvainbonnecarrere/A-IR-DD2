@@ -28,6 +28,8 @@ interface LegacyWorkflowEdgeLike {
     target?: string | unknown;
     sourceInstanceId?: unknown;
     targetInstanceId?: unknown;
+    sourceHandle?: string;
+    targetHandle?: string;
     type?: string;
     edgeType?: string;
     label?: string;
