@@ -143,6 +143,20 @@ export class TaskSchedulerService {
         return existing;
     }
 
+    markCancelled(taskId: string, now: Date = new Date()): TaskRuntimeEntry | undefined {
+        const existing = this.tasks.get(taskId);
+        if (!existing) {
+            return undefined;
+        }
+
+        existing.status = 'cancelled';
+        existing.completedAt = now;
+        existing.lease = undefined;
+        existing.retryAfterMs = undefined;
+        existing.nextRunAt = now;
+        return existing;
+    }
+
     scheduleRetry(taskId: string, delayMs: number, now: Date = new Date()): TaskRuntimeEntry | undefined {
         const existing = this.tasks.get(taskId);
         if (!existing || existing.status === 'completed' || existing.status === 'failed' || existing.status === 'cancelled') {
@@ -267,6 +281,21 @@ export class TaskWorkerService {
             this.queue.scheduler.scheduleRetry(claimed.task.taskId, this.retryDelayMs, now);
             return { accepted: true, taskId: claimed.task.taskId, reason: 'execution_error' };
         }
+    }
+
+    cancelTask(taskId: string, now: Date = new Date()): { cancelled: boolean; taskId?: string } {
+        const task = this.queue.scheduler.getTask(taskId);
+        if (!task) {
+            return { cancelled: false };
+        }
+
+        if (task.status === 'cancelled') {
+            return { cancelled: true, taskId };
+        }
+
+        this.queue.leaseService.releaseLease(taskId);
+        this.queue.scheduler.markCancelled(taskId, now);
+        return { cancelled: true, taskId };
     }
 
     reapAbandonedTasks(now: Date = new Date()): string[] {

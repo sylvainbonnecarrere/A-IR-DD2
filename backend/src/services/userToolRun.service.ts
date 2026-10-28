@@ -12,6 +12,7 @@ import {
     UserToolRunRuntime,
     UserToolRunStatus
 } from '../models';
+import { RuntimeEventPublisher } from './runtimeEventPublisher.service';
 
 type ObjectIdLike = mongoose.Types.ObjectId | string | null | undefined;
 
@@ -110,6 +111,12 @@ function computeDurationMs(startedAt?: Date | null, finishedAt?: Date | null): n
 }
 
 export class UserToolRunService {
+    private readonly runtimeEventPublisher?: RuntimeEventPublisher;
+
+    constructor(runtimeEventPublisher?: RuntimeEventPublisher) {
+        this.runtimeEventPublisher = runtimeEventPublisher;
+    }
+
     async createQueuedRun(data: CreateUserToolRunData): Promise<IUserToolRun> {
         if (!data.executionId?.trim()) {
             throw new Error('executionId is required');
@@ -304,6 +311,7 @@ export class UserToolRunService {
         );
 
         if (updatedRun) {
+            this.publishRuntimeStateChange(updatedRun, currentStatus, nextStatus);
             return updatedRun;
         }
 
@@ -315,6 +323,46 @@ export class UserToolRunService {
         throw new UserToolRunStateError(
             `Invalid UserToolRun transition for ${executionId}: ${currentRun.status} -> ${nextStatus}`
         );
+    }
+
+    private publishRuntimeStateChange(
+        run: IUserToolRun,
+        previousStatus: UserToolRunStatus,
+        nextStatus: UserToolRunStatus,
+    ): void {
+        if (!this.runtimeEventPublisher || !run.workflowId) {
+            return;
+        }
+
+        const workspaceId = run.workflowId.toString();
+        const payload: Record<string, unknown> = {
+            status: nextStatus,
+            stage: nextStatus === 'running' ? 'execution' : nextStatus === 'completed' ? 'finalize' : 'terminal',
+            durationMs: run.timing?.durationMs ?? undefined,
+            message: run.error?.message ?? undefined,
+            resultCount: Array.isArray(run.outputs?.artifacts) ? run.outputs.artifacts.length : undefined,
+            workflowId: workspaceId,
+            runId: run.executionId,
+            agentId: run.agentInstanceId?.toString() ?? undefined,
+        };
+
+        const progress = nextStatus === 'running' ? 50 : nextStatus === 'completed' ? 100 : nextStatus === 'failed' || nextStatus === 'stopped' || nextStatus === 'timed_out' ? 100 : undefined;
+
+        this.runtimeEventPublisher.publishRunStatusChange({
+            workspaceId,
+            roomWorkspaceId: workspaceId,
+            runId: run.executionId,
+            status: nextStatus,
+            progress,
+            message: payload.message as string | undefined,
+            stage: payload.stage as string | undefined,
+            durationMs: payload.durationMs as number | undefined,
+            resultCount: payload.resultCount as number | undefined,
+            workflowId: workspaceId,
+            agentId: payload.agentId as string | undefined,
+            errorCode: run.error?.code ?? undefined,
+            correlationId: `run:${run.executionId}:${previousStatus}->${nextStatus}`,
+        });
     }
 
     private async getRequiredRun(executionId: string): Promise<IUserToolRun> {

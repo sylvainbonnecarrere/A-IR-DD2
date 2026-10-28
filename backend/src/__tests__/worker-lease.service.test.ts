@@ -146,4 +146,43 @@ describe('TaskRuntimeInfra service', () => {
         expect(stale).toEqual(['task-10']);
         expect(worker.getHealthSnapshot(new Date('2026-10-27T15:00:25.000Z')).staleLeases).toBe(1);
     });
+
+    it('treats cancellation as a terminal task state and suppresses retries', () => {
+        const scheduler = new TaskSchedulerService();
+        const leaseService = new TaskLeaseService();
+        const queue = new TaskQueueService(scheduler, leaseService);
+
+        queue.enqueueTask('task-11', new Date('2026-10-27T16:00:00.000Z'), { attempt: 0 });
+        const lease = leaseService.acquireLease('task-11', 'worker-a', 60_000, new Date('2026-10-27T16:00:00.000Z'));
+        scheduler.markRunning('task-11', lease.lease!, new Date('2026-10-27T16:00:00.000Z'));
+
+        const cancelled = scheduler.markCancelled('task-11', new Date('2026-10-27T16:00:02.000Z'));
+        expect(cancelled?.status).toBe('cancelled');
+
+        const retryScheduled = scheduler.scheduleRetry('task-11', 30_000, new Date('2026-10-27T16:00:05.000Z'));
+        expect(retryScheduled?.status).toBe('cancelled');
+        expect(queue.claimNextTask('worker-b', 60_000, new Date('2026-10-27T16:00:10.000Z')).task).toBeUndefined();
+    });
+
+    it('cancelled tasks are not re-executed after a worker lease expires', async () => {
+        const scheduler = new TaskSchedulerService();
+        const leaseService = new TaskLeaseService();
+        const queue = new TaskQueueService(scheduler, leaseService);
+        const executed: string[] = [];
+
+        queue.enqueueTask('task-12', new Date('2026-10-27T17:00:00.000Z'), { attempt: 0 });
+        const lease = leaseService.acquireLease('task-12', 'worker-a', 10_000, new Date('2026-10-27T17:00:00.000Z'));
+        scheduler.markRunning('task-12', lease.lease!, new Date('2026-10-27T17:00:00.000Z'));
+
+        const worker = new TaskWorkerService(queue, async (task) => {
+            executed.push(task.taskId);
+        }, { leaseDurationMs: 10_000, retryDelayMs: 5_000 });
+
+        worker.cancelTask('task-12', new Date('2026-10-27T17:00:03.000Z'));
+        const afterCancel = await worker.runNextTask('worker-b', new Date('2026-10-27T17:00:15.000Z'));
+
+        expect(afterCancel.accepted).toBe(false);
+        expect(afterCancel.reason).toBe('no_due_tasks');
+        expect(executed).toEqual([]);
+    });
 });
