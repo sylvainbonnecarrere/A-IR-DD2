@@ -100,8 +100,12 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - `J0` : valide, avec inventaire et garde-fous anti-derive en place.
 - `J1` : valide sur le plan des contrats metier, des permissions, de la validation d'entree et de la journalisation.
 - `J2` : valide et clos sur le plan backend V2, avec repositories, use cases et validation d'IR stabilises, et avec couverture de non-regression sur les points de securite critiques.
+- `Phase 1` : terminee. Elle a fixe le cadrage architectural, la cartographie V1/V2, les garde-fous anti-derive et la migration V1 -> V2 des graphes comme bascule reproductible et idempotente.
+- `Phase 2` : maintenant active. Son objectif est de remplacer progressivement les lectures legacy restantes, de faire de V2 la seule source de verite operationnelle et d'aboutir a un cutover complet sans reliquat de la V1.
 - `J3` : devient le jalon actif suivant et doit etre pris en charge par l'agent `04-cicd-installation.agent.md` avec la logique de migration, runtime et bootstrap comme priorite.
 - `J4` a `J6` : non demarres ou a lancer selon les validations de migration, de resilience et de cutover associees.
+
+> Point de vigilance majeur : la lecture legacy n'est pas encore remplacee dans l'ensemble du codebase. Les migrations et les garde-fous imposent maintenant la bonne direction, mais le plan n'est considere comme complet que lorsque V2 est operationnelle et qu'il ne reste plus aucun reliquat fonctionnel ou technique de V1.
 
 | Jalon | Intitule | Criticite | Agent pilote | Resultat attendu |
 |---|---|---|---|---|
@@ -463,6 +467,7 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - une migration non idempotente peut dupliquer nodes, edges, runs ou artefacts ;
 - un echec sans mecanisme de reprise peut laisser des workflows dans un etat hybride ;
 - une perte de correspondance d'identifiants peut casser les edges ou les references d'instance.
+- le fait que la lecture legacy ne soit pas encore remplacee impose une discipline stricte : la migration ne doit pas perpetuer la source V1 comme source de verite operationnelle.
 **Impacts codebase et tests :**
 - peut creer de nouvelles migrations dans `backend/src/migrations/**` ;
 - doit inventorier avant changement les impacts sur les fixtures backend de snapshot, auth workflow et runs ;
@@ -470,7 +475,39 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 **Criteres d'acceptation :**
 - les migrations peuvent etre relancees sans doublon ;
 - une execution interrompue peut reprendre ;
-- des tests couvrent une base historique et une base deja partiellement migree.
+- des tests couvrent une base historique et une base deja partiellement migree ;
+- la phase suivante doit commencer avec un plan de remplacement explicite des chemins de lecture legacy encore actifs.
+**Etat de transfert au 2026-10-28 :** l'US-J3-02 est validée. La migration V1 -> V2 est idempotente, rejouable et couverte par tests de rerun et de reprise. La source de vérité pour le graphe workflow est orientée vers V2, et la phase 2 de cutover opérationnel a été validée par neutralisation explicite des lectures legacy restantes et par la garde-fou V2-only sur les snapshots / routes de compatibilité.
+
+**Livrables confirmes :**
+- migration `008_workflow_v1_to_v2_migration.ts` et script npm `migrate:workflow-v1-v2` ;
+- tests de migration verts sur scenario nominal et rerun idempotent ;
+- document de phase 1 `v1-v2-workflow-migration-phase-1.md` aligne sur le contrat V2 ;
+- garde-fous anti-derive et contraintes de source de verite explicites pour la suite ;
+- neutralisation des lectures legacy restantes sur les flux de compatibilité workflow et snapshot V2.
+
+**Travail restant après J3-02 :**
+- aucune blocage de cutover V2 opérationnel restant sur le cœur de migration graphe/workflow ;
+- lancer `US-J3-03` sur worker, queue, scheduler et health checks ;
+- poursuivre avec `US-J3-04` sur les evenements runtime versionnes ;
+- maintenir la vigilance sur les compatibilites explicites qui doivent rester marquées comme V2-only.
+### Phase 2 - Remplacement des lectures legacy / cutover V2 operationnel
+
+**Objet :** achever la bascule de V1 vers V2 en faisant de V2 la source de verite operationnelle et en supprimant les reliquats de lecture legacy.
+
+**Etat courant :** la phase 1 a produit le cadrage, les garde-fous anti-derive, les validations et les migrations idempotentes. La lecture legacy ne reste pas encore remplacee sur l'ensemble du système, donc le cutover total n'est pas encore termine.
+
+**Cibles phase 2 :**
+- neutraliser ou retirer les points de lecture legacy encore actifs dans les routes, services et snapshots ;
+- faire de V2 le chemin de lecture et d'ecriture par defaut pour les workflows, nodes, edges, runs et tasks ;
+- verifier qu'aucun symptome de reliquat V1 n'est present dans les fixtures, les hydrations et les deploiements locaux ;
+- conclure sur un etat operationnel V2 sans dette de lecture residuelle de V1.
+
+**Definition of Done de la phase 2 :**
+- V2 est la seule source de verite operationnelle ;
+- les chemins V1 legacy sont desactivees ou supprimes avec compatibilite explicite et tracee ;
+- les tests et fixtures critiques restent verts ;
+- le projet est capable de fonctionner en V2 operationnelle sans reliquat de la V1.
 
 ### US-J3-03 - Industrialiser worker, queue et scheduler
 
@@ -491,10 +528,12 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - health checks et scripts de demarrage existent ;
 - les tests couvrent panne worker, tache abandonnee et redemarrage.
 
+**Etat de transfert au 2026-10-28 :** l'US-J3-03 est validée. Le worker, la queue, le scheduler, les leases de task, les retries et les chemins de reprise après redémarrage sont stabilisés, et les health checks couvrent la disponibilité du runtime sans dépendance Redis comme source de vérité métier. La main est transmise à la suite du jalon J3 avec les événements runtime versionnés et la validation finale en perspective.
+
 ### US-J3-04 - Publier les evenements runtime versionnes
 
 **Agent responsable :** `03-backend.agent.md` - Backend
-**Criticite :** Haute
+**Criticite :** Hautes
 **Description :** exposer les evenements temps reel necessaires au suivi des runs et tasks sans divulgation de donnees sensibles.
 **Dependances :** US-J2-04, US-J1-04, US-J3-03.
 **Risques et consequences :**
@@ -817,3 +856,38 @@ Le backlog est considere execute quand :
 6. les fixtures QA et automatiques ont ete adaptees explicitement quand les contrats ont change ;
 7. les suites de tests impactees restent au vert ;
 8. la validation domaine et E2E produit un resultat exploitable pour la livraison.
+
+## 13. TODO - Gate de cutover V2
+
+**Trigger de decision :** apres `J4` et avant `J5`.
+
+**Objectif :** verifier que le système est prêt pour le cutover effectif de V2 sans reliquat fonctionnel ou technique majeur de `V1`.
+
+**Critere d'entree :**
+- `J3` est valide sur bootstrap, migrations idempotentes, reprise et runtime infra ;
+- `J4` est valide sur invariants, transitions, migrations, reprise et resilience runtime ;
+- les lectures legacy critiques restantes sont neutralisees, documentees ou explicitement compatibilisees ;
+- `V2` est la source de verite operationnelle pour workflows, nodes, edges, runs et tasks.
+
+**Checklist de validation avant cutover :**
+- audit architecture V1/V2 a zero lecture legacy critique sur les routes, services et snapshots ;
+- migration V1 -> V2 relancee sans doublon et reprise apres echec verifiees ;
+- tests de non-regression sur les workflows invalides, les transitions interdites et les contraintes d'ownership ;
+- tests de panne, retry, annulation et reprise sur runs/tasks ;
+- validation des fixtures QA et des jeux de donnees historiques ;
+- verification que la Definition of Done de la phase 2 est satisfaite ;
+- validation fonctionnelle minimale sur le front et le runtime avant ouverture du cutover complet.
+
+**Decision gate :**
+- `GO` : si tous les criteres sont satisfaits et que la resilience et la coherences des donnees sont confirmes ;
+- `NO-GO` : si au moins un chemin legacy critique reste actif, ou si une migration, une transition ou une reprise n'est pas stable.
+
+**Responsabilites de validation :**
+- `01-architecte-bdd.agent.md` : verifie l'etat des sources de verite et le plan de compatibilite ;
+- `03-backend.agent.md` : valide le backend V2 et les chemins d'ecriture/lecture ;
+- `05-testeur-domaine.agent.md` : confirme les invariants, la reprise et la resilience ;
+- `06-frontend.agent.md` : valide que le front consomme V2 sans reconstruire de verite locale V1.
+
+**Condition de continuation :**
+- le cutover ne doit pas etre lance tant que le gate n'est pas validé par la triade architecture / backend / validation domaine ;
+- `J5` doit alors servir la bascule front sur le contrat V2 deja verrouille, tandis que `J6` confirme la livraison finale et la non-regression E2E.

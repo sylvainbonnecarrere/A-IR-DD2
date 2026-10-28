@@ -88,6 +88,7 @@ function markLegacyWorkflowV1Usage(
     res.setHeader('Warning', '299 - "Deprecated workflow V1 route. Migrate to V2 workflow graph APIs."');
     res.setHeader('X-Workflow-Legacy-Route', routeKey);
     res.setHeader('X-Workflow-Legacy-Count', String(legacyWorkflowV1UsageCounters[routeKey]));
+    res.setHeader('X-Workflow-Legacy-Policy', 'v2-canonical-only');
 
     console.warn('[Workflows][DeprecatedV1Route]', {
         routeKey,
@@ -95,6 +96,47 @@ function markLegacyWorkflowV1Usage(
         detailId: detailId || null,
         usageCount: legacyWorkflowV1UsageCounters[routeKey],
     });
+}
+
+function rejectLegacyWorkflowV1Mutation(
+    res: Response,
+    routeKey: keyof typeof legacyWorkflowV1UsageCounters,
+    workflowId: string,
+    detailId?: string,
+) {
+    markLegacyWorkflowV1Usage(res, routeKey, workflowId, detailId);
+    res.status(410).json({
+        error: 'Workflow V1 legacy endpoint is no longer available',
+        code: 'WORKFLOW_V1_ENDPOINT_DEPRECATED',
+        message: 'Use the V2 workflow graph APIs instead of mutating Workflow.nodes or Workflow.edges.',
+        route: routeKey,
+        workflowId,
+        detailId: detailId || null,
+    });
+}
+
+function sanitizeLegacyWorkflowGraphFields<T extends Record<string, any>>(workflow: T | null): T | null {
+    if (!workflow || typeof workflow !== 'object') {
+        return workflow;
+    }
+
+    const source = typeof (workflow as any).toObject === 'function'
+        ? (workflow as any).toObject()
+        : { ...workflow };
+
+    const sanitized = { ...source } as Record<string, any>;
+    sanitized.id = (workflow as any).id ?? sanitized.id ?? (workflow as any)._id?.toString?.();
+    sanitized._id = (workflow as any)._id ?? sanitized._id;
+    delete sanitized.nodes;
+    delete sanitized.edges;
+    return sanitized as T;
+}
+
+function applyCompatibilityReadGuard(res: Response, workflowId: string) {
+    res.setHeader('Warning', '299 - "Legacy workflow compatibility read. V2 workflow graph APIs are canonical and legacy nodes/edges fields are stripped from this response."');
+    res.setHeader('X-Workflow-Legacy-Policy', 'v2-canonical-only');
+    res.setHeader('X-Workflow-Source', 'v2');
+    res.setHeader('X-Workflow-Id', workflowId);
 }
 
 // Schema validation
@@ -152,8 +194,10 @@ router.get('/:id',
                 WorkflowEdge.find({ workflowId: workflow.id })
             ]);
 
+            applyCompatibilityReadGuard(res, workflow.id);
+
             res.json({
-                workflow,
+                workflow: sanitizeLegacyWorkflowGraphFields(workflow as any),
                 agents,
                 edges
             });
@@ -315,9 +359,11 @@ router.post('/:id/select',
 
             const workspaceSnapshot = await buildWorkspaceSnapshot({
                 userId,
-                workflow: updatedWorkflow,
+                workflow: sanitizeLegacyWorkflowGraphFields(updatedWorkflow as any),
                 includeLegacyPrototypes: true
             });
+
+            applyCompatibilityReadGuard(res, workflowId);
             
             // ⭐ Production-safe: Only log in development
             if (process.env.NODE_ENV === 'development') {
@@ -504,41 +550,21 @@ router.patch('/:id/nodes/:nodeId/position',
             const user = req.user as IUser;
             const { x, y } = req.body;
 
-            markLegacyWorkflowV1Usage(res, 'nodePositionPatch', req.params.id, req.params.nodeId);
-
             if (typeof x !== 'number' || typeof y !== 'number') {
-                return res.status(400).json({ 
-                    error: 'Invalid position: x and y must be numbers' 
-                });
+                return rejectLegacyWorkflowV1Mutation(
+                    res,
+                    'nodePositionPatch',
+                    req.params.id,
+                    req.params.nodeId
+                );
             }
 
-            // Use positional operator to update specific node
-            const result = await Workflow.findOneAndUpdate(
-                { 
-                    _id: req.params.id, 
-                    userId: user.id,
-                    'nodes.id': req.params.nodeId 
-                },
-                { 
-                    $set: { 
-                        'nodes.$.position': { x, y },
-                        updatedAt: new Date()
-                    }
-                },
-                { new: true }
+            return rejectLegacyWorkflowV1Mutation(
+                res,
+                'nodePositionPatch',
+                req.params.id,
+                req.params.nodeId
             );
-
-            if (!result) {
-                return res.status(404).json({ 
-                    error: 'Workflow or node not found' 
-                });
-            }
-
-            res.json({ 
-                success: true, 
-                nodeId: req.params.nodeId,
-                position: { x, y }
-            });
 
         } catch (error) {
             console.error('[Workflows] PATCH node position error:', error);
@@ -562,40 +588,11 @@ router.post('/:id/edges',
             const user = req.user as IUser;
             const { source, target, type = 'default', data } = req.body;
 
-            markLegacyWorkflowV1Usage(res, 'edgeCreate', req.params.id);
-
             if (!source || !target) {
-                return res.status(400).json({ 
-                    error: 'source and target are required' 
-                });
+                return rejectLegacyWorkflowV1Mutation(res, 'edgeCreate', req.params.id);
             }
 
-            const edgeId = `edge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            const newEdge = {
-                id: edgeId,
-                source,
-                target,
-                type,
-                data: data || {}
-            };
-
-            const result = await Workflow.findOneAndUpdate(
-                { _id: req.params.id, userId: user.id },
-                { 
-                    $push: { edges: newEdge },
-                    $set: { updatedAt: new Date() }
-                },
-                { new: true }
-            );
-
-            if (!result) {
-                return res.status(404).json({ error: 'Workflow introuvable' });
-            }
-
-            res.status(201).json({ 
-                success: true, 
-                edge: newEdge 
-            });
+            return rejectLegacyWorkflowV1Mutation(res, 'edgeCreate', req.params.id);
 
         } catch (error) {
             console.error('[Workflows] POST edge error:', error);
@@ -617,25 +614,12 @@ router.delete('/:id/edges/:edgeId',
         try {
             const user = req.user as IUser;
 
-            markLegacyWorkflowV1Usage(res, 'edgeDelete', req.params.id, req.params.edgeId);
-
-            const result = await Workflow.findOneAndUpdate(
-                { _id: req.params.id, userId: user.id },
-                { 
-                    $pull: { edges: { id: req.params.edgeId } },
-                    $set: { updatedAt: new Date() }
-                },
-                { new: true }
+            return rejectLegacyWorkflowV1Mutation(
+                res,
+                'edgeDelete',
+                req.params.id,
+                req.params.edgeId
             );
-
-            if (!result) {
-                return res.status(404).json({ error: 'Workflow introuvable' });
-            }
-
-            res.json({ 
-                success: true, 
-                deletedEdgeId: req.params.edgeId 
-            });
 
         } catch (error) {
             console.error('[Workflows] DELETE edge error:', error);

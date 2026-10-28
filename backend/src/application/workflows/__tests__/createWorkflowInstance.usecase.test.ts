@@ -68,6 +68,9 @@ describe('CreateWorkflowInstanceUseCase', () => {
     expect(workflowNodeModel.create).toHaveBeenCalledTimes(1);
     expect(agentJournalModel.create).toHaveBeenCalledTimes(1);
     expect(result.kind).toBe('created');
+    if (result.kind !== 'created') {
+      throw new Error('Expected created workflow instance result');
+    }
     expect(result.instance).toEqual(expect.objectContaining({ _id: instanceId, name: 'Agent A' }));
     expect(result.node).toEqual(expect.objectContaining({ _id: nodeId, instanceId }));
   });

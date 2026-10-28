@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import * as workflowMigrationModule from '../migrations/008_workflow_v1_to_v2_migration';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
 import * as databaseInitModule from '../services/databaseInit';
 

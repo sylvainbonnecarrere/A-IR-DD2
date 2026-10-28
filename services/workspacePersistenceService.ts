@@ -133,20 +133,27 @@ export const WorkspacePersistenceService = {
             return { success: true };
         }
 
-        // Auth mode: API - Update each agent instance position
-        // Note: This could be optimized with a batch endpoint
-        const promises = nodes.map(node => 
-            fetch(`${API_BASE_URL}/api/workflows/${workflowId}/instances/${node.agentId}`, {
-                method: 'PUT',
+        // Canonical V2 path: node positions are persisted on WorkflowNodeV2 records,
+        // not on the legacy agent instance route. This preserves the V2 contract and
+        // prevents hybrid workflow writes while allowing optimistic canvas updates.
+        const promises = nodes.map(async (node) => {
+            const response = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/v2/nodes/${node.id}`, {
+                method: 'PATCH',
                 headers: buildGovernanceHeaders(options.accessToken, {
                     'Content-Type': 'application/json'
                 }),
                 body: JSON.stringify({ position: node.position })
-            })
-        );
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to save workflow node ${node.id}: ${response.statusText}`);
+            }
+
+            return response;
+        });
 
         await Promise.all(promises);
-        console.log('[WorkspacePersistence] Saved nodes to API:', nodes.length);
+        console.log('[WorkspacePersistence] Saved nodes to API V2:', nodes.length);
         
         return { success: true };
     },
@@ -166,25 +173,12 @@ export const WorkspacePersistenceService = {
             return { success: true };
         }
 
-        // Auth mode: API
-        // This would need a dedicated edges endpoint or batch update
-        // For now, we'll implement a simple approach
-        const response = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/edges`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${options.accessToken}`
-            },
-            body: JSON.stringify({ edges })
-        });
-
-        if (!response.ok) {
-            console.warn('[WorkspacePersistence] Edge save warning:', response.statusText);
-            // Non-blocking: edges are secondary data
-        }
-
-        console.log('[WorkspacePersistence] Saved edges to API:', edges.length);
-        return { success: true };
+        // Cutover V2 gate: legacy workflow edge writes are explicitly forbidden.
+        // The canonical edge persistence is handled by WorkflowEdgeV2 records and
+        // should be routed through the V2 graph APIs, not the deprecated Workflow.edges[] path.
+        throw new Error(
+            'Deprecated workflow V1 edge mutation is forbidden. Use the canonical V2 graph APIs for workflow edge persistence.'
+        );
     },
 
     /**
@@ -199,11 +193,13 @@ export const WorkspacePersistenceService = {
         // Save workflow first to get ID
         const { id: workflowId } = await this.saveWorkflow(workflow, options);
 
-        // Save nodes and edges in parallel
-        await Promise.all([
-            this.saveNodes(workflowId, nodes, options),
-            this.saveEdges(workflowId, edges, options)
-        ]);
+        // Canonical V2 contract: node positions are persisted through the V2 node route.
+        // Edge mutations are intentionally not reintroduced on the deprecated Workflow.edges[] path.
+        await this.saveNodes(workflowId, nodes, options);
+
+        if (!options.isAuthenticated) {
+            localStorage.setItem(GUEST_STORAGE_KEYS.WORKFLOW_EDGES, JSON.stringify(edges));
+        }
 
         console.log('[WorkspacePersistence] Complete workspace saved:', workflowId);
         return { workflowId, success: true };

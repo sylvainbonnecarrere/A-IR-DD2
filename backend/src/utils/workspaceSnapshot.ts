@@ -177,6 +177,23 @@ interface BuildWorkspaceSnapshotOptions {
     includeLegacyPrototypes?: boolean;
 }
 
+function sanitizeLegacyWorkflowGraphFields<T extends Record<string, any>>(workflow: T | null): T | null {
+    if (!workflow || typeof workflow !== 'object') {
+        return workflow;
+    }
+
+    const source = typeof (workflow as any).toObject === 'function'
+        ? (workflow as any).toObject()
+        : { ...workflow };
+
+    const sanitized = { ...source } as Record<string, any>;
+    sanitized.id = (workflow as any).id ?? sanitized.id ?? (workflow as any)._id?.toString?.();
+    sanitized._id = (workflow as any)._id ?? sanitized._id;
+    delete sanitized.nodes;
+    delete sanitized.edges;
+    return sanitized as T;
+}
+
 function transformWorkflowEdgeForFrontend(edge: any) {
     const sourceInstanceId = edge.sourceInstanceId?.toString() || edge.sourceId || edge.sourceNodeId || '';
     const targetInstanceId = edge.targetInstanceId?.toString() || edge.targetId || edge.targetNodeId || '';
@@ -255,7 +272,8 @@ export async function buildWorkspaceSnapshot({
     healingActions = [],
     includeLegacyPrototypes = true
 }: BuildWorkspaceSnapshotOptions): Promise<WorkspaceSnapshot> {
-    const workflowId = workflow?._id?.toString() || workflow?.id || null;
+    const sanitizedWorkflow = sanitizeLegacyWorkflowGraphFields(workflow as any); 
+    const workflowId = sanitizedWorkflow?._id?.toString() || sanitizedWorkflow?.id || null;
     const prototypeWorkflowFilter = workflowId
         ? (includeLegacyPrototypes
             ? {
@@ -313,21 +331,21 @@ export async function buildWorkspaceSnapshot({
             },
             lastScanAt: workspace.lastScanAt ?? null
         } : undefined,
-        workflow: workflow && workflowId ? {
+        workflow: sanitizedWorkflow && workflowId ? {
             id: workflowId,
-            name: workflow.name,
-            description: workflow.description,
-            isActive: workflow.isActive,
-            isDefault: workflow.isDefault || false,
-            isDirty: workflow.isDirty || false,
-            canvasState: workflow.canvasState || {
+            name: sanitizedWorkflow.name,
+            description: sanitizedWorkflow.description,
+            isActive: sanitizedWorkflow.isActive,
+            isDefault: sanitizedWorkflow.isDefault || false,
+            isDirty: sanitizedWorkflow.isDirty || false,
+            canvasState: sanitizedWorkflow.canvasState || {
                 zoom: 1,
                 panX: 0,
                 panY: 0
             },
-            createdAt: workflow.createdAt,
-            updatedAt: workflow.updatedAt,
-            lastSavedAt: workflow.lastSavedAt
+            createdAt: sanitizedWorkflow.createdAt,
+            updatedAt: sanitizedWorkflow.updatedAt,
+            lastSavedAt: sanitizedWorkflow.lastSavedAt
         } : null,
         nodes: transformedInstances.map((instance: any) => ({
             id: `node-${instance.id}`,

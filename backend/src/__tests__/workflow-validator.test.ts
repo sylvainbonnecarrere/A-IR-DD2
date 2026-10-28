@@ -88,4 +88,17 @@ describe('WorkflowValidator', () => {
     expect(result.valid).toBe(false);
     expect(result.issues[0]).toEqual(expect.objectContaining({ code: 'CYCLE_DETECTED' }));
   });
+
+  it('blocks workflow activation when validator findings are invalid', () => {
+    const invalid = {
+      valid: false,
+      issues: [{
+        code: 'MISSING_AGENT_INSTANCE',
+        message: 'Un nœud agent référence une instance absente du workflow.',
+        details: { instanceId: 'inst-404' },
+      }],
+    };
+
+    expect(() => validator.assertCanActivate(invalid)).toThrow('Workflow IR validation failed');
+  });
 });

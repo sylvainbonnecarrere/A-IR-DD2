@@ -19,6 +19,7 @@
 
 import mongoose from 'mongoose';
 import { backfillMediaReferenceCatalogFields } from '../migrations/006_media_reference_catalog_backfill';
+import { migrateLegacyWorkflowGraphsToV2 } from '../migrations/008_workflow_v1_to_v2_migration';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
 import { NativePythonProvisioningService } from './nativePythonProvisioning.service';
 import { mapLegacyFunctionToUserToolFields, type LegacyFunctionLike } from '../utils/userToolLegacyMapper';
@@ -516,6 +517,15 @@ export async function runDatabaseBootstrap(db: any): Promise<void> {
 export async function runDatabaseMigrations(db: any): Promise<void> {
   console.info('🧩 Starting database migrations (Phase 2: data backfills and compatibility updates)...');
   await runMediaReferenceCatalogBackfill(db);
+
+  try {
+    const summary = await migrateLegacyWorkflowGraphsToV2(db);
+    console.info(
+      `🧩 Workflow V1 -> V2 migration: scanned=${summary.workflowsScanned} migrated=${summary.workflowsMigrated} nodesCreated=${summary.nodesCreated} edgesCreated=${summary.edgesCreated} duplicatesPrevented=${summary.duplicatesPrevented}`
+    );
+  } catch (error) {
+    console.warn('⚠️  workflow V1 -> V2 migration warning:', error instanceof Error ? error.message : String(error));
+  }
 }
 
 /**

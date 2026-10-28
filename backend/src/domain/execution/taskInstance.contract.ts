@@ -7,7 +7,8 @@ export const TASK_INSTANCE_STATUS_VALUES = [
     'blocked',
     'completed',
     'failed',
-    'cancelled'
+    'cancelled',
+    'timed_out'
 ] as const;
 
 export const TaskInstanceStatusSchema = z.enum(TASK_INSTANCE_STATUS_VALUES);
@@ -15,13 +16,14 @@ export const TaskInstanceStatusSchema = z.enum(TASK_INSTANCE_STATUS_VALUES);
 export type TaskInstanceStatus = z.infer<typeof TaskInstanceStatusSchema>;
 
 export const TASK_INSTANCE_ALLOWED_TRANSITIONS: Readonly<Record<TaskInstanceStatus, readonly TaskInstanceStatus[]>> = {
-    pending: ['ready', 'blocked', 'cancelled'],
-    ready: ['running', 'cancelled'],
-    running: ['completed', 'failed', 'blocked', 'cancelled'],
-    blocked: ['ready', 'cancelled'],
+    pending: ['ready', 'blocked', 'cancelled', 'timed_out'],
+    ready: ['running', 'cancelled', 'timed_out'],
+    running: ['completed', 'failed', 'blocked', 'cancelled', 'timed_out'],
+    blocked: ['ready', 'cancelled', 'timed_out'],
     completed: [],
     failed: [],
     cancelled: [],
+    timed_out: [],
 };
 
 export function canTransitionTaskInstance(

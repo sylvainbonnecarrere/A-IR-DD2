@@ -11,6 +11,7 @@ import { WorkflowEdge } from '../models/WorkflowEdge.model';
 import { AgentJournal } from '../models/AgentJournal.model';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { Workspace } from '../models/Workspace.model';
+import { WorkflowRepository } from '../repositories/WorkflowRepository';
 import userWorkspaceRoutes from '../routes/user-workspace.routes';
 import workflowsRoutes from '../routes/workflows.routes';
 import { generateAccessToken } from '../utils/jwt';
@@ -362,5 +363,39 @@ describe('Workspace snapshot contract', () => {
                 })
             })
         ]));
+    });
+
+    it('neutralizes legacy workflow graph fields on compatibility reads and emits the V2-only warning header', async () => {
+        const legacyWorkflow = {
+            _id: new mongoose.Types.ObjectId(fixture.workflowId),
+            id: fixture.workflowId,
+            userId: fixture.userId,
+            name: 'Legacy graph workflow',
+            description: 'legacy compatibility read',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 },
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            lastSavedAt: new Date(),
+            nodes: [{ id: 'legacy-node-1' }],
+            edges: [{ id: 'legacy-edge-1', source: 'legacy-node-1', target: 'legacy-node-1' }]
+        } as any;
+
+        const findByIdSpy = jest.spyOn(WorkflowRepository.prototype, 'findById').mockResolvedValue(legacyWorkflow);
+
+        const response = await request(app)
+            .get(`/api/workflows/${fixture.workflowId}`)
+            .set('Authorization', `Bearer ${fixture.accessToken}`)
+            .expect(200);
+
+        expect(findByIdSpy).toHaveBeenCalledWith(fixture.workflowId);
+        expect(response.headers['x-workflow-legacy-policy']).toBe('v2-canonical-only');
+        expect(response.headers['warning']).toContain('V2 workflow graph APIs');
+        expect(response.body.workflow).not.toHaveProperty('nodes');
+        expect(response.body.workflow).not.toHaveProperty('edges');
+        expect(response.body.workflow.id).toBe(fixture.workflowId);
+
+        findByIdSpy.mockRestore();
     });
 });
