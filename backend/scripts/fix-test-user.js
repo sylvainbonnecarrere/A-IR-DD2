@@ -3,8 +3,13 @@ const bcrypt = require('bcryptjs');
 require('dotenv').config({ path: '.env' });
 
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/a-ir-dd2-dev';
-const TEST_EMAIL = 'test@example.com';
-const TEST_PASSWORD = 'TestPassword123';
+const TEST_EMAIL = process.env.DEV_TEST_USER_EMAIL || 'test@example.com';
+const TEST_PASSWORD = process.env.DEV_TEST_USER_PASSWORD;
+
+if (!TEST_PASSWORD) {
+    console.error('Missing DEV_TEST_USER_PASSWORD. Set it before running this script.');
+    process.exit(1);
+}
 
 const UserSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
@@ -36,7 +41,7 @@ async function fixTestUser() {
     console.log('\n🔧 Script de Diagnostic et Correction du Compte Test\n');
     console.log(`📍 MongoDB URI: ${MONGO_URI}`);
     console.log(`👤 Compte Test: ${TEST_EMAIL}`);
-    console.log(`🔐 Mot de passe: ${TEST_PASSWORD}\n`);
+    console.log('🔐 Mot de passe: [loaded from DEV_TEST_USER_PASSWORD]\n');
 
     try {
         // Connexion MongoDB
@@ -63,7 +68,7 @@ async function fixTestUser() {
             await newUser.save();
             console.log('✅ Compte test créé avec succès!');
             console.log(`📧 Email: ${TEST_EMAIL}`);
-            console.log(`🔐 Password: ${TEST_PASSWORD}`);
+            console.log('🔐 Password: [stored as bcrypt hash only]');
             console.log(`🆔 ID: ${newUser._id}\n`);
         } else {
             console.log(`✅ Utilisateur trouvé!`);
@@ -106,7 +111,7 @@ async function fixTestUser() {
         console.log('\n✅ SCRIPT TERMINÉ AVEC SUCCÈS!\n');
         console.log('📝 RÉSUMÉ FINAL:');
         console.log(`   Email: ${TEST_EMAIL}`);
-        console.log(`   Password: ${TEST_PASSWORD}`);
+        console.log('   Password: [hidden, loaded from environment]');
         console.log(`   Status: PRÊT POUR LE TEST D'AUTHENTIFICATION ✅\n`);
         console.log('➡️  Prochaine étape: Tester la connexion via l\'application');
         console.log('   1. Lancez le frontend: npm run dev');

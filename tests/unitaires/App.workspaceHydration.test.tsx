@@ -88,12 +88,16 @@ jest.mock('../../components/RobotPageRouter', () => ({
     RobotPageRouter: ({ onDeleteNode, llmConfigs, onWorkflowCanvasReady, onUpdateNodePosition }: { onDeleteNode?: (nodeId: string) => Promise<void> | void; llmConfigs?: Array<unknown>; onWorkflowCanvasReady?: () => void; onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: { persist?: boolean }) => void }) => {
         const { getAppHydrationHarness } = require('../harnesses/appHydrationHarness');
         const harness = getAppHydrationHarness();
+        const readySignalSentRef = React.useRef(false);
         React.useEffect(() => {
-            if (harness.autoSignalWorkflowCanvasReady) {
-                onWorkflowCanvasReady?.();
-                emitHydrationComponentsReady();
+            if (!harness.autoSignalWorkflowCanvasReady || readySignalSentRef.current) {
+                return;
             }
-        });
+
+            readySignalSentRef.current = true;
+            onWorkflowCanvasReady?.();
+            emitHydrationComponentsReady();
+        }, [harness.autoSignalWorkflowCanvasReady, onWorkflowCanvasReady]);
 
         return (
             <div data-testid="robot-page-router">

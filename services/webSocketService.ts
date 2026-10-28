@@ -3,13 +3,26 @@ import { ChatMessage } from '../types';
 import { authSessionStorage } from '../utils/authSessionStorage';
 
 // Types pour les événements (synchronisés avec le backend)
+interface RuntimeEventEnvelope {
+  id: string;
+  type: string;
+  version: 1;
+  aggregateType: 'run' | 'task';
+  aggregateId: string;
+  workspaceId: string;
+  correlationId?: string;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}
+
 interface ServerToClientEvents {
   'agent:position:updated': (data: { nodeId: string; position: { x: number; y: number }; userId: string }) => void;
   'agent:message:added': (data: { nodeId: string; message: ChatMessage; userId: string }) => void;
   'agent:toggle:minimized': (data: { nodeId: string; userId: string }) => void;
   'workspace:user:joined': (data: { userId: string; userInfo: any }) => void;
   'workspace:user:left': (data: { userId: string }) => void;
-  'user:cursor:updated': (data: { x: number; y: number; userId: string }) => void;
+  'user:cursor:updated': (data: { x: number, y: number; userId: string }) => void;
+  'runtime:event': (data: RuntimeEventEnvelope) => void;
   'connection:status': (status: 'connected' | 'disconnected' | 'error') => void;
 }
 
@@ -218,6 +231,14 @@ class WebSocketService {
         this.emit('userCursorUpdated', data);
       } catch (error) {
         console.warn('[WebSocket] Erreur dans user:cursor:updated:', error);
+      }
+    });
+
+    this.socket.on('runtime:event', (data) => {
+      try {
+        this.emit('runtimeEvent', data);
+      } catch (error) {
+        console.warn('[WebSocket] Erreur dans runtime:event:', error);
       }
     });
   }

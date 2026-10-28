@@ -153,18 +153,23 @@ docker exec -it a-ir-dd2-mongodb mongosh \
 
 ---
 
-## 🧪 Using the Test Account
+## 🧪 Using the Local Test Account
 
-After successful installation:
+After successful installation, configure a local seed user through environment variables before starting the backend:
+
+```bash
+export DEV_TEST_USER_EMAIL=test@example.com
+export DEV_TEST_USER_PASSWORD='your-local-only-password'
+```
+
+Then:
 
 1. ✅ MongoDB running: `docker-compose ps`
 2. ✅ Backend running: `curl http://localhost:3001/api/health`
 3. ✅ Frontend running: `npm run dev` (from root)
 4. Open http://127.0.0.1:4000
 5. Click "Connexion" (Login)
-6. Enter credentials:
-   - Email: **`test@example.com`**
-   - Password: **`TestPassword123`**
+6. Sign in using the configured local credentials
 7. ✅ Successfully authenticated!
 8. Test persistence: Go to Settings → Clés API
 
@@ -437,7 +442,7 @@ ENCRYPTION_KEY=<generated-32-hex>
 - [ ] Collections verified: `show collections` in mongosh
 - [ ] Test user created: `db.users.findOne({ email: 'test@example.com' })`
 - [ ] Frontend started: `npm run dev`
-- [ ] Login tested with test@example.com / TestPassword123
+- [ ] Login tested with the configured local credentials from `DEV_TEST_USER_EMAIL` and `DEV_TEST_USER_PASSWORD`
 
 ---
 

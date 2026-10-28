@@ -57,11 +57,12 @@ async function setup() {
         log('👤 Création utilisateur test via MongoDB...', 'blue');
         testUserId = new mongoose.Types.ObjectId();
         const usersCollection = db.collection('users');
+        const phase4TestPassword = process.env.DEV_TEST_USER_PASSWORD || 'change-me-local-only';
         await usersCollection.insertOne({
             _id: testUserId,
             email: `test-${Date.now()}@test.com`,
             username: `testuser-${Date.now()}`,
-            password: 'TestPassword123!'
+            password: phase4TestPassword
         });
         log(`✅ Utilisateur créé: ${testUserId}`, 'green');
 

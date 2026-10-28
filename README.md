@@ -272,10 +272,12 @@ Open:
 http://127.0.0.1:4000
 ```
 
-Default test account:
+For local development, set a non-default seed password in your environment before you start the backend:
 
-- `test@example.com`
-- `TestPassword123`
+- `DEV_TEST_USER_EMAIL` (optional, defaults to `test@example.com`)
+- `DEV_TEST_USER_PASSWORD` (required for local login bootstrap)
+
+Do not keep a shared or hardcoded password in the repository or installation docs.
 
 ### 11. Completion checklist
 

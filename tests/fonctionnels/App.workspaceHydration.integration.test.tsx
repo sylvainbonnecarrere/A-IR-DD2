@@ -60,12 +60,16 @@ jest.mock('../../components/RobotPageRouter', () => ({
     RobotPageRouter: ({ llmConfigs, onWorkflowCanvasReady }: { llmConfigs?: Array<unknown>; onWorkflowCanvasReady?: () => void }) => {
         const { getAppHydrationHarness } = require('../harnesses/appHydrationHarness');
         const harness = getAppHydrationHarness();
+        const readySignalSentRef = React.useRef(false);
         React.useEffect(() => {
-            if (harness.autoSignalWorkflowCanvasReady) {
-                onWorkflowCanvasReady?.();
-                emitHydrationComponentsReady();
+            if (!harness.autoSignalWorkflowCanvasReady || readySignalSentRef.current) {
+                return;
             }
-        });
+
+            readySignalSentRef.current = true;
+            onWorkflowCanvasReady?.();
+            emitHydrationComponentsReady();
+        }, [harness.autoSignalWorkflowCanvasReady, onWorkflowCanvasReady]);
 
         return (
             <div data-testid="robot-page-router">

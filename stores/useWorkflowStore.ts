@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { RobotId } from '../types';
 import { BaseWorkflowNodeData } from '../components/workflow/BaseWorkflowNode';
+import WorkflowRunService from '../services/workflowRunService';
+import type { FunctionRunRecord } from '../types/function.types';
 
 // Enhanced types for Workflow Editor
 export interface WorkflowNode {
@@ -46,7 +48,7 @@ export interface Workflow {
 export interface WorkflowExecution {
   id: string;
   workflowId: string;
-  status: 'running' | 'completed' | 'failed' | 'paused';
+  status: FunctionRunRecord['status'] | 'paused';
   startedAt: string;
   completedAt?: string;
   currentNodeId?: string;
@@ -425,48 +427,58 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set(state => ({ isConfigPanelOpen: !state.isConfigPanelOpen }));
   },
   
-  // Execution (Mock implementation for now)
+  // Execution backed by the canonical V2 workflow run API
   executeWorkflow: async () => {
     const { currentWorkflow } = get();
     if (!currentWorkflow) return '';
-    
-    const executionId = generateId();
-    const execution: WorkflowExecution = {
-      id: executionId,
-      workflowId: currentWorkflow.id,
-      status: 'running',
-      startedAt: new Date().toISOString(),
-      results: {},
-      errors: {}
-    };
-    
-    set({ execution });
-    
-    // Mock execution - in real implementation this would call the backend
-    setTimeout(() => {
-      set({
-        execution: {
-          ...execution,
-          status: 'completed',
-          completedAt: new Date().toISOString()
-        }
-      });
-    }, 3000);
-    
-    return executionId;
-  },
-  
-  pauseExecution: () => {
-    const { execution } = get();
-    if (execution && execution.status === 'running') {
-      set({
-        execution: { ...execution, status: 'paused' }
-      });
+
+    try {
+      const result = await WorkflowRunService.launchRun({ workflowId: currentWorkflow.id });
+      const execution: WorkflowExecution = {
+        id: result.executionId,
+        workflowId: currentWorkflow.id,
+        status: result.status as FunctionRunRecord['status'],
+        startedAt: new Date().toISOString(),
+        results: {},
+        errors: {}
+      };
+
+      set({ execution });
+      return result.executionId;
+    } catch (error) {
+      console.error('[useWorkflowStore] Failed to launch workflow run:', error);
+      throw error;
     }
   },
-  
-  stopExecution: () => {
-    set({ execution: null });
+
+  pauseExecution: async () => {
+    const { execution } = get();
+    if (!execution) return;
+
+    try {
+      await WorkflowRunService.cancelRun(execution.id);
+      set({
+        execution: { ...execution, status: 'stopped' }
+      });
+    } catch (error) {
+      console.error('[useWorkflowStore] Failed to stop workflow run:', error);
+      throw error;
+    }
+  },
+
+  stopExecution: async () => {
+    const { execution } = get();
+    if (!execution) return;
+
+    try {
+      await WorkflowRunService.cancelRun(execution.id);
+      set({
+        execution: { ...execution, status: 'stopped' }
+      });
+    } catch (error) {
+      console.error('[useWorkflowStore] Failed to cancel workflow run:', error);
+      throw error;
+    }
   },
   
   // Persistence

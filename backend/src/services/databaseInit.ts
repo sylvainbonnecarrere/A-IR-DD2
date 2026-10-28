@@ -18,6 +18,7 @@
  */
 
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 import { backfillMediaReferenceCatalogFields } from '../migrations/006_media_reference_catalog_backfill';
 import { migrateLegacyWorkflowGraphsToV2 } from '../migrations/008_workflow_v1_to_v2_migration';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
@@ -446,6 +447,17 @@ const INDEX_DEFINITIONS = {
  * Bootstrap phase: ensure collection schema, indexes, and development test accounts exist.
  * This is the base runtime initialization layer, intentionally separated from data migrations.
  */
+export function resolveDevSeedUserConfig(): { email: string; password: string } | null {
+  const email = (process.env.DEV_TEST_USER_EMAIL || 'test@example.com').trim();
+  const password = (process.env.DEV_TEST_USER_PASSWORD || '').trim();
+
+  if (!password) {
+    return null;
+  }
+
+  return { email, password };
+}
+
 export async function runDatabaseBootstrap(db: any): Promise<void> {
   console.info('🔧 Starting database bootstrap (Phase 1: schema and index check)...');
 
@@ -673,19 +685,23 @@ async function verifyIndexes(db: any): Promise<void> {
  */
 async function createTestUser(db: any): Promise<void> {
   try {
+    const devSeedUser = resolveDevSeedUserConfig();
+    if (!devSeedUser) {
+      console.warn('  ⚠️ Skipping development seed user: set DEV_TEST_USER_PASSWORD to enable a local test account.');
+      return;
+    }
+
     const collection = db.collection('users');
-    const existingUser = await collection.findOne({ email: 'test@example.com' });
+    const existingUser = await collection.findOne({ email: devSeedUser.email });
 
     if (existingUser) {
       console.info('  Test user already exists');
       return;
     }
 
-    // Static bcrypt hash used only for the local development seed account
-    const hashedPassword = '$2b$10$JkttyuwNvLIxq.f2p9rW8uKD7CFyZZvPZP8jKgRPrBXf2wq8Z2j6u';
-
+    const hashedPassword = await bcrypt.hash(devSeedUser.password, 12);
     const testUser = {
-      email: 'test@example.com',
+      email: devSeedUser.email,
       password: hashedPassword,
       role: 'user',
       isActive: true,
@@ -694,8 +710,7 @@ async function createTestUser(db: any): Promise<void> {
     };
 
     await collection.insertOne(testUser);
-    console.info('  ✓ Test user created:');
-    console.info('    Email: test@example.com');
+    console.info(`  ✓ Test user created: ${devSeedUser.email}`);
   } catch (error: any) {
     if (error.code === 11000 && error.keyPattern?.email) {
       // Duplicate key on email - this is fine

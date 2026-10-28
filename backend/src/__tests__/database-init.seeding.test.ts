@@ -94,6 +94,25 @@ describe('databaseInit canonical tool seeding', () => {
         expect(db.collection).not.toHaveBeenCalledWith('user_functions');
     });
 
+    it('uses an environment-supplied dev seed password instead of a hardcoded credential', () => {
+        const previousPassword = process.env.DEV_TEST_USER_PASSWORD;
+
+        try {
+            process.env.DEV_TEST_USER_PASSWORD = 'LocalDev!ChangeMe';
+
+            expect(databaseInitModule.resolveDevSeedUserConfig()).toMatchObject({
+                email: 'test@example.com',
+                password: 'LocalDev!ChangeMe',
+            });
+        } finally {
+            if (previousPassword === undefined) {
+                delete process.env.DEV_TEST_USER_PASSWORD;
+            } else {
+                process.env.DEV_TEST_USER_PASSWORD = previousPassword;
+            }
+        }
+    });
+
     it('exposes distinct bootstrap, migration, and seed phases in the lifecycle API', () => {
         expect(typeof runDatabaseBootstrap).toBe('function');
         expect(typeof runDatabaseMigrations).toBe('function');
