@@ -339,8 +339,8 @@ export const WorkflowEdgeService = {
     options: PersistenceOptions
   ): Promise<V2WorkflowEdge[]> {
     if (options.isAuthenticated && options.token) {
-      return WorkflowService._fetchFromAPI(
-        `/api/workflows/${workflowId}/edges`,
+      const response = await WorkflowService._fetchFromAPI(
+        `/api/workflows/${workflowId}/v2/graph`,
         {
           method: 'GET',
           headers: {
@@ -348,6 +348,7 @@ export const WorkflowEdgeService = {
           }
         }
       );
+      return Array.isArray(response?.edges) ? response.edges : [];
     } else {
       const edges = WorkflowService._loadFromStorage(GUEST_EDGES_KEY, []);
       return edges.filter((e: any) => e.workflowId === workflowId);
@@ -359,28 +360,22 @@ export const WorkflowEdgeService = {
     options: PersistenceOptions
   ): Promise<V2WorkflowEdge> {
     if (options.isAuthenticated && options.token) {
-      return WorkflowService._fetchFromAPI('/api/edges', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${options.token}`
-        },
-        body: JSON.stringify(edge)
-      });
-    } else {
-      const edges = WorkflowService._loadFromStorage(GUEST_EDGES_KEY, []) as V2WorkflowEdge[];
-      // Construire un V2WorkflowEdge valid
-      const newEdge: V2WorkflowEdge = {
-        id: `edge-${Date.now()}`,
-        source: (edge as any).source || '',
-        target: (edge as any).target || '',
-        type: (edge as any).type || 'default',
-        data: (edge as any).data
-      };
-      edges.push(newEdge);
-      WorkflowService._saveToStorage(GUEST_EDGES_KEY, edges);
-      return newEdge;
+      throw new Error(
+        'Deprecated workflow V1 edge mutation is forbidden. Use the canonical V2 workflow graph APIs for edge persistence.'
+      );
     }
+
+    const edges = WorkflowService._loadFromStorage(GUEST_EDGES_KEY, []) as V2WorkflowEdge[];
+    const newEdge: V2WorkflowEdge = {
+      id: `edge-${Date.now()}`,
+      source: (edge as any).source || '',
+      target: (edge as any).target || '',
+      type: (edge as any).type || 'default',
+      data: (edge as any).data
+    };
+    edges.push(newEdge);
+    WorkflowService._saveToStorage(GUEST_EDGES_KEY, edges);
+    return newEdge;
   },
 
   async deleteEdge(
@@ -388,17 +383,14 @@ export const WorkflowEdgeService = {
     options: PersistenceOptions
   ): Promise<void> {
     if (options.isAuthenticated && options.token) {
-      await WorkflowService._fetchFromAPI(`/api/edges/${edgeId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${options.token}`
-        }
-      });
-    } else {
-      const edges = WorkflowService._loadFromStorage(GUEST_EDGES_KEY, []);
-      const filtered = edges.filter((e: any) => e._id !== edgeId);
-      WorkflowService._saveToStorage(GUEST_EDGES_KEY, filtered);
+      throw new Error(
+        'Deprecated workflow V1 edge mutation is forbidden. Use the canonical V2 workflow graph APIs for edge persistence.'
+      );
     }
+
+    const edges = WorkflowService._loadFromStorage(GUEST_EDGES_KEY, []);
+    const filtered = edges.filter((e: any) => e._id !== edgeId);
+    WorkflowService._saveToStorage(GUEST_EDGES_KEY, filtered);
   }
 };
 

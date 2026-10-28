@@ -8,7 +8,9 @@ import {
   UserCursorUpdateSchema,
   WorkspaceJoinSchema,
   WorkspaceLeaveSchema,
+  WorkspaceRoomIdSchema,
 } from '../domain/workflow/workspaceCollaboration.contract';
+import { RuntimeEventEnvelopeSchema, type RuntimeEventEnvelope } from '../domain/execution/runtimeEvent.contract';
 import { User } from '../models/User.model';
 import { Workflow } from '../models/Workflow.model';
 import { verifyAccessToken } from '../utils/jwt';
@@ -38,6 +40,7 @@ interface ServerToClientEvents {
   'workspace:user:joined': (data: { userId: string; userInfo: any }) => void;
   'workspace:user:left': (data: { userId: string }) => void;
   'user:cursor:updated': (data: { x: number; y: number; userId: string }) => void;
+  'runtime:event': (data: RuntimeEventEnvelope) => void;
   
   // État de connexion
   'connection:status': (status: 'connected' | 'disconnected' | 'error') => void;
@@ -371,6 +374,26 @@ export class WebSocketManager {
 
   public getActiveWorkspaces(): string[] {
     return Array.from(this.connectedUsers.keys());
+  }
+
+  public emitRuntimeEvent(workspaceId: string, event: unknown): boolean {
+    const workspaceParseResult = WorkspaceRoomIdSchema.safeParse(workspaceId);
+    if (!workspaceParseResult.success) {
+      return false;
+    }
+
+    const eventParseResult = RuntimeEventEnvelopeSchema.safeParse(event);
+    if (!eventParseResult.success) {
+      return false;
+    }
+
+    const normalizedEvent = eventParseResult.data;
+    if (normalizedEvent.workspaceId !== workspaceParseResult.data) {
+      return false;
+    }
+
+    this.io.to(workspaceId).emit('runtime:event', normalizedEvent);
+    return true;
   }
 
   public async close(): Promise<void> {

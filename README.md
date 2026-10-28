@@ -150,7 +150,13 @@ cd ..
 
 ### 4. Create the backend environment file
 
-Copy the template:
+Use the checked-in template as the starting point:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+If you still rely on the Docker helper file, the project also supports:
 
 ```bash
 cp backend/docker/.env.docker backend/.env
@@ -174,6 +180,8 @@ Then update `backend/.env` with at least these values:
 - `ENCRYPTION_KEY`
 - `JWT_EXPIRATION` (for example `1h`)
 
+> Redis is intentionally not required for the supported runtime. MongoDB remains the source of truth for workflow state, task history, and worker coordination; Redis is not used as a business-state store in the current implementation.
+
 If you already have an older local `.env`, rename these deprecated keys:
 
 - `JWT_REFRESH_SECRET` -> `REFRESH_TOKEN_SECRET`
@@ -188,6 +196,8 @@ cd backend/docker
 docker-compose --env-file ../.env up -d
 cd ../..
 ```
+
+A healthy local startup is expected with MongoDB only. Redis is not part of the supported startup contract and is not required for the worker/queue model in this codebase.
 
 ### 6. Install Python dependencies for native agent functions
 

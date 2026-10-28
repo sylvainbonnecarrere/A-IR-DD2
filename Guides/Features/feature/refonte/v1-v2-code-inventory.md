@@ -21,7 +21,38 @@ La cible canonique reste V2. Les surfaces V1 encore presentes sont tolerees uniq
 - `MIGRATION` : bootstrap, schema, adaptation ou conversion necessaire a la convergence V1 -> V2.
 - `TEST_ONLY` : test, fixture ou support QA sans autorite de production.
 
-## 3. Constats structurants J0
+## 3. Phase 0 - checklist d'implementation et de validation
+
+Le present document sert de trace de mise en oeuvre de la phase J0 et doit rester en coherence avec le backlog principal : [Guides/Features/feature/refonte/backlog/v1-v2-refonte-backlog.md](Guides/Features/feature/refonte/backlog/v1-v2-refonte-backlog.md).
+
+### 3.1 Checklist technique et architecture
+
+- [x] Audit reproductible de l'architecture workflow mis en place via `npm run audit:workflow-architecture`.
+- [x] Inventaire V1/V2 documente et versionne dans ce fichier.
+- [x] Critiques de derive identifiees : `App.tsx`, `backend/src/routes/workflows.routes.ts`, `backend/src/services/databaseInit.ts`, `stores/useWorkflowStore.ts` et `services/workspacePersistenceService.ts`.
+- [x] Classification des surfaces `V1_READ`, `V1_WRITE`, `V2_READ`, `V2_WRITE`, `COMPATIBILITY`, `MIGRATION` et `TEST_ONLY` formalisee.
+- [x] Points d'entree backend et frontend classes par type de lecture / ecriture / compatibilite.
+- [x] Risques de double source de verite explicitement identifies et documentes.
+- [x] Gardes-fous anti-derive documentes comme obligation de stabilisation avant J1 et J2.
+- [x] Exigence de non-regression sur les fixtures QA / BDD listée comme contrainte de migration.
+
+### 3.2 Checklist de validation de la phase J0
+
+- [x] Audit strict execute avec `--strict` et resultat exploitable.
+- [x] Carte des surfaces legacy et V2 presente dans l'inventaire.
+- [x] Fichiers de refonte structurants identifies : `Guides/Features/feature/refonte/`, `backend/src/routes/workflows.routes.ts`, `backend/src/services/databaseInit.ts` et `App.tsx`.
+- [x] Risque de persistance hybride documente comme une dette architecture a neutraliser plus tard.
+- [x] Critere d'arret J0 : aucune nouvelle ecriture metier V1 ne doit etre introduite lors des jalons suivants.
+- [x] Compatibilite transitoire maintenue comme mesure de securite, sans faire d'un pont legacy une autorite de donnees.
+
+### 3.3 Point de validation des impacts QA
+
+- [x] Surface `tests/fixtures/workspaceHydration.fixtures.ts` reconnue comme `TEST_ONLY` et reference contractuelle de l'hydratation V2.
+- [x] Surface `backend/src/__tests__/workspace-snapshot.test.ts` reconnue comme reference de non-regression du snapshot unifie.
+- [x] Surface `backend/src/services/databaseInit.ts` reconnue comme `MIGRATION` et zone critique a separer en J3.
+- [x] Les changements sur fixtures et seeds sont conditionnes a une evolution fonctionnelle identifiee, jamais a une simple correction de test.
+
+## 4. Constats structurants J0
 
 - L'autorite d'hydratation authentifiee est backend via `GET /api/user/workspace` et `buildWorkspaceSnapshot`.
 - `App.tsx` et `hooks/useWorkspaceHydrationOrchestrator.ts` restent le point d'entree frontend principal de rehydratation et de reconstitution de l'etat interactif.

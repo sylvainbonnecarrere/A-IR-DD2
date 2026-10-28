@@ -306,7 +306,7 @@ describe('Auth and workflow routes', () => {
         expect(persistedUser?.lastActiveWorkflowId?.toString()).toBe(secondWorkflow.id);
     });
 
-    it('marks legacy V1 workflow mutation routes with deprecation headers', async () => {
+    it('returns a permanent deprecation response for legacy V1 workflow mutation routes', async () => {
         const fixture = await createUserFixture('legacy-route');
         const workflow = await Workflow.create({
             userId: fixture.user._id,
@@ -320,10 +320,16 @@ describe('Auth and workflow routes', () => {
             .patch(`/api/workflows/${workflow.id}/nodes/missing-node/position`)
             .set('Authorization', `Bearer ${fixture.accessToken}`)
             .send({ x: 10, y: 20 })
-            .expect(404);
+            .expect(410);
 
         expect(response.headers.warning).toContain('Deprecated workflow V1 route');
         expect(response.headers['x-workflow-legacy-route']).toBe('nodePositionPatch');
+        expect(response.body).toEqual(expect.objectContaining({
+            code: 'WORKFLOW_V1_ENDPOINT_DEPRECATED',
+            error: 'Workflow V1 legacy endpoint is no longer available',
+            workflowId: workflow.id,
+            route: 'nodePositionPatch',
+        }));
         expect(Number(response.headers['x-workflow-legacy-count'])).toBeGreaterThanOrEqual(1);
     });
 

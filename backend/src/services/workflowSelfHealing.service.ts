@@ -154,9 +154,7 @@ export class WorkflowSelfHealingService {
                 zoom: 1,
                 panX: 0,
                 panY: 0
-            },
-            nodes: [],
-            edges: []
+            }
         });
         
         await workflow.save();
@@ -249,9 +247,7 @@ export class WorkflowSelfHealingService {
                 zoom: 1,
                 panX: 0,
                 panY: 0
-            },
-            nodes: [],
-            edges: []
+            }
         });
         
         await workflow.save();

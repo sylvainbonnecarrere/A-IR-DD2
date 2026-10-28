@@ -8,12 +8,13 @@ describe('TaskInstance domain contract', () => {
     it('accepts the canonical task statuses', () => {
         expect(TaskInstanceStatusSchema.safeParse('pending').success).toBe(true);
         expect(TaskInstanceStatusSchema.safeParse('cancelled').success).toBe(true);
-        expect(TaskInstanceStatusSchema.safeParse('timed_out').success).toBe(false);
+        expect(TaskInstanceStatusSchema.safeParse('timed_out').success).toBe(true);
     });
 
     it('declares legal task transitions', () => {
         expect(canTransitionTaskInstance('pending', 'ready')).toBe(true);
         expect(canTransitionTaskInstance('running', 'completed')).toBe(true);
+        expect(canTransitionTaskInstance('running', 'timed_out')).toBe(true);
         expect(canTransitionTaskInstance('completed', 'running')).toBe(false);
     });
 
