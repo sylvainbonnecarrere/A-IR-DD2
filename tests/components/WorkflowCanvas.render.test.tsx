@@ -411,6 +411,16 @@ describe('WorkflowCanvas render smoke test', () => {
         }
     });
 
+    it('resets any scroll offset applied to the canvas root so nodes, minimap and controls never shift', () => {
+        const { container } = render(<WorkflowCanvas workflowName="QA Workflow" />);
+        const canvasRoot = container.firstElementChild as HTMLElement;
+
+        canvasRoot.scrollTop = 137;
+        canvasRoot.dispatchEvent(new Event('scroll'));
+
+        expect(canvasRoot.scrollTop).toBe(0);
+    });
+
     it('renders without crashing when diagnostics are enabled in development', () => {
         render(<WorkflowCanvas workflowName="QA Workflow" />);
 

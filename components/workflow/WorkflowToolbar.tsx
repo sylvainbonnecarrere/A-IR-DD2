@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { PlayIcon, PauseIcon, StopIcon, SaveIcon, DownloadIcon, UploadIcon, 
+import { PlayIcon, PauseIcon, StopIcon, DownloadIcon,
          CheckCircleIcon, ExclamationTriangleIcon, CogIcon } from '../Icons';
 import { useWorkflowStore } from '../../stores/useWorkflowStore';
+import { useDesignStore } from '../../stores/useDesignStore';
 import { useLocalization } from '../../hooks/useLocalization';
 import WorkflowRunService from '../../services/workflowRunService';
 import { resolveRuntimeActionPolicy } from '../../services/runtimeActionPolicy';
@@ -16,13 +17,14 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
   const {
     currentWorkflow,
     execution,
-    saveWorkflow,
     executeWorkflow,
     pauseExecution,
     stopExecution,
     toggleConfigPanel,
     isConfigPanelOpen
   } = useWorkflowStore();
+  const nodes = useDesignStore((state) => state.nodes);
+  const edges = useDesignStore((state) => state.edges);
 
   const [serverRunStatus, setServerRunStatus] = useState<FunctionRunRecord['status'] | null>(null);
   const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
@@ -70,19 +72,19 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
       return warnings;
     }
     
-    if (currentWorkflow.nodes.length === 0) {
+    if (nodes.length === 0) {
       warnings.push(t('workflow.validation.noNodes'));
     }
     
     // Check for disconnected nodes
     const connectedNodes = new Set<string>();
-    currentWorkflow.edges.forEach(edge => {
+    edges.forEach(edge => {
       connectedNodes.add(edge.source);
       connectedNodes.add(edge.target);
     });
     
-    const disconnectedNodes = currentWorkflow.nodes.filter(node => 
-      !connectedNodes.has(node.id) && currentWorkflow.nodes.length > 1
+    const disconnectedNodes = nodes.filter(node => 
+      !connectedNodes.has(node.id) && nodes.length > 1
     );
     
     if (disconnectedNodes.length > 0) {
@@ -90,11 +92,11 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
     }
     
     // Check for cycles (basic check)
-    const hasStartNode = currentWorkflow.nodes.some(node => 
-      !currentWorkflow.edges.some(edge => edge.target === node.id)
+    const hasStartNode = nodes.some(node => 
+      !edges.some(edge => edge.target === node.id)
     );
     
-    if (!hasStartNode && currentWorkflow.nodes.length > 0) {
+    if (!hasStartNode && nodes.length > 0) {
       warnings.push(t('workflow.validation.noStartNode'));
     }
     
@@ -105,7 +107,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
   const runtimeActionPolicy = resolveRuntimeActionPolicy({
     status: effectiveRunStatus,
     hasWorkflow: Boolean(currentWorkflow),
-    hasNodes: Boolean(currentWorkflow && currentWorkflow.nodes.length > 0),
+    hasNodes: nodes.length > 0,
     isLoading: false,
     isOffline: false,
     isPartial: false,
@@ -129,20 +131,10 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
     setServerRunStatus(refreshed.items[0]?.status ?? null);
   };
   
-  const handleSave = () => {
-    saveWorkflow();
-    // Show save confirmation
-    const button = document.getElementById('save-button');
-    if (button) {
-      button.classList.add('animate-pulse');
-      setTimeout(() => button.classList.remove('animate-pulse'), 1000);
-    }
-  };
-  
   const exportWorkflow = () => {
     if (!currentWorkflow) return;
     
-    const dataStr = JSON.stringify(currentWorkflow, null, 2);
+    const dataStr = JSON.stringify({ ...currentWorkflow, nodes, edges }, null, 2);
     const dataBlob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(dataBlob);
     
@@ -153,30 +145,6 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  };
-  
-  const importWorkflow = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          try {
-            const workflow = JSON.parse(e.target?.result as string);
-            // Validate and import workflow
-            console.log('Import workflow:', workflow);
-            // TODO: Implement workflow import logic
-          } catch (error) {
-            console.error('Failed to import workflow:', error);
-          }
-        };
-        reader.readAsText(file);
-      }
-    };
-    input.click();
   };
   
   const getExecutionStatus = () => {
@@ -299,24 +267,6 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
         {/* Right Section - File Operations */}
         <div className="flex items-center gap-2">
           <button
-            id="save-button"
-            onClick={handleSave}
-            disabled={!currentWorkflow}
-            className={`
-              flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium
-              transition-colors duration-200
-              ${currentWorkflow
-                ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-              }
-            `}
-            title={t('workflow.save')}
-          >
-            <SaveIcon className="w-4 h-4" />
-            {t('workflow.save')}
-          </button>
-          
-          <button
             onClick={exportWorkflow}
             disabled={!currentWorkflow}
             className={`
@@ -330,16 +280,6 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
             title={t('workflow.export')}
           >
             <DownloadIcon className="w-4 h-4" />
-          </button>
-          
-          <button
-            onClick={importWorkflow}
-            className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
-                     text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700
-                     transition-colors duration-200"
-            title={t('workflow.import')}
-          >
-            <UploadIcon className="w-4 h-4" />
           </button>
           
           <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-2"></div>

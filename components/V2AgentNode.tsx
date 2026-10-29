@@ -439,7 +439,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   const [webSearchResults, setWebSearchResults] = useState<{ text: string; webSources: any[] }>({ text: '', webSources: [] });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const bosHydrationFingerprintRef = useRef<string>('');
   const hydrationControlsReadyRef = useRef(false);
   const pendingLocalToolMessageIdsRef = useRef<Record<string, string>>({});
@@ -481,10 +481,11 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     }
   }, [id]);
 
-  // Auto-scroll to bottom
+  // Never use scrollIntoView here: it scrolls every ancestor, including the overflow:hidden canvas root.
   useEffect(() => {
-    if (!isMinimized) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!isMinimized && container) {
+      container.scrollTop = container.scrollHeight;
     }
   }, [messages, isMinimized]);
 
@@ -1797,6 +1798,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
           {/* Messages - Text selectable avec nodrag pour empêcher complètement le drag */}
           <div
+            ref={messagesContainerRef}
             className="flex-1 overflow-y-auto p-3 space-y-2 nodrag
                        scrollbar-thin scrollbar-track-gray-800/50 scrollbar-thumb-cyan-500/60 
                        hover:scrollbar-thumb-cyan-400/80 scrollbar-thumb-rounded-full
@@ -1833,7 +1835,6 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
               </div>
             )}
 
-            <div ref={messagesEndRef} />
           </div>
 
           {/* Input Area - nodrag pour empêcher le drag pendant la saisie */}

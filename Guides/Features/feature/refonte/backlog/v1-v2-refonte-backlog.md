@@ -751,6 +751,33 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - comportement de reconnexion defini ;
 - tests d'interaction et de non-regression sur les parcours critiques.
 
+### Etat de contexte J5 au 2026-10-29 (relecture de validation)
+
+**Verdict : J5 partiellement realise. Le handoff vers `08-testeur-e2e.agent.md` n'est pas donne.** Le jalon J6 ne doit pas demarrer tant que les ecarts ci-dessous ne sont pas fermes.
+
+**Realise et verifie**
+- US-J5-01 : l'orchestration hydratation / bascule de workflow est sortie de `App.tsx` (`hooks/useAppWorkflowController.ts`, `hooks/useWorkspaceHydrationOrchestrator.ts`) ; `useDesignStore` est la source canonique de l'identite workflow, `WorkflowCanvas` ne lit plus `useWorkflowStore` pour l'identifiant.
+- US-J5-02 (partiel) : `services/workflowRunService.ts` expose lancement, lecture et annulation via `/api/runs` (V2, idempotence geree cote backend) ; `services/runtimeActionPolicy.ts` desactive les actions selon l'etat serveur.
+- US-J5-03 (partiel) : `App.tsx` branche `webSocketService` (`runtimeEvent`, etat de connexion) sur `useRuntimeStore` (`runStatuses`, `taskStatuses`, `runtimeConnectionState`), couvert par `tests/stores/useRuntimeStore.runtime-events.test.ts`.
+- Stabilite du canvas : le viewport par workflow est restaure au retour sur la carte (correctif du decalage haut/gauche, reproduit puis valide en navigateur reel par `tests/fonctionnels/WorkflowCanvas.route-reentry.semi-e2e.spec.ts` avec des agents authentifies).
+- Verts au 2026-10-29 : `npm run test:integration:hydration` (3), `npm run test:components:ci` (31 suites, 109 tests), `npm run test:canvas:non-regression` (11), jest `tests/unitaires` + `tests/fonctionnels` (53 suites au total avec les precedentes), `npm run audit:workflow-architecture:strict` (OK).
+
+**Ecarts restants avant handoff J6 (mise a jour 2026-10-29)**
+1. A implementer, documente dans `Guides/Features/WORKFLOWLINKS/README.md` : `components/workflow/WorkflowToolbar.tsx` n'est monte nulle part dans l'application (seulement dans ses tests) : aucune commande de run n'est accessible a l'utilisateur.
+2. A implementer, documente dans `Guides/Features/WORKFLOWLINKS/README.md` : `Reprendre` relance un nouveau run, `Pause` et `Arreter` appellent tous deux `cancelRun`, et l'annulation n'a pas de confirmation.
+3. A implementer, documente dans `Guides/Features/WORKFLOWLINKS/README.md` : `useRuntimeStore.runStatuses`, `taskStatuses` et `runtimeConnectionState` sont alimentes mais aucun composant ne les affiche ; la toolbar passe `isOffline` et `isPartial` a `false` en dur.
+4. **CORRIGE le 2026-10-29** : `useWorkflowStore` ne conserve plus de graphe (plus de `nodes` / `edges`, de liste `workflows` ni de persistance locale `workflow-editor-data`) ; la toolbar lit le graphe dans `useDesignStore`. `NodeConfigPanel` et `useWorkflowIntegration` (sans importeur, dependants de l'agregat local) sont supprimes. Suite jest complete verte : 90 suites, 541 tests.
+5. Reporte dans un autre backlog : `WorkspacePersistenceService.saveEdges` reste en place pour le seul mode invite et leve une erreur en mode authentifie ; son usage par le front applicatif est a confirmer avant retrait.
+6. Reporte dans un autre backlog : tests manquants (interaction de reconnexion socket, affichage des statuts temps reel, parcours lancer / annuler / reprendre depuis l'UI).
+
+**Consigne au prochain agent front (`06-frontend.agent.md`)** : implementer les ecarts 1 a 3 selon `Guides/Features/WORKFLOWLINKS/README.md`, traiter les ecarts 5 et 6 via leur backlog dedie, puis mettre a jour cet etat et seulement alors transmettre a `08-testeur-e2e.agent.md`.
+
+**Anticipation du TODO - Gate de cutover V2 (section 13)**
+- Audit architecture V1/V2 strict : OK, aucune lecture legacy critique (reste `COMPATIBILITY` documente).
+- Migrations, transitions, resilience : valides (J3 / J4), non modifies par ce chantier.
+- Front sans verite locale V1 : atteint pour le graphe (ecart 4 ferme) ; le gate reste conditionnel a la fermeture des ecarts 1 a 3 (commandes de run accessibles) et 5 a 6.
+- Fixtures QA : aucune fixture d'hydratation modifiee ; `tests/builders/storeStateBuilders.ts` etendu pour l'etat de viewport (changement UI uniquement, sans contrat serveur).
+
 ## J6 - Validation finale de livraison
 
 **Agent pilote :** `08-testeur-e2e.agent.md` - Testeur E2E final
@@ -877,7 +904,7 @@ Toute suppression de fichier ou dossier legacy doit etre precedee d'un inventair
 - `App.tsx` est une zone a haut risque de regression car il centralise encore hydratation, persistance et navigation.
 - `backend/src/routes/**` est une zone a haut risque de derive car elle melange historiquement plusieurs generations de contrats.
 - `backend/src/services/databaseInit.ts` est une zone a haut risque car elle concentre bootstrap, migration et seed.
-- `stores/useWorkflowStore.ts` reste une surface de derive frontend car il maintient encore un aggregate local `Workflow` avec `nodes` et `edges`.
+- `stores/useWorkflowStore.ts` ne maintient plus d'agregat local `Workflow` avec `nodes` et `edges` (retire le 2026-10-29) ; il ne porte que les metadonnees du workflow courant et l'etat de run.
 - `services/workspacePersistenceService.ts` reste une surface de derive frontend car `saveEdges()` pointe encore vers un write path legacy `/api/workflows/:id/edges`.
 - `backend/src/websocket/WebSocketManager.ts` doit etre traite comme surface de securite et de coherence runtime, pas comme simple detail technique.
 - Toute user story touchant les statuts de run ou task doit verifier l'impact sur le temps reel, les retries et les annulations.

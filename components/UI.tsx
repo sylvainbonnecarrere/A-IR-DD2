@@ -46,7 +46,7 @@ export const Modal = ({ title, isOpen, onClose, children, size = 'md', ...props 
 
       // Focus sur le modal après un court délai pour assurer le rendu
       setTimeout(() => {
-        modalRef.current?.focus();
+        modalRef.current?.focus({ preventScroll: true });
       }, 10);
 
       // Bloquer le scroll du body
@@ -54,7 +54,7 @@ export const Modal = ({ title, isOpen, onClose, children, size = 'md', ...props 
     } else {
       // Restaurer le focus à l'élément précédent
       if (previousActiveElement.current) {
-        previousActiveElement.current.focus();
+        previousActiveElement.current.focus({ preventScroll: true });
       }
 
       // Restaurer le scroll
