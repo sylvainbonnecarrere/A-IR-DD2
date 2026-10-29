@@ -23,6 +23,11 @@ const instances = prototypes.map((prototype, index) => {
         workflowId,
         name: prototype.name,
         position,
+        chatMessages: Array.from({ length: 30 }, (_, messageIndex) => ({
+            sender: messageIndex % 2 === 0 ? 'user' : 'agent',
+            text: `Message ${messageIndex} ${'long '.repeat(20)}`,
+            timestamp: now,
+        })),
         isMinimized: false,
         isMaximized: false,
         configuration_json: {
@@ -100,7 +105,20 @@ async function snapshot(page: Page) {
             const rect = el.getBoundingClientRect();
             return { id: el.getAttribute('data-id'), x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width) };
         });
-        return { transform: viewport?.style.transform ?? null, nodes };
+        const rectOf = (selector: string) => {
+            const rect = document.querySelector(selector)?.getBoundingClientRect();
+            return rect ? { x: Math.round(rect.x), y: Math.round(rect.y) } : null;
+        };
+        const scrolled = Array.from(document.querySelectorAll('*'))
+            .filter((el) => (el as HTMLElement).scrollTop > 0 && !(el as HTMLElement).className?.toString().includes('overflow-y-auto'))
+            .map((el) => `${el.tagName}.${(el as HTMLElement).className?.toString().slice(0, 40)}:${(el as HTMLElement).scrollTop}`);
+        return {
+            transform: viewport?.style.transform ?? null,
+            nodes,
+            minimap: rectOf('.workflow-minimap-fixed'),
+            controls: rectOf('.workflow-controls-fixed'),
+            scrolled,
+        };
     });
 }
 
@@ -113,6 +131,7 @@ test('les nodes gardent la meme position apres navigation vers un autre ecran et
     const before = await snapshot(page);
     console.log('BEFORE', JSON.stringify(before));
     expect(before.nodes.length).toBe(3);
+    expect(before.scrolled).toEqual([]);
 
     for (let i = 0; i < 2; i += 1) {
         await page.getByRole('button', { name: 'Phil' }).click();
@@ -125,6 +144,9 @@ test('les nodes gardent la meme position apres navigation vers un autre ecran et
         const after = await snapshot(page);
         console.log(`AFTER${i}`, JSON.stringify(after));
         expect(after.nodes).toEqual(before.nodes);
+        expect(after.minimap).toEqual(before.minimap);
+        expect(after.controls).toEqual(before.controls);
+        expect(after.scrolled).toEqual([]);
         expect(after.transform).toBe(before.transform);
     }
 });

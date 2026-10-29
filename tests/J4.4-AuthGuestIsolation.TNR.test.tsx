@@ -142,12 +142,10 @@ describe('J4.4 TNR - Security: Guest ↔ Auth Data Isolation', () => {
             console.log('🔵 [AUTH SESSION] Creating auth workflow...');
             const workflowStore = useWorkflowStore.getState();
             
-            // createWorkflow returns workflow ID
-            const workflowId = workflowStore.createWorkflow('Auth User Workflow', RobotId.Archi);
+            workflowStore.hydrateWorkflowFromServer({ id: 'wf-auth-1', name: 'Auth User Workflow' });
             
             const freshWorkflowStore = useWorkflowStore.getState();
-            expect(freshWorkflowStore.workflows.length).toBe(1);
-            expect(freshWorkflowStore.workflows[0].name).toBe('Auth User Workflow');
+            expect(freshWorkflowStore.currentWorkflow?.name).toBe('Auth User Workflow');
             console.log('✅ Auth workflow created');
             
             // === ÉTAPE 2: SIMULATION LOGOUT ===
@@ -158,7 +156,7 @@ describe('J4.4 TNR - Security: Guest ↔ Auth Data Isolation', () => {
             const workflowStoreAfterLogout = useWorkflowStore.getState();
             
             // ⚠️ ASSERTION CRITIQUE: Workflow auth ne doit PAS être visible en guest
-            expect(workflowStoreAfterLogout.workflows.length).toBe(0);
+            expect(workflowStoreAfterLogout.currentWorkflow).toBeNull();
             
             console.log('✅ SECURITY PASSED: Auth workflow does NOT leak to guest');
         });

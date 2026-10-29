@@ -130,3 +130,10 @@ La main est transmise à `06-frontend.agent.md` pour le `J5 - Cutover frontend V
 ## 9. Verdict de gate
 
 Le bloc 3 est conforme au plan : il est possible de relancer les migrations sans doublon, de réexécuter les validations de workflow sans corruption du graphe, et de prouver que V2 est l’unique source de vérité opérationnelle pour le graphe workflow, avec compatibilité legacy explicitement réduite à une couche de signalement / non-exposition. La migration de fond J3-02 est validée et le cutover opérationnel associé est désormais verrouillé pour la suite du jalon J3.
+
+## 10. Etat de J5 au 2026-10-29 (anticipation du gate)
+
+J5 est partiellement realise : hydratation et bascule de workflow decouplees de `App.tsx`, runs lances / lus / annules via `/api/runs`, evenements runtime versionnes stockes dans `useRuntimeStore`, viewport du canvas restaure au retour sur la carte (valide en navigateur reel).
+
+Ecarts restants avant handoff vers `08-testeur-e2e.agent.md` : `WorkflowToolbar` non monte, reprise / confirmation d'annulation, statuts temps reel et etats offline / partial non affiches (specifies dans `Guides/Features/WORKFLOWLINKS/README.md`), plus deux ecarts reportes dans un autre backlog (`saveEdges`, tests de reconnexion et de parcours). L'agregat local `useWorkflowStore` (nodes / edges) a ete retire le 2026-10-29 : le graphe n'a plus qu'une source, `useDesignStore`. Le gate reste conditionnel a la fermeture de J5. Detail : section "Etat de contexte J5" du backlog.
+

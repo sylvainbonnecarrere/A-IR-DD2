@@ -360,15 +360,14 @@ describe('Security Wipe on Auth Change', () => {
         const store = useWorkflowStore.getState();
         
         // Simulate user data
+        store.hydrateWorkflowFromServer({ id: 'wf-1', name: 'Test' });
         store.markDirty('test');
-        store.createWorkflow('Test', 'archi' as any);
         
         // Simulate logout wipe
         store.resetAll();
         
         const state = useWorkflowStore.getState();
         expect(state.currentWorkflow).toBeNull();
-        expect(state.workflows).toHaveLength(0);
         expect(state.isDirty).toBe(false);
         expect(state.lastSynced).toBeNull();
     });

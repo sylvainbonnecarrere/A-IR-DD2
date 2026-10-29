@@ -24,7 +24,7 @@ import { AgentFormModal } from './modals/AgentFormModal';
 import { SavePrototypeButton } from './SavePrototypeButton';
 import { AutoSaveIndicator } from './AutoSaveIndicator';
 import { useAutoSave } from '../hooks/useAutoSave';
-import { Agent, AgentDraft, WorkflowNode, LLMConfig, AgentInstance, NodePositionUpdateOptions, RobotId, V2WorkflowNode, ChatMessage, MapsPanelPreloadedResults } from '../types';
+import { Agent, AgentDraft, WorkflowNode, LLMConfig, AgentInstance, NodePositionUpdateOptions, RobotId, ChatMessage, MapsPanelPreloadedResults } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useAuth } from '../contexts/AuthContext';
 import { isValidWorkflowConnection } from './workflow/connectionContracts';
@@ -67,7 +67,6 @@ const EDGE_TYPES = Object.freeze({});
 const REACT_FLOW_STYLE = Object.freeze({ background: 'transparent' });
 const DEFAULT_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 0.7 });
 const PRO_OPTIONS = Object.freeze({ hideAttribution: true });
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 const createMutableArray = <T,>(): T[] => Array.from<T>({ length: 0 });
 const EMPTY_WORKFLOW_NODES = createMutableArray<WorkflowNode>();
 const EMPTY_LLM_CONFIGS = createMutableArray<LLMConfig>();
@@ -118,8 +117,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     onOpenFullscreen,
     agents = EMPTY_AGENTS,
     onAddToWorkflow,
-    onUpdateWorkflowNode,
-    onRemoveFromWorkflow,
     onNavigate,
     // ⭐ ÉTAPE 2: Persistence props
     workflowId: workflowIdProp,
@@ -838,6 +835,29 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     };
   }, []);
 
+  // The canvas is overflow:hidden, so a focus or scrollIntoView elsewhere in the tree can still scroll it
+  // and drag nodes, minimap and controls up together; the viewport is only ever moved through React Flow.
+  useEffect(() => {
+    const root = canvasRootRef.current;
+    if (!root) {
+      return undefined;
+    }
+
+    const lockedElements = [root, root.parentElement];
+    const resetScroll = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (lockedElements.includes(target) || target.classList?.contains('react-flow'))
+        && (target.scrollTop !== 0 || target.scrollLeft !== 0)) {
+        target.scrollTop = 0;
+        target.scrollLeft = 0;
+      }
+    };
+
+    // Scroll events do not bubble: capture on the document to see them on every locked ancestor.
+    document.addEventListener('scroll', resetScroll, true);
+    return () => document.removeEventListener('scroll', resetScroll, true);
+  }, []);
+
   useEffect(() => {
     if (reactFlowNodes.length === 0) {
       if (!initialViewportSettledRef.current && !viewportCenterRequestRef.current) {
@@ -935,7 +955,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     // Forcer le focus sur le pane React Flow pour restaurer le curseur
     const pane = event.target.closest('.react-flow__pane');
     if (pane) {
-      pane.focus();
+      pane.focus({ preventScroll: true });
     }
     // Désélectionner tous les nodes en cliquant sur le canvas vide
     setReactFlowNodes(nodes => nodes.map(node => ({ ...node, selected: false })));

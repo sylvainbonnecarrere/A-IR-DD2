@@ -47,7 +47,7 @@ const TestComponent: React.FC<{ onDone: (result: any) => void }> = ({ onDone }) 
         designAgents: (design.agents || []).length,
         designInstances: (design.agentInstances || []).length,
         nodes: (design.nodes || []).length,
-        workflowWorkflows: (workflow.workflows || []).length,
+        workflowWorkflows: workflow.currentWorkflow ? 1 : 0,
         runtimeSessions: ((runtime as any).sessions ? (runtime as any).sessions.length : undefined),
       };
 
@@ -66,7 +66,7 @@ test('J4.4 - logout clears guest storage and resets stores', async () => {
 
   // 2) Seed some store data (simulate guest in-memory state)
   useDesignStore.setState({ agents: [{ id: 'a1' }], agentInstances: [{ id: 'i1', prototypeId: 'a1' }], nodes: [{ id: 'node-i1', data: { agentInstance: { id: 'i1' } } } ] } as any);
-  useWorkflowStore.setState({ workflows: [{ _id: 'wf-1', userId: 'u-1', name: 'W1', isActive: true, isDefault: false, createdAt: new Date(), updatedAt: new Date() }], currentWorkflowId: 'wf-1' } as any);
+  useWorkflowStore.setState({ currentWorkflow: { id: 'wf-1', name: 'W1', isActive: true, isDefault: false } });
   // runtime store shape is less strict — set a sessions array if present
   try { useRuntimeStore.setState({ sessions: [{ id: 's1' }] } as any); } catch {}
 

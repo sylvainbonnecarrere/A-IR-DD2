@@ -4,25 +4,25 @@ import { WorkflowToolbar } from '../../components/workflow/WorkflowToolbar';
 import WorkflowRunService from '../../services/workflowRunService';
 
 let mockStoreState = {
-  currentWorkflow: {
-    id: 'wf-1',
-    name: 'Demo workflow',
-    description: '',
-    nodes: [{ id: 'n-1', type: 'archi', position: { x: 0, y: 0 }, data: { label: 'Node 1', type: 'agent' } }],
-    edges: [],
-    variables: {},
-    created_at: '2026-01-01T00:00:00.000Z',
-    updated_at: '2026-01-01T00:00:00.000Z',
-    creator_id: 'archi',
-  },
+  currentWorkflow: { id: 'wf-1', name: 'Demo workflow', description: '' },
   execution: null,
-  saveWorkflow: jest.fn(),
   executeWorkflow: jest.fn(),
   pauseExecution: jest.fn(),
   stopExecution: jest.fn(),
   toggleConfigPanel: jest.fn(),
   isConfigPanelOpen: false,
 };
+
+const mockDesignState = {
+  nodes: [{ id: 'n-1', type: 'archi', position: { x: 0, y: 0 }, data: { label: 'Node 1', type: 'agent' } }],
+  edges: [],
+};
+
+jest.mock('../../stores/useDesignStore', () => ({
+  useDesignStore: (selector?: (state: typeof mockDesignState) => unknown) => (
+    selector ? selector(mockDesignState) : mockDesignState
+  ),
+}));
 
 jest.mock('../../hooks/useLocalization', () => ({
   useLocalization: () => ({
@@ -49,20 +49,10 @@ const mockedWorkflowRunService = WorkflowRunService as jest.Mocked<typeof Workfl
 describe('WorkflowToolbar runtime gating', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockDesignState.nodes = [{ id: 'n-1', type: 'archi', position: { x: 0, y: 0 }, data: { label: 'Node 1', type: 'agent' } }];
     mockStoreState = {
-      currentWorkflow: {
-        id: 'wf-1',
-        name: 'Demo workflow',
-        description: '',
-        nodes: [{ id: 'n-1', type: 'archi', position: { x: 0, y: 0 }, data: { label: 'Node 1', type: 'agent' } }],
-        edges: [],
-        variables: {},
-        created_at: '2026-01-01T00:00:00.000Z',
-        updated_at: '2026-01-01T00:00:00.000Z',
-        creator_id: 'archi',
-      },
+      currentWorkflow: { id: 'wf-1', name: 'Demo workflow', description: '' },
       execution: null,
-      saveWorkflow: jest.fn(),
       executeWorkflow: jest.fn(),
       pauseExecution: jest.fn(),
       stopExecution: jest.fn(),
@@ -81,6 +71,14 @@ describe('WorkflowToolbar runtime gating', () => {
 
     const executeButton = await screen.findByRole('button', { name: /Execute/i });
     expect(executeButton).toBeEnabled();
+  });
+
+  it('disables launch when the V2 design graph has no node', async () => {
+    mockDesignState.nodes = [];
+
+    render(<WorkflowToolbar />);
+
+    expect(await screen.findByRole('button', { name: /Execute/i })).toBeDisabled();
   });
 
   it('disables launch and exposes stop controls while a run is active', async () => {
