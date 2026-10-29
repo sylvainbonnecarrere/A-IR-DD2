@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, AgentDraft, LLMConfig, RobotId, PersistenceConfig } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
-import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useAuth } from '../contexts/AuthContext';
 import { AgentFormModal } from './modals/AgentFormModal';
 import { AgentDeletionConfirmModal } from './modals/AgentDeletionConfirmModal';
@@ -39,9 +38,9 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
   // ⭐ Auth context pour persistence MongoDB (users connectés uniquement)
   const { isAuthenticated, accessToken } = useAuth();
   
-  // ⭐ V2: Current workflow ID for scoping prototypes to active workflow
-  const currentWorkflowId = useWorkflowStore(state => state.getCurrentWorkflowId());
-  
+  // ⭐ V2: current workflow identity comes exclusively from the design store
+  const currentWorkflowId = useDesignStore(state => state.currentWorkflowId);
+
   const {
     agents,
     currentRobotId,

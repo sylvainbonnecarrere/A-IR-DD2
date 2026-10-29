@@ -21,7 +21,7 @@ function normalizeWorkflowId(value: string | null | undefined): string | null {
 export function resolveActiveWorkflowId({
   designWorkflowId,
   designWorkflows = [],
-  legacyWorkflowId,
+  legacyWorkflowId: _legacyWorkflowId,
 }: ResolveActiveWorkflowIdParams): string | null {
   const explicitDesignWorkflowId = normalizeWorkflowId(designWorkflowId);
   if (explicitDesignWorkflowId) {
@@ -42,5 +42,5 @@ export function resolveActiveWorkflowId({
     return firstDesignWorkflowId;
   }
 
-  return normalizeWorkflowId(legacyWorkflowId);
+  return null;
 }

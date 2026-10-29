@@ -3,6 +3,18 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useAppWorkflowController } from '../../hooks/useAppWorkflowController';
 import apiClient from '../../utils/apiClient';
 
+jest.mock('../../stores/useDesignStore', () => ({
+  useDesignStore: Object.assign(
+    () => ({ currentWorkflowId: 'wf-1' }),
+    {
+      getState: () => ({
+        currentWorkflowId: 'wf-1',
+        loadUserWorkflows: jest.fn().mockResolvedValue(undefined),
+      }),
+    },
+  ),
+}));
+
 jest.mock('../../utils/apiClient', () => ({
   __esModule: true,
   default: {
@@ -65,12 +77,27 @@ describe('useAppWorkflowController', () => {
   });
 
   it('switches to a workflow by posting the selected workflow snapshot', async () => {
+    const designStoreMock = require('../../stores/useDesignStore').useDesignStore;
+    designStoreMock.getState = jest.fn(() => ({ currentWorkflowId: null }));
+
     render(<TestHarness />);
 
     fireEvent.click(screen.getByRole('button', { name: 'idle' }));
 
     await waitFor(() => {
       expect(mockPost).toHaveBeenCalledWith('/api/workflows/wf-1/select');
+    });
+  });
+
+  it('skips the select request when the workflow is already active', async () => {
+    const designStoreMock = require('../../stores/useDesignStore').useDesignStore;
+    designStoreMock.getState = jest.fn(() => ({ currentWorkflowId: 'wf-1' }));
+
+    render(<TestHarness />);
+    fireEvent.click(screen.getByRole('button', { name: 'idle' }));
+
+    await waitFor(() => {
+      expect(mockPost).not.toHaveBeenCalled();
     });
   });
 });

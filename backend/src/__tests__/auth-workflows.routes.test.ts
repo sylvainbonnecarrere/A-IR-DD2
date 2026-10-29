@@ -499,6 +499,39 @@ describe('Auth and workflow routes', () => {
         }));
     });
 
+    it('self-heals stale agent-instance references before activation when the workflow graph is otherwise valid', async () => {
+        const fixture = await createUserFixture('self-heal-invalid-node');
+        const workflow = await Workflow.create({
+            userId: fixture.user._id,
+            name: 'Self-heal workflow',
+            isActive: false,
+            isDefault: false,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const staleInstanceId = new mongoose.Types.ObjectId();
+        await WorkflowNodeV2.create({
+            workflowId: workflow._id,
+            ownerId: fixture.user._id,
+            nodeType: 'agent',
+            instanceId: staleInstanceId,
+            position: { x: 10, y: 20 },
+            uiConfig: { label: 'Broken agent node', expanded: true }
+        });
+
+        const response = await request(app)
+            .post(`/api/workflows/${workflow.id}/select`)
+            .set('Authorization', `Bearer ${fixture.accessToken}`)
+            .expect(200);
+
+        expect(response.body.success).toBe(true);
+        expect(response.body.workflow).toEqual(expect.objectContaining({
+            isActive: true,
+            isDefault: true,
+        }));
+        expect(await WorkflowNodeV2.countDocuments({ workflowId: workflow._id })).toBe(0);
+    });
+
     it('rejects workflow activation when the V2 graph contains an invalid agent node reference', async () => {
         const fixture = await createUserFixture('invalid-select');
         const workflow = await Workflow.create({

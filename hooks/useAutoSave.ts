@@ -20,7 +20,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useSaveModeStore } from '../stores/useSaveModeStore';
-import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useAuth } from '../contexts/AuthContext';
 import { PersistenceService } from '../services/persistenceService';
 
@@ -81,9 +80,8 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
   const [error, setError] = useState<string | null>(null);
 
   const { isAuthenticated, accessToken } = useAuth();
-  const { nodes, edges } = useDesignStore();
+  const { nodes, edges, currentWorkflowId: designCurrentWorkflowId } = useDesignStore();
   const { isAutoSave } = useSaveModeStore();
-  const { getCurrentWorkflowId } = useWorkflowStore();
 
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const prevNodesRef = useRef<string>('');
@@ -103,8 +101,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
     // Only save if authenticated and auto-save enabled
     if (!isAuthenticated || !accessToken) return;
 
-    const currentWorkflowId = getCurrentWorkflowId();
-    const effectiveWorkflowId = workflowId || currentWorkflowId;
+    const effectiveWorkflowId = workflowId || designCurrentWorkflowId;
     if (!isValidWorkflowId(effectiveWorkflowId)) {
       return;
     }
@@ -172,7 +169,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
     isAuthenticated,
     accessToken,
     workflowId,
-    getCurrentWorkflowId,
+    designCurrentWorkflowId,
     workflowName,
     canvasState,
     nodes,
