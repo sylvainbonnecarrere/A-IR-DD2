@@ -137,6 +137,7 @@ describe('WorkflowCanvas minimize->move->restore', () => {
         });
 
         workflowCanvasHarness.designStore = createDesignStoreTestState({
+            currentWorkflowId: 'wf-1',
             nodes: [
                 createTestCanvasNode({
                     id: 'node-1',

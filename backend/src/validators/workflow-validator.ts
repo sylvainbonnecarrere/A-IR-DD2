@@ -26,6 +26,40 @@ export class WorkflowValidationError extends Error {
 }
 
 export class WorkflowValidator {
+  async selfHealStaleAgentReferences(workflowId: string, userId: string): Promise<{ removedNodeCount: number; removedEdgeCount: number }> {
+    const [nodes, edges, instances] = await Promise.all([
+      WorkflowNodeV2.find({ workflowId, ownerId: userId }).lean(),
+      WorkflowEdge.find({ workflowId, userId }).lean(),
+      AgentInstance.find({ workflowId, userId }).select('_id').lean(),
+    ]);
+
+    const validInstanceIds = new Set(instances.map((instance) => instance._id.toString()));
+    const staleNodeIds = nodes
+      .filter((node) => node.nodeType === 'agent' && !!node.instanceId && !validInstanceIds.has(node.instanceId.toString()))
+      .map((node) => node._id.toString());
+
+    const staleEdgeIds = edges
+      .filter((edge) => {
+        const sourceId = edge.sourceInstanceId?.toString();
+        const targetId = edge.targetInstanceId?.toString();
+        return !sourceId || !targetId || !validInstanceIds.has(sourceId) || !validInstanceIds.has(targetId);
+      })
+      .map((edge) => edge._id?.toString?.() ?? String(edge._id));
+
+    if (staleNodeIds.length > 0) {
+      await WorkflowNodeV2.deleteMany({ _id: { $in: staleNodeIds } });
+    }
+
+    if (staleEdgeIds.length > 0) {
+      await WorkflowEdge.deleteMany({ _id: { $in: staleEdgeIds } });
+    }
+
+    return {
+      removedNodeCount: staleNodeIds.length,
+      removedEdgeCount: staleEdgeIds.length,
+    };
+  }
+
   async validateActivation(workflowId: string, userId: string): Promise<WorkflowValidationResult> {
     const [nodes, edges, instances] = await Promise.all([
       WorkflowNodeV2.find({ workflowId, ownerId: userId }).lean(),

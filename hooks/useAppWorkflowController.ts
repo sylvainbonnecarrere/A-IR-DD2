@@ -99,8 +99,14 @@ export function useAppWorkflowController({
         : 'Chargement du workspace...';
 
   const switchToWorkflow = useCallback(async (workflowId: string, workflowName?: string) => {
+    const activeWorkflowId = useDesignStore.getState().currentWorkflowId;
+
     if (isSwitchingRef.current) {
       console.warn('[AppWorkflowController] Switch already in progress, ignoring');
+      return;
+    }
+    if (activeWorkflowId && activeWorkflowId === workflowId) {
+      console.info('[AppWorkflowController] Workflow already active, skipping duplicate select request');
       return;
     }
     if (isBlockingHydration) {

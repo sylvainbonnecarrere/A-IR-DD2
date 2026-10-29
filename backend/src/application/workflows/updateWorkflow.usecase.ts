@@ -29,6 +29,7 @@ export class UpdateWorkflowUseCase {
 
     if (input.updates.isActive === true) {
       if (this.workflowValidator) {
+        await this.workflowValidator.selfHealStaleAgentReferences(input.workflowId, input.userId);
         this.workflowValidator.assertCanActivate(
           await this.workflowValidator.validateActivation(input.workflowId, input.userId),
         );

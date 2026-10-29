@@ -1,8 +1,19 @@
 # Backlog de refonte V1 -> V2
 
-**Statut :** backlog de mise en oeuvre
-**Date :** 2026-09-30
+**Statut :** backlog validé pour la phase de stabilisation J0/J1
+**Date :** 2026-10-29
 **Source principale :** `Guides/Features/feature/refonte/v1-v2-implementation-plan.md`
+
+## Mise à jour de validation (2026-10-29)
+
+Les garde-fous V1/V2 sont maintenant operationalisés :
+
+- l'inventaire versionné est en place dans `Guides/Features/feature/refonte/v1-v2-code-inventory.md` ;
+- le script d'audit reproductible est validé via `npm run audit:workflow-architecture` et `npm run audit:workflow-architecture:strict` ;
+- le seuil strict ne remonte plus d'`UNKNOWN` sur les surfaces connues ;
+- le plan doit maintenant passer au jalon suivant sans réintroduire de nouvelles écritures métier V1.
+
+Ce dossier est donc aligné sur l'état actuel du code et sert de référence pour le prochain jalon de migration / cutover.
 
 ## 1. Objectif du backlog
 

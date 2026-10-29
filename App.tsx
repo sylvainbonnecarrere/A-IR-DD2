@@ -10,7 +10,6 @@ import { AgentConfigurationModal } from './components/modals/AgentConfigurationM
 import { useRuntimeStore } from './stores/useRuntimeStore';
 import { useDesignStore } from './stores/useDesignStore';
 import { useFunctionStore } from './stores/useFunctionStore';
-import { useWorkflowStore } from './stores/useWorkflowStore';
 import { useAppShellStore } from './stores/useAppShellStore';
 import { NotificationProvider } from './contexts';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -240,17 +239,16 @@ export function AppContent() {
   const designWorkflows = useDesignStore((state) => state.workflows);
   const designCurrentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
 
-  // ⭐ SELF-HEALING: Workflow Store for hydrating workflow ID
-  const getCurrentWorkflowId = useWorkflowStore((state) => state.getCurrentWorkflowId);
-  
+  // ⭐ V2: The design store is the canonical workflow identity source.
+  // Legacy workflow-store fallback is intentionally removed from the active workflow resolver.
+
   // ⭐ FIX QA: Journal queue for persisting generated images
   const { enqueueEntry: enqueueJournalEntry } = useJournalQueue();
 
   const resolveCurrentWorkflowId = useCallback(() => resolveActiveWorkflowId({
     designWorkflowId: designCurrentWorkflowId,
     designWorkflows,
-    legacyWorkflowId: getCurrentWorkflowId(),
-  }), [designCurrentWorkflowId, designWorkflows, getCurrentWorkflowId]);
+  }), [designCurrentWorkflowId, designWorkflows]);
 
   const {
     switchToWorkflow,

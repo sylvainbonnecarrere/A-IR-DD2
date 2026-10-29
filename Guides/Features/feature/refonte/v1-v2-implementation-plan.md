@@ -1,7 +1,7 @@
 # Plan chronologique d'implementation de la refonte V1 -> V2
 
-**Statut :** proposition d'implementation
-**Date :** 2026-09-30
+**Statut :** plan validé sur la phase J0/J1 et prêt pour le jalon suivant
+**Date :** 2026-10-29
 **Sources :**
 - `Guides/Features/feature/workflow-server.md`
 - `Guides/Features/feature/architecture-v1-v2-migration-plan.md`
@@ -180,6 +180,7 @@ Produire la carte exacte des lectures, ecritures et compatibilites V1/V2.
 - aucun `UNKNOWN` ;
 - la CI peut echouer sur une nouvelle regression architecturale.
 - les routes V1 legacy exposent un signal explicite de depreciation et d'usage restant.
+- validation confirmée avec `node scripts/audit-workflow-architecture.ts --strict` (sortie finale : `Audit result: OK`).
 
 ## Phase 2 - Stabilisation des contrats du domaine
 

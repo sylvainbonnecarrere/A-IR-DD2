@@ -72,6 +72,7 @@ const WorkflowPage: React.FC<{
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
   onAddToWorkflow?: (agent: Agent) => void;
   headerActions?: React.ReactNode;
+  currentWorkflowId?: string | null;
 }> = ({
   robotName,
   description,
@@ -88,7 +89,8 @@ const WorkflowPage: React.FC<{
   onOpenMapsPanel,
   onOpenFullscreen,
   onAddToWorkflow,
-  headerActions
+  headerActions,
+  currentWorkflowId,
 }) => {
     return (
       <div className="h-full flex flex-col bg-gray-900 text-gray-100">
@@ -221,6 +223,7 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     onOpenMapsPanel,
     onOpenFullscreen,
     onAddToWorkflow,
+    currentWorkflowId,
   };
 
   const bosMediaHeaderAction = (
@@ -256,6 +259,7 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     case ROBOT_PAGE_ROUTE_IDS.bosDashboard:
       return (
         <WorkflowPage
+          key={`${resolvedRoute}:${currentPath}`}
           robotName={t('page_dashboard_title')}
           description={t('page_dashboard_description')}
           headerActions={bosMediaHeaderAction}
@@ -265,6 +269,7 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     case ROBOT_PAGE_ROUTE_IDS.bosSupervision:
       return (
         <WorkflowPage
+          key={`${resolvedRoute}:${currentPath}`}
           robotName={t('page_bos_supervision_title')}
           description={t('page_bos_supervision_description')}
           headerActions={bosMediaHeaderAction}

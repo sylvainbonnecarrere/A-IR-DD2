@@ -31,11 +31,11 @@ describe('workflowIdResolver', () => {
     })).toBe('wf-first');
   });
 
-  it('uses the legacy workflow id only when the design store has no workflow identity', () => {
+  it('returns null when the design store has no workflow identity and legacy fallback is forbidden', () => {
     expect(resolveActiveWorkflowId({
       designWorkflowId: '',
       designWorkflows: [],
       legacyWorkflowId: 'wf-legacy',
-    })).toBe('wf-legacy');
+    })).toBeNull();
   });
 });

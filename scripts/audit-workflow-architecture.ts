@@ -136,6 +136,14 @@ function classifyOccurrence(relPath, lineText) {
     };
   }
 
+  if (relPath.startsWith('backend/src/application/')) {
+    return {
+      classification: 'COMPATIBILITY',
+      surface: 'application-workflow-usecase',
+      reason: 'Application-layer use case still creates or reads workflow payloads that carry transitional canvas metadata.'
+    };
+  }
+
   if (relPath === 'backend/src/routes/index.ts' || relPath === 'backend/src/server.ts') {
     return {
       classification: 'COMPATIBILITY',

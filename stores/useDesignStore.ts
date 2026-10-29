@@ -57,6 +57,7 @@ interface DesignStore {
   // ⭐ PHASE 2: Multiple Workflows
   workflows: Workflow[];
   currentWorkflowId: string | null;
+  viewportFitHistory: Record<string, string>;
   isLoadingWorkflows: boolean;
   workflowLoadError: string | null;
 
@@ -127,6 +128,8 @@ interface DesignStore {
   // ⭐ PHASE 2: Multiple Workflows Actions
   setWorkflows: (workflows: Workflow[]) => void;
   setCurrentWorkflowId: (id: string | null) => void;
+  markWorkflowViewportFit: (workflowId: string, signature: string) => void;
+  clearWorkflowViewportFit: (workflowId: string) => void;
   loadUserWorkflows: () => Promise<void>;
   createWorkflow: (name: string, description?: string) => Promise<Workflow>;
   updateWorkflow: (id: string, name: string, description?: string, isDefault?: boolean) => Promise<void>;
@@ -217,6 +220,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   // ⭐ PHASE 2: Multiple Workflows - Initial state
   workflows: [],
   currentWorkflowId: null,
+  viewportFitHistory: {},
   isLoadingWorkflows: false,
   workflowLoadError: null,
 
@@ -684,6 +688,23 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   setWorkflows: (workflows) => set({ workflows }),
   
   setCurrentWorkflowId: (id) => set({ currentWorkflowId: id }),
+
+  markWorkflowViewportFit: (workflowId, signature) => set((state) => ({
+    viewportFitHistory: {
+      ...state.viewportFitHistory,
+      [workflowId]: signature,
+    },
+  })),
+
+  clearWorkflowViewportFit: (workflowId) => set((state) => {
+    if (!state.viewportFitHistory[workflowId]) {
+      return {};
+    }
+
+    const nextHistory = { ...state.viewportFitHistory };
+    delete nextHistory[workflowId];
+    return { viewportFitHistory: nextHistory };
+  }),
   
   /**
    * Load all workflows for the current user
@@ -871,6 +892,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     edges: [],
     workflows: [],
     currentWorkflowId: null,
+    viewportFitHistory: {},
     isLoadingWorkflows: false,
     workflowLoadError: null
   }),

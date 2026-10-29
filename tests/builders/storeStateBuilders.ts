@@ -26,6 +26,8 @@ export type DesignStoreTestState = ExtraState & {
   deleteAgentInstance: jest.Mock;
   hydrateFromServer: jest.Mock;
   setCurrentWorkflowId: jest.Mock;
+  markWorkflowViewportFit: jest.Mock;
+  clearWorkflowViewportFit: jest.Mock;
   updateInstanceId: jest.Mock;
   updateAgentInstance: jest.Mock;
   updateAgentId: jest.Mock;
@@ -35,6 +37,7 @@ export type DesignStoreTestState = ExtraState & {
   nodes: Array<V2WorkflowNode | Record<string, unknown>>;
   workflows: Array<Record<string, unknown>>;
   currentWorkflowId: string;
+  viewportFitHistory: Record<string, string>;
   currentRobotId: RobotId | string;
   resetAll: jest.Mock;
   loadUserWorkflows: jest.Mock<Promise<void>, []>;
@@ -83,7 +86,7 @@ export function createRuntimeStoreTestState(
 export function createDesignStoreTestState(
   overrides: Partial<DesignStoreTestState> = {},
 ): DesignStoreTestState {
-  return {
+  const state = {
     agents: overrides.agents ?? [],
     validateWorkflowIntegrity: overrides.validateWorkflowIntegrity ?? jest.fn(() => ({ fixedCount: 0 })),
     cleanupOrphanedInstances: overrides.cleanupOrphanedInstances ?? jest.fn(() => 0),
@@ -101,12 +104,32 @@ export function createDesignStoreTestState(
     nodes: overrides.nodes ?? [],
     workflows: overrides.workflows ?? [],
     currentWorkflowId: overrides.currentWorkflowId ?? 'workflow-1',
+    viewportFitHistory: overrides.viewportFitHistory ?? {},
     currentRobotId: overrides.currentRobotId ?? RobotId.Bos,
     resetAll: overrides.resetAll ?? jest.fn(),
     loadUserWorkflows: overrides.loadUserWorkflows ?? jest.fn().mockResolvedValue(undefined),
     getResolvedInstance: overrides.getResolvedInstance ?? jest.fn(() => null),
     ...overrides,
-  } satisfies DesignStoreTestState;
+  } as DesignStoreTestState;
+
+  const mutateFitHistory = (workflowId: string, signature: string) => {
+    state.viewportFitHistory = { ...state.viewportFitHistory, [workflowId]: signature };
+  };
+
+  const clearFitHistory = (workflowId: string) => {
+    const next = { ...state.viewportFitHistory };
+    delete next[workflowId];
+    state.viewportFitHistory = next;
+  };
+
+  state.markWorkflowViewportFit = overrides.markWorkflowViewportFit ?? jest.fn((workflowId: string, signature: string) => {
+    mutateFitHistory(workflowId, signature);
+  });
+  state.clearWorkflowViewportFit = overrides.clearWorkflowViewportFit ?? jest.fn((workflowId: string) => {
+    clearFitHistory(workflowId);
+  });
+
+  return state as DesignStoreTestState;
 }
 
 export function createWorkflowStoreTestState(
