@@ -316,6 +316,20 @@ npm test
 cd backend && npm test
 ```
 
+For runtime image security checks, start Docker and rebuild the three sandbox and
+provisioning images before scanning:
+
+```bash
+npm --prefix backend run runtime:ci
+npm --prefix backend run runtime:scan -- --report-file=runtime-scan-report.json
+```
+
+The scan requires Docker Scout or Trivy and fails on HIGH or CRITICAL findings.
+The report is written under `backend/`; GitHub Actions also retains the runtime
+scan report as an artifact for 14 days, including when a scan fails. Image base
+digests can be checked with `npm --prefix backend run runtime:update-digests -- --check`;
+after an intentional update, rebuild, verify, and scan the images before use.
+
 For deeper Docker and MongoDB operational details, see [backend/docker/README.md](backend/docker/README.md). That document is optional and extends this installation guide; it is not required for the standard supported setup above.
 
 ---
