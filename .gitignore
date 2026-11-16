@@ -121,6 +121,40 @@ coverage/
 .nyc_output/
 *.lcov
 
+# Rapports locaux de tests, audits et scans
+/.jest-root-summary.json
+/.jest.j5-01.json
+/.jest.shell-verify.json
+/.jest.us-j5-01.json
+/.jest.workflow-hydration.json
+/.tmp-jest-root.json
+/backend-jest-summary.json
+/jest-summary.json
+/result-root.json
+/root-audit.json
+/root-jest-log.txt
+/root-jest-results.json
+/root-jest-summary.json
+/backend/backend-audit.json
+/backend/backend-jest-log.txt
+/backend/backend-jest-results.json
+/backend/backend-jest-summary.json
+/backend/build.out
+/backend/final-backend-test.out
+/backend/jest-summary.json
+/backend/result-backend.json
+/backend/test.out
+/backend/trivy-node.json
+/backend/trivy-python.json
+/backend/trivy-python-provisioning.json
+/backend/runtime-scan-report.json
+/test-results/
+/playwright-report/
+/blob-report/
+/tests/temp_rapport_tests/jest-report.out
+/tests/temp_rapport_tests/jest-report.exit
+/tests/temp_rapport_tests/unitaires/settingsmodal/
+
 # Storybook
 storybook-static/
 

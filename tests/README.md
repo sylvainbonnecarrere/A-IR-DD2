@@ -96,7 +96,7 @@ npm test -- --testPathPattern=fonctionnels  # Tests fonctionnels
 npm test                                           # Tous les tests
 npm test -- --testPathPattern=non-regression       # TNR
 npm test -- --testPathPattern=unitaires            # Unitaires
-npm run test:settingsmodal:report                  # Rapport SettingsModal dans tests/temp_rapport_tests/
+npm run test:settingsmodal:report                  # Rapport local ignoré par Git dans tests/temp_rapport_tests/unitaires/settingsmodal/
 ```
 
 ## 📊 Couverture de Code

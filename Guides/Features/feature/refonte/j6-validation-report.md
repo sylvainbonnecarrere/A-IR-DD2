@@ -114,7 +114,6 @@ Validation backend après implémentation : `npm --prefix backend run build` PAS
 - L'API retry crée un nouveau run enfant avec ownership, idempotence, lineage et contexte privé restauré; aucun état terminal parent n'est réécrit.
 
 **Majeures de validation**
-- `npm run test:coverage` échoue une fois sur 90 suites (89/90) alors que la même suite passe isolément et que le run complet sans coverage passe (90/90). Tendance flake à expliquer.
 - Reconnexion navigateur, rechargement pendant run et redémarrage de processus ne sont pas E2E.
 - Les smoke live ne sont pas isolés d'une base Mongo locale et restent non exécutés.
 
