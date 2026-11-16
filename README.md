@@ -377,4 +377,4 @@ Projet solo développé par **Sylvain Bonnecarrère** — développeur senior fu
 *Last updated: J4.3 — March 2026*
 
 Les suites Jest de validation pré-push sont maintenues avec un taux de réussite de 100% sur les correctifs stabilisés, et les commandes standard à exécuter sont `npm test`, `npm run test:coverage`, `cd backend && npm test` et `cd backend && npm run test:coverage`.
-Le rapport ciblé SettingsModal est généré via `npm run test:settingsmodal:report`, avec sortie versionnée dans `tests/temp_rapport_tests/unitaires/settingsmodal/`.
+Le rapport ciblé SettingsModal est généré via `npm run test:settingsmodal:report` dans `tests/temp_rapport_tests/unitaires/settingsmodal/` ; cette sortie locale est ignorée par Git.

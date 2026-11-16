@@ -37,6 +37,8 @@ npm run test:coverage
 - Les artefacts de rapports Jest ne doivent pas être générés à la racine du dépôt.
 - Les sorties ciblées doivent être écrites sous `tests/temp_rapport_tests/` dans un sous-dossier cohérent avec la suite concernée.
 - Pour SettingsModal, le chemin canonique est `tests/temp_rapport_tests/unitaires/settingsmodal/`.
+- Les fichiers SettingsModal sont des sorties locales ignorées par Git, et non des résultats versionnés.
+- Les fichiers `tests/temp_rapport_tests/jest-report.out` et `jest-report.exit`, produits par défaut par le script de rapport, sont également ignorés. Toute autre sortie personnalisée doit être vérifiée avant commit.
 
 Commande dédiée:
 
@@ -49,7 +51,7 @@ Artefacts générés:
 - `tests/temp_rapport_tests/unitaires/settingsmodal/settingsmodal-jest.out`
 - `tests/temp_rapport_tests/unitaires/settingsmodal/settingsmodal-jest.exit`
 
-Les anciens fichiers historiques `settingsmodal-jest-2.out` et `settingsmodal-jest-2.exit` peuvent être conservés dans le même dossier à titre de trace de diagnostic, mais ne doivent plus être générés à la racine.
+Les anciens fichiers `settingsmodal-jest-2.out` et `settingsmodal-jest-2.exit` peuvent rester localement à titre de trace de diagnostic, sans être committés.
 
 ---
 
