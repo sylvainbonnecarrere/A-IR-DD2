@@ -1,3 +1,17 @@
+## État au 16 novembre 2026
+
+Le workflow Runtime a réussi après correction : [exécution GitHub Actions](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/43883144675). Le rapport `runtime-scan-report` est conservé comme artefact pendant 14 jours.
+
+- [x] Reproduire les scans des trois images : CVE-2026-109518 affectait `apt` et `libapt-pkg6.0t64` en version `2.8.3`.
+- [x] Actualiser les digests et les paquets concernés vers `2.8.4ubuntu0.1`, puis reconstruire et rescanner.
+- [x] Conserver les détails du scan dans les workflows Runtime et de déploiement, sans baisser le seuil HIGH.
+- [x] Corriger les avis élevés Mongoose : `8.24.4` vers `8.24.9`.
+- [x] Vérifier le workflow Runtime GitHub : build et scan des images, rapport et tranche Node 24 réussis.
+
+Le message et le diagnostic ci-dessous sont conservés comme historique : le rapport initial ne permettait pas, à lui seul, d'identifier les CVE.
+
+## Erreur initiale
+
 Message d'erreur : 16s
 Run npm --prefix backend run runtime:scan
 
