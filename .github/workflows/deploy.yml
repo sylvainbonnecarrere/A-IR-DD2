@@ -274,7 +274,16 @@ jobs:
 
       - name: Scan backend runtime images
         if: ${{ inputs.run_runtime_checks }}
-        run: npm --prefix backend run runtime:scan
+        run: npm --prefix backend run runtime:scan -- --report-file=runtime-scan-report.json
+
+      - name: Upload runtime scan report
+        if: ${{ inputs.run_runtime_checks && !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-runtime-scan-report
+          path: backend/runtime-scan-report.json
+          if-no-files-found: warn
+          retention-days: 14
 
   package-release:
     name: Package Deployable Bundle

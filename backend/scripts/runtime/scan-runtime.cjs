@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+const fs = require('fs');
+const path = require('path');
 const {
     runtimeArtifacts,
     parseArgs,
@@ -27,11 +29,26 @@ function parseSeverity(flags) {
     return ['critical', 'high'];
 }
 
-async function main() {
-    const flags = parseArgs(process.argv);
+function writeReport(reportFile, payload) {
+    if (!reportFile) {
+        return;
+    }
+
+    const destination = path.resolve(reportFile);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
+
+async function main(argv = process.argv) {
+    const flags = parseArgs(argv);
     const useJson = flags.has('--json');
     const dryRun = flags.has('--dry-run');
     const allowMissingScanner = flags.has('--allow-missing-scanner');
+    const reportFlag = [...flags].find((flag) => flag.startsWith('--report-file='));
+    const reportFile = reportFlag && reportFlag.slice('--report-file='.length);
+    if (reportFlag && !reportFile) {
+        throw new Error('--report-file nécessite un chemin de fichier.');
+    }
     const severities = parseSeverity(flags);
 
     const dockerState = await inspectDockerState();
@@ -55,8 +72,10 @@ async function main() {
 
     if (!dockerState.available) {
         const status = summarizeStatus(components);
-        printOutput(useJson ? { status, docker: dockerState, scanner, images: [] } : buildTextReport('Runtime scan', status, components), useJson);
-        process.exit(1);
+        const payload = { status, dryRun, severities, docker: dockerState, scanner, images: [] };
+        writeReport(reportFile, payload);
+        printOutput(useJson ? payload : buildTextReport('Runtime scan', status, components), useJson);
+        return 1;
     }
 
     const imageResults = [];
@@ -65,6 +84,7 @@ async function main() {
         if (!exists) {
             imageResults.push({
                 label: spec.label,
+                image: spec.image,
                 status: 'unhealthy',
                 summary: `${spec.image} absente`,
                 purpose: spec.purpose
@@ -78,11 +98,15 @@ async function main() {
             : scan.status;
         imageResults.push({
             label: spec.label,
+            image: spec.image,
             status: effectiveStatus,
             summary: effectiveStatus === 'unhealthy' && scan.status === 'degraded'
                 ? `${scan.summary} Activez docker login ou installez Trivy.`
                 : scan.summary,
             detail: scan.detail,
+            scanned: scan.scanned,
+            command: scan.command,
+            scanner: scan.scanner,
             purpose: spec.purpose
         });
     }
@@ -101,12 +125,22 @@ async function main() {
         scanner,
         images: imageResults
     };
+    writeReport(reportFile, payload);
     printOutput(useJson ? payload : buildTextReport('Runtime scan', status, allComponents), useJson);
 
     const hasFatalError = !dockerState.available
         || (!scanner && !allowMissingScanner)
         || imageResults.some((result) => result.status === 'unhealthy');
-    process.exit(hasFatalError ? 1 : 0);
+    return hasFatalError ? 1 : 0;
 }
 
-void main();
+if (require.main === module) {
+    main().then((exitCode) => {
+        process.exitCode = exitCode;
+    }).catch((error) => {
+        console.error(`Runtime scan: ${error.message}`);
+        process.exitCode = 1;
+    });
+}
+
+module.exports = { main };

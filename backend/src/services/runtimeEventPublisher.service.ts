@@ -4,6 +4,12 @@ export interface RuntimeEventEmitter {
   emitRuntimeEvent: (workspaceId: string, event: unknown) => boolean;
 }
 
+let configuredRuntimeEventEmitter: RuntimeEventEmitter | null = null;
+
+export function configureRuntimeEventEmitter(emitter: RuntimeEventEmitter | null): void {
+  configuredRuntimeEventEmitter = emitter;
+}
+
 export interface RuntimeEventPublishContext {
   workspaceId: string;
   roomWorkspaceId?: string;
@@ -75,7 +81,7 @@ export class RuntimeEventPublisher {
     }
 
     const status = typeof context.status === 'string' ? context.status : 'running';
-    const type = this.resolveEventType(context.aggregateType, status, context.progress);
+    const type = this.resolveEventType(context.aggregateType, status, context.progress, context.stage);
     const payload = this.buildPayload(context, status, type);
 
     const signature = this.buildEventSignature(workspaceId, context.aggregateType, context.aggregateId, type, payload);
@@ -166,7 +172,11 @@ export class RuntimeEventPublisher {
     return payload;
   }
 
-  private resolveEventType(aggregateType: RuntimeEventAggregateType, status: string, progress?: number): RuntimeEventType {
+  private resolveEventType(aggregateType: RuntimeEventAggregateType, status: string, progress?: number, stage?: string): RuntimeEventType {
+    if (aggregateType === 'run' && stage === 'cancellation_requested') {
+      return 'run:progressed';
+    }
+
     const map = aggregateType === 'run' ? RUN_TYPE_MAP : TASK_TYPE_MAP;
     const mapped = map[status];
 
@@ -186,6 +196,8 @@ export class RuntimeEventPublisher {
   }
 }
 
-export function createRuntimeEventPublisher(emitter: RuntimeEventEmitter): RuntimeEventPublisher {
-  return new RuntimeEventPublisher(emitter);
+export function createRuntimeEventPublisher(emitter?: RuntimeEventEmitter): RuntimeEventPublisher {
+  return new RuntimeEventPublisher(emitter ?? {
+    emitRuntimeEvent: (workspaceId, event) => configuredRuntimeEventEmitter?.emitRuntimeEvent(workspaceId, event) ?? false,
+  });
 }

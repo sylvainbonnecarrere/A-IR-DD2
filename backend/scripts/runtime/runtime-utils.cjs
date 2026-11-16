@@ -394,23 +394,23 @@ async function scanRuntimeImage(spec, options = {}) {
         };
     }
 
+    const command = scanner.key === 'docker-scout'
+        ? ['docker', 'scout', 'cves', '--only-severity', severityList.join(','), '--exit-code', `local://${spec.image}`]
+        : ['trivy', 'image', '--severity', severityList.map((severity) => severity.toUpperCase()).join(','), '--exit-code', '2', spec.image];
+
     if (options.dryRun) {
-        const command = scanner.key === 'docker-scout'
-            ? ['docker', 'scout', 'cves', '--only-severity', severityList.join(','), '--exit-code', `local://${spec.image}`].join(' ')
-            : ['trivy', 'image', '--severity', severityList.map((severity) => severity.toUpperCase()).join(','), '--exit-code', '2', spec.image].join(' ');
         return {
             image: spec.image,
             scanned: false,
             status: 'degraded',
             summary: `Scan planifié via ${scanner.label}`,
-            detail: command,
+            detail: command.join(' '),
+            command,
             scanner
         };
     }
 
-    const result = scanner.key === 'docker-scout'
-        ? await runCommand('docker', ['scout', 'cves', '--only-severity', severityList.join(','), '--exit-code', `local://${spec.image}`], { timeoutMs: 10 * 60 * 1000 })
-        : await runCommand('trivy', ['image', '--severity', severityList.map((severity) => severity.toUpperCase()).join(','), '--exit-code', '2', spec.image], { timeoutMs: 10 * 60 * 1000 });
+    const result = await runCommand(command[0], command.slice(1), { timeoutMs: 10 * 60 * 1000 });
 
     const scanOutput = (result.stdout || result.stderr).trim();
     const dockerScoutNeedsLogin = scanner.key === 'docker-scout'
@@ -434,6 +434,7 @@ async function scanRuntimeImage(spec, options = {}) {
             status: 'degraded',
             summary: 'Docker Scout détecté mais non authentifié; aucun scanner de fallback disponible.',
             detail: 'Exécutez docker login pour activer Docker Scout, ou installez Trivy pour le scan local sans compte Docker.',
+            command,
             scanner
         };
     }
@@ -445,6 +446,7 @@ async function scanRuntimeImage(spec, options = {}) {
             status: 'healthy',
             summary: `Aucune CVE ${severityList.join('/')} détectée via ${scanner.label}.`,
             detail: scanOutput,
+            command,
             scanner
         };
     }
@@ -456,6 +458,7 @@ async function scanRuntimeImage(spec, options = {}) {
             status: 'unhealthy',
             summary: `CVE ${severityList.join('/')} détectées via ${scanner.label}.`,
             detail: scanOutput,
+            command,
             scanner
         };
     }
@@ -466,6 +469,7 @@ async function scanRuntimeImage(spec, options = {}) {
         status: 'unhealthy',
         summary: `Échec du scan ${scanner.label}.`,
         detail: describeFailure(result),
+        command,
         scanner
     };
 }

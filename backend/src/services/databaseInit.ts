@@ -305,6 +305,11 @@ const COLLECTION_SCHEMAS = {
           workflowId: { bsonType: ['objectId', 'null'] },
           agentPrototypeId: { bsonType: ['objectId', 'null'] },
           agentInstanceId: { bsonType: ['objectId', 'null'] },
+          retryOfExecutionId: { bsonType: ['string', 'null'] },
+          requestFingerprint: { bsonType: ['string', 'null'] },
+          privateContextCiphertext: { bsonType: ['string', 'null'] },
+          cancellationRequestedAt: { bsonType: ['date', 'null'] },
+          cancellationRequestedBy: { bsonType: ['objectId', 'null'] },
           launchContext: { bsonType: 'string' },
           status: { bsonType: 'string' },
           runtime: { bsonType: 'string' },
@@ -431,6 +436,27 @@ const INDEX_DEFINITIONS = {
       options: {
         partialFilterExpression: { status: { $in: ['queued', 'running'] } },
         name: 'idx_user_tool_runs_active_watchdog'
+      }
+    },
+    {
+      spec: { status: 1, 'timing.queuedAt': 1 },
+      options: {
+        partialFilterExpression: { status: 'queued' },
+        name: 'idx_user_tool_runs_queued_dispatch'
+      }
+    },
+    {
+      spec: { status: 1, cancellationRequestedAt: 1 },
+      options: {
+        partialFilterExpression: { status: 'running', cancellationRequestedAt: { $type: 'date' } },
+        name: 'idx_user_tool_runs_cancellation_requests'
+      }
+    },
+    {
+      spec: { ownerUserId: 1, retryOfExecutionId: 1, createdAt: 1 },
+      options: {
+        partialFilterExpression: { retryOfExecutionId: { $type: 'string' } },
+        name: 'idx_user_tool_runs_retry_lineage'
       }
     }
   ],

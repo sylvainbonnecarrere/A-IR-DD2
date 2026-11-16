@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { UserToolRunService, UserToolRunStateError } from '../services/userToolRun.service';
+import { isEncrypted } from '../utils/encryption';
 
 describe('UserToolRunService', () => {
     const service = new UserToolRunService();
@@ -192,5 +193,89 @@ describe('UserToolRunService', () => {
         if (persisted?.status === 'failed') {
             expect(persisted.error).toEqual(expect.objectContaining({ code: 'RACE_FAIL' }));
         }
+    });
+
+    it('persists retry lineage and encrypts private execution context', async () => {
+        const createData = buildCreateData();
+        const privateContext = { accessToken: 'do-not-store-plaintext', workflow: { id: 'wf-1' } };
+        const run = await service.createQueuedRun({
+            ...createData,
+            retryOfExecutionId: 'parent-run-1',
+            requestFingerprint: 'sha256-request-fingerprint',
+            privateContext,
+        });
+
+        expect(run.retryOfExecutionId).toBe('parent-run-1');
+        expect(run.requestFingerprint).toBe('sha256-request-fingerprint');
+        expect(run.privateContextCiphertext).toBeTruthy();
+        expect(isEncrypted(run.privateContextCiphertext!)).toBe(true);
+        expect(run.privateContextCiphertext).not.toContain('do-not-store-plaintext');
+        await expect(service.getPrivateContext(run)).resolves.toEqual(privateContext);
+    });
+
+    it('stops a queued run atomically and treats a repeated cancellation as idempotent', async () => {
+        const createData = buildCreateData();
+        await service.createQueuedRun(createData);
+
+        const requestedAt = new Date('2026-03-17T15:00:00.000Z');
+        const first = await service.requestCancellation(createData.executionId, createData.ownerUserId, createData.ownerUserId, requestedAt);
+        const repeated = await service.requestCancellation(createData.executionId, createData.ownerUserId, createData.ownerUserId, requestedAt);
+
+        expect(first.kind).toBe('stopped');
+        expect(repeated.kind).toBe('stopped');
+        if (first.kind === 'stopped') {
+            expect(first.run.status).toBe('stopped');
+            expect(first.run.error?.code).toBe('RUN_CANCELLED');
+        }
+    });
+
+    it('records a running cancellation request without claiming the runner has stopped', async () => {
+        const createData = buildCreateData();
+        await service.createQueuedRun(createData);
+        await service.markRunning(createData.executionId);
+
+        const requestedAt = new Date('2026-03-17T16:00:00.000Z');
+        const first = await service.requestCancellation(createData.executionId, createData.ownerUserId, createData.ownerUserId, requestedAt);
+        const repeated = await service.requestCancellation(createData.executionId, createData.ownerUserId, createData.ownerUserId, new Date('2026-03-17T16:00:05.000Z'));
+
+        expect(first.kind).toBe('requested');
+        expect(repeated.kind).toBe('requested');
+        if (first.kind === 'requested' && repeated.kind === 'requested') {
+            expect(first.run.status).toBe('running');
+            expect(repeated.run.status).toBe('running');
+            expect(first.run.cancellationRequestedAt?.toISOString()).toBe(requestedAt.toISOString());
+            expect(repeated.run.cancellationRequestedAt?.toISOString()).toBe(requestedAt.toISOString());
+        }
+    });
+
+    it('does not expose cancellation state for a run owned by another user', async () => {
+        const createData = buildCreateData();
+        await service.createQueuedRun(createData);
+
+        const result = await service.requestCancellation(createData.executionId, new mongoose.Types.ObjectId());
+
+        expect(result.kind).toBe('not_found');
+        expect((await service.getRunByExecutionId(createData.executionId))?.status).toBe('queued');
+    });
+
+    it('publishes queued, started and cancellation-requested runtime events for workflow runs', async () => {
+        const publishRunStatusChange = jest.fn(() => true);
+        const eventService = new UserToolRunService({ publishRunStatusChange } as any);
+        const createData = buildCreateData();
+        await eventService.createQueuedRun(createData);
+        await eventService.markRunning(createData.executionId);
+        const cancellation = await eventService.requestCancellation(
+            createData.executionId,
+            createData.ownerUserId,
+        );
+
+        expect(cancellation.kind).toBe('requested');
+        expect(publishRunStatusChange).toHaveBeenNthCalledWith(1, expect.objectContaining({ status: 'queued' }));
+        expect(publishRunStatusChange).toHaveBeenNthCalledWith(2, expect.objectContaining({ status: 'running' }));
+        expect(publishRunStatusChange).toHaveBeenNthCalledWith(3, expect.objectContaining({
+            status: 'running',
+            stage: 'cancellation_requested',
+            progress: 50,
+        }));
     });
 });

@@ -4,10 +4,14 @@ import { UserToolRunStatusSchema } from '../domain/execution/userToolRun.contrac
 import { requireAuth } from '../middleware/auth.middleware';
 import { IUser } from '../models/User.model';
 import { RuntimeCompatibilityService } from '../services/runtimeCompatibility.service';
-import { SandboxService } from '../services/sandbox.service';
+import { BuildPreparationError } from '../services/build.service';
+import { RuntimeNotReadyError } from '../services/runtime/errors';
+import { SandboxService, SandboxServiceError } from '../services/sandbox.service';
+import { IdempotencyKeyReuseError } from '../services/runtime/ExecutionOrchestrator';
 import { UserToolRunQueryService } from '../services/userToolRunQuery.service';
 import { UserToolRunRetentionService } from '../services/userToolRunRetention.service';
 import { UserToolRunService } from '../services/userToolRun.service';
+import { UserToolRunStateError } from '../services/userToolRun.service';
 
 const router = Router();
 const runtimeCompatibilityService = new RuntimeCompatibilityService();
@@ -73,6 +77,38 @@ function readIdempotencyKey(value: unknown): string | undefined {
     return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function sendRunCommandError(res: import('express').Response, error: unknown) {
+    if (error instanceof IdempotencyKeyReuseError) {
+        return res.status(409).json({ error: error.message, code: error.code });
+    }
+    if (error instanceof RuntimeNotReadyError) {
+        return res.status(503).json({ error: error.message, code: 'RUNTIME_NOT_READY' });
+    }
+    if (error instanceof SandboxServiceError) {
+        return res.status(error.statusCode).json({ error: error.message, code: error.code });
+    }
+    if (error instanceof BuildPreparationError) {
+        return res.status(422).json({ error: error.message, code: error.code });
+    }
+    if (error instanceof UserToolRunStateError) {
+        return res.status(409).json({ error: error.message, code: 'RUN_STATE_CONFLICT' });
+    }
+    if (typeof error === 'object' && error !== null && 'statusCode' in error && 'code' in error) {
+        const statusCode = Number((error as { statusCode: unknown }).statusCode);
+        const code = String((error as { code: unknown }).code);
+        if (statusCode >= 400 && statusCode < 500) {
+            return res.status(statusCode).json({
+                error: error instanceof Error ? error.message : 'Run command rejected',
+                code,
+            });
+        }
+    }
+    console.error('[RunsRoute] Run command failed', {
+        errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return res.status(500).json({ error: 'Erreur lors de la commande de run', code: 'RUN_COMMAND_FAILED' });
+}
+
 router.post('/execute', requireAuth, async (req, res) => {
     try {
         const bodyResult = executeRunSchema.safeParse(req.body);
@@ -84,27 +120,26 @@ router.post('/execute', requireAuth, async (req, res) => {
         const idempotencyKey = readIdempotencyKey(req.header('Idempotency-Key'));
         const { functionId, agentInstanceId, toolSelection, testArgs, privateContext } = bodyResult.data;
 
-        const result = await sandboxService.runFunction(
+        const result = await sandboxService.queueFunctionRun({
             functionId,
-            user.id,
+            userId: user.id,
             testArgs,
             toolSelection,
             agentInstanceId,
             privateContext,
-            req.headers.authorization,
             idempotencyKey,
-        );
+        });
 
-        res.json({
-            ...result,
+        res.status(result.replayed ? 200 : 202).json({
+            executionId: result.executionId,
+            status: result.status,
             idempotency: {
                 key: idempotencyKey ?? null,
-                replayed: result.replayed ?? false,
+                replayed: result.replayed,
             }
         });
     } catch (error) {
-        console.error('[RunsRoute] POST /execute error:', error);
-        res.status(500).json({ error: 'Erreur lors du lancement du run' });
+        return sendRunCommandError(res, error);
     }
 });
 
@@ -129,24 +164,55 @@ router.post('/executions/:executionId/cancel', requireAuth, async (req, res) => 
             });
         }
 
-        const updatedRun = await userToolRunService.stopRun(executionId, {
-            error: {
-                code: 'RUN_CANCELLED',
-                subsystem: 'validation',
-                failureKind: 'cancelled',
-                message: 'Run annulé par l’utilisateur',
-                retryable: false,
-            },
-        });
+        const cancellation = await sandboxService.cancelRun(executionId, user.id);
+        if (cancellation.kind === 'not_found') {
+            return res.status(404).json({ error: 'Run introuvable' });
+        }
+        if (cancellation.kind === 'not_cancellable') {
+            return res.status(409).json({
+                error: 'Run non annulable',
+                code: 'RUN_NOT_CANCELLABLE',
+                status: cancellation.run.status,
+            });
+        }
 
-        res.json({
+        res.status(cancellation.kind === 'requested' ? 202 : 200).json({
             success: true,
-            executionId: updatedRun.executionId,
-            status: updatedRun.status,
+            executionId,
+            status: cancellation.run.status,
+            cancellationRequested: cancellation.kind === 'requested',
         });
     } catch (error) {
         console.error('[RunsRoute] POST /executions/:executionId/cancel error:', error);
         res.status(500).json({ error: 'Erreur lors de l’annulation du run' });
+    }
+});
+
+router.post('/executions/:executionId/retry', requireAuth, async (req, res) => {
+    const executionId = String(req.params.executionId || '').trim();
+    if (!executionId) {
+        return res.status(400).json({ error: 'executionId invalide' });
+    }
+
+    const idempotencyKey = readIdempotencyKey(req.header('Idempotency-Key'));
+    if (!idempotencyKey) {
+        return res.status(400).json({
+            error: 'Idempotency-Key est requis pour relancer un run',
+            code: 'IDEMPOTENCY_KEY_REQUIRED',
+        });
+    }
+
+    try {
+        const user = req.user as IUser;
+        const result = await sandboxService.retryRun(executionId, user.id, idempotencyKey);
+        return res.status(result.replayed ? 200 : 202).json({
+            executionId: result.executionId,
+            retryOfExecutionId: executionId,
+            status: result.status,
+            idempotency: { key: idempotencyKey, replayed: result.replayed },
+        });
+    } catch (error) {
+        return sendRunCommandError(res, error);
     }
 });
 
