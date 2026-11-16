@@ -6,7 +6,8 @@ import type {
     IUserToolRunResourceUsage,
     UserToolRunLaunchContext,
     UserToolRunRunner,
-    UserToolRunRuntime
+    UserToolRunRuntime,
+    UserToolRunStatus,
 } from '../../models/UserToolRun.model';
 import type { WorkspaceProvisioningResult } from '../workspace/types';
 
@@ -24,6 +25,7 @@ export type SandboxExecutionFailureKind =
     | 'sandbox_runtime_error'
     | 'sandbox_invalid_output'
     | 'sandbox_non_zero_exit'
+    | 'cancelled'
     | 'unknown';
 
 export type SandboxExecutionFailureSubsystem =
@@ -41,6 +43,8 @@ export interface SandboxExecutionMetadata {
     maxMemoryMb?: number;
     failureKind?: SandboxExecutionFailureKind;
     failureSubsystem?: SandboxExecutionFailureSubsystem;
+    cancellationConfirmed?: boolean;
+    runnerTerminationConfirmed?: boolean;
     errorType?: string;
     traceback?: string;
     artifacts?: IUserToolRunArtifact[];
@@ -83,6 +87,7 @@ export interface SandboxExecutionRequest {
     launchContext: UserToolRunLaunchContext;
     args: Record<string, unknown>;
     privateContext?: Record<string, unknown>;
+    signal?: AbortSignal;
     policySnapshot: IUserToolRunPolicySnapshot;
     workspace: WorkspaceProvisioningResult | null;
     sourceCode?: string;
@@ -106,4 +111,7 @@ export interface SandboxExecutionResult {
 export interface OrchestratedExecutionResult extends SandboxExecutionResult {
     executionId: string;
     replayed?: boolean;
+    status?: UserToolRunStatus;
+    retryOfExecutionId?: string | null;
+    cancellationRequested?: boolean;
 }

@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { WebSocketManager } from './websocket/WebSocketManager';
+import { configureRuntimeEventEmitter } from './services/runtimeEventPublisher.service';
 import helmet from 'helmet';
 import mongoSanitize from 'express-mongo-sanitize';
 import passport from './middleware/auth.middleware';
@@ -149,6 +150,9 @@ let isShuttingDown = false;
 function ensureWebSocketManager(): WebSocketManager {
   if (!wsManager) {
     wsManager = new WebSocketManager(httpServer);
+    configureRuntimeEventEmitter({
+      emitRuntimeEvent: (workspaceId, event) => wsManager?.emitRuntimeEvent(workspaceId, event) ?? false,
+    });
   }
 
   return wsManager;
@@ -220,6 +224,7 @@ async function stopServer() {
   if (wsManager) {
     await wsManager.close();
     wsManager = null;
+    configureRuntimeEventEmitter(null);
   }
 
   if (serverStarted) {

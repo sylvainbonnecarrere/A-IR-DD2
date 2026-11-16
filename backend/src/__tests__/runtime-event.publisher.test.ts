@@ -1,5 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
-import { RuntimeEventPublisher } from '../services/runtimeEventPublisher.service';
+import {
+  configureRuntimeEventEmitter,
+  createRuntimeEventPublisher,
+  RuntimeEventPublisher,
+} from '../services/runtimeEventPublisher.service';
 
 describe('RuntimeEventPublisher', () => {
   it('publishes a sanitized run event with a versioned payload', () => {
@@ -111,5 +115,36 @@ describe('RuntimeEventPublisher', () => {
     });
 
     expect(result).toBe(false);
+  });
+
+  it('routes cancellation-requested updates through the configured emitter as run progress', () => {
+    const emitted: Array<{ workspaceId: string; event: any }> = [];
+    const publisher = createRuntimeEventPublisher();
+    configureRuntimeEventEmitter({
+      emitRuntimeEvent: (workspaceId, event) => {
+        emitted.push({ workspaceId, event: event as any });
+        return true;
+      },
+    });
+
+    try {
+      const published = publisher.publishRunStatusChange({
+        workspaceId: '507f1f77bcf86cd799439011',
+        runId: 'run-cancel-request',
+        status: 'running',
+        stage: 'cancellation_requested',
+        progress: 50,
+      });
+
+      expect(published).toBe(true);
+      expect(emitted[0].event.type).toBe('run:progressed');
+      expect(emitted[0].event.payload).toEqual(expect.objectContaining({
+        status: 'running',
+        stage: 'cancellation_requested',
+        progress: 50,
+      }));
+    } finally {
+      configureRuntimeEventEmitter(null);
+    }
   });
 });

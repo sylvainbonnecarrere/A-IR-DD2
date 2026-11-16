@@ -306,7 +306,7 @@ describe('Auth and workflow routes', () => {
         expect(persistedUser?.lastActiveWorkflowId?.toString()).toBe(secondWorkflow.id);
     });
 
-    it('returns a permanent deprecation response for legacy V1 workflow mutation routes', async () => {
+    it('permanently rejects every legacy V1 graph mutation route', async () => {
         const fixture = await createUserFixture('legacy-route');
         const workflow = await Workflow.create({
             userId: fixture.user._id,
@@ -316,21 +316,39 @@ describe('Auth and workflow routes', () => {
             canvasState: { zoom: 1, panX: 0, panY: 0 }
         });
 
-        const response = await request(app)
+        const responses = await Promise.all([
+            request(app)
             .patch(`/api/workflows/${workflow.id}/nodes/missing-node/position`)
             .set('Authorization', `Bearer ${fixture.accessToken}`)
             .send({ x: 10, y: 20 })
-            .expect(410);
+            .expect(410),
+            request(app)
+                .post(`/api/workflows/${workflow.id}/edges`)
+                .set('Authorization', `Bearer ${fixture.accessToken}`)
+                .send({ source: 'node-a', target: 'node-b' })
+                .expect(410),
+            request(app)
+                .delete(`/api/workflows/${workflow.id}/edges/legacy-edge`)
+                .set('Authorization', `Bearer ${fixture.accessToken}`)
+                .expect(410),
+        ]);
 
-        expect(response.headers.warning).toContain('Deprecated workflow V1 route');
-        expect(response.headers['x-workflow-legacy-route']).toBe('nodePositionPatch');
-        expect(response.body).toEqual(expect.objectContaining({
-            code: 'WORKFLOW_V1_ENDPOINT_DEPRECATED',
-            error: 'Workflow V1 legacy endpoint is no longer available',
-            workflowId: workflow.id,
-            route: 'nodePositionPatch',
-        }));
-        expect(Number(response.headers['x-workflow-legacy-count'])).toBeGreaterThanOrEqual(1);
+        expect(responses.map((response) => response.headers['x-workflow-legacy-route'])).toEqual([
+            'nodePositionPatch',
+            'edgeCreate',
+            'edgeDelete',
+        ]);
+        expect(await WorkflowNodeV2.countDocuments({ workflowId: workflow._id })).toBe(0);
+        expect(await WorkflowEdge.countDocuments({ workflowId: workflow._id })).toBe(0);
+        for (const response of responses) {
+            expect(response.headers.warning).toContain('Deprecated workflow V1 route');
+            expect(response.body).toEqual(expect.objectContaining({
+                code: 'WORKFLOW_V1_ENDPOINT_DEPRECATED',
+                error: 'Workflow V1 legacy endpoint is no longer available',
+                workflowId: workflow.id,
+            }));
+            expect(Number(response.headers['x-workflow-legacy-count'])).toBeGreaterThanOrEqual(1);
+        }
     });
 
     it('saves a workflow and clears its dirty flag', async () => {
@@ -416,6 +434,30 @@ describe('Auth and workflow routes', () => {
 
         const persistedWorkflow = await Workflow.findById(workflow._id).lean();
         expect(persistedWorkflow?.description).toBe('after');
+    });
+
+    it('rejects legacy nodes and edges in metadata patch payloads without writing them', async () => {
+        const fixture = await createUserFixture('patch-legacy-graph');
+        const workflow = await Workflow.create({
+            userId: fixture.user._id,
+            name: 'Workflow metadata patch guard',
+            isActive: true,
+            isDefault: true,
+            canvasState: { zoom: 1, panX: 0, panY: 0 }
+        });
+
+        const response = await request(app)
+            .patch(`/api/workflows/${workflow.id}/patch`)
+            .set('Authorization', `Bearer ${fixture.accessToken}`)
+            .send({ $set: { nodes: [{ id: 'legacy-node' }], edges: [{ id: 'legacy-edge' }] } })
+            .expect(400);
+
+        expect(response.body).toEqual(expect.objectContaining({
+            code: 'WORKFLOW_V1_GRAPH_MUTATION_FORBIDDEN'
+        }));
+        expect(await WorkflowNodeV2.countDocuments({ workflowId: workflow._id })).toBe(0);
+        expect(await WorkflowEdge.countDocuments({ workflowId: workflow._id })).toBe(0);
+        expect((await Workflow.findById(workflow._id).lean())?.__v).toBe(workflow.__v);
     });
 
     it('deletes a workflow, reassigns default ownership, and updates the user counters', async () => {

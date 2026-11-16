@@ -8,6 +8,9 @@ class FakeDockerProcessRunner implements DockerProcessRunner {
 
     async run(command: string, args: string[], options: { stdin?: string; timeoutMs?: number } = {}) {
         this.calls.push({ command, args, stdin: options.stdin, timeoutMs: options.timeoutMs });
+        if (args[0] === 'kill') {
+            return { exitCode: 0, stdout: 'container stopped', stderr: '', timedOut: false };
+        }
 
         return {
             exitCode: this.result.exitCode ?? 0,
@@ -15,6 +18,37 @@ class FakeDockerProcessRunner implements DockerProcessRunner {
             stderr: this.result.stderr ?? '',
             timedOut: this.result.timedOut ?? false
         };
+    }
+}
+
+class AbortableDockerProcessRunner implements DockerProcessRunner {
+    public calls: Array<{ command: string; args: string[] }> = [];
+    public started!: () => void;
+    public readonly startedPromise = new Promise<void>((resolve) => {
+        this.started = resolve;
+    });
+
+    constructor(private readonly killExitCode = 0) {}
+
+    async run(command: string, args: string[], options: { stdin?: string; timeoutMs?: number; signal?: AbortSignal } = {}) {
+        this.calls.push({ command, args });
+        if (args[0] === 'kill') {
+            return { exitCode: this.killExitCode, stdout: 'container stopped', stderr: '', timedOut: false };
+        }
+        if (args[0] === 'inspect') {
+            return { exitCode: 1, stdout: '', stderr: 'container state unavailable', timedOut: false };
+        }
+
+        this.started();
+        return new Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean; aborted?: boolean }>((resolve) => {
+            options.signal?.addEventListener('abort', () => resolve({
+                exitCode: 137,
+                stdout: '',
+                stderr: 'terminated',
+                timedOut: false,
+                aborted: true,
+            }), { once: true });
+        });
     }
 }
 
@@ -66,6 +100,60 @@ function createRequest(overrides: Partial<SandboxExecutionRequest> = {}): Sandbo
 }
 
 describe('DockerSandboxRunner', () => {
+    it('kills the named container and reports cancellation only after the process exits', async () => {
+        const processRunner = new AbortableDockerProcessRunner();
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+        const controller = new AbortController();
+        const execution = runner.execute(createRequest({ signal: controller.signal }));
+
+        await processRunner.startedPromise;
+        controller.abort();
+        const result = await execution;
+
+        expect(processRunner.calls).toEqual(expect.arrayContaining([
+            expect.objectContaining({ command: 'docker', args: expect.arrayContaining(['run', '--name=airdd2-utr-test']) }),
+            expect.objectContaining({ command: 'docker', args: ['kill', 'airdd2-utr-test'] }),
+        ]));
+        expect(result).toEqual(expect.objectContaining({
+            success: false,
+            exitCode: 130,
+            stderr: 'Sandbox execution cancelled.',
+            metadata: expect.objectContaining({ failureKind: 'cancelled', cancellationConfirmed: true }),
+        }));
+    });
+
+    it('does not claim cancellation when Docker cannot confirm the container stopped', async () => {
+        const processRunner = new AbortableDockerProcessRunner(1);
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+        const controller = new AbortController();
+        const execution = runner.execute(createRequest({ signal: controller.signal }));
+
+        await processRunner.startedPromise;
+        controller.abort();
+        const result = await execution;
+
+        expect(result.metadata).toEqual(expect.objectContaining({
+            failureKind: 'cancelled',
+            cancellationConfirmed: false,
+        }));
+        expect(processRunner.calls).toEqual(expect.arrayContaining([
+            expect.objectContaining({ command: 'docker', args: ['inspect', '--format', '{{.State.Running}}', 'airdd2-utr-test'] }),
+        ]));
+    });
+
+    it('preserves a completed result when an abort races in after docker has exited', async () => {
+        const processRunner = new FakeDockerProcessRunner();
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+        const controller = new AbortController();
+        const execution = runner.execute(createRequest({ signal: controller.signal }));
+        controller.abort();
+
+        const result = await execution;
+
+        expect(result.success).toBe(true);
+        expect(result.metadata?.failureKind).toBeUndefined();
+    });
+
     it('runs custom TypeScript in an ephemeral Docker sandbox with hardened flags', async () => {
         const processRunner = new FakeDockerProcessRunner();
         const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');

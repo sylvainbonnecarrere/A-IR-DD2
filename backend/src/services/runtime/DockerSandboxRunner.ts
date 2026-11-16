@@ -29,12 +29,14 @@ interface CommandExecutionResult {
     stdout: string;
     stderr: string;
     timedOut: boolean;
+    aborted?: boolean;
     errorMessage?: string;
 }
 
 interface ProcessRunOptions {
     stdin?: string;
     timeoutMs?: number;
+    signal?: AbortSignal;
 }
 
 interface SandboxExecutionContextPayload {
@@ -63,6 +65,19 @@ class SpawnDockerProcessRunner implements DockerProcessRunner {
             let stderr = '';
             let settled = false;
             let timedOut = false;
+            let aborted = false;
+            const signal = options.signal;
+
+            const removeAbortListener = () => signal?.removeEventListener('abort', handleAbort);
+            const handleAbort = () => {
+                aborted = true;
+            };
+
+            if (signal?.aborted) {
+                handleAbort();
+            } else {
+                signal?.addEventListener('abort', handleAbort, { once: true });
+            }
 
             const timeout = setTimeout(() => {
                 timedOut = true;
@@ -84,11 +99,13 @@ class SpawnDockerProcessRunner implements DockerProcessRunner {
 
                 settled = true;
                 clearTimeout(timeout);
+                removeAbortListener();
                 resolve({
                     exitCode: 1,
                     stdout,
                     stderr,
                     timedOut,
+                    aborted,
                     errorMessage: error.message
                 });
             });
@@ -100,11 +117,13 @@ class SpawnDockerProcessRunner implements DockerProcessRunner {
 
                 settled = true;
                 clearTimeout(timeout);
+                removeAbortListener();
                 resolve({
                     exitCode: exitCode ?? 1,
                     stdout,
                     stderr,
-                    timedOut
+                    timedOut,
+                    aborted
                 });
             });
 
@@ -165,15 +184,102 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         try {
             console.debug('[DockerSandboxRunner] stdinPayload:', stdinPayload);
         } catch {}
-        const args = this.buildDockerArgs(request, maxMemoryMb, containerWorkspaceDir);
+        const containerName = `airdd2-${request.executionId.replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 48)}`;
+        const args = this.buildDockerArgs(request, maxMemoryMb, containerWorkspaceDir, containerName);
+        let containerKill: Promise<boolean> | undefined;
+        const killContainer = () => {
+            containerKill ??= this.processRunner.run('docker', ['kill', containerName], { timeoutMs: 5_000 })
+                .then(async (killResult) => {
+                    if (killResult.exitCode === 0) {
+                        return true;
+                    }
 
-        const result = await this.processRunner.run('docker', args, {
-            stdin: stdinPayload,
-            timeoutMs
-        });
+                    const inspectResult = await this.processRunner.run(
+                        'docker',
+                        ['inspect', '--format', '{{.State.Running}}', containerName],
+                        { timeoutMs: 5_000 },
+                    ).catch(() => null);
+                    return inspectResult?.exitCode === 0 && inspectResult.stdout.trim() === 'false';
+                })
+                .catch(() => {
+                    console.warn('[DockerSandboxRunner] Container cancellation could not be confirmed', { executionId: request.executionId });
+                    return false;
+                });
+            return containerKill;
+        };
+        request.signal?.addEventListener('abort', killContainer, { once: true });
+        if (request.signal?.aborted) {
+            killContainer();
+        }
+
+        let result: CommandExecutionResult;
+        try {
+            result = await this.processRunner.run('docker', args, {
+                stdin: stdinPayload,
+                timeoutMs,
+                signal: request.signal,
+            });
+        } finally {
+            request.signal?.removeEventListener('abort', killContainer);
+        }
 
         const durationMs = Date.now() - startedAt;
         const normalized = this.normalizeResult(result, request.mode, durationMs);
+        if (request.signal?.aborted && result.aborted) {
+            const cancellationConfirmed = await containerKill ?? false;
+            return {
+                ...normalized,
+                success: false,
+                output: null,
+                stderr: 'Sandbox execution cancelled.',
+                timedOut: false,
+                exitCode: 130,
+                runner: this.getRunnerId(),
+                metadata: {
+                    exitCode: 130,
+                    failureKind: 'cancelled',
+                    failureSubsystem: 'runner',
+                    cancellationConfirmed,
+                    containerWorkspaceDir,
+                    timeoutMs,
+                    maxMemoryMb,
+                },
+                resourceUsage: {
+                    wallTimeMs: durationMs,
+                    memoryLimitMb: maxMemoryMb,
+                },
+            };
+        }
+
+        if (result.timedOut) {
+            const terminationConfirmed = await killContainer();
+            if (!terminationConfirmed) {
+                return {
+                    ...normalized,
+                    success: false,
+                    output: null,
+                    stderr: 'Sandbox timed out, but container termination could not be confirmed.',
+                    timedOut: false,
+                    exitCode: normalized.exitCode,
+                    runner: this.getRunnerId(),
+                    metadata: {
+                        ...(normalized.metadata ?? {}),
+                        exitCode: normalized.exitCode,
+                        failureKind: 'runner_unavailable',
+                        failureSubsystem: 'runner',
+                        runnerTerminationConfirmed: false,
+                        containerWorkspaceDir,
+                        timeoutMs,
+                        maxMemoryMb,
+                    },
+                    resourceUsage: {
+                        wallTimeMs: durationMs,
+                        memoryLimitMb: maxMemoryMb,
+                    },
+                };
+            }
+        }
+
         return {
             ...normalized,
             runner: this.getRunnerId(),
@@ -182,6 +288,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
                 containerWorkspaceDir,
                 timeoutMs,
                 maxMemoryMb,
+                ...(result.timedOut ? { runnerTerminationConfirmed: true } : {}),
                 ...(normalized.metadata ?? {})
             },
             resourceUsage: {
@@ -228,11 +335,12 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         };
     }
 
-    private buildDockerArgs(request: SandboxExecutionRequest, maxMemoryMb: number, containerWorkspaceDir: string): string[] {
+    private buildDockerArgs(request: SandboxExecutionRequest, maxMemoryMb: number, containerWorkspaceDir: string, containerName: string): string[] {
         const networkMode = this.resolveDockerNetworkMode(request.policySnapshot.networkMode);
         const baseArgs = [
             'run',
             '--rm',
+            `--name=${containerName}`,
             '--interactive',
             `--network=${networkMode}`,
             '--cpus=0.50',

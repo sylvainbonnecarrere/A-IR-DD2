@@ -492,6 +492,15 @@ router.patch('/:id/patch',
                 });
             }
 
+            const legacyGraphFields = Object.keys($set).filter((field) => /^(nodes|edges)(?:\.|$)/.test(field));
+            if (legacyGraphFields.length > 0) {
+                return res.status(400).json({
+                    error: 'Workflow graph mutations must use the canonical V2 graph routes',
+                    code: 'WORKFLOW_V1_GRAPH_MUTATION_FORBIDDEN',
+                    fields: legacyGraphFields,
+                });
+            }
+
             const result = await patchWorkflowUseCase.execute({
                 workflowId: req.params.id,
                 userId: user.id,

@@ -122,12 +122,21 @@ async function snapshot(page: Page) {
     });
 }
 
+async function waitForStableCanvas(page: Page) {
+    await expect.poll(async () => {
+        const current = await snapshot(page);
+        await page.evaluate(() => new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }));
+        return JSON.stringify(await snapshot(page)) === JSON.stringify(current);
+    }, { intervals: [50, 100, 200], timeout: 15_000 }).toBe(true);
+}
+
 test('les nodes gardent la meme position apres navigation vers un autre ecran et retour sur la carte', async ({ page }) => {
     await installMocks(page);
-    page.on('console', (msg) => { if (msg.text().includes('DBGFIT')) console.log(msg.text()); });
     await page.goto('/');
     await page.waitForSelector('.react-flow__node', { timeout: 30_000 });
-    await page.waitForTimeout(1500);
+    await waitForStableCanvas(page);
     const before = await snapshot(page);
     console.log('BEFORE', JSON.stringify(before));
     expect(before.nodes.length).toBe(3);
@@ -136,11 +145,11 @@ test('les nodes gardent la meme position apres navigation vers un autre ecran et
     for (let i = 0; i < 2; i += 1) {
         await page.getByRole('button', { name: 'Phil' }).click();
         await page.getByRole('button', { name: 'Fonctions Personnalisées' }).click();
-        await page.waitForTimeout(800);
+        await expect(page.getByRole('heading', { name: 'Fonctions Personnalisées' })).toBeVisible();
         await page.getByRole('button', { name: 'Bos' }).click();
         await page.getByRole('button', { name: 'Carte du workflow' }).click();
         await page.waitForSelector('.react-flow__node', { timeout: 30_000 });
-        await page.waitForTimeout(1500);
+        await waitForStableCanvas(page);
         const after = await snapshot(page);
         console.log(`AFTER${i}`, JSON.stringify(after));
         expect(after.nodes).toEqual(before.nodes);

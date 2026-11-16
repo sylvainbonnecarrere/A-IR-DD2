@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import path from 'path';
 import mongoose from 'mongoose';
 import ts from 'typescript';
-import type { UserToolRunLaunchContext } from '../../models/UserToolRun.model';
+import type { UserToolRunLaunchContext, UserToolRunRunner } from '../../models/UserToolRun.model';
 import type { IUserToolRunArtifact } from '../../models/UserToolRun.model';
 import { deriveExecutionMetadataFromLegacyFunction } from '../../utils/userToolLegacyMapper';
 import { BuildService } from '../build.service';
@@ -33,6 +33,40 @@ export interface ExecutionOrchestratorRequest {
     launchContext: UserToolRunLaunchContext;
     agentInstanceId?: string;
     idempotencyKey?: string;
+    retryOfExecutionId?: string;
+    persistedExecutionId?: string;
+    executeExistingQueued?: boolean;
+}
+
+export interface QueuedRunAcknowledgement {
+    executionId: string;
+    status: string;
+    replayed: boolean;
+}
+
+export type RunPreparation = () => Promise<void>;
+
+export class IdempotencyKeyReuseError extends Error {
+    readonly code = 'IDEMPOTENCY_KEY_REUSED';
+
+    constructor() {
+        super('Idempotency-Key was already used with a different run request.');
+        this.name = 'IdempotencyKeyReuseError';
+    }
+}
+
+function stableSerialize(value: unknown): string {
+    if (Array.isArray(value)) {
+        return `[${value.map(stableSerialize).join(',')}]`;
+    }
+
+    if (value !== null && typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        return `{${Object.keys(record).sort().filter((key) => record[key] !== undefined)
+            .map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(',')}}`;
+    }
+
+    return JSON.stringify(value) ?? 'null';
 }
 
 export class ExecutionOrchestrator {
@@ -46,6 +80,9 @@ export class ExecutionOrchestrator {
     private readonly sandboxRunnerFactory = createSandboxRunnerFactory();
     private readonly dockerRunner = new DockerSandboxRunner();
     private readonly firecrackerRunner = new FirecrackerRunner();
+    private readonly queuedDispatches = new Map<string, Promise<void>>();
+    private readonly activeRunControllers = new Map<string, AbortController>();
+    private readonly activeRunCompletions = new Map<string, Promise<void>>();
 
     async getPreferredRunnerReadiness(runtime: SandboxExecutionRequest['runtime']) {
         const runtimeReport = await this.runtimeHealthService.getHealthReport();
@@ -76,12 +113,123 @@ export class ExecutionOrchestrator {
         return this.dockerRunner.checkPythonSyntax(code);
     }
 
-    async execute(request: ExecutionOrchestratorRequest): Promise<OrchestratedExecutionResult> {
+    async enqueue(request: ExecutionOrchestratorRequest, prepareForDispatch?: RunPreparation): Promise<QueuedRunAcknowledgement> {
         const executionMetadata = deriveExecutionMetadataFromLegacyFunction(request.fn);
-        const executionId = this.buildExecutionId(request, executionMetadata.toolId.toString());
-        if (request.idempotencyKey) {
-            const existingRun = await this.userToolRunService.getRunByExecutionId(executionId);
-            if (existingRun) {
+        const executionId = request.persistedExecutionId
+            ?? this.buildExecutionId(request, executionMetadata.toolId.toString());
+        const requestFingerprint = this.buildRequestFingerprint(request, executionMetadata);
+        const existingRun = request.idempotencyKey || request.persistedExecutionId
+            ? await this.userToolRunService.getRunByExecutionId(executionId)
+            : null;
+
+        if (existingRun) {
+            this.assertMatchingRequestFingerprint(existingRun.requestFingerprint, requestFingerprint);
+            if (existingRun.status === 'queued') {
+                this.scheduleQueuedExecution(request, executionId, prepareForDispatch);
+            }
+            return { executionId, status: existingRun.status, replayed: true };
+        }
+
+        const selectedRunnerId: UserToolRunRunner = 'docker_sandbox';
+
+        try {
+            await this.userToolRunService.createQueuedRun({
+                executionId,
+                ownerUserId: request.userId,
+                toolId: executionMetadata.toolId,
+                toolVersionTag: executionMetadata.toolVersionTag,
+                toolContentHash: executionMetadata.toolContentHash,
+                workflowId: executionMetadata.workflowId,
+                launchContext: request.launchContext,
+                runtime: executionMetadata.runtime,
+                runner: selectedRunnerId,
+                inputs: request.args,
+                agentInstanceId: request.agentInstanceId,
+                retryOfExecutionId: request.retryOfExecutionId,
+                requestFingerprint,
+                privateContext: request.privateContext,
+                policySnapshot: executionMetadata.policySnapshot,
+            });
+        } catch (error) {
+            if (!this.isDuplicateKeyError(error)) {
+                throw error;
+            }
+
+            const duplicateRun = await this.userToolRunService.getRunByExecutionId(executionId);
+            if (!duplicateRun) {
+                throw error;
+            }
+            this.assertMatchingRequestFingerprint(duplicateRun.requestFingerprint, requestFingerprint);
+            if (duplicateRun.status === 'queued') {
+                this.scheduleQueuedExecution(request, executionId, prepareForDispatch);
+            }
+            return { executionId, status: duplicateRun.status, replayed: true };
+        }
+
+        this.scheduleQueuedExecution(request, executionId, prepareForDispatch);
+        return { executionId, status: 'queued', replayed: false };
+    }
+
+    async requestCancellation(executionId: string, ownerUserId: string) {
+        const cancellation = await this.userToolRunService.requestCancellation(executionId, ownerUserId);
+        if (cancellation.kind === 'not_found' || cancellation.kind === 'not_cancellable') {
+            return cancellation;
+        }
+
+        this.activeRunControllers.get(executionId)?.abort();
+        const workCompleted = await this.waitForRunWork(executionId);
+        if (workCompleted) {
+            const currentRun = await this.userToolRunService.getRunByExecutionId(executionId);
+            if (currentRun?.status === 'stopped' && currentRun.error?.code === 'RUN_CANCELLED') {
+                return { kind: 'stopped' as const, run: currentRun };
+            }
+            if (currentRun && !['queued', 'running'].includes(currentRun.status)) {
+                return { kind: 'not_cancellable' as const, run: currentRun };
+            }
+            if (currentRun) {
+                return { kind: 'requested' as const, run: currentRun };
+            }
+        }
+
+        return cancellation;
+    }
+
+    private async waitForRunWork(executionId: string, timeoutMs = 10_000): Promise<boolean> {
+        const activeCompletion = this.activeRunCompletions.get(executionId);
+        const queuedDispatch = this.queuedDispatches.get(executionId);
+        if (!activeCompletion && !queuedDispatch) {
+            return true;
+        }
+
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        try {
+            return await Promise.race([
+                Promise.all([activeCompletion, queuedDispatch].filter((work): work is Promise<void> => Boolean(work)))
+                    .then(() => true),
+                new Promise<boolean>((resolve) => {
+                    timeout = setTimeout(() => resolve(false), timeoutMs);
+                }),
+            ]);
+        } finally {
+            if (timeout) {
+                clearTimeout(timeout);
+            }
+        }
+    }
+
+    async execute(request: ExecutionOrchestratorRequest, prepareForDispatch?: RunPreparation): Promise<OrchestratedExecutionResult> {
+        const executionMetadata = deriveExecutionMetadataFromLegacyFunction(request.fn);
+        const executionId = request.persistedExecutionId
+            ?? this.buildExecutionId(request, executionMetadata.toolId.toString());
+        const requestFingerprint = this.buildRequestFingerprint(request, executionMetadata);
+        const existingRun = request.idempotencyKey || request.persistedExecutionId
+            ? await this.userToolRunService.getRunByExecutionId(executionId)
+            : null;
+        const isQueuedDispatch = request.executeExistingQueued === true && existingRun?.status === 'queued';
+
+        if (existingRun) {
+            this.assertMatchingRequestFingerprint(existingRun.requestFingerprint, requestFingerprint);
+            if (!isQueuedDispatch) {
                 return this.mapPersistedRun(existingRun, true);
             }
         }
@@ -103,16 +251,38 @@ export class ExecutionOrchestrator {
             runner: selectedRunnerId,
         });
 
-        const executionRequest = await this.buildExecutionRequest({
-            ...request,
-            executionId,
-            executionMetadataRuntime: executionMetadata.runtime,
-            executionMetadataToolVersionTag: executionMetadata.toolVersionTag,
-            executionMetadataPolicy: executionMetadata.policySnapshot,
-            launchContext: request.launchContext
-        });
+        let executionRequest: SandboxExecutionRequest;
+        try {
+            await prepareForDispatch?.();
+            executionRequest = await this.buildExecutionRequest({
+                ...request,
+                executionId,
+                executionMetadataRuntime: executionMetadata.runtime,
+                executionMetadataToolVersionTag: executionMetadata.toolVersionTag,
+                executionMetadataPolicy: executionMetadata.policySnapshot,
+                launchContext: request.launchContext
+            });
+        } catch (error) {
+            if (isQueuedDispatch) {
+                await this.userToolRunService.failRun(executionId, {
+                    error: buildSandboxErrorDetails({
+                        code: 'RUN_PREPARATION_FAILED',
+                        message: error instanceof Error ? error.message : String(error),
+                        subsystem: 'build_preparation',
+                        retryable: false,
+                    }),
+                });
+            }
+            throw error;
+        }
 
         try {
+            if (isQueuedDispatch) {
+                const persistedRun = await this.userToolRunService.getRunByExecutionId(executionId);
+                if (persistedRun?.status !== 'queued') {
+                    return persistedRun ? this.mapPersistedRun(persistedRun, true) : this.mapPersistedRun(await this.userToolRunService.getRunByExecutionId(executionId) as any, true);
+                }
+            } else {
             await this.userToolRunService.createQueuedRun({
                 executionId,
                 ownerUserId: request.userId,
@@ -125,8 +295,12 @@ export class ExecutionOrchestrator {
                 runner: selectedRunnerId,
                 inputs: request.args,
                 agentInstanceId: request.agentInstanceId,
+                retryOfExecutionId: request.retryOfExecutionId,
+                requestFingerprint,
+                privateContext: request.privateContext,
                 policySnapshot: executionMetadata.policySnapshot
             });
+            }
         } catch (error) {
             if (request.idempotencyKey && this.isDuplicateKeyError(error)) {
                 const existingRun = await this.userToolRunService.getRunByExecutionId(executionId);
@@ -138,12 +312,27 @@ export class ExecutionOrchestrator {
             throw error;
         }
 
-        return this.executeSerializedForWorkspace(executionRequest.workspace, async () => {
-            await this.userToolRunService.markRunning(executionId);
-            const artifactBaseline = await this.snapshotOutputArtifacts(executionRequest.workspace);
+        let resolveActiveCompletion!: () => void;
+        const activeCompletion = new Promise<void>((resolve) => {
+            resolveActiveCompletion = resolve;
+        });
+        this.activeRunCompletions.set(executionId, activeCompletion);
 
+        try {
+        return await this.executeSerializedForWorkspace(executionRequest.workspace, async () => {
+            const controller = new AbortController();
+            this.activeRunControllers.set(executionId, controller);
             try {
-                const executionResult = await this.getExecutionRunner(selectedRunnerId).execute(executionRequest);
+                await this.userToolRunService.markRunning(executionId, new Date(), selectedRunnerId);
+                const artifactBaseline = await this.snapshotOutputArtifacts(executionRequest.workspace);
+                let runnerCompleted = false;
+
+                try {
+                const executionResult = await this.getExecutionRunner(selectedRunnerId).execute({
+                    ...executionRequest,
+                    signal: controller.signal,
+                });
+                runnerCompleted = true;
                 const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
                 const outputs = {
                     result: executionResult.output,
@@ -151,8 +340,40 @@ export class ExecutionOrchestrator {
                     stderr: executionResult.stderr,
                     ...(outputArtifacts.length > 0 ? { artifacts: outputArtifacts } : {})
                 };
+                const cancellationOutcome = executionResult.metadata?.failureKind === 'cancelled';
 
-                if (executionResult.success) {
+                if (cancellationOutcome) {
+                    if (executionResult.metadata?.cancellationConfirmed !== true) {
+                        return {
+                            ...executionResult,
+                            success: false,
+                            executionId,
+                            replayed: false,
+                            status: 'running',
+                            cancellationRequested: true,
+                        };
+                    }
+
+                    await this.userToolRunService.stopRun(executionId, {
+                        error: {
+                            code: 'RUN_CANCELLED',
+                            subsystem: 'runner',
+                            failureKind: 'cancelled',
+                            message: 'Sandbox stopped after cancellation request',
+                            retryable: false,
+                        },
+                        outputs,
+                        resourceUsage: this.buildResourceUsage(executionResult),
+                    });
+                } else if (executionResult.metadata?.runnerTerminationConfirmed === false) {
+                    return {
+                        ...executionResult,
+                        success: false,
+                        executionId,
+                        replayed: false,
+                        status: 'running',
+                    };
+                } else if (executionResult.success) {
                     await this.userToolRunService.completeRun(executionId, {
                         outputs,
                         resourceUsage: this.buildResourceUsage(executionResult)
@@ -199,6 +420,7 @@ export class ExecutionOrchestrator {
                     ...executionResult,
                     executionId,
                     replayed: false,
+                    status: cancellationOutcome ? 'stopped' : executionResult.success ? 'completed' : executionResult.timedOut ? 'timed_out' : 'failed',
                     metadata: {
                         exitCode: executionResult.exitCode,
                         ...(executionResult.metadata ?? {}),
@@ -206,6 +428,25 @@ export class ExecutionOrchestrator {
                     }
                 };
             } catch (error) {
+                if (controller.signal.aborted && !runnerCompleted) {
+                    const currentRun = await this.userToolRunService.getRunByExecutionId(executionId);
+                    if (currentRun?.status === 'stopped' && currentRun.error?.code === 'RUN_CANCELLED') {
+                        return this.mapPersistedRun(currentRun, false);
+                    }
+                    return {
+                        success: false,
+                        output: null,
+                        stderr: 'Cancellation requested; runner termination has not been confirmed.',
+                        durationMs: 0,
+                        timedOut: false,
+                        exitCode: 130,
+                        runner: selectedRunnerId,
+                        executionId,
+                        replayed: false,
+                        status: 'running',
+                        cancellationRequested: true,
+                    };
+                }
                 const message = error instanceof Error ? error.message : String(error);
                 const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
                 console.error('[ExecutionOrchestrator] failed execution', {
@@ -239,8 +480,19 @@ export class ExecutionOrchestrator {
                 });
 
                 throw error;
+                }
+            } finally {
+                if (this.activeRunControllers.get(executionId) === controller) {
+                    this.activeRunControllers.delete(executionId);
+                }
             }
         });
+        } finally {
+            resolveActiveCompletion();
+            if (this.activeRunCompletions.get(executionId) === activeCompletion) {
+                this.activeRunCompletions.delete(executionId);
+            }
+        }
     }
 
     private async catalogOutputArtifacts(params: {
@@ -566,9 +818,75 @@ export class ExecutionOrchestrator {
             message,
             code: this.toPersistedErrorCode(failureKind),
             subsystem: inferSandboxFailureSubsystem(failureKind),
-            retryable: false,
+            retryable: failureKind === 'runner_unavailable'
+                || failureKind === 'runner_spawn_failed'
+                || failureKind === 'runner_image_missing'
+                || failureKind === 'runner_mount_failed',
             failureKind,
         });
+    }
+
+    private buildRequestFingerprint(
+        request: ExecutionOrchestratorRequest,
+        metadata: ReturnType<typeof deriveExecutionMetadataFromLegacyFunction>,
+    ): string {
+        return crypto.createHash('sha256').update(stableSerialize({
+            userId: request.userId,
+            toolId: metadata.toolId.toString(),
+            toolVersionTag: metadata.toolVersionTag,
+            toolContentHash: metadata.toolContentHash,
+            workflowId: request.fn.workflowId?.toString() ?? null,
+            agentInstanceId: request.agentInstanceId ?? null,
+            launchContext: request.launchContext,
+            retryOfExecutionId: request.retryOfExecutionId ?? null,
+            args: request.args,
+            policySnapshot: metadata.policySnapshot,
+            privateContext: request.privateContext ?? null,
+        })).digest('hex');
+    }
+
+    private assertMatchingRequestFingerprint(existing: string | null | undefined, requested: string): void {
+        if (existing && existing !== requested) {
+            throw new IdempotencyKeyReuseError();
+        }
+    }
+
+    private scheduleQueuedExecution(request: ExecutionOrchestratorRequest, executionId: string, prepareForDispatch?: RunPreparation): void {
+        if (this.queuedDispatches.has(executionId)) {
+            return;
+        }
+
+        const queuedRequest: ExecutionOrchestratorRequest = {
+            ...request,
+            persistedExecutionId: executionId,
+            executeExistingQueued: true,
+        };
+        const pending = Promise.resolve()
+            .then(() => this.execute(queuedRequest, prepareForDispatch))
+            .then(() => undefined)
+            .catch(async (error: unknown) => {
+                const run = await this.userToolRunService.getRunByExecutionId(executionId).catch(() => null);
+                if (run?.status === 'queued' && !(error instanceof RuntimeNotReadyError)) {
+                    await this.userToolRunService.failRun(executionId, {
+                        error: buildSandboxErrorDetails({
+                            code: 'RUN_DISPATCH_FAILED',
+                            subsystem: 'unknown',
+                            message: error instanceof Error ? error.message : 'Run dispatch failed',
+                            retryable: false,
+                        }),
+                    }).catch(() => undefined);
+                }
+
+                console.error('[ExecutionOrchestrator] queued execution failed before completion', {
+                    executionId,
+                    errorType: error instanceof Error ? error.name : 'UnknownError',
+                });
+            })
+            .finally(() => {
+                this.queuedDispatches.delete(executionId);
+            });
+
+        this.queuedDispatches.set(executionId, pending);
     }
 
     private buildExecutionId(request: ExecutionOrchestratorRequest, toolId: string): string {
@@ -583,6 +901,7 @@ export class ExecutionOrchestrator {
                 toolId,
                 agentInstanceId: request.agentInstanceId ?? null,
                 launchContext: request.launchContext,
+                retryOfExecutionId: request.retryOfExecutionId ?? null,
                 idempotencyKey: request.idempotencyKey,
             }))
             .digest('hex')
@@ -609,6 +928,8 @@ export class ExecutionOrchestrator {
             stderr: run.outputs?.stderr ?? run.error?.message,
             durationMs: run.timing.durationMs ?? 0,
             timedOut: run.status === 'timed_out',
+            status: run.status,
+            retryOfExecutionId: run.retryOfExecutionId ?? null,
             exitCode: run.status === 'completed' ? 0 : 1,
             runner: run.runner,
             executionId: run.executionId,

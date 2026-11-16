@@ -193,6 +193,17 @@ async function installAuthWorkspaceMocks(page: Page, state: MockScenarioState, a
             return fulfillJson(route, { status: 200, body: [] });
         }
 
+        if (path === '/api/user-settings' && method === 'GET') {
+            return fulfillJson(route, {
+                status: 200,
+                body: { preferences: { language: 'fr', theme: 'dark', saveMode: 'manual' } },
+            });
+        }
+
+        if (path === '/api/user-settings' && method === 'PUT') {
+            return fulfillJson(route, { status: 200, body: { success: true } });
+        }
+
         if (path === '/api/user/workspace' && method === 'GET') {
             state.workspaceRequests += 1;
 

@@ -1,26 +1,51 @@
-1- commande  npm --prefix backend run build
-    renvoie "
-rror: src/__tests__/worker-lease.service.test.ts(32,16): error TS18048: 'second.lease' is possibly 'undefined'.
-Error: src/__tests__/workflow-validator.test.ts(102,46): error TS2345: Argument of type '{ valid: boolean; issues: { code: string; message: string; details: { instanceId: string; }; }[]; }' is not assignable to parameter of type 'WorkflowValidationResult'.
-  Types of property 'issues' are incompatible.
-    Type '{ code: string; message: string; details: { instanceId: string; }; }[]' is not assignable to type 'WorkflowValidationIssue[]'.
-      Type '{ code: string; message: string; details: { instanceId: string; }; }' is not assignable to type 'WorkflowValidationIssue'.
-        Types of property 'code' are incompatible.
-          Type 'string' is not assignable to type 'WorkflowValidationIssueCode'.
-Error: src/domain/execution/runtimeEvent.contract.ts(96,4): error TS2554: Expected 2-3 arguments, but got 1.
-Error: src/migrations/008_workflow_v1_to_v2_migration.ts(132,28): error TS2339: Property 'sourceHandle' does not exist on type 'LegacyWorkflowEdgeLike'.
-Error: src/migrations/008_workflow_v1_to_v2_migration.ts(133,28): error TS2339: Property 'targetHandle' does not exist on type 'LegacyWorkflowEdgeLike'.
-Error: Process completed with exit code 2."
+Message d'erreur : 16s
+Run npm --prefix backend run runtime:scan
 
-2- commande  npm --prefix backend run build
-    renvoie "Error: src/__tests__/worker-lease.service.test.ts(32,16): error TS18048: 'second.lease' is possibly 'undefined'.
-Error: src/__tests__/workflow-validator.test.ts(102,46): error TS2345: Argument of type '{ valid: boolean; issues: { code: string; message: string; details: { instanceId: string; }; }[]; }' is not assignable to parameter of type 'WorkflowValidationResult'.
-  Types of property 'issues' are incompatible.
-    Type '{ code: string; message: string; details: { instanceId: string; }; }[]' is not assignable to type 'WorkflowValidationIssue[]'.
-      Type '{ code: string; message: string; details: { instanceId: string; }; }' is not assignable to type 'WorkflowValidationIssue'.
-        Types of property 'code' are incompatible.
-          Type 'string' is not assignable to type 'WorkflowValidationIssueCode'.
-Error: src/domain/execution/runtimeEvent.contract.ts(96,4): error TS2554: Expected 2-3 arguments, but got 1.
-Error: src/migrations/008_workflow_v1_to_v2_migration.ts(132,28): error TS2339: Property 'sourceHandle' does not exist on type 'LegacyWorkflowEdgeLike'.
-Error: src/migrations/008_workflow_v1_to_v2_migration.ts(133,28): error TS2339: Property 'targetHandle' does not exist on type 'LegacyWorkflowEdgeLike'.
-Error: Process completed with exit code 2."
+> llm-agent-workflow-backend@1.0.0 runtime:scan
+> node scripts/runtime/scan-runtime.cjs --fail-on-severity=high
+
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+Runtime scan: unhealthy
+- [healthy] Docker CLI: Docker disponible (29.4.2)
+- [healthy] Scanner local: Trivy détecté
+- [unhealthy] Node.js runtime: CVE critical/high détectées via Trivy.
+- [unhealthy] Python runtime: CVE critical/high détectées via Trivy.
+- [unhealthy] Python provisioning image: CVE critical/high détectées via Trivy.
+Error: Process completed with exit code 1.
+
+
+Diagnostic : La CI échoue parce que le scanner a trouvé des vulnérabilités HIGH ou CRITICAL dans trois cibles : le runtime Node.js, le runtime Python et l’image de provisioning Python. Le script est configuré pour faire échouer le job à ce seuil ; le code de sortie 1 est donc le comportement attendu du garde-fou, pas la cause première. Trivy permet explicitement de faire échouer une analyse selon les sévérités configurées. 
+trivy.dev
+
+Le rapport fourni ne contient ni identifiants CVE, ni versions de paquets, ni image/tag concerné. Il ne permet donc pas de désigner précisément les dépendances à mettre à jour. Le README du projet décrit une application Node.js avec des fonctions Python et des sandboxes Docker : il faut vérifier les images et dépendances effectivement scannées, pas se limiter aux dépendances npm de l’application.
+
+Brief à transmettre à l’agent d’implémentation
+text
+
+
+Objectif : corriger l’échec de `npm --prefix backend run runtime:scan` sans affaiblir la politique de sécurité.
+
+1. Examiner `backend/scripts/runtime/scan-runtime.cjs` et retrouver, pour chacune des trois cibles en échec (Node.js runtime, Python runtime, Python provisioning image) :
+   - la commande Trivy exacte ;
+   - le nom et le tag ou digest de l’image, s’il s’agit d’une image ;
+   - le rapport Trivy détaillé, notamment CVE, sévérité, paquet, version installée et version corrigée ;
+   - si le finding vient d’un paquet OS, d’une dépendance applicative ou d’une image de base.
+
+2. Reproduire le scan et conserver les rapports détaillés comme artefacts/logs CI si le script ne les rend pas déjà accessibles. Ne pas déduire les CVE à partir du résumé « CVE critical/high ».
+
+3. Corriger les vulnérabilités à leur source :
+   - mettre à jour les images de base Node/Python vers des versions maintenues et corrigées, en respectant le runtime Node déclaré par le projet ;
+   - mettre à jour les paquets OS dans les Dockerfiles/images si les findings les concernent ;
+   - mettre à jour les dépendances npm/pip et leurs lockfiles si les findings proviennent de ces dépendances ;
+   - reconstruire les images et vérifier qu’elles utilisent bien les versions corrigées.
+
+4. Ne pas contourner le contrôle :
+   - ne pas supprimer `--fail-on-severity=high` ;
+   - ne pas ignorer globalement les CVE, ni masquer les findings avec un changement de configuration ;
+   - si une exception est réellement nécessaire faute de correctif, la limiter aux CVE précises, documenter la justification, le périmètre et une date d’expiration, et la faire approuver.
+
+5. Validation :
+   - relancer `npm --prefix backend run runtime:scan` et vérifier que les trois cibles passent ;
+   - exécuter les tests/runtime checks pertinents et les vérifications CI existantes ;
+   - fournir dans le PR les CVE traitées, les versions avant/après et les sorties de validation.
+En bref : le correctif attendu est de mettre à jour les images et/ou dépendances vulnérables identifiées dans les rapports détaillés, puis de rescanner. Un changement de seuil pourrait rendre le job vert tout en laissant les vulnérabilités présentes ; ce n’est pas une résolution.

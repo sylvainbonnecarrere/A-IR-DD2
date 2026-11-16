@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { assertUserToolRunTransition } from '../domain/execution/userToolRun.contract';
+import { decrypt, encrypt } from '../utils/encryption';
 import {
     IUserToolRun,
     IUserToolRunError,
@@ -12,7 +13,7 @@ import {
     UserToolRunRuntime,
     UserToolRunStatus
 } from '../models';
-import { RuntimeEventPublisher } from './runtimeEventPublisher.service';
+import { createRuntimeEventPublisher, RuntimeEventPublisher } from './runtimeEventPublisher.service';
 
 type ObjectIdLike = mongoose.Types.ObjectId | string | null | undefined;
 
@@ -30,6 +31,9 @@ export interface CreateUserToolRunData {
     workflowId?: ObjectIdLike;
     agentPrototypeId?: ObjectIdLike;
     agentInstanceId?: ObjectIdLike;
+    retryOfExecutionId?: string;
+    requestFingerprint?: string;
+    privateContext?: Record<string, unknown>;
     queuedAt?: Date;
 }
 
@@ -113,7 +117,7 @@ function computeDurationMs(startedAt?: Date | null, finishedAt?: Date | null): n
 export class UserToolRunService {
     private readonly runtimeEventPublisher?: RuntimeEventPublisher;
 
-    constructor(runtimeEventPublisher?: RuntimeEventPublisher) {
+    constructor(runtimeEventPublisher: RuntimeEventPublisher = createRuntimeEventPublisher()) {
         this.runtimeEventPublisher = runtimeEventPublisher;
     }
 
@@ -123,16 +127,24 @@ export class UserToolRunService {
         }
 
         const queuedAt = data.queuedAt ?? new Date();
+        const ownerUserId = toObjectId(data.ownerUserId, 'ownerUserId');
 
         const run = new UserToolRun({
             executionId: data.executionId.trim(),
-            ownerUserId: toObjectId(data.ownerUserId, 'ownerUserId'),
+            ownerUserId,
             toolId: toObjectId(data.toolId, 'toolId'),
             toolVersionTag: data.toolVersionTag,
             toolContentHash: data.toolContentHash,
             workflowId: toOptionalObjectId(data.workflowId),
             agentPrototypeId: toOptionalObjectId(data.agentPrototypeId),
             agentInstanceId: toOptionalObjectId(data.agentInstanceId),
+            retryOfExecutionId: data.retryOfExecutionId ?? null,
+            requestFingerprint: data.requestFingerprint ?? null,
+            privateContextCiphertext: data.privateContext
+                ? encrypt(JSON.stringify(data.privateContext), ownerUserId.toString())
+                : null,
+            cancellationRequestedAt: null,
+            cancellationRequestedBy: null,
             launchContext: data.launchContext,
             status: 'queued',
             runtime: data.runtime,
@@ -150,7 +162,101 @@ export class UserToolRunService {
         });
 
         await run.save();
+        this.publishRuntimeStateChange(run, 'queued', 'queued');
         return run;
+    }
+
+    async requestCancellation(
+        executionId: string,
+        ownerUserId: ObjectIdLike,
+        requestedBy: ObjectIdLike = ownerUserId,
+        requestedAt: Date = new Date(),
+    ): Promise<
+        | { kind: 'stopped'; run: IUserToolRun }
+        | { kind: 'requested'; run: IUserToolRun }
+        | { kind: 'not_found' }
+        | { kind: 'not_cancellable'; run: IUserToolRun }
+    > {
+        const ownerId = toObjectId(ownerUserId, 'ownerUserId');
+        const requestedById = toObjectId(requestedBy, 'requestedBy');
+        const cancelledError: IUserToolRunError = {
+            code: 'RUN_CANCELLED',
+            subsystem: 'validation',
+            failureKind: 'cancelled',
+            message: 'Run annulé par l’utilisateur',
+            retryable: false,
+        };
+
+        const stoppedQueuedRun = await UserToolRun.findOneAndUpdate(
+            { executionId, ownerUserId: ownerId, status: 'queued' },
+            {
+                $set: {
+                    status: 'stopped',
+                    error: cancelledError,
+                    cancellationRequestedAt: requestedAt,
+                    cancellationRequestedBy: requestedById,
+                    'timing.finishedAt': requestedAt,
+                    'timing.durationMs': null,
+                },
+            },
+            { new: true },
+        );
+
+        if (stoppedQueuedRun) {
+            this.publishRuntimeStateChange(stoppedQueuedRun, 'queued', 'stopped');
+            return { kind: 'stopped', run: stoppedQueuedRun };
+        }
+
+        const requestedRunningRun = await UserToolRun.findOneAndUpdate(
+            {
+                executionId,
+                ownerUserId: ownerId,
+                status: 'running',
+                cancellationRequestedAt: null,
+            },
+            {
+                $set: {
+                    cancellationRequestedAt: requestedAt,
+                    cancellationRequestedBy: requestedById,
+                },
+            },
+            { new: true },
+        );
+
+        if (requestedRunningRun) {
+            this.publishCancellationRequested(requestedRunningRun);
+            return { kind: 'requested', run: requestedRunningRun };
+        }
+
+        const currentRun = await UserToolRun.findOne({ executionId, ownerUserId: ownerId });
+        if (!currentRun) {
+            return { kind: 'not_found' };
+        }
+
+        if (currentRun.status === 'running' && currentRun.cancellationRequestedAt) {
+            return { kind: 'requested', run: currentRun };
+        }
+
+        if (currentRun.status === 'stopped' && currentRun.error?.code === 'RUN_CANCELLED') {
+            return { kind: 'stopped', run: currentRun };
+        }
+
+        return { kind: 'not_cancellable', run: currentRun };
+    }
+
+    async getPrivateContext(run: IUserToolRun): Promise<Record<string, unknown> | undefined> {
+        const ciphertext = run.privateContextCiphertext;
+        if (!ciphertext) {
+            return undefined;
+        }
+
+        const plaintext = decrypt(ciphertext, run.ownerUserId.toString());
+        const parsed: unknown = JSON.parse(plaintext);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            throw new Error('Persisted run private context must be a record');
+        }
+
+        return parsed as Record<string, unknown>;
     }
 
     async createAndStartRun(
@@ -161,7 +267,7 @@ export class UserToolRunService {
         return this.markRunning(data.executionId, startedAt);
     }
 
-    async markRunning(executionId: string, startedAt: Date = new Date()): Promise<IUserToolRun> {
+    async markRunning(executionId: string, startedAt: Date = new Date(), runner?: UserToolRunRunner): Promise<IUserToolRun> {
         const run = await this.getRequiredRun(executionId);
         this.assertTransitionAllowed(run.status, 'running', executionId);
 
@@ -171,6 +277,7 @@ export class UserToolRunService {
             'running',
             {
                 status: 'running',
+                ...(runner ? { runner } : {}),
                 error: null,
                 'timing.startedAt': startedAt,
                 'timing.finishedAt': null,
@@ -362,6 +469,26 @@ export class UserToolRunService {
             agentId: payload.agentId as string | undefined,
             errorCode: run.error?.code ?? undefined,
             correlationId: `run:${run.executionId}:${previousStatus}->${nextStatus}`,
+        });
+    }
+
+    private publishCancellationRequested(run: IUserToolRun): void {
+        if (!this.runtimeEventPublisher || !run.workflowId) {
+            return;
+        }
+
+        const workflowId = run.workflowId.toString();
+        this.runtimeEventPublisher.publishRunStatusChange({
+            workspaceId: workflowId,
+            roomWorkspaceId: workflowId,
+            runId: run.executionId,
+            status: 'running',
+            progress: 50,
+            stage: 'cancellation_requested',
+            message: 'Cancellation requested',
+            workflowId,
+            agentId: run.agentInstanceId?.toString() ?? undefined,
+            correlationId: `run:${run.executionId}:cancellation_requested`,
         });
     }
 

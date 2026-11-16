@@ -3,10 +3,12 @@ import { UserTool } from '../models/UserTool.model';
 import { BuildPreparationError, BuildService } from './build.service';
 import { NativePythonProvisioningService } from './nativePythonProvisioning.service';
 import { RuntimeHealthService } from './runtimeHealth.service';
-import { ExecutionOrchestrator } from './runtime/ExecutionOrchestrator';
+import { ExecutionOrchestrator, type QueuedRunAcknowledgement } from './runtime/ExecutionOrchestrator';
 import type { ExecutionFunctionRef, SandboxExecutionMetadata, SandboxExecutionResourceUsage, SandboxSyntaxCheckResult } from './runtime/execution.types';
 import { getSandboxErrorDetailsFromExecutionResult, RuntimeNotReadyError, type SandboxErrorDetails } from './runtime/errors';
 import type { IUserToolPolicy, IUserToolVersion } from '../models/UserTool.model';
+import { UserToolRun } from '../models/UserToolRun.model';
+import { UserToolRunService } from './userToolRun.service';
 import { buildGlobalToolClauses, buildOwnedToolClause } from '../utils/sharedExampleAccess';
 
 export interface SandboxResult {
@@ -26,6 +28,17 @@ export interface SandboxResult {
 }
 
 export type SyntaxCheckResult = SandboxSyntaxCheckResult;
+
+export class SandboxServiceError extends Error {
+    constructor(
+        public readonly code: string,
+        public readonly statusCode: number,
+        message: string,
+    ) {
+        super(message);
+        this.name = 'SandboxServiceError';
+    }
+}
 
 interface SandboxToolSelection {
     toolId: string;
@@ -49,6 +62,7 @@ export class SandboxService {
     private readonly nativePythonProvisioningService = new NativePythonProvisioningService();
     private readonly runtimeHealthService = new RuntimeHealthService();
     private readonly executionOrchestrator = new ExecutionOrchestrator();
+    private readonly userToolRunService = new UserToolRunService();
 
     /**
      * Retourne l'etat de sante du runtime sandbox via le service de health dedie.
@@ -71,63 +85,8 @@ export class SandboxService {
         authHeader?: string,
         idempotencyKey?: string,
     ): Promise<SandboxResult> {
-        // 1. Resoudre la cible d'execution depuis le catalogue canonique user_tools
-        const fn = toolSelection
-            ? await this.resolveVersionedExecutionTarget(toolSelection, userId)
-            : functionId
-                ? await this.resolveLegacyFunctionExecutionTarget(functionId, userId)
-                : null;
-
-        if (!fn) {
-            const targetIdentity = toolSelection?.toolId ?? functionId ?? 'unknown';
-            throw new Error(`Fonction introuvable ou accès non autorisé (id: ${targetIdentity})`);
-        }
-
-        if (!fn.isEnabled) {
-            throw new Error(
-                `La fonction '${fn.name}' est désactivée. Activez-la dans la bibliothèque avant d'exécuter.`
-            );
-        }
-
-        const resolvedVersionTag = toolSelection
-            ? (fn as VersionedExecutionTarget).toolVersionTag
-            : undefined;
-
-        try {
-            if (toolSelection) {
-                await this.buildService.ensureBuildReadyForTool(
-                    toolSelection.toolId,
-                    userId,
-                    resolvedVersionTag
-                );
-            } else if (functionId) {
-                await this.buildService.ensureBuildReadyForRun(functionId, userId);
-            }
-        } catch (error) {
-            if (
-                error instanceof BuildPreparationError
-                && error.code === 'PLATFORM_PROVISION_REQUIRED'
-                && toolSelection
-            ) {
-                await this.nativePythonProvisioningService.provisionToolVersion(
-                    toolSelection.toolId,
-                    userId,
-                    resolvedVersionTag
-                );
-
-                await this.buildService.ensureBuildReadyForTool(
-                    toolSelection.toolId,
-                    userId,
-                    resolvedVersionTag
-                );
-            } else if (error instanceof BuildPreparationError) {
-                throw error;
-            }
-            else {
-                throw error;
-            }
-        }
-
+        const fn = await this.resolveExecutionTarget(functionId, userId, toolSelection);
+        await this.prepareResolvedExecutionTarget(fn, userId, functionId, toolSelection);
         await this.ensureRuntimeReadyForRun(fn.language);
 
         const executionResult = await this.executionOrchestrator.execute({
@@ -147,6 +106,122 @@ export class SandboxService {
                 errorDetails
             }
             : executionResult;
+    }
+
+    async queueFunctionRun(input: {
+        functionId?: string;
+        userId: string;
+        testArgs?: Record<string, unknown>;
+        toolSelection?: SandboxToolSelection;
+        agentInstanceId?: string;
+        privateContext?: Record<string, unknown>;
+        idempotencyKey?: string;
+        retryOfExecutionId?: string;
+        launchContext?: 'editor_test' | 'workflow_run' | 'system_validation';
+    }): Promise<QueuedRunAcknowledgement> {
+        const fn = await this.resolveExecutionTarget(input.functionId, input.userId, input.toolSelection);
+        return this.executionOrchestrator.enqueue({
+            fn,
+            userId: input.userId,
+            args: input.testArgs ?? {},
+            agentInstanceId: input.agentInstanceId,
+            privateContext: input.privateContext,
+            launchContext: input.launchContext ?? (input.agentInstanceId ? 'workflow_run' : 'editor_test'),
+            idempotencyKey: input.idempotencyKey,
+            retryOfExecutionId: input.retryOfExecutionId,
+        }, async () => {
+            await this.prepareResolvedExecutionTarget(fn, input.userId, input.functionId, input.toolSelection);
+        });
+    }
+
+    async cancelRun(executionId: string, userId: string) {
+        return this.executionOrchestrator.requestCancellation(executionId, userId);
+    }
+
+    async retryRun(executionId: string, userId: string, idempotencyKey: string): Promise<QueuedRunAcknowledgement> {
+        const ownerUserId = new mongoose.Types.ObjectId(userId);
+        const parentRun = await UserToolRun.findOne({ executionId, ownerUserId }).select('+privateContextCiphertext');
+        if (!parentRun) {
+            const error = new Error('Run introuvable');
+            Object.assign(error, { statusCode: 404, code: 'RUN_NOT_FOUND' });
+            throw error;
+        }
+
+        const isRetryableTerminal = ['failed', 'timed_out'].includes(parentRun.status)
+            && parentRun.error?.retryable === true;
+        if (!isRetryableTerminal) {
+            const error = new Error('Ce run terminal ne peut pas être relancé');
+            Object.assign(error, { statusCode: 409, code: 'RUN_NOT_RETRYABLE' });
+            throw error;
+        }
+
+        const privateContext = await this.userToolRunService.getPrivateContext(parentRun);
+        return this.queueFunctionRun({
+            userId,
+            testArgs: parentRun.inputs,
+            toolSelection: {
+                toolId: parentRun.toolId.toString(),
+                versionRef: { versionTag: parentRun.toolVersionTag },
+            },
+            agentInstanceId: parentRun.agentInstanceId?.toString(),
+            privateContext,
+            idempotencyKey,
+            retryOfExecutionId: parentRun.executionId,
+            launchContext: parentRun.launchContext,
+        });
+    }
+
+    private async resolveExecutionTarget(
+        functionId: string | undefined,
+        userId: string,
+        toolSelection?: SandboxToolSelection,
+    ): Promise<VersionedExecutionTarget> {
+        const fn = toolSelection
+            ? await this.resolveVersionedExecutionTarget(toolSelection, userId)
+            : functionId
+                ? await this.resolveLegacyFunctionExecutionTarget(functionId, userId)
+                : null;
+
+        if (!fn) {
+            const targetIdentity = toolSelection?.toolId ?? functionId ?? 'unknown';
+            throw new SandboxServiceError('RUN_TARGET_NOT_FOUND', 404, `Fonction introuvable ou accès non autorisé (id: ${targetIdentity})`);
+        }
+
+        if (!fn.isEnabled) {
+            throw new SandboxServiceError('RUN_TARGET_DISABLED', 409, `La fonction '${fn.name}' est désactivée. Activez-la dans la bibliothèque avant d'exécuter.`);
+        }
+
+        return fn;
+    }
+
+    private async prepareResolvedExecutionTarget(
+        fn: VersionedExecutionTarget,
+        userId: string,
+        functionId?: string,
+        toolSelection?: SandboxToolSelection,
+    ): Promise<void> {
+        const resolvedVersionTag = toolSelection ? fn.toolVersionTag : undefined;
+        try {
+            if (toolSelection) {
+                await this.buildService.ensureBuildReadyForTool(toolSelection.toolId, userId, resolvedVersionTag);
+            } else if (functionId) {
+                await this.buildService.ensureBuildReadyForRun(functionId, userId);
+            }
+        } catch (error) {
+            if (error instanceof BuildPreparationError
+                && error.code === 'PLATFORM_PROVISION_REQUIRED'
+                && toolSelection) {
+                await this.nativePythonProvisioningService.provisionToolVersion(
+                    toolSelection.toolId,
+                    userId,
+                    resolvedVersionTag,
+                );
+                await this.buildService.ensureBuildReadyForTool(toolSelection.toolId, userId, resolvedVersionTag);
+            } else {
+                throw error;
+            }
+        }
+
     }
 
     private async resolveVersionedExecutionTarget(

@@ -628,6 +628,16 @@ async function installApiMocks(page: Page): Promise<MockApiState> {
             return fulfillJson(route, 200, []);
         }
 
+        if (path === '/api/user-settings' && method === 'GET') {
+            return fulfillJson(route, 200, {
+                preferences: { language: 'fr', theme: 'dark', saveMode: 'manual' },
+            });
+        }
+
+        if (path === '/api/user-settings' && method === 'PUT') {
+            return fulfillJson(route, 200, { success: true });
+        }
+
         if (path === '/api/user/workspace' && method === 'GET') {
             return fulfillJson(route, 200, workspacePayload);
         }

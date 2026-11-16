@@ -128,4 +128,13 @@ jobs:
         run: npm --prefix backend run runtime:ci
 
       - name: Scan runtime images
-        run: npm --prefix backend run runtime:scan
+        run: npm --prefix backend run runtime:scan -- --report-file=runtime-scan-report.json
+
+      - name: Upload runtime scan report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-scan-report
+          path: backend/runtime-scan-report.json
+          if-no-files-found: warn
+          retention-days: 14

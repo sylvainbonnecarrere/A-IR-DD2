@@ -127,6 +127,13 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 | J4 | Validation domaine et resilience | Haute | `05-testeur-domaine.agent.md` | Invariants, transitions et scenarios de panne couverts |
 | J5 | Cutover frontend V2 | Critique | `06-frontend.agent.md` | Frontend decouple de V1 et pilote par contrats V2 |
 | J6 | Validation finale de livraison | Critique | `08-testeur-e2e.agent.md` | Non-regression bout en bout et recommandation Go/No-Go |
+| J7 | Remediation des blocages J6 | Critique | `03-backend.agent.md` (coordination technique) | Runs durables et annulables, UI runtime V2, J6 reexecute avec gate Go/No-Go |
+
+### Mise a jour d'etat au 2026-11-03
+
+- `J6` est en cours avec un verdict provisoire `NO-GO`; son rapport initial et les preuves sont suivis dans `Guides/Features/feature/refonte/j6-validation-report.md`.
+- J5 reste partiellement ferme. Cela ne bloque pas la preparation J6, mais l'UI commandes/runtime demeure une condition du cutover et du verdict final.
+- `J7` est ajoute pour traiter les ecarts runtime et UI prouvees par J6, puis fermer J6 sur une nouvelle campagne. Les tests live doivent utiliser une base de test explicitement isolee; ne pas lancer de smoke destructif sur la base de developpement par defaut.
 
 ## 6. Backlog detaille par jalon
 
@@ -753,7 +760,7 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 
 ### Etat de contexte J5 au 2026-10-29 (relecture de validation)
 
-**Verdict : J5 partiellement realise. Le handoff vers `08-testeur-e2e.agent.md` n'est pas donne.** Le jalon J6 ne doit pas demarrer tant que les ecarts ci-dessous ne sont pas fermes.
+**Verdict : J5 partiellement realise.** Les ecarts 1 a 3 sont reportes dans J7 et ne bloquent pas la preparation ni les tests J6 isoles. Ils restent bloquants pour les parcours UI correspondants et pour tout verdict final `GO` ; le handoff J6 de cloture intervient apres leur correction.
 
 **Realise et verifie**
 - US-J5-01 : l'orchestration hydratation / bascule de workflow est sortie de `App.tsx` (`hooks/useAppWorkflowController.ts`, `hooks/useWorkspaceHydrationOrchestrator.ts`) ; `useDesignStore` est la source canonique de l'identite workflow, `WorkflowCanvas` ne lit plus `useWorkflowStore` pour l'identifiant.
@@ -784,6 +791,8 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 **Criticite du jalon :** Critique
 **But :** valider que la refonte est livrable, que les parcours critiques fonctionnent et que la suppression progressive du legacy est soutenable.
 
+**État au 2026-11-03 :** J6 est commencé. Les travaux J5 1 à 3 ne bloquent pas la préparation ni l'exécution des tests isolés J6 ; ils restent des conditions de validation finale et de GO au cutover. La matrice des 18 scénarios, les todolists par US, les anomalies et les résultats de baseline sont suivis dans `Guides/Features/feature/refonte/j6-validation-report.md`. Verdict initial : **NO-GO**, campagne incomplète.
+
 **Fichiers a toucher en priorite :**
 - `tests/fonctionnels/**`
 - `playwright.config.ts`
@@ -803,7 +812,7 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 **Agent responsable :** `08-testeur-e2e.agent.md` - Testeur E2E final
 **Criticite :** Critique
 **Description :** couvrir installation, authentification, creation ou chargement workflow, activation, lancement de run, suivi runtime, annulation, retry et reprise.
-**Dependances :** J3, J4 et J5 termines.
+**Dependances :** J3 et J4 termines. Les tests de preparation J6 peuvent demarrer avant la fermeture de J5 si le scenario est isole ; les parcours UI de run et le verdict final restent conditionnes a la fermeture du cutover J5 via J7.
 **Risques et consequences :**
 - sans campagne complete, des ruptures inter-couches resteront invisibles jusqu'a la livraison ;
 - les scenarios temps reel ou reprise apres redemarrage sont des zones ou les regressions sont souvent tardives ;
@@ -835,6 +844,145 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - la matrice de non-regression est executee ;
 - les anomalies sont classees en bloquantes, majeures et mineures ;
 - une recommandation Go ou No-Go est formulee.
+
+## J7 - Remediation des blocages J6 et fermeture du gate
+
+**Agent pilote :** `03-backend.agent.md` - Backend (coordination du contrat run)
+**Co-responsables :** `04-cicd-installation.agent.md` (worker durable), `06-frontend.agent.md` (cutover UI), `08-testeur-e2e.agent.md` (validation et gate).
+**Criticite du jalon :** Critique
+**But :** resoudre les causes runtime qui rendent le verdict J6 `NO-GO`, terminer les ecarts de cutover J5 encore visibles dans l'interface, puis reexecuter les US J6-01/J6-02 sur un environnement isole.
+
+**Dependances :** J3 et J4 valides. J5 reste en cours sur les ecarts commandes/runtime visibles ; sa fermeture est integree a US-J7-03. Les tests de preparation J6 deja verts ne sont pas a refaire sans raison.
+
+**Principes non negociables**
+- MongoDB et `UserToolRun` restent la source de verite metier. Un transport de queue peut signaler du travail, mais ne doit pas etre l'unique stockage d'une execution en attente.
+- Un statut terminal de run ne revient jamais a `queued` ou `running`. Relancer apres un echec cree un nouvel `executionId` lie au run parent ; ne pas appeler cette action `resume` si aucun checkpoint d'execution n'est restaure.
+- L'annulation n'est confirmee comme `stopped` qu'apres confirmation que le runner/processus sandbox a effectivement cesse. Un simple changement du document Mongo ne vaut pas annulation.
+- Ne pas presenter `Pause` tant qu'une vraie semantique de pause n'existe pas dans le contrat serveur.
+- Aucune regression de source de graphe : l'UI lit nodes/edges depuis `useDesignStore` V2 et les runs depuis les API/runtime V2 ; aucune reconstruction V1.
+- Les tests live utilisent une base Mongo de test explicite, disposable et verifiee avant toute operation destructive. Aucun compte, workspace ou fournisseur reel.
+
+### US-J7-01 - Rendre le cycle de vie des runs durable et cancellable
+
+**Agent responsable :** `03-backend.agent.md` - Backend
+**Criticite :** Critique
+**Description :** remplacer le chemin synchrone actuel de `POST /api/runs/execute` par une commande durable qui enregistre l'intention, repond avec un run `queued`, et permet une annulation qui stoppe effectivement le runner. Formaliser le retry comme creation d'un nouveau run, sans transition illegale d'un terminal.
+
+**État backend :** Implémentée et validée. `POST /api/runs/execute` persiste avant l'accusé de réception et retourne une commande queued; les exécutions restent dispatchées par un ordonnanceur en mémoire jusqu'à US-J7-02. Cancel propage un signal jusqu'au runner et garde le run non terminal si l'arrêt n'est pas confirmé. Retry crée un enfant avec lineage, ownership, nouvelle clé d'idempotence et contexte privé chiffré au repos.
+
+**Validation réalisée :** build backend PASS; 83 suites / 417 tests backend PASS; 90 suites / 542 tests racine PASS; `ci:node25:runtime` PASS (20 tests, avec Node 24 indiqué par le script). Les tests J7-01 ciblés couvrent idempotence, dispatch concurrent, cancellation/timeout confirmés ou non, course cancel/complete, ownership, retry et publication d'événements.
+
+**Dependances :** US-J2-04, US-J3-04.
+**Risques et consequences :**
+- une reponse HTTP synchrone perd le suivi si le client se deconnecte ou si le serveur redemarre ;
+- marquer `stopped` avant l'arret effectif laisse du code continuer a produire des effets de bord ;
+- un retry automatique apres crash peut dupliquer des effets externes non idempotents ;
+- une nouvelle route sans ownership et idempotence strictes peut permettre de piloter le run d'un autre utilisateur.
+
+**Impacts codebase et tests :**
+- `backend/src/routes/runs.routes.ts`, `backend/src/services/sandbox.service.ts`, `backend/src/services/runtime/ExecutionOrchestrator.ts` ;
+- `backend/src/domain/execution/userToolRun.contract.ts`, `backend/src/models/UserToolRun.model.ts`, `backend/src/services/userToolRun.service.ts` et les schemas/routes de run ;
+- tests `runs-command.routes`, `user-tool-run.service`, `execution-orchestrator`, sandbox et contrat d'evenement ;
+- migration idempotente uniquement si de nouveaux champs de correlation/lease/retry sont necessaires ; fixtures backend runs et snapshots a maintenir strictes.
+
+**Solution retenue a valider avec l'architecte/backend :**
+- la commande de lancement persiste le run `queued` et son contexte/version/policy avant d'accuser reception ; l'`Idempotency-Key` reutilisee retourne le meme run et ne planifie pas deux executions ;
+- l'annulation est une demande idempotente au worker. Le worker propage un signal d'annulation jusqu'au processus/container sandbox, attend sa terminaison et persiste ensuite `stopped` ; erreur/timeout d'arret reste visible et ne doit pas mentir sur le statut ;
+- pour un run terminal retryable, une commande explicite cree un nouveau run avec `retryOfExecutionId` (ou champ de lineage convenu), conserve l'ownership et la version de tool, et exige une nouvelle cle d'idempotence ; le run parent reste immutable ;
+- `Pause` est retiree de l'UI tant que le backend n'expose pas pause/resume/checkpoint.
+
+**Criteres d'acceptation :**
+- `POST /api/runs/execute` persiste `queued` et retourne sans attendre la fin du sandbox ; execution, progression, resultat et erreur restent lisibles via l'API ;
+- doublon d'idempotency key : un seul run et une seule mise en file ;
+- annulation d'un run queued et running, courses cancel/complete, annulation repetees et runner impossible a stopper sont testees ; le statut expose correspond a l'etat effectif du processus ;
+- les statuts terminaux restent irreversibles ; retry = nouvel `executionId` lie au parent, non mutation/reprise mensongere du run terminal ;
+- tests d'ownership refusent cancel/retry sur un run d'un autre proprietaire ; aucun secret n'apparait dans payload runtime ou logs.
+
+### US-J7-02 - Brancher un worker durable avec reprise apres redemarrage
+
+**Agent responsable :** `04-cicd-installation.agent.md` - CI/CD et installation
+**Co-responsable :** `03-backend.agent.md`
+**Criticite :** Critique
+**Description :** connecter le traitement de run a un worker de production et remplacer le `TaskQueueService`/`TaskWorkerService` purement en memoire comme preuve de resilience. La file durable doit pouvoir etre reconstruite depuis MongoDB apres redemarrage.
+
+**Dependances :** US-J7-01.
+**Risques et consequences :**
+- une queue volatile perd les runs queued apres panne ;
+- deux workers peuvent reclamer le meme run sans claim atomique/lease persiste ;
+- une reprise aveugle d'un run running peut dupliquer des appels/outils externes ;
+- une initialisation ou migration non idempotente peut bloquer le backend ou reprendre plusieurs fois une execution.
+
+**Impacts codebase et tests :**
+- `backend/src/services/taskRuntimeInfra.service.ts`, nouveau worker/bootstrap uniquement si aucun composant J3 existant ne peut etre reconnecte ;
+- `backend/src/services/databaseInit.ts`, migration/indexes seulement si requis, scripts de demarrage et `backend/package.json` ;
+- tests worker lease, `user-tool-run.service`, migration, runtime health, arret/redemarrage et tests avec deux workers concurrents.
+
+**Decision de reprise :**
+- les runs queued sont recuperables et reclamables par compare-and-set/lease durable ;
+- un run running dont le lease expire est marque en erreur terminale stable (`WORKER_LOST`, retryable) apres reconciliation, puis relance explicite via un nouveau run. Ne pas rejouer automatiquement un run au resultat externe incertain ;
+- les evenements WebSocket sont des signaux best-effort, jamais la seule source d'etat : apres reconnexion, l'UI relit le run serveur.
+
+**Criteres d'acceptation :**
+- le worker de production est demarre par un chemin documente/health-checke et consomme les runs Mongo persistants ; aucune `Map` en memoire ne constitue la file de verite ;
+- deux workers concurrents ne peuvent pas executer un meme lease simultanement ; lease expire, run queued et run running sont reconciliables ;
+- test d'integration : persister un run, arreter/recreer le worker, verifier sa reprise ou sa classification `WORKER_LOST`, puis tester retry explicite sans modifier le parent ;
+- migration/bootstrap rejouables, tests de reprise et `npm run ci:node25:runtime` verts ;
+- Redis, s'il sert de transport de reveil, reste non autoritaire et sa perte ne perd aucun run persiste.
+
+### US-J7-03 - Terminer le cutover UI J5 des commandes et statuts runtime
+
+**Agent responsable :** `06-frontend.agent.md` - Front-end
+**Criticite :** Critique
+**Description :** exposer les commandes V2 sur la carte et afficher l'etat serveur/realtime, en utilisant le contrat livre par US-J7-01/02 et sans graphe local concurrent.
+
+**Dependances :** US-J7-01, US-J7-02.
+**Risques et consequences :**
+- boutons sans contrat serveur coherents peuvent afficher pause/reprise alors qu'ils annulent ou relancent ;
+- un statut local ou un evenement d'un autre workflow peut afficher un run faux ;
+- l'ajout d'une barre overlay peut deplacer le canvas et violer la non-regression de position/minimap/controls.
+
+**Impacts codebase et tests :**
+- `components/RobotPageRouter.tsx`, `components/workflow/WorkflowToolbar.tsx`, `services/workflowRunService.ts`, `services/runtimeActionPolicy.ts`, stores runtime/design, localization `i18n/*.ts` ;
+- tests toolbar, router, `tests/stores/useRuntimeStore.runtime-events.test.ts` et `WorkflowCanvas.route-reentry.semi-e2e.spec.ts` ;
+- `Guides/Features/WORKFLOWLINKS/README.md` et l'etat J5 du backlog a actualiser a la cloture.
+
+**Decision UX/contrat :**
+- monter la toolbar uniquement sur la carte workflow et la garder dans le flux layout, hors viewport React Flow ;
+- afficher `Lancer`, `Annuler` avec confirmation, et `Relancer` pour creer un nouveau run parent-enfant ; ne pas afficher `Pause`/`Reprendre` tant qu'ils ne sont pas reellement supportes ;
+- afficher les statuts run/task et etats `loading`, `empty`, `error`, `offline`, `reconnecting`, `degraded/partial` ; filtres stricts par `workflowId` ; actions desactivees selon l'etat serveur et la connectivite ;
+- le statut REST reste autoritaire et recharge le dernier etat apres reconnexion ; aucun token/secret dans affichage ou localStorage.
+
+**Criteres d'acceptation :**
+- toolbar visible sur `/bos/dashboard` et `/bos/supervision`, absente des autres routes ; graph nodes/edges pris dans `useDesignStore` ;
+- confirmation refusee = aucune commande; confirmation acceptee = annulation serveur effective ; erreur serveur conserve et affiche l'etat autoritaire ;
+- evenement de progression/succes/echec du workflow actif met a jour l'UI sans reload ; evenement d'un autre workflow ignore ; refresh REST retablit l'etat apres reconnexion ;
+- commandes indisponibles lorsque le run est actif/terminal ou le canal est hors ligne/partiel ; clavier, focus, `role="status"` et messages d'erreur accessibles ;
+- Playwright verifie que nodes, minimap et controls gardent leurs positions avec la toolbar, durant un run et apres retour/reload.
+
+### US-J7-04 - Rejouer J6 en environnement isole et prononcer le gate
+
+**Agent responsable :** `08-testeur-e2e.agent.md` - Testeur E2E final
+**Criticite :** Critique
+**Description :** reexecuter les 18 scenarios J6-01 et la matrice J6-02 apres livraison des US-J7-01 a J7-03 ; classer les anomalies et fournir un verdict final documente.
+
+**Dependances :** US-J7-01, US-J7-02, US-J7-03 ; suites J3/J4 restent vertes.
+**Risques et consequences :**
+- smoke live sur une base partagee peut detruire ou polluer des donnees ;
+- test uniquement chromium peut manquer des regressions de reload/focus/scroll ;
+- une fixture assouplie peut masquer une vraie regression historique ;
+- un PASS partiel presente comme GO annulerait la valeur de la validation finale.
+
+**Impacts codebase et tests :**
+- `tests/fonctionnels/**`, `playwright.config.ts`, `playwright.live.config.ts`, `backend/src/__tests__/**` et `Guides/Features/feature/refonte/j6-validation-report.md` ;
+- reutiliser le compte synthétique et les mocks semi-E2E ; test backend live seulement sur URI de test explicitement isolee et verifiee ;
+- couverture `npm test`, `npm run test:coverage`, backend, `npm run ci:node25:runtime`, `npm run test:j6:semi-e2e`, `npm run test:j6:backend`, audit strict ; Chromium + Firefox/WebKit si ces projets sont declares dans la matrice CI.
+
+**Criteres d'acceptation :**
+- les 18 scenarios nominaux/echec sont executes ou chaque exception est approuvee et classee bloquante/non bloquante ; aucun `test.skip` opportuniste ;
+- auth, creation/chargement, ajout agent, activation, run queued/running, succes/echec, annulation effective, retry nouveau-run, reload en run, reconnexion, ownership, migration, redemarrage/recovery et panne sandbox sont verifies ;
+- J6-02 revalide toutes les routes V1, lecture V2-only, donnees historiques, mode invite et API refusee, sans affaiblir aucune fixture ;
+- traces/captures/video d'echec conserves tant que les deux US J6 ne sont pas fermees ; le nettoyage des traces est une action post-cloture distincte, jamais un substitut a la preuve ;
+- rapport final contient matrice resultat, anomalies classees, commandes/config exactes et decision signee `GO` ou `NO-GO` ; `GO` impossible si une anomalie critique ou un scenario de redemarrage/cancel reste ouvert.
 
 ## 7. Adaptations fonctionnelles et structurelles a anticiper
 
@@ -898,6 +1046,7 @@ Toute suppression de fichier ou dossier legacy doit etre precedee d'un inventair
 4. Terminer J3 avant la campagne de resilience et avant le cutover frontend complet.
 5. Terminer J4 avant la validation finale.
 6. Terminer J5 avant J6.
+7. Si J6 conclut `NO-GO`, executer les US J7 applicable(s), puis reexecuter J6-01 et J6-02 avant tout verdict `GO`.
 
 ## 11. Points de vigilance transverses
 

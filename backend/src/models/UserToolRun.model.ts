@@ -63,6 +63,11 @@ export interface IUserToolRun extends Document {
     workflowId?: mongoose.Types.ObjectId | null;
     agentPrototypeId?: mongoose.Types.ObjectId | null;
     agentInstanceId?: mongoose.Types.ObjectId | null;
+    retryOfExecutionId?: string | null;
+    requestFingerprint?: string | null;
+    privateContextCiphertext?: string | null;
+    cancellationRequestedAt?: Date | null;
+    cancellationRequestedBy?: mongoose.Types.ObjectId | null;
     launchContext: UserToolRunLaunchContext;
     status: UserToolRunStatus;
     runtime: UserToolRunRuntime;
@@ -167,6 +172,30 @@ const UserToolRunSchema = new Schema<IUserToolRun>({
         ref: 'AgentInstance',
         default: null
     },
+    retryOfExecutionId: {
+        type: String,
+        trim: true,
+        default: null
+    },
+    requestFingerprint: {
+        type: String,
+        trim: true,
+        default: null
+    },
+    privateContextCiphertext: {
+        type: String,
+        select: false,
+        default: null
+    },
+    cancellationRequestedAt: {
+        type: Date,
+        default: null
+    },
+    cancellationRequestedBy: {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
     launchContext: {
         type: String,
         required: true,
@@ -250,6 +279,30 @@ UserToolRunSchema.index(
             status: { $in: ['queued', 'running'] }
         },
         name: 'idx_user_tool_runs_active_watchdog'
+    }
+);
+
+UserToolRunSchema.index(
+    { status: 1, 'timing.queuedAt': 1 },
+    {
+        partialFilterExpression: { status: 'queued' },
+        name: 'idx_user_tool_runs_queued_dispatch'
+    }
+);
+
+UserToolRunSchema.index(
+    { status: 1, cancellationRequestedAt: 1 },
+    {
+        partialFilterExpression: { status: 'running', cancellationRequestedAt: { $type: 'date' } },
+        name: 'idx_user_tool_runs_cancellation_requests'
+    }
+);
+
+UserToolRunSchema.index(
+    { ownerUserId: 1, retryOfExecutionId: 1, createdAt: 1 },
+    {
+        partialFilterExpression: { retryOfExecutionId: { $type: 'string' } },
+        name: 'idx_user_tool_runs_retry_lineage'
     }
 );
 
