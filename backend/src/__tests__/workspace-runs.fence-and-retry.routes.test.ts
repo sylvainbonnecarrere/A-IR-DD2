@@ -52,7 +52,7 @@ function createTestContext() {
         getFencedOperations: jest.fn().mockResolvedValue([fencedOperation()]),
     };
     const retry: jest.Mocked<QuarantinedRetryPort> = {
-        retryQuarantinedRun: jest.fn(async (executionId: string) => ({
+        retryQuarantinedRun: jest.fn(async (executionId: string, _userId: string, _idempotencyKey: string) => ({
             executionId: `child-of-${executionId}`,
             status: 'queued',
             replayed: false,
@@ -143,7 +143,7 @@ describe('POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry', () => 
         await db.collection('gateway_fence_audit').deleteMany({ runId: /^fr-test-/i });
         await db.collection('runtime_alerts').deleteMany({ runId: /^fr-test-/i });
         await db.collection('run_command_idempotency').deleteMany({ runId: /^fr-test-/i });
-        await db.collection('workspace_execution_locks').deleteMany({ _id: { $regex: /^[a-f\d]{24}:[a-f\d]{24}$/ } });
+        await db.collection<{ _id: string }>('workspace_execution_locks').deleteMany({ _id: { $regex: /^[a-f\d]{24}:[a-f\d]{24}$/ } });
     });
 
     it('rejects without authentication and without Idempotency-Key', async () => {
@@ -243,7 +243,7 @@ describe('POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry', () => 
         expect(parentAfter?.updatedAt?.getTime()).toBe(parentBefore?.updatedAt?.getTime());
 
         // Réponse idempotente persistée
-        const stored = await db.collection('run_command_idempotency').findOne({ _id: `${fixture.user.id}:fence-and-retry:key-202` });
+        const stored = await db.collection<{ _id: string }>('run_command_idempotency').findOne({ _id: `${fixture.user.id}:fence-and-retry:key-202` });
         expect(stored).toMatchObject({ runId, workspaceId: fixture.workflow.id, command: 'fence-and-retry' });
     });
 
