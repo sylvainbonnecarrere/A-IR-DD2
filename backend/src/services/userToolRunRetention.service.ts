@@ -1,7 +1,9 @@
+import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
 import { UserToolRun, type IUserToolRun } from '../models/UserToolRun.model';
+import { MongoWorkspaceLockService, type WorkspaceLock } from './runtime/MongoWorkspaceLockService';
 import { UserToolQueryService } from './userToolQuery.service';
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
 
@@ -22,6 +24,7 @@ export interface CleanupFunctionRunsResult {
 export class UserToolRunRetentionService {
     private readonly userToolQueryService = new UserToolQueryService();
     private readonly workspaceManager = createWorkspaceManager();
+    private readonly workspaceLocks = new MongoWorkspaceLockService();
 
     async cleanupRunsForFunction(
         functionId: string,
@@ -37,47 +40,7 @@ export class UserToolRunRetentionService {
             return null;
         }
 
-        const runs = await UserToolRun.find({
-            ownerUserId: new mongoose.Types.ObjectId(ownerUserId),
-            toolId: resolvedToolId
-        })
-            .sort({ createdAt: -1 })
-            .lean<IUserToolRun[]>();
-
-        const retainLatest = options.retainLatest ?? 0;
-        const protectedIds = new Set(runs.slice(0, retainLatest).map((run) => run.executionId));
-        const cutoffDate = options.retentionDays != null
-            ? new Date(Date.now() - options.retentionDays * 24 * 60 * 60 * 1000)
-            : undefined;
-
-        const runsToDelete = runs.filter((run) => {
-            if (protectedIds.has(run.executionId)) {
-                return false;
-            }
-
-            if (cutoffDate) {
-                return run.createdAt.getTime() < cutoffDate.getTime();
-            }
-
-            return true;
-        });
-
-        const runsToKeep = runs.filter((run) => !runsToDelete.some((candidate) => candidate.executionId === run.executionId));
-        const deletedArtifacts = await this.deleteArtifactsForRuns(ownerUserId, runsToDelete, runsToKeep, options.dryRun === true);
-
-        if (!options.dryRun && runsToDelete.length > 0) {
-            await UserToolRun.deleteMany({
-                executionId: { $in: runsToDelete.map((run) => run.executionId) }
-            });
-        }
-
-        return {
-            deletedRuns: runsToDelete.length,
-            deletedArtifacts,
-            retainedRuns: runs.length - runsToDelete.length,
-            dryRun: options.dryRun === true,
-            cutoffDate
-        };
+        return this.cleanupResolvedToolRuns(resolvedToolId, ownerUserId, options);
     }
 
     private async resolveToolIdFromFunctionAlias(
@@ -110,10 +73,20 @@ export class UserToolRunRetentionService {
             return null;
         }
 
+        return this.cleanupResolvedToolRuns(new mongoose.Types.ObjectId(toolId), ownerUserId, options);
+    }
+
+    private async cleanupResolvedToolRuns(
+        toolId: mongoose.Types.ObjectId,
+        ownerUserId: string,
+        options: CleanupFunctionRunsOptions,
+    ): Promise<CleanupFunctionRunsResult> {
+        const ownerId = new mongoose.Types.ObjectId(ownerUserId);
         const runs = await UserToolRun.find({
-            ownerUserId: new mongoose.Types.ObjectId(ownerUserId),
-            toolId: new mongoose.Types.ObjectId(toolId)
+            ownerUserId: ownerId,
+            toolId,
         })
+            .select('+supervisedAttempt +workspaceRetentionProtected')
             .sort({ createdAt: -1 })
             .lean<IUserToolRun[]>();
 
@@ -124,7 +97,10 @@ export class UserToolRunRetentionService {
             : undefined;
 
         const runsToDelete = runs.filter((run) => {
-            if (protectedIds.has(run.executionId)) {
+            if (protectedIds.has(run.executionId)
+                || !['completed', 'failed', 'stopped', 'timed_out'].includes(run.status)
+                || run.workspaceRetentionProtected === true
+                || run.supervisedAttempt != null) {
                 return false;
             }
 
@@ -135,22 +111,67 @@ export class UserToolRunRetentionService {
             return true;
         });
 
-        const runsToKeep = runs.filter((run) => !runsToDelete.some((candidate) => candidate.executionId === run.executionId));
-        const deletedArtifacts = await this.deleteArtifactsForRuns(ownerUserId, runsToDelete, runsToKeep, options.dryRun === true);
+        const heldWorkspaceLocks: WorkspaceLock[] = [];
+        const blockedWorkflows = new Set<string>();
+        try {
+            const workflowIds = Array.from(new Set(
+                runsToDelete.flatMap((run) => run.workflowId ? [run.workflowId.toString()] : []),
+            )).sort();
+            for (const workflowId of workflowIds) {
+                const lock = await this.workspaceLocks.tryAcquire(ownerUserId, workflowId, `retention:${randomUUID()}`);
+                if (lock) {
+                    heldWorkspaceLocks.push(lock);
+                } else {
+                    blockedWorkflows.add(workflowId);
+                }
+            }
+            const deletableRuns = runsToDelete.filter((run) =>
+                !run.workflowId || !blockedWorkflows.has(run.workflowId.toString()),
+            );
+            const deletedRuns: IUserToolRun[] = [];
+            if (options.dryRun) {
+                deletedRuns.push(...deletableRuns);
+            } else {
+                for (const run of deletableRuns) {
+                    const deleted = await UserToolRun.findOneAndDelete({
+                        _id: run._id,
+                        ownerUserId: ownerId,
+                        toolId,
+                        status: { $in: ['completed', 'failed', 'stopped', 'timed_out'] },
+                        workspaceRetentionProtected: { $ne: true },
+                        supervisedAttempt: null,
+                    }).lean<IUserToolRun>();
+                    if (deleted) {
+                        deletedRuns.push(deleted);
+                    }
+                }
+            }
+            const deletedIds = new Set(deletedRuns.map((run) => run.executionId));
+            const workflows = deletedRuns.flatMap((run) => run.workflowId ? [run.workflowId] : []);
+            const runsToKeep = options.dryRun
+                ? [
+                    ...runs.filter((run) => !deletedIds.has(run.executionId)),
+                    ...await UserToolRun.find({ ownerUserId: ownerId, toolId: { $ne: toolId }, workflowId: { $in: workflows } }).lean<IUserToolRun[]>(),
+                ]
+                : await UserToolRun.find({
+                    ownerUserId: ownerId,
+                    $or: [{ toolId }, { workflowId: { $in: workflows } }],
+                }).lean<IUserToolRun[]>();
+            const deletedArtifacts = await this.deleteArtifactsForRuns(ownerUserId, deletedRuns, runsToKeep, options.dryRun === true);
 
-        if (!options.dryRun && runsToDelete.length > 0) {
-            await UserToolRun.deleteMany({
-                executionId: { $in: runsToDelete.map((run) => run.executionId) }
-            });
+            return {
+                deletedRuns: deletedRuns.length,
+                deletedArtifacts,
+                retainedRuns: runs.length - deletedRuns.length,
+                dryRun: options.dryRun === true,
+                cutoffDate
+            };
+        } finally {
+            const released = await Promise.all(heldWorkspaceLocks.map((lock) => this.workspaceLocks.release(lock)));
+            if (released.some((wasReleased) => !wasReleased)) {
+                throw new Error('Workspace lock release was not confirmed after run retention');
+            }
         }
-
-        return {
-            deletedRuns: runsToDelete.length,
-            deletedArtifacts,
-            retainedRuns: runs.length - runsToDelete.length,
-            dryRun: options.dryRun === true,
-            cutoffDate
-        };
     }
 
     private async deleteArtifactsForRuns(
@@ -194,11 +215,7 @@ export class UserToolRunRetentionService {
                 deletedArtifacts.push(artifact.path);
 
                 if (!dryRun) {
-                    try {
-                        await fs.rm(absolutePath, { force: true });
-                    } catch {
-                        // Ignore missing or concurrently removed artifacts.
-                    }
+                    await fs.rm(absolutePath, { force: true });
                 }
             }
         }

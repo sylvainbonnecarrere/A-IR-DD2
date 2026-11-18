@@ -7,6 +7,7 @@ import { UserTool, type IUserTool, type IUserToolVersion } from '../models/UserT
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
 import { BuildPreparationError } from './build.service';
 import { ToolPreparationPolicyService } from './toolPreparationPolicy.service';
+import { createDockerCommandRunner } from './runtime/DockerGatewayRuntime';
 
 interface CommandExecutionResult {
     exitCode: number;
@@ -165,7 +166,7 @@ export class NativePythonProvisioningService {
     private readonly provisionOnStartup: boolean;
 
     constructor(options: NativePythonProvisioningServiceOptions = {}) {
-        this.runner = options.runner ?? new SpawnCommandRunner();
+        this.runner = options.runner ?? createDockerCommandRunner(new SpawnCommandRunner(), config.runtime.dockerExecutable);
         this.backendPythonRoot = options.backendPythonRoot ?? path.resolve(__dirname, '../../python');
         this.dockerExecutable = options.dockerExecutable ?? config.runtime.dockerExecutable;
         this.provisioningImage = options.provisioningImage ?? config.runtime.pythonProvisioningImage;

@@ -1,5 +1,6 @@
 import { DockerSandboxRunner, type DockerProcessRunner } from '../services/runtime/DockerSandboxRunner';
 import type { SandboxExecutionRequest } from '../services/runtime/execution.types';
+import { DockerSupervisedAttemptLauncher } from '../services/runtime/DockerSupervisedAttemptLauncher';
 
 class FakeDockerProcessRunner implements DockerProcessRunner {
     public calls: Array<{ command: string; args: string[]; stdin?: string; timeoutMs?: number }> = [];
@@ -100,6 +101,177 @@ function createRequest(overrides: Partial<SandboxExecutionRequest> = {}): Sandbo
 }
 
 describe('DockerSandboxRunner', () => {
+    it('passes a supervised attempt identity to Docker without automatic container removal', async () => {
+        const processRunner = new FakeDockerProcessRunner();
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+        const attemptId = 'c91e377e-b884-4a12-a298-a558eaa63430';
+        const attempt = { executionId: 'utr-test', attemptId, containerName: `airdd2-j7-attempt-${attemptId}` };
+        const launcher = new DockerSupervisedAttemptLauncher(createRequest(), runner);
+        await launcher.launch(attempt, new AbortController().signal);
+        expect(processRunner.calls[0].args).toEqual(expect.arrayContaining([
+            `--name=${attempt.containerName}`, '--label', `airdd2.execution.attempt=${attemptId}`,
+        ]));
+        expect(processRunner.calls[0].args).not.toContain('--rm');
+    });
+
+    it('refuses mismatched supervised identity before invoking Docker', async () => {
+        const processRunner = new FakeDockerProcessRunner();
+        const runner = new DockerSandboxRunner(processRunner);
+        const attemptId = 'c91e377e-b884-4a12-a298-a558eaa63430';
+        const signal = new AbortController().signal;
+        const valid = { executionId: 'utr-test', attemptId, containerName: `airdd2-j7-attempt-${attemptId}` };
+        await expect(runner.executeForAttempt(createRequest({ signal }), { ...valid, executionId: 'other' })).rejects.toThrow('matching attempt');
+        await expect(runner.executeForAttempt(createRequest({ signal }), { ...valid, containerName: 'other' })).rejects.toThrow('matching attempt');
+        await expect(runner.executeForAttempt(createRequest(), valid)).rejects.toThrow('monitor signal');
+        expect(processRunner.calls).toEqual([]);
+    });
+
+    it('does not present a successful kill as proof of supervised cancellation', async () => {
+        const processRunner = new AbortableDockerProcessRunner();
+        const runner = new DockerSandboxRunner(processRunner);
+        const controller = new AbortController();
+        const attemptId = 'c91e377e-b884-4a12-a298-a558eaa63430';
+        const work = runner.executeForAttempt(createRequest({ signal: controller.signal }), {
+            executionId: 'utr-test', attemptId, containerName: `airdd2-j7-attempt-${attemptId}`,
+        });
+        await processRunner.startedPromise;
+        controller.abort();
+        const result = await work;
+        expect(processRunner.calls.some(({ args }) => args[0] === 'kill')).toBe(true);
+        expect(result).toEqual(expect.objectContaining({
+            success: false,
+            metadata: expect.objectContaining({ failureKind: 'cancelled', cancellationConfirmed: false }),
+        }));
+    });
+
+    it('does not present a successful kill after supervised timeout as proof of termination', async () => {
+        const runner = new DockerSandboxRunner(new FakeDockerProcessRunner({ timedOut: true }));
+        const attemptId = 'c91e377e-b884-4a12-a298-a558eaa63430';
+        const result = await runner.executeForAttempt(createRequest({ signal: new AbortController().signal }), {
+            executionId: 'utr-test', attemptId, containerName: `airdd2-j7-attempt-${attemptId}`,
+        });
+        expect(result).toEqual(expect.objectContaining({
+            success: false,
+            timedOut: false,
+            metadata: expect.objectContaining({ runnerTerminationConfirmed: false }),
+        }));
+    });
+
+    it('does not report success when a supervised launch resolves after cancellation', async () => {
+        const controller = new AbortController();
+        const run: DockerProcessRunner['run'] = jest.fn().mockImplementation(async (_command, args) => {
+            if (args[0] === 'kill') {
+                return { exitCode: 0, stdout: '', stderr: '', timedOut: false };
+            }
+            controller.abort();
+            return { exitCode: 0, stdout: JSON.stringify({ success: true, output: 1 }), stderr: '', timedOut: false };
+        });
+        const runner = new DockerSandboxRunner({ run });
+        const attemptId = 'c91e377e-b884-4a12-a298-a558eaa63430';
+        const result = await runner.executeForAttempt(createRequest({ signal: controller.signal }), {
+            executionId: 'utr-test', attemptId, containerName: `airdd2-j7-attempt-${attemptId}`,
+        });
+        expect(result).toEqual(expect.objectContaining({
+            success: false,
+            metadata: expect.objectContaining({ failureKind: 'cancelled', cancellationConfirmed: false }),
+        }));
+    });
+
+    it('does not treat an observed stopped container as proof against a late start', async () => {
+        const controller = new AbortController();
+        let runStarted!: () => void;
+        const started = new Promise<void>((resolve) => { runStarted = resolve; });
+        let finishRun!: () => void;
+        const finish = new Promise<void>((resolve) => { finishRun = resolve; });
+        const calls: string[] = [];
+        const run: DockerProcessRunner['run'] = jest.fn().mockImplementation(async (_command, args) => {
+            calls.push(args[0]);
+            if (args[0] === 'kill') {
+                return { exitCode: 1, stdout: '', stderr: 'not running', timedOut: false };
+            }
+            if (args[0] === 'inspect') {
+                return { exitCode: 0, stdout: 'false', stderr: '', timedOut: false };
+            }
+            runStarted();
+            await finish;
+            calls.push('late-start');
+            return { exitCode: 0, stdout: JSON.stringify({ success: true, output: 1 }), stderr: '', timedOut: false, aborted: true };
+        });
+        const runner = new DockerSandboxRunner({ run });
+        const attemptId = 'c91e377e-b884-4a12-a298-a558eaa63430';
+        const work = runner.executeForAttempt(createRequest({ signal: controller.signal }), {
+            executionId: 'utr-test', attemptId, containerName: `airdd2-j7-attempt-${attemptId}`,
+        });
+        await started;
+        controller.abort();
+        await Promise.resolve();
+        await Promise.resolve();
+        finishRun();
+        const result = await work;
+        expect(calls).toEqual(['run', 'kill', 'inspect', 'late-start']);
+        expect(result).toMatchObject({ success: false, metadata: { cancellationConfirmed: false } });
+    });
+
+    it('does not treat a successful supervised Docker response as neutralization proof', async () => {
+        const runner = new DockerSandboxRunner(new FakeDockerProcessRunner());
+        const attemptId = 'c91e377e-b884-4a12-a298-a558eaa63430';
+        const result = await runner.executeForAttempt(createRequest({ signal: new AbortController().signal }), {
+            executionId: 'utr-test', attemptId, containerName: `airdd2-j7-attempt-${attemptId}`,
+        });
+        expect(result.success).toBe(true);
+        expect(result.metadata?.runnerTerminationConfirmed).toBe(false);
+    });
+
+    it('does not log sandbox inputs, source code, or private context', async () => {
+        const processRunner = new FakeDockerProcessRunner();
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+        const debug = jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+        const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+        try {
+            const result = await runner.execute(createRequest({
+                args: { value: 'sensitive-test-input' },
+                sourceCode: 'function run() { return "sensitive-test-source"; }',
+            }));
+            const nativeResult = await runner.execute(createRequest({
+                mode: 'python-native',
+                runtime: 'python',
+                privateContext: { credential: 'sensitive-test-secret' },
+            }));
+
+            expect(result.success).toBe(true);
+            expect(nativeResult.success).toBe(true);
+            expect(processRunner.calls[1].stdin).toContain('sensitive-test-secret');
+            const messages = JSON.stringify([debug.mock.calls, log.mock.calls, warn.mock.calls, error.mock.calls]);
+            expect(messages).not.toContain('sensitive-test-input');
+            expect(messages).not.toContain('sensitive-test-secret');
+            expect(messages).not.toContain('sensitive-test-source');
+        } finally {
+            debug.mockRestore();
+            log.mockRestore();
+            warn.mockRestore();
+            error.mockRestore();
+        }
+    });
+
+    it('never launches Docker when cancellation has already been requested', async () => {
+        const processRunner = new FakeDockerProcessRunner();
+        const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
+        const controller = new AbortController();
+        controller.abort();
+
+        const result = await runner.execute(createRequest({ signal: controller.signal }));
+
+        expect(processRunner.calls).toEqual([]);
+        expect(result).toEqual(expect.objectContaining({
+            success: false,
+            exitCode: 130,
+            metadata: expect.objectContaining({ failureKind: 'cancelled', cancellationConfirmed: false }),
+        }));
+    });
+
     it('kills the named container and reports cancellation only after the process exits', async () => {
         const processRunner = new AbortableDockerProcessRunner();
         const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');

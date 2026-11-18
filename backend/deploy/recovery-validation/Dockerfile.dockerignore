@@ -1,0 +1,14 @@
+**
+!package.json
+!package-lock.json
+!tsconfig.json
+!jest.config.js
+!src/
+!src/**
+!__tests__/
+!__tests__/**
+!deploy/
+!deploy/systemd/
+!deploy/systemd/**
+!deploy/recovery-validation/
+!deploy/recovery-validation/**

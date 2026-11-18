@@ -905,6 +905,8 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 **Criticite :** Critique
 **Description :** connecter le traitement de run a un worker de production et remplacer le `TaskQueueService`/`TaskWorkerService` purement en memoire comme preuve de resilience. La file durable doit pouvoir etre reconstruite depuis MongoDB apres redemarrage.
 
+**Avancement CI/CD et isolation Docker :** le gateway Unix dédié, l'autorité d'epoch persistée MongoDB, le routage des commandes Docker backend (runs, health checks et provisioning Python) et les unités systemd sont raccordés ; le déploiement Linux a été validé par le responsable du projet. La réconciliation des runs expirés est branchée avant le démarrage du worker. Les scénarios Linux/Docker ciblés ont été exécutés dans un environnement local isolé ; l'US reste ouverte notamment pour la sortie sûre des opérations `run` incertaines et la validation complète des critères ci-dessous.
+
 **Dependances :** US-J7-01.
 **Risques et consequences :**
 - une queue volatile perd les runs queued apres panne ;
@@ -928,6 +930,31 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - test d'integration : persister un run, arreter/recreer le worker, verifier sa reprise ou sa classification `WORKER_LOST`, puis tester retry explicite sans modifier le parent ;
 - migration/bootstrap rejouables, tests de reprise et `npm run ci:node25:runtime` verts ;
 - Redis, s'il sert de transport de reveil, reste non autoritaire et sa perte ne perd aucun run persiste.
+
+**Etat d'avancement du cutover :**
+- le dispatcher en memoire a ete retire du chemin d'enqueue ; les appels legacy passent maintenant par les runs Mongo et attendent leur resultat persiste ;
+- le backend demarre le worker durable apres la connexion Mongo et l'initialisation de la base, et expose `/api/health/ready` ;
+- les runs queued sont repris apres redemarrage et les runs running au resultat incertain restent en quarantaine avec leur workspace verrouille ;
+- un conflit de workspace differe le run queued sans faire tomber le worker ; la cible est reverifiee apres sa preparation, avant de la lancer ;
+- la reconstruction apres redemarrage est volontairement limitee aux sources inline dont l'empreinte est verifiable ; les sources sur disque ou natives sont mises en quarantaine plutot que relues depuis un chemin mutable ;
+- le gateway Docker est raccorde : admission par epoch, serveur/client HTTP sur socket Unix avec permissions 0660 sur Linux, commandes restreintes et tests de transport ; l'autorite Mongo conserve des epochs monotones, les jetons sous forme de hash et une operation en attente, et transforme celle-ci en incertaine au redemarrage ;
+- l'admission persistante est testee contre les epochs perimees, les admissions concurrentes et la reprise fail-closed ; l'entrypoint autonome impose Node.js >=24.22.1 <25, publie le credential d'epoch atomiquement en mode 0640 et une unite systemd Linux est fournie ;
+- le gateway ferme l'admission avant l'arret normal ; le worker de production utilise le gateway et ne demarre qu'apres la reconciliation de reprise. Une operation `run` incertaine reste bloquee au redemarrage : une inspection ponctuelle ne prouve pas qu'une creation ou un demarrage ne peut plus arriver ;
+- le deploiement Linux du gateway et son raccordement au backend de production ont ete valides par le responsable du projet ; les nouveaux chemins de reconciliation de runs expires ont ete testes sous systemd dans un environnement Linux local isole, pas sur l'hote de production ;
+- les reponses de `kill` restent incertaines jusqu'a preuve externe de quiescence ; ni une reponse Docker ni une inspection seule n'autorisent la liberation du workspace ;
+- au demarrage, les runs `running` au lease expire sont inspectes et arretes via le gateway lorsque l'admission n'est pas bloquee ; un etat Docker terminal/absence apres fencing permet alors le passage a `WORKER_LOST`, puis la liberation conditionnelle du verrou propre au run ; une preuve absente conserve le run et son verrou en quarantaine ;
+- la liberation de verrou interrompue est rejouee au demarrage sans supprimer le verrou d'un autre run ;
+- validation du 17/11/2026 : moteur Docker Linux de Docker Desktop, MongoDB isole, gateway execute sous Windows ; arret d'un conteneur reel, rejet de l'ancienne epoch, identite incorrecte et conteneur en pause testes. Un test separe du socket Unix `0660` et du fencing a ete execute dans un processus Linux avec runner Docker simule (Node 25.9.0, hors plage de production) ;
+- une creation Docker differee apres deconnexion a revele que l'absence du conteneur ne prouve pas la quiescence. Le gateway conserve maintenant l'operation `run` incertaine et bloque son redemarrage ; une preuve durable permettant une sortie sure de cette quarantaine reste a implementer et valider sur l'hote Linux de production ;
+- les chemins `dist/src/...` des entrees npm et systemd ont ete alignes sur la sortie effective du build ; le redeploiement des unites corrigees sur l'hote cible reste a effectuer ;
+- validation Linux locale : 10 suites et 61 tests reussis avec Node 24.22.1, MongoDB et moteur Docker-in-Docker isoles. Apres `SIGKILL` du backend systemd, un conteneur actif est arrete, `WORKER_LOST` est persiste et le verrou libere ; un conteneur en pause conserve run et verrou en quarantaine ;
+- au redemarrage systemd du gateway, une operation `run` en attente injectee dans le journal de test devient incertaine et bloque l'ouverture du socket. Cette injection est synthetique et ne prouve pas la neutralisation d'une requete Docker reellement en transit ; la creation differee a ete testee separement ;
+- essais complementaires Docker-in-Docker : un demarrage par ID retarde peut lancer un conteneur observe `created` ; apres suppression du conteneur initial et reservation inerte de son nom, ce demarrage sur ancien ID est refuse. Ces essais ne prouvent pas la neutralisation des effets deja executes ou des suppressions tardives par nom ;
+- les metadonnees d'effet conservees dans MongoDB sont transmises a `reconcileUnknown` ; au redemarrage, les `run` et `kill` incertains restent bloques. Des tests Docker reels montrent qu'un `kill` retarde peut toucher un remplacement et qu'une suppression retardee par nom peut detruire une reservation inerte ;
+- nouvelle validation ciblee : build backend, 11 suites/72 tests Linux Docker/Mongo, 8 tests de quarantaine queued et 7 tests de requetes retardees reussis ; les pannes backend systemd et la quarantaine gateway synthetique sont aussi validees. Campagne navigateur semi-E2E complete en serie : 10 reussites, 1 echec `minimize-restore` ;
+- campagne live sur backend/Mongo ephemeres : 6 reussites, 1 echec reproductible d'attachement workspace et 1 test d'artefact runtime ignore (sandbox Python non pret). Le test d'election replica Mongo n'a pas ete execute ; aucun E2E complet du worker n'est revendique ;
+- les permissions testees interdisent Docker directement au compte backend, autorisent le compte gateway et permettent au backend d'acceder au socket gateway. `npm run ci:node25:runtime` reussit avec Node 24.22.1 (3 suites, 20 tests) ;
+- reste a faire : concevoir et prouver la sortie sure de quarantaine d'un `run` incertain, valider le deploiement corrige sur l'hote cible et achever la validation E2E et les criteres de l'US. Ne pas effacer le journal ni liberer un verrou sur simple inspection. **US-J7-02 reste ouverte.**
 
 ### US-J7-03 - Terminer le cutover UI J5 des commandes et statuts runtime
 
@@ -1089,6 +1116,7 @@ Le backlog est considere execute quand :
 - migration V1 -> V2 relancee sans doublon et reprise apres echec verifiees ;
 - tests de non-regression sur les workflows invalides, les transitions interdites et les contraintes d'ownership ;
 - tests de panne, retry, annulation et reprise sur runs/tasks ;
+- traitement particulier de gestion des runs et des erreurs : definir la retention, la reconciliation, la liberation et le nettoyage des preuves d'execution, ainsi que l'exploitation des etats incertains ; ne jamais supprimer ces preuves ni liberer un workspace avant verification des garanties de surete ;
 - validation des fixtures QA et des jeux de donnees historiques ;
 - verification que la Definition of Done de la phase 2 est satisfaite ;
 - validation fonctionnelle minimale sur le front et le runtime avant ouverture du cutover complet.

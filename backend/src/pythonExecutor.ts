@@ -1,35 +1,9 @@
 import mongoose from 'mongoose';
-import { ExecutionOrchestrator, type ExecutionOrchestratorRequest } from './services/runtime/ExecutionOrchestrator';
+import { SandboxService } from './services/sandbox.service';
 import { UserToolQueryService, type ToolTransitionReadModel } from './services/userToolQuery.service';
 
-const executionOrchestrator = new ExecutionOrchestrator();
 const userToolQueryService = new UserToolQueryService();
-
-function parseLegacyVersion(versionTag?: string | null): number {
-    if (!versionTag) {
-        return 1;
-    }
-
-    const match = versionTag.match(/(\d+)/);
-    return match ? Number.parseInt(match[1], 10) : 1;
-}
-
-function mapToolToExecutionFunction(tool: ToolTransitionReadModel): ExecutionOrchestratorRequest['fn'] {
-    return {
-        _id: tool.id,
-        name: tool.name,
-        language: tool.runtime,
-        origin: tool.origin,
-        codeInline: tool.currentVersion?.sourceInline ?? null,
-        codePath: tool.currentVersion?.sourcePath ?? null,
-        workflowId: tool.workflowId ?? null,
-        dependencies: tool.dependencies,
-        version: parseLegacyVersion(tool.currentVersion?.versionTag),
-        toolVersionTag: tool.currentVersion?.versionTag,
-        toolContentHash: tool.currentVersion?.contentHash,
-        policySnapshot: tool.policy
-    };
-}
+const sandboxService = new SandboxService();
 
 /**
  * J7.4 — Execute a legacy function identifier through the canonical Tools V2 catalog.
@@ -37,7 +11,7 @@ function mapToolToExecutionFunction(tool: ToolTransitionReadModel): ExecutionOrc
  * Flow:
  *  1. Load the canonical tool from DB (ownership: native/shared OR belongs to userId)
  *  2. Validate enabled status
- *  3. Adapt it to the runtime execution contract and delegate to the sandbox orchestrator
+ *  3. Adapt it to the runtime execution contract, enqueue durably, and await the worker result
  *
  * @param fnId    ObjectId string of the legacy function/tool identifier
  * @param args    Key/value map of function arguments
@@ -64,18 +38,17 @@ export const executeFunctionById = async (
         throw new Error(`Function '${tool.name}' is disabled.`);
     }
 
-    const fn = mapToolToExecutionFunction(tool);
-
-    const result = await executionOrchestrator.execute({
-        fn,
+    const acknowledgement = await sandboxService.queueFunctionRun({
+        functionId: tool.id,
         userId,
-        args,
+        testArgs: args,
         launchContext: agentId ? 'workflow_run' : 'system_validation',
-        agentInstanceId: agentId
+        agentInstanceId: agentId,
     });
+    const result = await sandboxService.waitForRunCompletion(acknowledgement.executionId, userId);
 
     if (!result.success) {
-        throw new Error(result.stderr || `Function '${fn.name}' failed.`);
+        throw new Error(result.stderr || `Function '${tool.name}' failed.`);
     }
 
     return result.output as object;

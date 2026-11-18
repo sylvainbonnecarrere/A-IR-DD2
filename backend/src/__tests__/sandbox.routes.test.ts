@@ -6,11 +6,10 @@ import { User } from '../models/User.model';
 import { UserTool } from '../models/UserTool.model';
 import sandboxRoutes from '../routes/sandbox.routes';
 import { generateAccessToken } from '../utils/jwt';
-import { BuildPreparationError, BuildService } from '../services/build.service';
-import { NativePythonProvisioningService } from '../services/nativePythonProvisioning.service';
+import { BuildPreparationError } from '../services/build.service';
 import { ExecutionOrchestrator } from '../services/runtime/ExecutionOrchestrator';
 import { RuntimeNotReadyError } from '../services/runtime/errors';
-import * as userToolMirrorService from '../services/userToolMirror.service';
+import { SandboxService } from '../services/sandbox.service';
 
 type FixtureRuntime = 'typescript' | 'python';
 
@@ -91,56 +90,9 @@ describe('Sandbox routes', () => {
         return { user, fn, accessToken };
     }
 
-    it('executes POST /api/sandbox/run through auth, service, and orchestrator', async () => {
+    it('forwards an authenticated workflow run to the durable sandbox service', async () => {
         const fixture = await createFixture();
-        jest.spyOn(BuildService.prototype, 'ensureBuildReadyForRun').mockResolvedValue();
-        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
-            report: {
-                status: 'healthy',
-                summary: 'Docker sandbox ready',
-                python: { available: true, executable: 'python', version: 'Python 3.12.0' },
-                runtime: {
-                    mode: 'docker_desktop',
-                    securityLevel: 'dev-only',
-                    executionReady: true,
-                    warning: 'Docker Desktop dev-only',
-                    docker: {
-                        available: true,
-                        rootless: false,
-                        context: 'desktop-linux',
-                        socketPath: '//./pipe/dockerDesktopLinuxEngine',
-                        warning: 'Docker Desktop dev-only',
-                        executionReady: true,
-                        images: {
-                            node: true,
-                            python: true
-                        }
-                    },
-                    firecracker: {
-                        available: false,
-                        enabled: false,
-                        kvmAvailable: false,
-                        warning: 'Firecracker unavailable'
-                    },
-                    runners: {
-                        preferred: 'docker_sandbox',
-                        available: ['docker_sandbox']
-                    }
-                },
-                capabilities: {
-                    syntaxCheck: { python: true, typescript: true },
-                    run: { python: true, typescript: true }
-                }
-            } as any,
-            runner: {
-                getRunnerId: () => 'docker_sandbox',
-                getLabel: () => 'Docker sandbox',
-                supportsRuntime: () => true,
-                getReadiness: () => ({ ready: true })
-            },
-            readiness: { ready: true }
-        });
-        const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
+        const runSpy = jest.spyOn(SandboxService.prototype, 'runFunction').mockResolvedValue({
             success: true,
             output: { echoed: 'route-ok' },
             stdout: 'route test',
@@ -173,69 +125,20 @@ describe('Sandbox routes', () => {
         expect(response.body.metadata).toEqual(expect.objectContaining({
             artifacts: [{ path: 'output/result.json', kind: 'json' }]
         }));
-        expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({
-            userId: fixture.user.id,
-            agentInstanceId: '66c111111111111111111111',
-            args: { value: 'route-ok' },
-            launchContext: 'workflow_run',
-            fn: expect.objectContaining({
-                _id: expect.anything(),
-                name: fixture.fn.name,
-                language: 'typescript'
-            })
-        }));
+        expect(runSpy).toHaveBeenCalledWith(
+            fixture.fn.id,
+            fixture.user.id,
+            { value: 'route-ok' },
+            undefined,
+            '66c111111111111111111111',
+            undefined,
+            expect.any(String),
+        );
     });
 
-    it('executes POST /api/sandbox/run for a simple custom Python function used from the editor', async () => {
+    it('forwards an authenticated Python editor run to the durable sandbox service', async () => {
         const fixture = await createFixture('python');
-        jest.spyOn(BuildService.prototype, 'ensureBuildReadyForRun').mockResolvedValue();
-        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
-            report: {
-                status: 'healthy',
-                summary: 'Docker sandbox ready',
-                python: { available: true, executable: 'python', version: 'Python 3.12.0' },
-                runtime: {
-                    mode: 'docker_desktop',
-                    securityLevel: 'dev-only',
-                    executionReady: true,
-                    warning: 'Docker Desktop dev-only',
-                    docker: {
-                        available: true,
-                        rootless: false,
-                        context: 'desktop-linux',
-                        socketPath: '//./pipe/dockerDesktopLinuxEngine',
-                        warning: 'Docker Desktop dev-only',
-                        executionReady: true,
-                        images: {
-                            node: true,
-                            python: true
-                        }
-                    },
-                    firecracker: {
-                        available: false,
-                        enabled: false,
-                        kvmAvailable: false,
-                        warning: 'Firecracker unavailable'
-                    },
-                    runners: {
-                        preferred: 'docker_sandbox',
-                        available: ['docker_sandbox']
-                    }
-                },
-                capabilities: {
-                    syntaxCheck: { python: true, typescript: true },
-                    run: { python: true, typescript: true }
-                }
-            } as any,
-            runner: {
-                getRunnerId: () => 'docker_sandbox',
-                getLabel: () => 'Docker sandbox',
-                supportsRuntime: () => true,
-                getReadiness: () => ({ ready: true })
-            },
-            readiness: { ready: true }
-        });
-        const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
+        const runSpy = jest.spyOn(SandboxService.prototype, 'runFunction').mockResolvedValue({
             success: true,
             output: { echoed: 'route-python-ok' },
             stdout: 'python route test',
@@ -264,21 +167,20 @@ describe('Sandbox routes', () => {
             runner: 'docker_sandbox',
             output: { echoed: 'route-python-ok' }
         }));
-        expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({
-            userId: fixture.user.id,
-            args: { value: 'route-python-ok' },
-            launchContext: 'editor_test',
-            fn: expect.objectContaining({
-                _id: expect.anything(),
-                name: fixture.fn.name,
-                language: 'python'
-            })
-        }));
+        expect(runSpy).toHaveBeenCalledWith(
+            fixture.fn.id,
+            fixture.user.id,
+            { value: 'route-python-ok' },
+            undefined,
+            undefined,
+            undefined,
+            expect.any(String),
+        );
     });
 
     it('returns 409 when build preparation is required before sandbox execution', async () => {
         const fixture = await createFixture();
-        jest.spyOn(BuildService.prototype, 'ensureBuildReadyForRun').mockRejectedValue(
+        jest.spyOn(SandboxService.prototype, 'runFunction').mockRejectedValue(
             new BuildPreparationError('Function must be prepared via the build workflow before sandbox execution.')
         );
 
@@ -355,7 +257,7 @@ describe('Sandbox routes', () => {
             role: user.role
         });
 
-        jest.spyOn(NativePythonProvisioningService.prototype, 'provisionToolVersion').mockRejectedValue(
+        jest.spyOn(SandboxService.prototype, 'runFunction').mockRejectedValue(
             new BuildPreparationError(
                 'This native tool version declares dependencies and requires platform provisioning before sandbox execution.',
                 'PLATFORM_PROVISION_REQUIRED'
@@ -381,7 +283,7 @@ describe('Sandbox routes', () => {
         }));
     });
 
-    it('auto-provisions a native readonly tool on demand before executing it through toolSelection', async () => {
+    it('forwards a canonical native tool selection to durable execution', async () => {
         const timestamp = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         const user = await User.create({
             email: `sandbox-route-${timestamp}@test.com`,
@@ -438,70 +340,7 @@ describe('Sandbox routes', () => {
             role: user.role
         });
 
-        const ensureBuildReadySpy = jest.spyOn(BuildService.prototype, 'ensureBuildReadyForTool')
-            .mockRejectedValueOnce(new BuildPreparationError(
-                'This native tool version declares dependencies and requires platform provisioning before sandbox execution.',
-                'PLATFORM_PROVISION_REQUIRED'
-            ))
-            .mockResolvedValueOnce();
-
-        const provisionSpy = jest.spyOn(NativePythonProvisioningService.prototype, 'provisionToolVersion').mockResolvedValue({
-            toolId: tool.id,
-            toolName: tool.name,
-            toolVersionTag: 'v1',
-            status: 'ready',
-            provisionedAt: new Date().toISOString(),
-            dependencies: ['requests==2.32.3'],
-            criticalModules: ['requests'],
-            sitePackagesPath: '/tmp/site-packages',
-            reportPath: '/tmp/provision-report.json'
-        });
-
-        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
-            report: {
-                status: 'healthy',
-                summary: 'Docker sandbox ready',
-                python: { available: true, executable: 'python', version: 'Python 3.12.0' },
-                runtime: {
-                    mode: 'docker_desktop',
-                    securityLevel: 'dev-only',
-                    executionReady: true,
-                    warning: 'Docker Desktop dev-only',
-                    docker: {
-                        available: true,
-                        rootless: false,
-                        context: 'desktop-linux',
-                        socketPath: '//./pipe/dockerDesktopLinuxEngine',
-                        warning: 'Docker Desktop dev-only',
-                        executionReady: true,
-                        images: { node: true, python: true }
-                    },
-                    firecracker: {
-                        available: false,
-                        enabled: false,
-                        kvmAvailable: false,
-                        warning: 'Firecracker unavailable'
-                    },
-                    runners: {
-                        preferred: 'docker_sandbox',
-                        available: ['docker_sandbox']
-                    }
-                },
-                capabilities: {
-                    syntaxCheck: { python: true, typescript: true },
-                    run: { python: true, typescript: true }
-                }
-            } as any,
-            runner: {
-                getRunnerId: () => 'docker_sandbox',
-                getLabel: () => 'Docker sandbox',
-                supportsRuntime: () => true,
-                getReadiness: () => ({ ready: true })
-            },
-            readiness: { ready: true }
-        });
-
-        jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
+        const runSpy = jest.spyOn(SandboxService.prototype, 'runFunction').mockResolvedValue({
             success: true,
             output: { results: [{ title: 'Meteo Paris', url: 'https://meteofrance.com/previsions-meteo-france/paris/75000' }] },
             stdout: 'route test',
@@ -512,7 +351,7 @@ describe('Sandbox routes', () => {
             exitCode: 0,
             metadata: { containerWorkspaceDir: '/tmp/workspace' },
             resourceUsage: { peakMemoryMb: 24 }
-        } as any);
+        });
 
         const response = await request(app)
             .post('/api/sandbox/run')
@@ -527,8 +366,15 @@ describe('Sandbox routes', () => {
             .expect(200);
 
         expect(response.body.success).toBe(true);
-        expect(ensureBuildReadySpy).toHaveBeenCalledTimes(2);
-        expect(provisionSpy).toHaveBeenCalledWith(tool.id, user.id, 'v1');
+        expect(runSpy).toHaveBeenCalledWith(
+            undefined,
+            user.id,
+            { query: 'meteo paris demain', language: 'fr' },
+            { toolId: tool.id, versionRef: { versionTag: 'v1' } },
+            undefined,
+            undefined,
+            expect.any(String),
+        );
     });
 
     it('accepts a semver versionTag through canonical toolSelection without requiring functionId or legacy mirror sync', async () => {
@@ -588,22 +434,7 @@ describe('Sandbox routes', () => {
             role: user.role
         });
 
-        const ensureBuildReadySpy = jest.spyOn(BuildService.prototype, 'ensureBuildReadyForTool').mockResolvedValue();
-        const syncMirrorSpy = jest.spyOn(userToolMirrorService, 'syncUserToolMirrorFromLegacyFunction').mockResolvedValue();
-        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
-            report: {
-                status: 'healthy',
-                summary: 'Docker sandbox ready'
-            } as any,
-            runner: {
-                getRunnerId: () => 'docker_sandbox',
-                getLabel: () => 'Docker sandbox',
-                supportsRuntime: () => true,
-                getReadiness: () => ({ ready: true })
-            },
-            readiness: { ready: true }
-        });
-        const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
+        const runSpy = jest.spyOn(SandboxService.prototype, 'runFunction').mockResolvedValue({
             success: true,
             output: { ok: true },
             stdout: 'route test',
@@ -614,7 +445,7 @@ describe('Sandbox routes', () => {
             exitCode: 0,
             metadata: { containerWorkspaceDir: '/tmp/workspace' },
             resourceUsage: { peakMemoryMb: 24 }
-        } as any);
+        });
 
         const response = await request(app)
             .post('/api/sandbox/run')
@@ -629,31 +460,21 @@ describe('Sandbox routes', () => {
             .expect(200);
 
         expect(response.body.success).toBe(true);
-        expect(ensureBuildReadySpy).toHaveBeenCalledWith(tool.id, user.id, 'v1');
-        expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({
-            fn: expect.objectContaining({
-                name: tool.name,
-                toolVersionTag: 'v1'
-            })
-        }));
-        expect(syncMirrorSpy).not.toHaveBeenCalled();
+        expect(runSpy).toHaveBeenCalledWith(
+            undefined,
+            user.id,
+            { query: 'films programmation informatique cinémas Paris semaine 2025', language: 'fr' },
+            { toolId: tool.id, versionRef: { versionTag: '1.0.0', versionNumber: 1 } },
+            undefined,
+            undefined,
+            expect.any(String),
+        );
     });
 
-    it('returns 503 when the preferred runner is not ready', async () => {
+    it('returns 503 when durable run setup reports that the runtime is not ready', async () => {
         const fixture = await createFixture();
-        jest.spyOn(BuildService.prototype, 'ensureBuildReadyForRun').mockResolvedValue();
-        const syncMirrorSpy = jest.spyOn(userToolMirrorService, 'syncUserToolMirrorFromLegacyFunction').mockResolvedValue();
-        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
-            report: { summary: 'Sandbox runtime unavailable' } as any,
-            runner: {
-                getRunnerId: () => 'docker_sandbox',
-                getLabel: () => 'Docker sandbox',
-                supportsRuntime: () => true,
-                getReadiness: () => ({ ready: false, reason: 'Sandbox runtime unavailable' })
-            },
-            readiness: { ready: false, reason: 'Sandbox runtime unavailable' }
-        });
-        const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute');
+        const runSpy = jest.spyOn(SandboxService.prototype, 'runFunction')
+            .mockRejectedValue(new RuntimeNotReadyError('Sandbox runtime unavailable'));
 
         const response = await request(app)
             .post('/api/sandbox/run')
@@ -670,60 +491,12 @@ describe('Sandbox routes', () => {
             subsystem: 'runtime_readiness',
             retryable: true
         }));
-        expect(executeSpy).not.toHaveBeenCalled();
-        expect(syncMirrorSpy).not.toHaveBeenCalled();
+        expect(runSpy).toHaveBeenCalled();
     });
 
     it('returns sandbox failure diagnostics in a successful HTTP response when execution fails in-container', async () => {
         const fixture = await createFixture();
-        jest.spyOn(BuildService.prototype, 'ensureBuildReadyForRun').mockResolvedValue();
-        jest.spyOn(ExecutionOrchestrator.prototype, 'getPreferredRunnerReadiness').mockResolvedValue({
-            report: {
-                status: 'healthy',
-                summary: 'Docker sandbox ready',
-                python: { available: true, executable: 'python', version: 'Python 3.12.0' },
-                runtime: {
-                    mode: 'docker_desktop',
-                    securityLevel: 'dev-only',
-                    executionReady: true,
-                    warning: 'Docker Desktop dev-only',
-                    docker: {
-                        available: true,
-                        rootless: false,
-                        context: 'desktop-linux',
-                        socketPath: '//./pipe/dockerDesktopLinuxEngine',
-                        warning: 'Docker Desktop dev-only',
-                        executionReady: true,
-                        images: {
-                            node: true,
-                            python: true
-                        }
-                    },
-                    firecracker: {
-                        available: false,
-                        enabled: false,
-                        kvmAvailable: false,
-                        warning: 'Firecracker unavailable'
-                    },
-                    runners: {
-                        preferred: 'docker_sandbox',
-                        available: ['docker_sandbox']
-                    }
-                },
-                capabilities: {
-                    syntaxCheck: { python: true, typescript: true },
-                    run: { python: true, typescript: true }
-                }
-            } as any,
-            runner: {
-                getRunnerId: () => 'docker_sandbox',
-                getLabel: () => 'Docker sandbox',
-                supportsRuntime: () => true,
-                getReadiness: () => ({ ready: true })
-            },
-            readiness: { ready: true }
-        });
-        jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
+        jest.spyOn(SandboxService.prototype, 'runFunction').mockResolvedValue({
             success: false,
             output: null,
             stdout: '',
@@ -738,8 +511,17 @@ describe('Sandbox routes', () => {
                 failureSubsystem: 'dependency',
                 errorType: 'ModuleNotFoundError',
                 traceback: 'Traceback...'
+            },
+            errorDetails: {
+                code: 'DEPENDENCY_MISSING',
+                subsystem: 'dependency',
+                retryable: false,
+                message: 'ModuleNotFoundError: No module named requests',
+                failureKind: 'dependency_missing',
+                errorType: 'ModuleNotFoundError',
+                traceback: 'Traceback...'
             }
-        } as any);
+        });
 
         const response = await request(app)
             .post('/api/sandbox/run')

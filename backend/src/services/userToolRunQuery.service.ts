@@ -15,6 +15,7 @@ export interface FunctionRunReadModel {
     createdAt: Date;
     updatedAt: Date;
     timing: IUserToolRun['timing'];
+    reconstructionQuarantine?: IUserToolRun['reconstructionQuarantine'];
     error?: IUserToolRun['error'] | null;
     outputs?: Pick<NonNullable<IUserToolRun['outputs']>, 'stdout' | 'stderr' | 'artifacts'> | null;
     resourceUsage?: IUserToolRun['resourceUsage'];
@@ -225,6 +226,7 @@ export class UserToolRunQueryService {
             createdAt: run.createdAt,
             updatedAt: run.updatedAt,
             timing: run.timing,
+            ...(run.reconstructionQuarantine ? { reconstructionQuarantine: run.reconstructionQuarantine } : {}),
             error: run.error
                 ? {
                     code: run.error.code,

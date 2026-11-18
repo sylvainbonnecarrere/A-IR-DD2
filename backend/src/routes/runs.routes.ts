@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { UserToolRunStatusSchema } from '../domain/execution/userToolRun.contract';
-import { requireAuth } from '../middleware/auth.middleware';
+import { requireAuth, requireRole } from '../middleware/auth.middleware';
 import { IUser } from '../models/User.model';
+import { RECONSTRUCTION_REJECTION_CODES } from '../domain/execution/runReconstructionQuarantine';
 import { RuntimeCompatibilityService } from '../services/runtimeCompatibility.service';
 import { BuildPreparationError } from '../services/build.service';
 import { RuntimeNotReadyError } from '../services/runtime/errors';
@@ -66,6 +67,9 @@ const executeRunSchema = z.object({
             path: ['functionId'],
         });
     }
+});
+const resolveQuarantineSchema = z.object({
+    expectedCode: z.enum(RECONSTRUCTION_REJECTION_CODES),
 });
 
 function readIdempotencyKey(value: unknown): string | undefined {
@@ -210,6 +214,44 @@ router.post('/executions/:executionId/retry', requireAuth, async (req, res) => {
             retryOfExecutionId: executionId,
             status: result.status,
             idempotency: { key: idempotencyKey, replayed: result.replayed },
+        });
+    } catch (error) {
+        return sendRunCommandError(res, error);
+    }
+});
+
+router.post('/executions/:executionId/reconstruction-quarantine/fail', requireAuth, requireRole(['admin']), async (req, res) => {
+    const executionId = String(req.params.executionId || '').trim();
+    if (!executionId) {
+        return res.status(400).json({ error: 'executionId invalide', code: 'INVALID_EXECUTION_ID' });
+    }
+
+    const body = resolveQuarantineSchema.safeParse(req.body);
+    if (!body.success) {
+        return res.status(400).json({
+            error: 'Le code attendu de quarantaine est requis',
+            code: 'INVALID_QUARANTINE_RESOLUTION',
+            details: body.error.issues,
+        });
+    }
+
+    try {
+        const admin = req.user as IUser;
+        const result = await userToolRunService.failQuarantinedRun(executionId, body.data.expectedCode, admin.id);
+        if (result.kind === 'not_found') {
+            return res.status(404).json({ error: 'Run introuvable', code: 'RUN_NOT_FOUND' });
+        }
+        if (result.kind === 'conflict') {
+            return res.status(409).json({
+                error: 'Le run n’est plus dans la quarantaine attendue',
+                code: 'RUN_QUARANTINE_STATE_CONFLICT',
+            });
+        }
+        return res.status(200).json({
+            executionId,
+            status: result.run.status,
+            error: result.run.error,
+            quarantineResolution: result.run.reconstructionQuarantineResolution,
         });
     } catch (error) {
         return sendRunCommandError(res, error);

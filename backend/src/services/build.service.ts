@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
@@ -7,6 +8,7 @@ import { ToolPreparationPolicyService, type PreparationPolicyErrorCode } from '.
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
 import type { WorkspaceProvisioningResult } from './workspace/types';
 import { buildGlobalToolClauses, buildOwnedToolClause } from '../utils/sharedExampleAccess';
+import { MongoWorkspaceLockService } from './runtime/MongoWorkspaceLockService';
 
 export type BuildPreparationStatus = 'ready' | 'failed';
 
@@ -190,6 +192,7 @@ class PythonBuildStrategy implements BuildStrategy {
 
 export class BuildService {
     private readonly workspaceManager = createWorkspaceManager();
+    private readonly workspaceLocks = new MongoWorkspaceLockService();
     private readonly preparationPolicy = new ToolPreparationPolicyService();
     private readonly backendPythonRoot = path.resolve(__dirname, '../../python');
 
@@ -377,39 +380,51 @@ export class BuildService {
             throw new BuildPreparationError('Only workflow-scoped custom tools can be prepared during J10.');
         }
 
-        const workspace = await this.workspaceManager.ensureWorkflowWorkspace(userId, tool.workflowId.toString());
-        const sourcePath = await this.ensureToolVersionSourceMaterialized(
-            tool,
-            version,
-            workspace,
-            options.buildKey,
-            options.persistSourcePath
-        );
-        const materializedVersion = this.resolveToolVersion(tool, version.versionTag);
-        const sourceCode = await this.loadToolVersionSourceCode(materializedVersion, sourcePath);
-        const strategy = this.resolveStrategy(tool.runtime);
-        const result = await strategy.prepare({
-            fn: this.mapToolVersionToBuildTarget(tool, materializedVersion),
-            workspace,
-            sourcePath,
-            toolKey: options.buildKey,
-            sourceCode
-        });
-
-        if (options.includeVersionMetadata) {
-            result.toolId = tool._id.toString();
-            result.toolVersionTag = materializedVersion.versionTag;
+        const workflowId = tool.workflowId.toString();
+        const lock = await this.workspaceLocks.tryAcquire(userId, workflowId, `build:${randomUUID()}`);
+        if (!lock) {
+            throw new BuildPreparationError('Workspace is locked by an active execution or requires reconciliation.');
         }
 
-        result.functionId = tool._id.toString();
+        try {
+            const workspace = await this.workspaceManager.ensureWorkflowWorkspace(userId, workflowId);
+            const sourcePath = await this.ensureToolVersionSourceMaterialized(
+                tool,
+                version,
+                workspace,
+                options.buildKey,
+                options.persistSourcePath
+            );
+            const materializedVersion = this.resolveToolVersion(tool, version.versionTag);
+            const sourceCode = await this.loadToolVersionSourceCode(materializedVersion, sourcePath);
+            const strategy = this.resolveStrategy(tool.runtime);
+            const result = await strategy.prepare({
+                fn: this.mapToolVersionToBuildTarget(tool, materializedVersion),
+                workspace,
+                sourcePath,
+                toolKey: options.buildKey,
+                sourceCode
+            });
 
-        const reportPath = this.resolveBuildReportPath(workspace, options.reportKey);
-        await fs.mkdir(path.dirname(reportPath), { recursive: true });
-        await fs.writeFile(reportPath, JSON.stringify(result, null, 2), 'utf-8');
+            if (options.includeVersionMetadata) {
+                result.toolId = tool._id.toString();
+                result.toolVersionTag = materializedVersion.versionTag;
+            }
 
-        await this.markToolVersionBuilt(tool, materializedVersion.versionTag);
+            result.functionId = tool._id.toString();
 
-        return result;
+            const reportPath = this.resolveBuildReportPath(workspace, options.reportKey);
+            await fs.mkdir(path.dirname(reportPath), { recursive: true });
+            await fs.writeFile(reportPath, JSON.stringify(result, null, 2), 'utf-8');
+
+            await this.markToolVersionBuilt(tool, materializedVersion.versionTag);
+
+            return result;
+        } finally {
+            if (!await this.workspaceLocks.release(lock)) {
+                throw new Error(`Workspace lock release was not confirmed after build preparation for ${lock.owner}`);
+            }
+        }
     }
 
     private async loadOwnedOrNativeTool(toolId: string, userId: string): Promise<IUserTool | null> {

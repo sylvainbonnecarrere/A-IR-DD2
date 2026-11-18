@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
+import mongoose from 'mongoose';
 import { WebSocketManager } from './websocket/WebSocketManager';
 import { configureRuntimeEventEmitter } from './services/runtimeEventPublisher.service';
 import helmet from 'helmet';
@@ -28,6 +29,18 @@ import runsRoutes from './routes/runs.routes';
 import mediaRoutes from './routes/media.routes';
 import sandboxRoutes from './routes/sandbox.routes';
 import { initializeDatabase } from './services/databaseInit';
+import { createProductionRunWorker } from './services/runtime/productionRunWorker';
+import type { DurableRunWorker } from './services/runtime/DurableRunWorker';
+import os from 'os';
+import { randomUUID } from 'crypto';
+import {
+  activateDockerGatewayWorker,
+  closeDockerGatewayWorker,
+  isDockerGatewayRequired,
+  isDockerGatewayWorkerActive,
+} from './services/runtime/DockerGatewayRuntime';
+import { DockerGatewayAttemptRecovery } from './services/runtime/DockerGatewayAttemptRecovery';
+import { MongoExpiredRunReconciler } from './services/runtime/MongoExpiredRunReconciler';
 
 // SOLID: Valider la configuration au démarrage (fail-fast pattern)
 validateConfig();
@@ -94,6 +107,24 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Backend is running' });
 });
 
+app.get('/api/health/ready', (_req, res) => {
+  const databaseReady = mongoose.connection.readyState === 1;
+  const workerState = runWorker?.getState() ?? (isTestEnvironment ? 'disabled' : 'not_started');
+  const workerReady = isTestEnvironment || workerState === 'running';
+  const gatewayReady = !isDockerGatewayRequired() || isDockerGatewayWorkerActive();
+  const ready = databaseReady && workerReady && gatewayReady;
+
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    components: {
+      database: databaseReady ? 'connected' : 'unavailable',
+      durableRunWorker: workerState,
+      dockerGateway: gatewayReady ? (isDockerGatewayRequired() ? 'active' : 'optional') : 'unavailable',
+    },
+    ...(runWorker?.getFailure() ? { workerFailure: runWorker.getFailure() } : {}),
+  });
+});
+
 // Auth routes (Jalon 2)
 app.use('/api/auth', authRoutes);
 
@@ -146,6 +177,7 @@ httpServer.keepAliveTimeout = Math.max(httpServer.keepAliveTimeout, 65_000);
 
 let wsManager: WebSocketManager | null = null;
 let isShuttingDown = false;
+let runWorker: DurableRunWorker | null = null;
 
 function ensureWebSocketManager(): WebSocketManager {
   if (!wsManager) {
@@ -168,6 +200,7 @@ async function startServer() {
 
   try {
     ensureWebSocketManager();
+    let databaseInitialized = false;
 
     // Tentative connexion MongoDB (non-bloquante pour Jalon 1)
     try {
@@ -176,13 +209,34 @@ async function startServer() {
       // Initialize database schema, collections, and indexes (Code-First approach)
       // This runs AFTER successful MongoDB connection
       await initializeDatabase();
-      
+      databaseInitialized = true;
     } catch (dbError) {
       console.warn('⚠️  MongoDB non disponible - Mode Guest uniquement');
       console.warn('   Pour activer le mode Authenticated, démarrer MongoDB :');
       console.warn('   - Windows: Installer MongoDB Community Server');
       console.warn('   - Docker: docker run -d -p 27017:27017 --name mongodb mongo:6');
       console.warn('');
+    }
+
+    if (!isTestEnvironment && databaseInitialized) {
+      const gatewaySocket = process.env.DOCKER_GATEWAY_SOCKET?.trim();
+      if (isDockerGatewayRequired() && !gatewaySocket) {
+        throw new Error('DOCKER_GATEWAY_SOCKET is required in production; direct Docker access is disabled');
+      }
+      if (gatewaySocket) {
+        await activateDockerGatewayWorker(
+          gatewaySocket,
+          `backend:${os.hostname()}:${process.pid}:${randomUUID()}`,
+        );
+        const recovery = await new MongoExpiredRunReconciler(
+          new DockerGatewayAttemptRecovery(),
+        ).reconcile();
+        if (recovery.unresolved > 0 || recovery.lockCleanupPending > 0) {
+          console.warn('[Backend startup] Some expired runs remain quarantined after Docker reconciliation', recovery);
+        }
+      }
+      runWorker = createProductionRunWorker();
+      runWorker.start();
     }
 
     // Démarrer le serveur HTTP (même sans MongoDB)
@@ -221,27 +275,68 @@ async function startServer() {
 }
 
 async function stopServer() {
-  if (wsManager) {
-    await wsManager.close();
-    wsManager = null;
-    configureRuntimeEventEmitter(null);
-  }
+  const shutdownErrors: string[] = [];
 
   if (serverStarted) {
-    await new Promise<void>((resolve, reject) => {
-      httpServer.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        httpServer.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
 
-        serverStarted = false;
-        resolve();
+          serverStarted = false;
+          resolve();
+        });
       });
-    });
+    } catch (error) {
+      shutdownErrors.push(`HTTP server: ${describeShutdownError(error)}`);
+    }
   }
 
-  await disconnectDatabase();
+  if (runWorker) {
+    try {
+      await runWorker.stop();
+    } catch (error) {
+      shutdownErrors.push(`Durable run worker: ${describeShutdownError(error)}`);
+    } finally {
+      runWorker = null;
+    }
+  }
+
+  if (isDockerGatewayWorkerActive()) {
+    try {
+      await closeDockerGatewayWorker();
+    } catch (error) {
+      shutdownErrors.push(`Docker gateway worker epoch: ${describeShutdownError(error)}`);
+    }
+  }
+
+  if (wsManager) {
+    try {
+      await wsManager.close();
+    } catch (error) {
+      shutdownErrors.push(`WebSocket manager: ${describeShutdownError(error)}`);
+    } finally {
+      wsManager = null;
+      configureRuntimeEventEmitter(null);
+    }
+  }
+
+  try {
+    await disconnectDatabase();
+  } catch (error) {
+    shutdownErrors.push(`MongoDB connection: ${describeShutdownError(error)}`);
+  }
+
+  if (shutdownErrors.length > 0) {
+    throw new Error(`Backend shutdown did not complete cleanly: ${shutdownErrors.join('; ')}`);
+  }
+}
+
+function describeShutdownError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function shutdown(signal: string) {
