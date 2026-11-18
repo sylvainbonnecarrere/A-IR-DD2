@@ -1,6 +1,9 @@
 import { DockerAttemptReservation } from './DockerAttemptReservation';
-import type { DockerAttemptRecoveryPort } from './DockerGatewayAttemptRecovery';
+
+import type { DockerAttemptFencingProof, DockerAttemptFencingProofPort } from './DockerGatewayFencedAttemptProof';
+
 import { MongoWorkspaceLockService, type RunWorkspaceLockRelease } from './MongoWorkspaceLockService';
+
 import { UserToolRunService } from '../userToolRun.service';
 
 export interface ExpiredRunReconciliationSummary {
@@ -17,6 +20,7 @@ export interface ExpiredRunReconciliationStore {
         attemptId: string,
         containerState: 'absent' | 'created' | 'exited' | 'dead',
     ): Promise<boolean>;
+    markRunQuarantined(executionId: string, attemptId: string, message?: string): Promise<boolean>;
     markWorkerLostWorkspaceLockReleased(executionId: string, attemptId: string): Promise<boolean>;
 }
 
@@ -25,8 +29,9 @@ export interface RunWorkspaceLockRecovery {
 }
 
 export class MongoExpiredRunReconciler {
+
     constructor(
-        private readonly docker: DockerAttemptRecoveryPort,
+        private readonly fencing: DockerAttemptFencingProofPort,
         private readonly runs: ExpiredRunReconciliationStore = new UserToolRunService(),
         private readonly locks: RunWorkspaceLockRecovery = new MongoWorkspaceLockService(),
     ) {}
@@ -41,27 +46,33 @@ export class MongoExpiredRunReconciler {
 
         for (const run of await this.runs.listExpiredSupervisedRuns()) {
             const expectedContainerName = DockerAttemptReservation.containerName(run.attemptId);
-            let containerState: 'absent' | 'created' | 'exited' | 'dead' | null;
+            let proof: DockerAttemptFencingProof | null;
             try {
-                containerState = await this.docker.stopAndVerify(run.attemptId);
+                proof = await this.fencing.proveFencedAttempt(run.attemptId);
             } catch (error) {
-                containerState = null;
-                console.error('[MongoExpiredRunReconciler] Docker state inspection failed; run remains quarantined', {
+                proof = null;
+                console.error('[MongoExpiredRunReconciler] Gateway quiescence proof failed closed; run will be quarantined', {
                     executionId: run.executionId,
+                    attemptId: run.attemptId,
                     error: error instanceof Error ? error.message : String(error),
                 });
             }
-            if (!containerState) {
+            if (!proof || !proof.quiescent || !proof.containerState) {
+                // Fail-closed : preuve de quiescence absente -> `quarantined`, verrou workspace tenu.
+                if (!await this.runs.markRunQuarantined(run.executionId, run.attemptId)) {
+                    continue;
+                }
                 summary.unresolved += 1;
-                console.warn('[MongoExpiredRunReconciler] Docker effects are not proven quiescent; retaining run and workspace lock', {
+                console.warn('[MongoExpiredRunReconciler] Docker quiescence is not proven; run quarantined and workspace lock retained', {
                     executionId: run.executionId,
                     attemptId: run.attemptId,
                     containerName: expectedContainerName,
+                    operationId: proof?.operationId ?? null,
                 });
                 continue;
             }
 
-            if (!await this.runs.markExpiredRunWorkerLost(run.executionId, run.attemptId, containerState)) {
+            if (!await this.runs.markExpiredRunWorkerLost(run.executionId, run.attemptId, proof.containerState)) {
                 continue;
             }
             summary.reconciled += 1;

@@ -2,6 +2,7 @@ import type { RunLease } from './MongoRunLeaseService';
 import type { OrchestratedExecutionResult } from './execution.types';
 import type { DeferredDispatch, QuarantinedDispatch } from './MonitoredRunDispatch';
 import { isReconstructionRejectionCode } from '../../domain/execution/runReconstructionQuarantine';
+import { USER_TOOL_RUN_TERMINAL_STATUS_VALUES } from '../../domain/execution/userToolRun.contract';
 
 export interface QueuedLeaseSource {
     claimQueued(owner: string): Promise<RunLease | null>;
@@ -99,7 +100,7 @@ export class DurableRunWorker {
                     }
                     if (result.executionId !== lease.executionId
                         || !('status' in result) || !result.status
-                        || !['completed', 'failed', 'stopped', 'timed_out'].includes(result.status)) {
+                        || !(USER_TOOL_RUN_TERMINAL_STATUS_VALUES as readonly string[]).includes(result.status)) {
                         failure = 'unexpected_dispatch_result';
                         throw new Error('Dispatch did not return a terminal outcome for the claimed run');
                     }

@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { assertUserToolRunTransition } from '../domain/execution/userToolRun.contract';
+import { assertUserToolRunTransition, isUserToolRunTerminalStatus } from '../domain/execution/userToolRun.contract';
 import { decrypt, encrypt } from '../utils/encryption';
 import {
     IUserToolRun,
@@ -35,6 +35,7 @@ export interface CreateUserToolRunData {
     agentPrototypeId?: ObjectIdLike;
     agentInstanceId?: ObjectIdLike;
     retryOfExecutionId?: string;
+    recoveryAttemptCount?: number;
     requestFingerprint?: string;
     targetFingerprint?: string;
     privateContext?: Record<string, unknown>;
@@ -149,6 +150,11 @@ export class UserToolRunService {
         const queuedAt = data.queuedAt ?? new Date();
         const ownerUserId = toObjectId(data.ownerUserId, 'ownerUserId');
 
+        const recoveryAttemptCount = data.recoveryAttemptCount ?? 0;
+        if (!Number.isSafeInteger(recoveryAttemptCount) || recoveryAttemptCount < 0) {
+            throw new Error('recoveryAttemptCount must be a non-negative integer');
+        }
+
         const run = new UserToolRun({
             executionId: data.executionId.trim(),
             ownerUserId,
@@ -159,6 +165,7 @@ export class UserToolRunService {
             agentPrototypeId: toOptionalObjectId(data.agentPrototypeId),
             agentInstanceId: toOptionalObjectId(data.agentInstanceId),
             retryOfExecutionId: data.retryOfExecutionId ?? null,
+            recoveryAttemptCount,
             requestFingerprint: data.requestFingerprint ?? null,
             targetFingerprint: data.targetFingerprint ?? null,
             privateContextCiphertext: data.privateContext
@@ -416,7 +423,7 @@ export class UserToolRunService {
 
     async listWorkerLostLockCleanup(): Promise<WorkerLostLockCleanup[]> {
         const runs = await UserToolRun.find({
-            status: 'failed',
+            status: 'worker_lost',
             'error.code': 'WORKER_LOST',
             workflowId: { $type: 'objectId' },
             'supervisedAttempt.workerLossReconciliation.workspaceLockReleased': false,
@@ -457,12 +464,12 @@ export class UserToolRunService {
             },
             [{
                 $set: {
-                    status: 'failed',
+                    status: 'worker_lost',
                     error: {
                         code: 'WORKER_LOST',
                         subsystem: 'runner',
                         failureKind: 'worker_lost',
-                        message: 'Le worker a été perdu ; le conteneur Docker supervisé a été réconcilié comme arrêté.',
+                        message: 'Le worker a été perdu ; le conteneur Docker supervisé a été réconcilié comme arrêté après preuve de quiescence.',
                         retryable: true,
                     },
                     'timing.finishedAt': '$$NOW',
@@ -476,8 +483,7 @@ export class UserToolRunService {
                     lease: null,
                     workspaceRetentionProtected: false,
                     'supervisedAttempt.dockerJournal.admission': 'closed',
-                    'supervisedAttempt.dockerJournal.pending': null,
-                    'supervisedAttempt.dockerJournal.hasUnknownOutcome': false,
+                    // Le journal Docker du run n'est jamais effacé (pending/hasUnknownOutcome conservés).
                     'supervisedAttempt.workerLossReconciliation': {
                         containerName: `airdd2-j7-attempt-${attemptId}`,
                         containerState: { $literal: containerState },
@@ -489,7 +495,53 @@ export class UserToolRunService {
             { new: true, writeConcern: DURABLE_RUN_WRITE_CONCERN },
         );
         if (!run) return false;
-        this.publishRuntimeStateChange(run, 'running', 'failed');
+        this.publishRuntimeStateChange(run, 'running', 'worker_lost');
+        return true;
+    }
+
+    async markRunQuarantined(
+        executionId: string,
+        attemptId: string,
+        message: string = 'La preuve de quiescence Docker est absente ; le run est placé en quarantaine et le verrou workspace est tenu.',
+    ): Promise<boolean> {
+        if (!executionId.trim() || !attemptId.trim()) {
+            throw new Error('Quarantine reconciliation identity is invalid');
+        }
+        const run = await UserToolRun.findOneAndUpdate(
+            {
+                executionId,
+                status: 'running',
+                'supervisedAttempt.attemptId': attemptId,
+                $expr: { $lte: ['$lease.expiresAt', '$$NOW'] },
+            },
+            [{
+                $set: {
+                    status: 'quarantined',
+                    error: {
+                        code: 'QUARANTINED',
+                        subsystem: 'runner',
+                        failureKind: 'quiescence_unproven',
+                        message,
+                        retryable: true,
+                    },
+                    'timing.finishedAt': '$$NOW',
+                    'timing.durationMs': {
+                        $cond: [
+                            { $eq: [{ $ifNull: ['$timing.startedAt', null] }, null] },
+                            null,
+                            { $subtract: ['$$NOW', '$timing.startedAt'] },
+                        ],
+                    },
+                    lease: null,
+                    // workspaceRetentionProtected est conservé : le verrou workspace reste tenu.
+                    'supervisedAttempt.dockerJournal.admission': 'closed',
+                    // Le journal Docker du run n'est jamais effacé (pending/hasUnknownOutcome conservés).
+                },
+            }],
+            { new: true, writeConcern: DURABLE_RUN_WRITE_CONCERN },
+        );
+        if (!run) return false;
+        this.publishRuntimeStateChange(run, 'running', 'quarantined');
         return true;
     }
 
@@ -497,7 +549,7 @@ export class UserToolRunService {
         const result = await UserToolRun.updateOne(
             {
                 executionId,
-                status: 'failed',
+                status: 'worker_lost',
                 'error.code': 'WORKER_LOST',
                 'supervisedAttempt.attemptId': attemptId,
                 'supervisedAttempt.workerLossReconciliation.workspaceLockReleased': false,
@@ -692,7 +744,7 @@ export class UserToolRunService {
             agentId: run.agentInstanceId?.toString() ?? undefined,
         };
 
-        const progress = nextStatus === 'running' ? 50 : nextStatus === 'completed' ? 100 : nextStatus === 'failed' || nextStatus === 'stopped' || nextStatus === 'timed_out' ? 100 : undefined;
+        const progress = nextStatus === 'running' ? 50 : isUserToolRunTerminalStatus(nextStatus) ? 100 : undefined;
 
         this.runtimeEventPublisher.publishRunStatusChange({
             workspaceId,

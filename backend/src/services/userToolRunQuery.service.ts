@@ -263,7 +263,9 @@ export class UserToolRunQueryService {
             completed: 2,
             failed: 3,
             timed_out: 4,
-            stopped: 5
+            stopped: 5,
+            worker_lost: 6,
+            quarantined: 7
         };
 
         return [...runs].sort((left, right) => {
