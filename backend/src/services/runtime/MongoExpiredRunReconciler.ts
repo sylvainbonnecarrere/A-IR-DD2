@@ -8,6 +8,8 @@ import { UserToolRunService } from '../userToolRun.service';
 
 import type { AutoRecoveryPort, QuarantinedRunEntry } from './agentAutoRecovery.service';
 
+import type { RunVisibilityPort } from './runVisibility.service';
+
 export interface ExpiredRunReconciliationSummary {
     reconciled: number;
     unresolved: number;
@@ -39,6 +41,7 @@ export class MongoExpiredRunReconciler {
         private readonly runs: ExpiredRunReconciliationStore = new UserToolRunService(),
         private readonly locks: RunWorkspaceLockRecovery = new MongoWorkspaceLockService(),
         private readonly autoRecovery?: AutoRecoveryPort,
+        private readonly visibility?: RunVisibilityPort, // ⭐ J7-09: journal agent + événement `run:quarantined`
     ) {}
 
     async reconcile(): Promise<ExpiredRunReconciliationSummary> {
@@ -78,6 +81,19 @@ export class MongoExpiredRunReconciler {
                     containerName: expectedContainerName,
                     operationId: proof?.operationId ?? null,
                 });
+                // ⭐ J7-09: visibilité — journal agent + événement `run:quarantined` (verrou tenu).
+                if (run.workflowId) {
+                    await this.visibility?.record({
+                        workspaceId: run.workflowId,
+                        runId: run.executionId,
+                        agentInstanceId: run.agentInstanceId,
+                        event: 'run_quarantined',
+                        cause: 'QUARANTINED',
+                        lockHeld: true,
+                        fencedOperationId: proof?.operationId ?? null,
+                        message: 'Preuve de quiescence absente ; run placé en quarantaine, verrou workspace tenu',
+                    });
+                }
                 await this.tryAutoRecover(run, summary);
                 continue;
             }

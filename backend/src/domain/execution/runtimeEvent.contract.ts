@@ -7,6 +7,10 @@ const RUNTIME_EVENT_TYPE_VALUES = [
   'run:completed',
   'run:failed',
   'run:stopped',
+  // ⭐ J7-09: visibilité quarantaine/fencing (extension additive, version 1 conservée)
+  'run:quarantined',
+  'run:fenced',
+  'run:recovery_relaunched',
   'task:queued',
   'task:started',
   'task:progressed',
@@ -31,6 +35,12 @@ const RUNTIME_EVENT_ALLOWED_PAYLOAD_KEYS = new Set([
   'workflowId',
   'runId',
   'taskId',
+  // ⭐ J7-09: visibilité quarantaine/fencing (clés non sensibles uniquement)
+  'lockHeld',
+  'reason',
+  'operationId',
+  'recoveryAttemptCount',
+  'newRunId',
 ]);
 const RUNTIME_EVENT_SENSITIVE_KEYS = new Set([
   'secret',

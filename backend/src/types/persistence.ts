@@ -324,11 +324,13 @@ export interface TaskJournalPayload extends JournalCorrelationIds {
  * Payload pour les entrées de type 'system'
  */
 export interface SystemJournalPayload extends JournalCorrelationIds {
-    event: 'instance_created' | 'instance_started' | 'instance_paused' | 
-           'instance_resumed' | 'instance_stopped' | 'config_changed' | 
-           'persistence_config_updated' | 'status_changed' | 
+    event: 'instance_created' | 'instance_started' | 'instance_paused' |
+           'instance_resumed' | 'instance_stopped' | 'config_changed' |
+           'persistence_config_updated' | 'status_changed' |
            'interaction_started' | 'interaction_ended' |
-           'media_deletion_policy_applied';
+           'media_deletion_policy_applied' |
+           // ⭐ J7-09: visibilité quarantaine/fencing/reprise
+           'run_quarantined' | 'run_fenced' | 'run_recovery_relaunched';
     details?: Record<string, unknown>;
     triggeredBy?: string;           // userId ou 'system'
 }
