@@ -1,9 +1,15 @@
 import mongoose from 'mongoose';
+
 import { DockerGatewayDaemon } from './DockerGatewayDaemon';
+
 import { DockerGatewayServer } from './DockerGatewayServer';
+
 import type { DockerGatewayCommandRunner } from './DockerGatewayProtocol';
+
 import { MongoDockerGatewayAdmission } from './MongoDockerGatewayAdmission';
+
 import { DockerGatewayOperationReconciler } from './DockerGatewayOperationReconciler';
+
 import { SpawnDockerProcessRunner, type DockerProcessRunner } from './DockerSandboxRunner';
 
 class DockerCliGatewayRunner implements DockerGatewayCommandRunner {
@@ -38,6 +44,39 @@ function assertSupportedNodeRuntime(): void {
     }
 }
 
+const IMAGE_ID_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
+/**
+ * Résout l'ID immuable (sha256) d'une image locale disponible pour la réservation de
+ * nom inerte du fencing. Sans image résolue, la réservation échoue fail-closed
+ * (nameReserved=false, quiescence non prouvable).
+ */
+async function resolveInertImageId(commandRunner: DockerGatewayCommandRunner): Promise<string | undefined> {
+    const candidates = [
+        process.env.RUNTIME_NODE_IMAGE,
+        'airdd2-runtime-node:24.19.0-ubuntu-noble',
+        process.env.RUNTIME_PYTHON_IMAGE,
+        'airdd2-runtime-python:3.12-ubuntu-noble',
+        process.env.RUNTIME_PYTHON_PROVISIONING_IMAGE,
+        'airdd2-python-provisioning:3.12-ubuntu-noble',
+    ].filter((value, index, all): value is string => Boolean(value) && all.indexOf(value) === index);
+
+    for (const image of candidates) {
+        try {
+            const result = await commandRunner.run(
+                ['image', 'inspect', image, '--format', '{{json .Id}}'],
+                { timeoutMs: 5_000 },
+            );
+            if (result.timedOut || result.errorMessage || result.exitCode !== 0) continue;
+            const id = JSON.parse(result.stdout) as unknown;
+            if (typeof id === 'string' && IMAGE_ID_PATTERN.test(id)) return id;
+        } catch {
+            // Image indisponible localement : on essaie la suivante.
+        }
+    }
+    return undefined;
+}
+
 async function runDockerGateway(): Promise<void> {
     assertSupportedNodeRuntime();
     const mongoUri = requiredEnvironment('MONGODB_URI');
@@ -56,11 +95,20 @@ async function runDockerGateway(): Promise<void> {
     const processRunner: DockerProcessRunner = new SpawnDockerProcessRunner();
 
     const commandRunner = new DockerCliGatewayRunner(processRunner, dockerBinary);
-    const server = new DockerGatewayServer({ socketPath, admission, commandRunner });
+
+    const inertImage = await resolveInertImageId(commandRunner);
+    if (!inertImage) {
+        console.warn('Docker gateway: no local runtime image resolved; name reservations will fail closed');
+    }
+
+    const reconciler = new DockerGatewayOperationReconciler(commandRunner, 'restart', { inertImage });
+
+    const server = new DockerGatewayServer({ socketPath, admission, commandRunner, inertImage });
     const daemon = new DockerGatewayDaemon({
         admission,
         server,
-        quiescenceVerifier: new DockerGatewayOperationReconciler(commandRunner, 'restart'),
+        quiescenceVerifier: reconciler,
+        fencer: reconciler,
     });
 
     let stopping = false;
@@ -68,7 +116,9 @@ async function runDockerGateway(): Promise<void> {
         if (stopping) return;
         stopping = true;
         console.info(`Docker gateway received ${signal}; closing admission`);
+
         let shutdownError: unknown;
+
         try {
             await daemon.stop();
         } catch (error) {

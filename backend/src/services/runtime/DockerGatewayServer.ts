@@ -6,23 +6,40 @@ import path from 'path';
 import type {
     DockerGatewayAdmissionPort,
     DockerGatewayEpoch,
+    DockerGatewayFenceKind,
+    DockerGatewayFencedOperation,
     DockerGatewayOperation,
     DockerGatewayOperationEffect,
 } from './DockerGatewayAdmission';
 import type { DockerGatewayServerPort } from './DockerGatewayDaemon';
-import type { DockerGatewayCommandRequest, DockerGatewayCommandRunner } from './DockerGatewayProtocol';
+import {
+    DOCKER_GATEWAY_OP_LABEL,
+    type DockerGatewayCommandRequest,
+    type DockerGatewayCommandRunner,
+} from './DockerGatewayProtocol';
 import { DockerGatewayOperationReconciler } from './DockerGatewayOperationReconciler';
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
 const MAX_TIMEOUT_MS = 120_000;
 const MIN_TIMEOUT_MS = 100;
 const CONTAINER_NAME_PATTERN = /^airdd2-[A-Za-z0-9_.-]{1,63}$/;
+const OPERATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const OPERATION_CONTROL_PATTERN = /^\/v1\/operations\/([0-9a-f-]{36})\/(fence|verify)$/;
+
 const RUNTIME_IMAGE_PATTERN = /^airdd2-(?:runtime-node|runtime-python|python-provisioning):[A-Za-z0-9._-]+$/;
+
+const FENCE_KINDS: readonly DockerGatewayFenceKind[] = [
+    'auto_epoch_rotation',
+    'user_manual_reset',
+    'agent_auto_recovery',
+    'admin_maintenance',
+];
 
 export interface DockerGatewayServerOptions {
     socketPath: string;
     admission: DockerGatewayAdmissionPort;
     commandRunner: DockerGatewayCommandRunner;
+    inertImage?: string;
 }
 
 export class DockerGatewayServer implements DockerGatewayServerPort {
@@ -31,7 +48,9 @@ export class DockerGatewayServer implements DockerGatewayServerPort {
     private readonly operationReconciler: DockerGatewayOperationReconciler;
 
     constructor(private readonly options: DockerGatewayServerOptions) {
-        this.operationReconciler = new DockerGatewayOperationReconciler(options.commandRunner);
+        this.operationReconciler = new DockerGatewayOperationReconciler(options.commandRunner, 'in-flight', {
+            inertImage: options.inertImage,
+        });
     }
 
     async listen(address: string | { port: number; host: string } = this.options.socketPath): Promise<void> {
@@ -102,6 +121,13 @@ export class DockerGatewayServer implements DockerGatewayServerPort {
             await this.handleWorkerClosure(request, response);
             return;
         }
+        const operationControl = request.method === 'POST'
+            ? OPERATION_CONTROL_PATTERN.exec(request.url ?? '')
+            : null;
+        if (operationControl) {
+            await this.handleOperationControl(request, response, operationControl[1], operationControl[2] as 'fence' | 'verify');
+            return;
+        }
         if (request.method !== 'POST' || request.url !== '/v1/docker/command') {
             this.send(response, 404, { error: 'Docker gateway route not found' });
             return;
@@ -137,8 +163,25 @@ export class DockerGatewayServer implements DockerGatewayServerPort {
             return;
         }
 
+        if (command === 'run') {
+            // Label d'opération injecté par le serveur après admission : tout conteneur
+            // créé porte le label, même si la réponse HTTP est perdue en transit.
+            parsed.args = ['run', `--label=${DOCKER_GATEWAY_OP_LABEL}=${operation.id}`, ...parsed.args.slice(1)];
+            if (!this.isAllowedCommand(parsed.args)) {
+                // Fail-closed : aucune exécution si les arguments injectés sont invalides.
+                try {
+                    await this.options.admission.reconcileInFlight(operation, this.operationReconciler);
+                } catch {
+                    // L'opération reste en état unknown, journalisée.
+                }
+                this.send(response, 403, { error: 'Docker gateway command is not allowed' });
+                return;
+            }
+        }
+
         const controller = new AbortController();
         let responseClosed = false;
+
         response.once('close', () => {
             if (!response.writableEnded) {
                 responseClosed = true;
@@ -248,6 +291,9 @@ export class DockerGatewayServer implements DockerGatewayServerPort {
         }
         try {
             const epoch = await this.options.admission.fenceAndActivateWorker(body.workerId);
+            // Fencing best-effort (journalisé) des opérations fencées sans réservation :
+            // l'admission est déjà rouverte, aucune erreur ici ne doit la refermer.
+            await this.fenceUnreservedOperations();
             this.send(response, 200, epoch);
         } catch (error) {
             this.send(response, 409, {
@@ -276,6 +322,114 @@ export class DockerGatewayServer implements DockerGatewayServerPort {
             this.send(response, 409, {
                 error: error instanceof Error ? error.message : 'Docker gateway worker closure refused',
             });
+        }
+    }
+
+    private async handleOperationControl(
+        request: IncomingMessage,
+        response: ServerResponse,
+        operationId: string,
+        action: 'fence' | 'verify',
+    ): Promise<void> {
+        if (!OPERATION_ID_PATTERN.test(operationId)) {
+            this.send(response, 400, { error: 'Docker gateway operation id is invalid' });
+            return;
+        }
+        let body: unknown;
+        try {
+            body = await this.readBody(request);
+        } catch (error) {
+            this.send(response, 400, { error: error instanceof Error ? error.message : 'Invalid control request body' });
+            return;
+        }
+        if (typeof body !== 'object' || body === null) {
+            this.send(response, 400, { error: 'Docker gateway control request body must be a JSON object' });
+            return;
+        }
+        let fenceKind: DockerGatewayFenceKind | undefined;
+        if (action === 'fence' && (body as Record<string, unknown>).fenceKind !== undefined) {
+            const requested = (body as Record<string, unknown>).fenceKind;
+            if (typeof requested !== 'string' || !FENCE_KINDS.includes(requested as DockerGatewayFenceKind)) {
+                this.send(response, 400, { error: 'Docker gateway fence kind is invalid' });
+                return;
+            }
+            fenceKind = requested as DockerGatewayFenceKind;
+        }
+
+        let fenced = await this.options.admission.getFencedOperation(operationId);
+        let operation: DockerGatewayOperation | undefined;
+        if (fenced) {
+            operation = { id: fenced.id, epoch: fenced.epoch, ...(fenced.effect ? { effect: fenced.effect } : {}) };
+        } else {
+            const pending = (await this.options.admission.getPendingOperations())
+                .find((candidate) => candidate.id === operationId);
+            if (!pending) {
+                this.send(response, 404, { error: 'Docker gateway operation is unknown' });
+                return;
+            }
+            if (action === 'verify') {
+                // Fail-closed : la vérification de quiescence exige un fencing préalable.
+                this.send(response, 409, { error: 'Docker gateway operation is not fenced; fence it first' });
+                return;
+            }
+            try {
+                fenced = await this.options.admission.fencePendingOperation(operationId, fenceKind ?? 'user_manual_reset');
+            } catch (error) {
+                this.send(response, 409, {
+                    error: error instanceof Error ? error.message : 'Docker gateway operation could not be fenced',
+                });
+                return;
+            }
+            operation = pending;
+        }
+
+        try {
+            if (action === 'fence') {
+                const result = await this.operationReconciler.fence(operation, fenced);
+                await this.options.admission.markNameReservation(operationId, result.nameReserved);
+                if (result.quiescent) {
+                    await this.options.admission.markQuiescenceProven(operationId);
+                }
+                this.send(response, 200, result);
+                return;
+            }
+            const quiescent = await this.operationReconciler.verifyFenced(operation, fenced);
+            if (quiescent) {
+                await this.options.admission.markQuiescenceProven(operationId);
+            }
+            this.send(response, 200, { quiescent });
+        } catch (error) {
+            this.send(response, 503, {
+                error: `Docker gateway operation control failed closed: ${error instanceof Error ? error.message : 'unknown error'}`,
+                operationId,
+                outcome: 'unknown',
+            });
+        }
+    }
+
+    private async fenceUnreservedOperations(): Promise<void> {
+        let fencedOperations: DockerGatewayFencedOperation[];
+        try {
+            fencedOperations = await this.options.admission.getFencedOperations();
+        } catch {
+            return;
+        }
+        for (const fenced of fencedOperations) {
+            if (fenced.quiescenceProven || fenced.nameReservation?.reserved) continue;
+            try {
+                const operation: DockerGatewayOperation = {
+                    id: fenced.id,
+                    epoch: fenced.epoch,
+                    ...(fenced.effect ? { effect: fenced.effect } : {}),
+                };
+                const result = await this.operationReconciler.fence(operation, fenced);
+                await this.options.admission.markNameReservation(fenced.id, result.nameReserved);
+                if (result.quiescent) {
+                    await this.options.admission.markQuiescenceProven(fenced.id);
+                }
+            } catch {
+                // Best-effort : l'opération reste fencée, journalisée, sans réservation prouvée.
+            }
         }
     }
 
@@ -368,12 +522,22 @@ export class DockerGatewayServer implements DockerGatewayServerPort {
         const name = args.find((argument) => argument.startsWith('--name='))
             ?.slice('--name='.length);
         if (!name || !CONTAINER_NAME_PATTERN.test(name)) return undefined;
-        const labelIndex = args.findIndex((argument) => argument === '--label');
-        const labelValue = labelIndex >= 0 ? args[labelIndex + 1] : args.find((argument) => argument.startsWith('--label='))
-            ?.slice('--label='.length);
-        const attemptMatch = labelValue?.match(/^airdd2\.execution\.attempt=([0-9a-f-]{36})$/);
-        const attemptId = attemptMatch?.[1];
+
+        const labels: string[] = [];
+        for (let index = 0; index < args.length; index += 1) {
+            const argument = args[index];
+            if (argument === '--label' && index + 1 < args.length) {
+                labels.push(args[index + 1]);
+            } else if (argument.startsWith('--label=')) {
+                labels.push(argument.slice('--label='.length));
+            }
+        }
+        const attemptId = labels
+            .map((label) => /^airdd2\.execution\.attempt=([0-9a-f-]{36})$/.exec(label)?.[1])
+            .find((candidate): candidate is string => Boolean(candidate));
+
         if (attemptId && name !== `airdd2-j7-attempt-${attemptId}`) return undefined;
+
         return { command: 'run', containerName: name, ...(attemptId ? { attemptId } : {}) };
     }
 
@@ -467,7 +631,7 @@ export class DockerGatewayServer implements DockerGatewayServerPort {
                 if (option === '--workdir' && !['/sandbox/tmp', '/sandbox/workspace', '/persistent-workspace/source', '/opt/airdd2/backend-python'].includes(value)) return false;
                 if ((option === '--env' || option === '-e') && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(value)) return false;
                 if (option === '--mount' && !this.isAllowedMount(value)) return false;
-                if (option === '--label' && !/^airdd2\.execution\.attempt=[0-9a-f-]{36}$/.test(value)) return false;
+                if (option === '--label' && !/^airdd2\.(?:execution\.attempt|gateway\.op)=[0-9a-f-]{36}$/.test(value)) return false;
                 if (option === '--entrypoint' && value !== 'python3') return false;
                 values.set(option, value);
                 continue;
@@ -520,10 +684,13 @@ export class DockerGatewayServer implements DockerGatewayServerPort {
                 .map((root) => root.trim())
                 .filter(Boolean),
         ].map((root) => path.posix.resolve(root));
+
         const resolvedSource = path.posix.resolve(source);
+
         const sourceAllowed = roots.some((root) =>
             resolvedSource === root || resolvedSource.startsWith(`${root}/`),
         );
+
         const destinationMatchesSource = destination === '/opt/airdd2/backend-python'
             ? resolvedSource === '/opt/airdd2/backend/python'
             : resolvedSource === '/opt/airdd2/backend/storage/workspaces'

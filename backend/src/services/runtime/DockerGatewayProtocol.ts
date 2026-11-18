@@ -1,5 +1,8 @@
 import type { DockerGatewayEpoch } from './DockerGatewayAdmission';
 
+export const DOCKER_GATEWAY_OP_LABEL = 'airdd2.gateway.op';
+export const DOCKER_GATEWAY_FENCE_LABEL = 'airdd2.fence.op';
+
 export interface DockerGatewayCommandRequest {
     epoch: DockerGatewayEpoch;
     args: string[];

@@ -1,14 +1,19 @@
 import { createHash, randomUUID } from 'crypto';
+
 import mongoose from 'mongoose';
+
 import {
     type DockerGatewayAdmissionPort,
     type DockerGatewayEpoch,
+    type DockerGatewayFenceKind,
+    type DockerGatewayFencedOperation,
     type DockerGatewayOperation,
     type DockerGatewayOperationEffect,
     type DockerGatewayQuiescenceVerifier,
 } from './DockerGatewayAdmission';
 
 const GATEWAY_STATE_ID = 'docker-gateway';
+
 const DURABLE_WRITE = { w: 'majority' as const, wtimeoutMS: 10_000 };
 
 interface GatewayWorker {
@@ -28,9 +33,38 @@ interface GatewayState {
     activeWorker: GatewayWorker | null;
     admissionClosed: boolean;
     pendingOperation: GatewayOperation | null;
+    fencedOperations: DockerGatewayFencedOperation[];
+}
+
+function fencedEntryFromPending(fenceKind: DockerGatewayFenceKind, fencedAt: Date): Record<string, unknown> {
+    return {
+        $mergeObjects: [
+            { id: '$pendingOperation.id', epoch: '$pendingOperation.epoch' },
+            {
+                $cond: [
+                    { $ifNull: ['$pendingOperation.effect', null] },
+                    { effect: '$pendingOperation.effect' },
+                    {},
+                ],
+            },
+            {
+                fencedAt: { $literal: fencedAt },
+                fenceKind: { $literal: fenceKind },
+                nameReservation: {
+                    $cond: [
+                        { $ifNull: ['$pendingOperation.effect', null] },
+                        { containerName: '$pendingOperation.effect.containerName', reserved: false },
+                        null,
+                    ],
+                },
+                quiescenceProven: false,
+            },
+        ],
+    };
 }
 
 export class MongoDockerGatewayAdmission implements DockerGatewayAdmissionPort {
+
     constructor(private readonly connection: mongoose.Connection = mongoose.connection) {}
 
     async recoverAfterRestart(): Promise<DockerGatewayOperation[]> {
@@ -57,19 +91,38 @@ export class MongoDockerGatewayAdmission implements DockerGatewayAdmissionPort {
 
     async activateWorker(workerId: string): Promise<DockerGatewayEpoch> {
         if (!workerId.trim()) throw new Error('Docker gateway worker identity is required');
+
         await this.ensureState();
+
         const token = randomUUID();
         const tokenDigest = this.digest(token);
+        const fencedAt = new Date();
+
+        // Fencing automatique : une opération en attente de l'ancienne epoch est
+        // déplacée dans fencedOperations (auto_epoch_rotation, sans preuve de
+        // quiescence) et l'admission rouvre immédiatement.
         const result = await this.collection().updateOne(
             {
                 _id: GATEWAY_STATE_ID,
                 admissionClosed: true,
-                pendingOperation: null,
             },
             [
                 { $set: { epoch: { $add: ['$epoch', 1] } } },
                 {
                     $set: {
+                        fencedOperations: {
+                            $concatArrays: [
+                                { $ifNull: ['$fencedOperations', []] },
+                                {
+                                    $cond: [
+                                        { $ifNull: ['$pendingOperation', null] },
+                                        [fencedEntryFromPending('auto_epoch_rotation', fencedAt)],
+                                        [],
+                                    ],
+                                },
+                            ],
+                        },
+                        pendingOperation: null,
                         activeWorker: {
                             workerId: { $literal: workerId },
                             epoch: '$epoch',
@@ -81,12 +134,9 @@ export class MongoDockerGatewayAdmission implements DockerGatewayAdmissionPort {
             ],
             { writeConcern: DURABLE_WRITE },
         );
+
         if (result.modifiedCount !== 1) {
-            const state = await this.readState();
-            if (state.pendingOperation?.state === 'in_flight') {
-                throw new Error('Docker gateway worker activation blocked: a Docker operation is still in flight');
-            }
-            throw new Error('Docker gateway cannot activate a worker while admission is open or an operation requires reconciliation');
+            throw new Error('Docker gateway cannot activate a worker while admission is open');
         }
 
         const state = await this.readState();
@@ -99,17 +149,21 @@ export class MongoDockerGatewayAdmission implements DockerGatewayAdmissionPort {
 
     async fenceAndActivateWorker(workerId: string): Promise<DockerGatewayEpoch> {
         if (!workerId.trim()) throw new Error('Docker gateway worker identity is required');
+
         await this.ensureState();
+
         await this.collection().updateOne(
             { _id: GATEWAY_STATE_ID, admissionClosed: false },
             { $set: { admissionClosed: true, activeWorker: null } },
             { writeConcern: DURABLE_WRITE },
         );
+
         return this.activateWorker(workerId);
     }
 
     async admit(epoch: DockerGatewayEpoch, effect?: DockerGatewayOperationEffect): Promise<DockerGatewayOperation> {
         this.validateEpoch(epoch);
+
         const operation = {
             id: randomUUID(),
             epoch: epoch.epoch,
@@ -128,9 +182,11 @@ export class MongoDockerGatewayAdmission implements DockerGatewayAdmissionPort {
             { $set: { pendingOperation: operation } },
             { writeConcern: DURABLE_WRITE },
         );
+
         if (result.modifiedCount !== 1) {
             throw new Error('Docker gateway rejected a stale worker epoch or an unresolved operation is pending');
         }
+
         return {
             id: operation.id,
             epoch: operation.epoch,
@@ -199,6 +255,7 @@ export class MongoDockerGatewayAdmission implements DockerGatewayAdmissionPort {
             { $set: { pendingOperation: quiescent ? null : { ...pending, state: 'unknown' } } },
             { writeConcern: DURABLE_WRITE },
         );
+
         if (settled.modifiedCount !== 1) {
             throw new Error('Docker gateway reconciliation state changed unexpectedly');
         }
@@ -207,6 +264,7 @@ export class MongoDockerGatewayAdmission implements DockerGatewayAdmissionPort {
 
     async closeWorker(epoch: DockerGatewayEpoch): Promise<void> {
         this.validateEpoch(epoch);
+
         const result = await this.collection().updateOne(
             {
                 _id: GATEWAY_STATE_ID,
@@ -219,6 +277,7 @@ export class MongoDockerGatewayAdmission implements DockerGatewayAdmissionPort {
             { writeConcern: DURABLE_WRITE },
         );
         if (result.modifiedCount !== 1) throw new Error('Docker gateway worker epoch is no longer active');
+
     }
 
     async closeAdmission(): Promise<void> {
@@ -293,6 +352,77 @@ export class MongoDockerGatewayAdmission implements DockerGatewayAdmissionPort {
             : [];
     }
 
+    async getFencedOperations(): Promise<DockerGatewayFencedOperation[]> {
+        const state = await this.readState();
+        return (state.fencedOperations ?? []).map((fenced) => ({ ...fenced }));
+    }
+
+    async getFencedOperation(operationId: string): Promise<DockerGatewayFencedOperation | null> {
+        const fenced = (await this.getFencedOperations()).find((entry) => entry.id === operationId);
+        return fenced ?? null;
+    }
+
+    async fencePendingOperation(operationId: string, fenceKind: DockerGatewayFenceKind): Promise<DockerGatewayFencedOperation> {
+        const state = await this.readState();
+        const pending = state.pendingOperation;
+        if (!pending || pending.id !== operationId
+            || (pending.state !== 'unknown' && pending.state !== 'in_flight')) {
+            throw new Error('Docker gateway operation is not pending');
+        }
+        if (pending.state === 'in_flight' && !state.admissionClosed) {
+            throw new Error('Docker gateway cannot fence an in-flight operation of the active epoch');
+        }
+
+        const result = await this.collection().updateOne(
+            {
+                _id: GATEWAY_STATE_ID,
+                'pendingOperation.id': operationId,
+                'pendingOperation.state': pending.state,
+            },
+            [{
+                $set: {
+                    fencedOperations: {
+                        $concatArrays: [
+                            { $ifNull: ['$fencedOperations', []] },
+                            [fencedEntryFromPending(fenceKind, new Date())],
+                        ],
+                    },
+                    pendingOperation: null,
+                },
+            }],
+            { writeConcern: DURABLE_WRITE },
+        );
+        if (result.modifiedCount !== 1) {
+            throw new Error('Docker gateway operation state changed unexpectedly while fencing');
+        }
+        const fenced = await this.getFencedOperation(operationId);
+        if (!fenced) throw new Error('Docker gateway fenced operation could not be read back');
+        return fenced;
+    }
+
+    async markNameReservation(operationId: string, reserved: boolean): Promise<void> {
+        const fenced = await this.getFencedOperation(operationId);
+        if (!fenced) throw new Error('Docker gateway operation is not fenced');
+        const containerName = fenced.nameReservation?.containerName ?? fenced.effect?.containerName;
+        if (!containerName) throw new Error('Docker gateway fenced operation has no name to reserve');
+
+        const result = await this.collection().updateOne(
+            { _id: GATEWAY_STATE_ID, 'fencedOperations.id': operationId },
+            { $set: { 'fencedOperations.$.nameReservation': { containerName, reserved } } },
+            { writeConcern: DURABLE_WRITE },
+        );
+        if (result.matchedCount !== 1) throw new Error('Docker gateway operation is not fenced');
+    }
+
+    async markQuiescenceProven(operationId: string): Promise<void> {
+        const result = await this.collection().updateOne(
+            { _id: GATEWAY_STATE_ID, 'fencedOperations.id': operationId },
+            { $set: { 'fencedOperations.$.quiescenceProven': true } },
+            { writeConcern: DURABLE_WRITE },
+        );
+        if (result.matchedCount !== 1) throw new Error('Docker gateway operation is not fenced');
+    }
+
     private async restoreUnknown(operationId: string): Promise<void> {
         await this.collection().updateOne(
             {
@@ -326,6 +456,7 @@ export class MongoDockerGatewayAdmission implements DockerGatewayAdmissionPort {
                     activeWorker: null,
                     admissionClosed: true,
                     pendingOperation: null,
+                    fencedOperations: [],
                 },
             },
             { upsert: true, writeConcern: DURABLE_WRITE },

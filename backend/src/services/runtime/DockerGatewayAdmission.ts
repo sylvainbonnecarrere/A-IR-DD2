@@ -18,8 +18,41 @@ export interface DockerGatewayOperationEffect {
     attemptId?: string;
 }
 
+export type DockerGatewayFenceKind =
+    | 'auto_epoch_rotation'
+    | 'user_manual_reset'
+    | 'agent_auto_recovery'
+    | 'admin_maintenance';
+
+export interface DockerGatewayNameReservation {
+    containerName: string;
+    reserved: boolean;
+}
+
+export interface DockerGatewayFencedOperation {
+    id: string;
+    epoch: number;
+    effect?: DockerGatewayOperationEffect;
+    fencedAt: Date;
+    fenceKind: DockerGatewayFenceKind;
+    nameReservation: DockerGatewayNameReservation | null;
+    quiescenceProven: boolean;
+}
+
+export interface DockerGatewayFenceResult {
+    fenced: boolean;
+    nameReserved: boolean;
+    quiescent: boolean;
+    observed: string[];
+}
+
 export interface DockerGatewayQuiescenceVerifier {
     verify(operation: DockerGatewayOperation): Promise<boolean>;
+}
+
+export interface DockerGatewayOperationFencer {
+    fence(operation: DockerGatewayOperation, fenced: DockerGatewayFencedOperation): Promise<DockerGatewayFenceResult>;
+    verifyFenced(operation: DockerGatewayOperation, fenced: DockerGatewayFencedOperation): Promise<boolean>;
 }
 
 export interface DockerGatewayAdmissionPort {
@@ -32,6 +65,11 @@ export interface DockerGatewayAdmissionPort {
     closeAdmission(): void | Promise<void>;
     reconcileUnknown(operationId: string, verifier: DockerGatewayQuiescenceVerifier): Promise<boolean>;
     getPendingOperations(): DockerGatewayOperation[] | Promise<DockerGatewayOperation[]>;
+    getFencedOperations(): DockerGatewayFencedOperation[] | Promise<DockerGatewayFencedOperation[]>;
+    getFencedOperation(operationId: string): DockerGatewayFencedOperation | null | Promise<DockerGatewayFencedOperation | null>;
+    fencePendingOperation(operationId: string, fenceKind: DockerGatewayFenceKind): Promise<DockerGatewayFencedOperation>;
+    markNameReservation(operationId: string, reserved: boolean): void | Promise<void>;
+    markQuiescenceProven(operationId: string): void | Promise<void>;
 }
 
 type OperationState = 'in_flight' | 'unknown' | 'reconciling';
@@ -40,11 +78,26 @@ interface PendingOperation extends DockerGatewayOperation {
     state: OperationState;
 }
 
+function toFencedOperation(pending: PendingOperation, fenceKind: DockerGatewayFenceKind): DockerGatewayFencedOperation {
+    return {
+        id: pending.id,
+        epoch: pending.epoch,
+        ...(pending.effect ? { effect: pending.effect } : {}),
+        fencedAt: new Date(),
+        fenceKind,
+        nameReservation: pending.effect
+            ? { containerName: pending.effect.containerName, reserved: false }
+            : null,
+        quiescenceProven: false,
+    };
+}
+
 export class DockerGatewayAdmission implements DockerGatewayAdmissionPort {
     private epoch = 0;
     private activeEpoch: DockerGatewayEpoch | undefined;
     private activeEpochClosed = false;
     private readonly pendingOperations = new Map<string, PendingOperation>();
+    private readonly fencedOperations = new Map<string, DockerGatewayFencedOperation>();
 
     activateWorker(workerId: string): DockerGatewayEpoch {
         if (!workerId.trim()) {
@@ -53,13 +106,19 @@ export class DockerGatewayAdmission implements DockerGatewayAdmissionPort {
         if (this.activeEpoch && !this.activeEpochClosed) {
             throw new Error('Docker gateway already has an active worker epoch');
         }
-        if (this.pendingOperations.size > 0) {
-            throw new Error('Docker gateway cannot activate a worker while Docker operations require reconciliation');
+
+        // Fencing automatique : toute opération en attente de l'ancienne epoch est
+        // confinée dans fencedOperations (sans prétendre prouver la quiescence) et
+        // l'admission rouvre immédiatement.
+        for (const pending of this.pendingOperations.values()) {
+            this.fencedOperations.set(pending.id, toFencedOperation(pending, 'auto_epoch_rotation'));
         }
+        this.pendingOperations.clear();
 
         this.epoch += 1;
         this.activeEpoch = { workerId, epoch: this.epoch, token: randomUUID() };
         this.activeEpochClosed = false;
+
         return { ...this.activeEpoch };
     }
 
@@ -72,6 +131,9 @@ export class DockerGatewayAdmission implements DockerGatewayAdmissionPort {
         this.assertActiveEpoch(epoch);
         if (this.activeEpochClosed) {
             throw new Error('Docker gateway worker epoch is closed');
+        }
+        if (this.pendingOperations.size > 0) {
+            throw new Error('Docker gateway already has a pending Docker operation');
         }
 
         const operation = { id: randomUUID(), epoch: epoch.epoch, ...(effect ? { effect } : {}) };
@@ -162,6 +224,52 @@ export class DockerGatewayAdmission implements DockerGatewayAdmissionPort {
             epoch,
             ...(effect ? { effect } : {}),
         }));
+    }
+
+    getFencedOperations(): DockerGatewayFencedOperation[] {
+        return Array.from(this.fencedOperations.values(), (fenced) => ({ ...fenced }));
+    }
+
+    getFencedOperation(operationId: string): DockerGatewayFencedOperation | null {
+        const fenced = this.fencedOperations.get(operationId);
+        return fenced ? { ...fenced } : null;
+    }
+
+    async fencePendingOperation(operationId: string, fenceKind: DockerGatewayFenceKind): Promise<DockerGatewayFencedOperation> {
+        const pending = this.pendingOperations.get(operationId);
+        if (!pending || (pending.state !== 'unknown' && pending.state !== 'in_flight')) {
+            throw new Error('Docker gateway operation is not pending');
+        }
+        if (pending.state === 'in_flight' && !this.activeEpochClosed) {
+            throw new Error('Docker gateway cannot fence an in-flight operation of the active epoch');
+        }
+        const fenced = toFencedOperation(pending, fenceKind);
+        this.pendingOperations.delete(operationId);
+        this.fencedOperations.set(operationId, fenced);
+        return { ...fenced };
+    }
+
+    markNameReservation(operationId: string, reserved: boolean): void {
+        const fenced = this.fencedOperations.get(operationId);
+        if (!fenced) {
+            throw new Error('Docker gateway operation is not fenced');
+        }
+        if (!fenced.nameReservation) {
+            if (!fenced.effect) {
+                throw new Error('Docker gateway fenced operation has no name to reserve');
+            }
+            fenced.nameReservation = { containerName: fenced.effect.containerName, reserved };
+        } else {
+            fenced.nameReservation.reserved = reserved;
+        }
+    }
+
+    markQuiescenceProven(operationId: string): void {
+        const fenced = this.fencedOperations.get(operationId);
+        if (!fenced) {
+            throw new Error('Docker gateway operation is not fenced');
+        }
+        fenced.quiescenceProven = true;
     }
 
     private assertActiveEpoch(epoch: DockerGatewayEpoch): void {

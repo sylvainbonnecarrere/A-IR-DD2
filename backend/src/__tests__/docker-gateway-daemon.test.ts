@@ -1,8 +1,11 @@
 import { DockerGatewayDaemon } from '../services/runtime/DockerGatewayDaemon';
-import type { DockerGatewayOperation } from '../services/runtime/DockerGatewayAdmission';
+
+import type { DockerGatewayFenceKind, DockerGatewayOperation } from '../services/runtime/DockerGatewayAdmission';
+
 import type { DockerGatewayRestartAdmission, DockerGatewayServerPort } from '../services/runtime/DockerGatewayDaemon';
 
 describe('Docker gateway daemon lifecycle', () => {
+
     function createAdmission(pending: DockerGatewayOperation[] = [], events: string[] = []) {
         const admission: DockerGatewayRestartAdmission = {
             recoverAfterRestart: jest.fn().mockResolvedValue(pending),
@@ -15,6 +18,20 @@ describe('Docker gateway daemon lifecycle', () => {
             closeAdmission: jest.fn().mockImplementation(async () => { events.push('admission-closed'); }),
             reconcileUnknown: jest.fn(),
             getPendingOperations: jest.fn().mockResolvedValue([]),
+            getFencedOperations: jest.fn().mockResolvedValue([]),
+            getFencedOperation: jest.fn().mockResolvedValue(null),
+            fencePendingOperation: jest.fn().mockImplementation(
+                async (operationId: string, fenceKind: DockerGatewayFenceKind) => ({
+                    id: operationId,
+                    epoch: 1,
+                    fencedAt: new Date(),
+                    fenceKind,
+                    nameReservation: null,
+                    quiescenceProven: false,
+                }),
+            ),
+            markNameReservation: jest.fn().mockResolvedValue(undefined),
+            markQuiescenceProven: jest.fn().mockResolvedValue(undefined),
         };
         return admission;
     }
@@ -27,16 +44,17 @@ describe('Docker gateway daemon lifecycle', () => {
         return server;
     }
 
-    it('does not listen when restart recovery finds uncertain Docker work', async () => {
+    it('opens the socket even when restart recovery finds uncertain Docker work (fenced, never blocking)', async () => {
         const operation = { id: 'uncertain-operation', epoch: 1 };
         const admission = createAdmission([operation]);
         const server = createServer();
         const daemon = new DockerGatewayDaemon({ admission, server });
 
-        await expect(daemon.start()).rejects.toThrow('operations require quiescence reconciliation');
+        await daemon.start();
 
         expect(admission.recoverAfterRestart).toHaveBeenCalledTimes(1);
-        expect(server.listen).not.toHaveBeenCalled();
+        expect(admission.fencePendingOperation).toHaveBeenCalledWith(operation.id, 'auto_epoch_rotation');
+        expect(server.listen).toHaveBeenCalledTimes(1);
     });
 
     it('recovers durable state before listening and closes admission before shutdown', async () => {
@@ -52,7 +70,7 @@ describe('Docker gateway daemon lifecycle', () => {
         expect(events).toEqual(['listened', 'admission-closed', 'server-closed']);
     });
 
-    it('reconciles pending operations before opening the socket', async () => {
+    it('fences pending operations best-effort before opening the socket, without failing on fencer errors', async () => {
         const events: string[] = [];
         const operation: DockerGatewayOperation = {
             id: 'uncertain-operation',
@@ -60,24 +78,34 @@ describe('Docker gateway daemon lifecycle', () => {
             effect: { command: 'kill', containerName: 'airdd2-attempt' },
         };
         const admission = createAdmission([operation], events);
-        jest.mocked(admission.reconcileUnknown).mockImplementation(async () => {
-            events.push('reconciled');
-            return true;
-        });
         const server = createServer(events);
-        const daemon = new DockerGatewayDaemon({
-            admission,
-            server,
-            quiescenceVerifier: { verify: jest.fn().mockResolvedValue(true) },
-        });
+        const fencer = {
+            fence: jest.fn().mockResolvedValue({ fenced: true, nameReserved: true, quiescent: true, observed: ['killed:abc'] }),
+            verifyFenced: jest.fn().mockResolvedValue(true),
+        };
+        const daemon = new DockerGatewayDaemon({ admission, server, fencer });
 
         await daemon.start();
 
-        expect(events).toEqual(['reconciled', 'listened']);
-        expect(admission.reconcileUnknown).toHaveBeenCalledWith(
-            operation.id,
-            expect.objectContaining({ verify: expect.any(Function) }),
+        expect(events).toEqual(['listened']);
+        expect(fencer.fence).toHaveBeenCalledWith(
+            operation,
+            expect.objectContaining({ id: operation.id, fenceKind: 'auto_epoch_rotation' }),
         );
+        expect(admission.markNameReservation).toHaveBeenCalledWith(operation.id, true);
+        expect(admission.markQuiescenceProven).toHaveBeenCalledWith(operation.id);
+    });
+
+    it('still opens the socket when fencing the pending operation fails', async () => {
+        const operation = { id: 'uncertain-operation', epoch: 1 };
+        const admission = createAdmission([operation]);
+        jest.mocked(admission.fencePendingOperation).mockRejectedValue(new Error('MongoDB unavailable'));
+        const server = createServer();
+        const daemon = new DockerGatewayDaemon({ admission, server });
+
+        await daemon.start();
+
+        expect(server.listen).toHaveBeenCalledTimes(1);
     });
 
     it('does not close the admission service if the socket cannot bind', async () => {
