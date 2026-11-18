@@ -26,7 +26,10 @@
     "node25:prepare": "node scripts/prepare-node25-validation.mjs 24.22.1",
     "audit:root": "npm audit --audit-level=high",
     "audit:backend": "npm --prefix backend audit --audit-level=high",
-    "audit:all": "npm run audit:root && npm run audit:backend",
+    "audit:gate:root": "node scripts/ci/audit-gate.mjs",
+    "audit:gate:backend": "node scripts/ci/audit-gate.mjs --prefix backend",
+    "audit:gate:self-test": "node scripts/ci/audit-gate.mjs --self-test",
+    "audit:all": "npm run audit:gate:root && npm run audit:gate:backend",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:settingsmodal:report": "node scripts/run-jest-report.mjs tests/unitaires/SettingsModal.TNR.test.ts --outputDir tests/temp_rapport_tests/unitaires/settingsmodal --reportBase settingsmodal-jest"

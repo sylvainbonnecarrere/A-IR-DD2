@@ -122,11 +122,11 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
-      - name: Audit root dependencies
-        run: npm audit --audit-level=high
+      - name: Audit root dependencies (gate high, withdrawn advisories allowlisted)
+        run: node scripts/ci/audit-gate.mjs
 
-      - name: Audit backend dependencies
-        run: npm --prefix backend audit --audit-level=high
+      - name: Audit backend dependencies (gate high, withdrawn advisories allowlisted)
+        run: node scripts/ci/audit-gate.mjs --prefix backend
 
   application-gates:
     name: Application Gates
