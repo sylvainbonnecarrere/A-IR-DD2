@@ -6,6 +6,8 @@ import type { ExpiredSupervisedRun, QuarantinedRecoveryRun, WorkerLostLockCleanu
 
 import type { AutoRecoveryPort, QuarantinedRunEntry } from '../services/runtime/agentAutoRecovery.service';
 
+import type { RunVisibilityPort } from '../services/runtime/runVisibility.service';
+
 import type { RunWorkspaceLockRelease } from '../services/runtime/MongoWorkspaceLockService';
 
 const expiredRun: ExpiredSupervisedRun = {
@@ -225,5 +227,38 @@ describe('MongoExpiredRunReconciler', () => {
 
         expect(summary).toEqual({ reconciled: 1, unresolved: 0, lockCleanupPending: 0, autoRecovered: 0 });
         expect(autoRecovery.tryRecoverQuarantinedRun).not.toHaveBeenCalled();
+    });
+
+    // ⭐ J7-09: visibilité
+    it('records a run_quarantined visibility entry (lock held) when the run is quarantined', async () => {
+        const store = createStore([{ ...expiredRun, agentInstanceId: '507f1f77bcf86cd799439012' }]);
+        const fencing = createFencing(null);
+        const locks = createLockRecovery();
+        const visibility: jest.Mocked<RunVisibilityPort> = { record: jest.fn().mockResolvedValue(undefined) };
+
+        const summary = await new MongoExpiredRunReconciler(fencing, store, locks, undefined, visibility).reconcile();
+
+        expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0, autoRecovered: 0 });
+        expect(visibility.record).toHaveBeenCalledTimes(1);
+        expect(visibility.record).toHaveBeenCalledWith(expect.objectContaining({
+            workspaceId: 'workflow-1',
+            runId: 'run-1',
+            agentInstanceId: '507f1f77bcf86cd799439012',
+            event: 'run_quarantined',
+            cause: 'QUARANTINED',
+            lockHeld: true,
+        }));
+    });
+
+    it('never records visibility for a worker_lost run', async () => {
+        const store = createStore();
+        const fencing = createFencing({ operationId: '123e4567-e89b-42d3-a456-426614174001', quiescent: true, containerState: 'exited' });
+        const locks = createLockRecovery();
+        const visibility: jest.Mocked<RunVisibilityPort> = { record: jest.fn().mockResolvedValue(undefined) };
+
+        const summary = await new MongoExpiredRunReconciler(fencing, store, locks, undefined, visibility).reconcile();
+
+        expect(summary).toEqual({ reconciled: 1, unresolved: 0, lockCleanupPending: 0, autoRecovered: 0 });
+        expect(visibility.record).not.toHaveBeenCalled();
     });
 });

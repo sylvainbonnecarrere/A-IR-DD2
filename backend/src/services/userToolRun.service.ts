@@ -785,6 +785,8 @@ export class UserToolRunService {
             workflowId: workspaceId,
             runId: run.executionId,
             agentId: run.agentInstanceId?.toString() ?? undefined,
+            // ⭐ J7-09: un run quarantined retient le verrou workspace (workspaceRetentionProtected conservé).
+            lockHeld: nextStatus === 'quarantined' ? true : undefined,
         };
 
         const progress = nextStatus === 'running' ? 50 : isUserToolRunTerminalStatus(nextStatus) ? 100 : undefined;

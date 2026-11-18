@@ -23,6 +23,8 @@ import {
 
 import { MongoGatewayFenceAuditStore, MongoQuarantinedRunStore, MongoRunCommandIdempotencyStore, MongoRuntimeAlertsStore, MongoWorkflowOwnershipStore, buildFenceAndRetryStorageId } from './runtime/fenceAndRetry.stores';
 
+import type { RunVisibilityPort } from './runtime/runVisibility.service';
+
 import { SandboxService } from './sandbox.service';
 
 export { FenceAndRetryError } from './runtime/fenceAndRetry.ports';
@@ -69,6 +71,7 @@ export class FenceAndRetryService {
         private readonly alerts: RuntimeAlertPort = new MongoRuntimeAlertsStore(),
         private readonly idempotency: RunCommandIdempotencyPort = new MongoRunCommandIdempotencyStore(),
         private readonly retry: QuarantinedRetryPort = new SandboxService(),
+        private readonly visibility?: RunVisibilityPort, // ⭐ J7-09: journal agent + événement runtime
     ) {}
 
     async fenceAndRetry(request: FenceAndRetryRequest): Promise<FenceAndRetryResult> {
@@ -149,6 +152,18 @@ export class FenceAndRetryService {
             quiescenceProven: true,
         });
 
+        // ⭐ J7-09: visibilité — journal agent + événement `run:fenced` (verrou encore tenu à ce stade).
+        await this.visibility?.record({
+            workspaceId,
+            runId,
+            agentInstanceId: run.agentInstanceId,
+            event: 'run_fenced',
+            cause: reason,
+            lockHeld: true,
+            fencedOperationId: operation.id,
+            message: `Opération fencée (${REASON_TO_FENCE_KIND[reason]}), quiescence prouvée`,
+        });
+
         // Étape 3 : libération conditionnelle du verrou — uniquement si owner === runId.
         const release = await this.locks.releaseForRun(userId, workspaceId, runId);
         if (release === 'owned_by_another_run') {
@@ -167,6 +182,20 @@ export class FenceAndRetryService {
             status: 'queued',
             recoveryAttemptCount: (run.recoveryAttemptCount ?? 0) + 1,
         };
+
+        // ⭐ J7-09: visibilité — journal agent + événement `run:recovery_relaunched` (verrou libéré à l'étape 3).
+        await this.visibility?.record({
+            workspaceId,
+            runId,
+            agentInstanceId: run.agentInstanceId,
+            event: 'run_recovery_relaunched',
+            cause: reason,
+            lockHeld: false,
+            fencedOperationId: operation.id,
+            newRunId: child.executionId,
+            recoveryAttemptCount: response.recoveryAttemptCount,
+            message: `Run relancé (nouvel executionId ${child.executionId}, tentative ${response.recoveryAttemptCount})`,
+        });
 
         try {
             await this.idempotency.store({
