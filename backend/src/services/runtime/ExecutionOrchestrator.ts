@@ -6,6 +6,7 @@ import ts from 'typescript';
 import type { UserToolRunLaunchContext, UserToolRunRunner } from '../../models/UserToolRun.model';
 import type { IUserToolRunArtifact } from '../../models/UserToolRun.model';
 import { deriveExecutionMetadataFromLegacyFunction } from '../../utils/userToolLegacyMapper';
+import { USER_TOOL_RUN_TERMINAL_STATUS_VALUES, isUserToolRunTerminalStatus } from '../../domain/execution/userToolRun.contract';
 import { BuildService } from '../build.service';
 import { MediaCatalogService } from '../mediaCatalog.service';
 import { RuntimeHealthService } from '../runtimeHealth.service';
@@ -37,6 +38,7 @@ export interface ExecutionOrchestratorRequest {
     agentInstanceId?: string;
     idempotencyKey?: string;
     retryOfExecutionId?: string;
+    recoveryAttemptCount?: number;
     persistedExecutionId?: string;
     executeExistingQueued?: boolean;
     verifiedInlineSource?: boolean;
@@ -157,6 +159,7 @@ export class ExecutionOrchestrator {
                 inputs: request.args,
                 agentInstanceId: request.agentInstanceId,
                 retryOfExecutionId: request.retryOfExecutionId,
+                recoveryAttemptCount: request.recoveryAttemptCount,
                 requestFingerprint,
                 targetFingerprint: executionTargetFingerprint(request.fn),
                 privateContext: request.privateContext,
@@ -235,7 +238,7 @@ export class ExecutionOrchestrator {
             if (!run) {
                 throw new Error('Run not found or access denied');
             }
-            if (['completed', 'failed', 'stopped', 'timed_out'].includes(run.status)) {
+            if (isUserToolRunTerminalStatus(run.status)) {
                 return this.mapPersistedRun(run, true);
             }
             await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, Math.max(0, deadline - Date.now()))));
@@ -267,7 +270,7 @@ export class ExecutionOrchestrator {
                 workspaceLock: lock,
             }, prepareForDispatch, () => { runnerStarted = true; }, executionId);
             safeToRelease = !request.lease
-                && ['completed', 'failed', 'stopped', 'timed_out'].includes(result.status ?? '')
+                && (USER_TOOL_RUN_TERMINAL_STATUS_VALUES as readonly string[]).includes(result.status ?? '')
                 && result.metadata?.runnerTerminationConfirmed !== false;
             return result;
         } finally {
@@ -396,6 +399,7 @@ export class ExecutionOrchestrator {
                 inputs: request.args,
                 agentInstanceId: request.agentInstanceId,
                 retryOfExecutionId: request.retryOfExecutionId,
+                recoveryAttemptCount: request.recoveryAttemptCount,
                 requestFingerprint,
                 targetFingerprint: executionTargetFingerprint(request.fn),
                 privateContext: request.privateContext,

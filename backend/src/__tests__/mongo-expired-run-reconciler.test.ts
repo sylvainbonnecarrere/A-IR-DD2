@@ -1,6 +1,9 @@
 import { MongoExpiredRunReconciler, type ExpiredRunReconciliationStore } from '../services/runtime/MongoExpiredRunReconciler';
-import type { DockerAttemptRecoveryPort } from '../services/runtime/DockerGatewayAttemptRecovery';
+
+import type { DockerAttemptFencingProofPort } from '../services/runtime/DockerGatewayFencedAttemptProof';
+
 import type { ExpiredSupervisedRun, WorkerLostLockCleanup } from '../services/userToolRun.service';
+
 import type { RunWorkspaceLockRelease } from '../services/runtime/MongoWorkspaceLockService';
 
 const expiredRun: ExpiredSupervisedRun = {
@@ -9,6 +12,7 @@ const expiredRun: ExpiredSupervisedRun = {
     workflowId: 'workflow-1',
     attemptId: '123e4567-e89b-42d3-a456-426614174000',
 };
+
 const attemptId = expiredRun.attemptId;
 
 const cleanupRun: WorkerLostLockCleanup = {
@@ -24,9 +28,14 @@ function createStore(
         listExpiredSupervisedRuns: jest.fn().mockResolvedValue(expiredRuns),
         listWorkerLostLockCleanup: jest.fn().mockResolvedValue(cleanupRuns),
         markExpiredRunWorkerLost: jest.fn().mockResolvedValue(true),
+        markRunQuarantined: jest.fn().mockResolvedValue(true),
         markWorkerLostWorkspaceLockReleased: jest.fn().mockResolvedValue(true),
     };
     return store;
+}
+
+function createFencing(proof: Awaited<ReturnType<DockerAttemptFencingProofPort['proveFencedAttempt']>>) {
+    return { proveFencedAttempt: jest.fn().mockResolvedValue(proof) };
 }
 
 function createLockRecovery(release: RunWorkspaceLockRelease = 'released') {
@@ -34,26 +43,63 @@ function createLockRecovery(release: RunWorkspaceLockRelease = 'released') {
 }
 
 describe('MongoExpiredRunReconciler', () => {
-    it('keeps the run and workspace lock when Docker quiescence cannot be proven', async () => {
+
+    it('quarantines the run and retains the workspace lock when no fenced operation proves quiescence', async () => {
         const store = createStore();
-        const docker: DockerAttemptRecoveryPort = { stopAndVerify: jest.fn().mockResolvedValue(null) };
+        const fencing = createFencing(null);
         const locks = createLockRecovery();
 
-        const summary = await new MongoExpiredRunReconciler(docker, store, locks).reconcile();
+        const summary = await new MongoExpiredRunReconciler(fencing, store, locks).reconcile();
 
         expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0 });
+        expect(store.markRunQuarantined).toHaveBeenCalledWith('run-1', attemptId);
         expect(store.markExpiredRunWorkerLost).not.toHaveBeenCalled();
         expect(locks.releaseForRun).not.toHaveBeenCalled();
     });
 
-    it('marks a quiescent expired run WORKER_LOST before releasing its workspace lock', async () => {
+    it('quarantines the run when the gateway reports quiescence as not proven', async () => {
         const store = createStore();
-        const docker: DockerAttemptRecoveryPort = { stopAndVerify: jest.fn().mockResolvedValue('exited') };
+        const fencing = createFencing({ operationId: '123e4567-e89b-42d3-a456-426614174001', quiescent: false, containerState: null });
         const locks = createLockRecovery();
 
-        const summary = await new MongoExpiredRunReconciler(docker, store, locks).reconcile();
+        const summary = await new MongoExpiredRunReconciler(fencing, store, locks).reconcile();
+
+        expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0 });
+        expect(store.markRunQuarantined).toHaveBeenCalledWith('run-1', attemptId);
+        expect(store.markExpiredRunWorkerLost).not.toHaveBeenCalled();
+        expect(locks.releaseForRun).not.toHaveBeenCalled();
+    });
+
+    it('fails closed and quarantines when the gateway proof errors out', async () => {
+        const store = createStore();
+        const fencing: DockerAttemptFencingProofPort = {
+            proveFencedAttempt: jest.fn().mockRejectedValue(new Error('gateway unreachable')),
+        };
+        const locks = createLockRecovery();
+        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+        try {
+            const summary = await new MongoExpiredRunReconciler(fencing, store, locks).reconcile();
+
+            expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0 });
+            expect(store.markRunQuarantined).toHaveBeenCalledWith('run-1', attemptId);
+            expect(store.markExpiredRunWorkerLost).not.toHaveBeenCalled();
+            expect(locks.releaseForRun).not.toHaveBeenCalled();
+            expect(log).toHaveBeenCalled();
+        } finally {
+            log.mockRestore();
+        }
+    });
+
+    it('marks a quiescent expired run worker_lost before releasing its workspace lock', async () => {
+        const store = createStore();
+        const fencing = createFencing({ operationId: '123e4567-e89b-42d3-a456-426614174001', quiescent: true, containerState: 'exited' });
+        const locks = createLockRecovery();
+
+        const summary = await new MongoExpiredRunReconciler(fencing, store, locks).reconcile();
 
         expect(summary).toEqual({ reconciled: 1, unresolved: 0, lockCleanupPending: 0 });
+        expect(store.markRunQuarantined).not.toHaveBeenCalled();
         expect(store.markExpiredRunWorkerLost).toHaveBeenCalledWith('run-1', attemptId, 'exited');
         expect(locks.releaseForRun).toHaveBeenCalledWith('user-1', 'workflow-1', 'run-1');
         expect(store.markWorkerLostWorkspaceLockReleased).toHaveBeenCalledWith('run-1', attemptId);
@@ -61,12 +107,12 @@ describe('MongoExpiredRunReconciler', () => {
 
     it('never releases a workspace lock now owned by another run', async () => {
         const store = createStore();
-        const docker: DockerAttemptRecoveryPort = { stopAndVerify: jest.fn().mockResolvedValue('absent') };
+        const fencing = createFencing({ operationId: '123e4567-e89b-42d3-a456-426614174001', quiescent: true, containerState: 'absent' });
         const locks = createLockRecovery('owned_by_another_run');
         const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
         try {
-            const summary = await new MongoExpiredRunReconciler(docker, store, locks).reconcile();
+            const summary = await new MongoExpiredRunReconciler(fencing, store, locks).reconcile();
 
             expect(summary).toEqual({ reconciled: 1, unresolved: 0, lockCleanupPending: 1 });
             expect(store.markWorkerLostWorkspaceLockReleased).not.toHaveBeenCalled();
@@ -78,24 +124,36 @@ describe('MongoExpiredRunReconciler', () => {
 
     it('retries persisting a confirmed lock release after restart', async () => {
         const store = createStore([], [cleanupRun]);
-        const docker: DockerAttemptRecoveryPort = { stopAndVerify: jest.fn() };
+        const fencing = createFencing(null);
         const locks = createLockRecovery('absent');
 
-        const summary = await new MongoExpiredRunReconciler(docker, store, locks).reconcile();
+        const summary = await new MongoExpiredRunReconciler(fencing, store, locks).reconcile();
 
         expect(summary).toEqual({ reconciled: 0, unresolved: 0, lockCleanupPending: 0 });
         expect(locks.releaseForRun).toHaveBeenCalledWith('user-1', 'workflow-1', 'run-1');
         expect(store.markWorkerLostWorkspaceLockReleased).toHaveBeenCalledWith('run-1', attemptId);
-        expect(docker.stopAndVerify).not.toHaveBeenCalled();
+        expect(fencing.proveFencedAttempt).not.toHaveBeenCalled();
     });
 
     it('keeps the lock cleanup pending when the run changes before terminalization', async () => {
         const store = createStore();
         store.markExpiredRunWorkerLost.mockResolvedValue(false);
-        const docker: DockerAttemptRecoveryPort = { stopAndVerify: jest.fn().mockResolvedValue('dead') };
+        const fencing = createFencing({ operationId: '123e4567-e89b-42d3-a456-426614174001', quiescent: true, containerState: 'dead' });
         const locks = createLockRecovery();
 
-        const summary = await new MongoExpiredRunReconciler(docker, store, locks).reconcile();
+        const summary = await new MongoExpiredRunReconciler(fencing, store, locks).reconcile();
+
+        expect(summary).toEqual({ reconciled: 0, unresolved: 0, lockCleanupPending: 0 });
+        expect(locks.releaseForRun).not.toHaveBeenCalled();
+    });
+
+    it('does not count an unresolved run when the quarantine marking loses the race', async () => {
+        const store = createStore();
+        store.markRunQuarantined.mockResolvedValue(false);
+        const fencing = createFencing(null);
+        const locks = createLockRecovery();
+
+        const summary = await new MongoExpiredRunReconciler(fencing, store, locks).reconcile();
 
         expect(summary).toEqual({ reconciled: 0, unresolved: 0, lockCleanupPending: 0 });
         expect(locks.releaseForRun).not.toHaveBeenCalled();

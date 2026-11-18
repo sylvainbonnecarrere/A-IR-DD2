@@ -306,6 +306,7 @@ const COLLECTION_SCHEMAS = {
           agentPrototypeId: { bsonType: ['objectId', 'null'] },
           agentInstanceId: { bsonType: ['objectId', 'null'] },
           retryOfExecutionId: { bsonType: ['string', 'null'] },
+          recoveryAttemptCount: { bsonType: ['int', 'long', 'double', 'null'] },
           requestFingerprint: { bsonType: ['string', 'null'] },
           targetFingerprint: { bsonType: ['string', 'null'] },
           privateContextCiphertext: { bsonType: ['string', 'null'] },
@@ -493,6 +494,20 @@ const INDEX_DEFINITIONS = {
         partialFilterExpression: { retryOfExecutionId: { $type: 'string' } },
         name: 'idx_user_tool_runs_retry_lineage'
       }
+    },
+    {
+      spec: { ownerUserId: 1, retryOfExecutionId: 1, recoveryAttemptCount: -1 },
+      options: {
+        partialFilterExpression: { retryOfExecutionId: { $type: 'string' } },
+        name: 'idx_user_tool_runs_recovery_attempts'
+      }
+    },
+    {
+      spec: { status: 1, updatedAt: -1 },
+      options: {
+        partialFilterExpression: { status: { $in: ['worker_lost', 'quarantined'] } },
+        name: 'idx_user_tool_runs_terminal_reconcilable'
+      }
     }
   ],
   secrets_metadata: [
@@ -572,6 +587,22 @@ export async function runDatabaseBootstrap(db: any): Promise<void> {
       {
         partialFilterExpression: { status: 'running', 'lease.expiresAt': { $type: 'date' } },
         name: 'idx_user_tool_runs_running_lease_expiry'
+      }
+    );
+
+    // Index partiels US-J7-06 : recréés de façon idempotente sur une base existante.
+    await db.collection('user_tool_runs').createIndex(
+      { ownerUserId: 1, retryOfExecutionId: 1, recoveryAttemptCount: -1 },
+      {
+        partialFilterExpression: { retryOfExecutionId: { $type: 'string' } },
+        name: 'idx_user_tool_runs_recovery_attempts'
+      }
+    );
+    await db.collection('user_tool_runs').createIndex(
+      { status: 1, updatedAt: -1 },
+      {
+        partialFilterExpression: { status: { $in: ['worker_lost', 'quarantined'] } },
+        name: 'idx_user_tool_runs_terminal_reconcilable'
       }
     );
 

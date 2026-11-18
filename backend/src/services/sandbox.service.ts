@@ -123,6 +123,7 @@ export class SandboxService {
         privateContext?: Record<string, unknown>;
         idempotencyKey?: string;
         retryOfExecutionId?: string;
+        recoveryAttemptCount?: number;
         launchContext?: 'editor_test' | 'workflow_run' | 'system_validation';
         retrySnapshot?: RetrySnapshot;
     }): Promise<QueuedRunAcknowledgement> {
@@ -139,6 +140,7 @@ export class SandboxService {
             launchContext: input.launchContext ?? (input.agentInstanceId ? 'workflow_run' : 'editor_test'),
             idempotencyKey: input.idempotencyKey,
             retryOfExecutionId: input.retryOfExecutionId,
+            recoveryAttemptCount: input.recoveryAttemptCount,
         });
     }
 
@@ -273,6 +275,7 @@ export class SandboxService {
             privateContext,
             idempotencyKey,
             retryOfExecutionId: parentRun.executionId,
+            recoveryAttemptCount: (parentRun.recoveryAttemptCount ?? 0) + 1,
             launchContext: parentRun.launchContext,
             retrySnapshot: {
                 toolVersionTag: parentRun.toolVersionTag,
