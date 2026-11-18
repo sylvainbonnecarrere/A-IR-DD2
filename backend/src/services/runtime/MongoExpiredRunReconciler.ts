@@ -6,15 +6,19 @@ import { MongoWorkspaceLockService, type RunWorkspaceLockRelease } from './Mongo
 
 import { UserToolRunService } from '../userToolRun.service';
 
+import type { AutoRecoveryPort, QuarantinedRunEntry } from './agentAutoRecovery.service';
+
 export interface ExpiredRunReconciliationSummary {
     reconciled: number;
     unresolved: number;
     lockCleanupPending: number;
+    autoRecovered: number;
 }
 
 export interface ExpiredRunReconciliationStore {
     listExpiredSupervisedRuns(): ReturnType<UserToolRunService['listExpiredSupervisedRuns']>;
     listWorkerLostLockCleanup(): ReturnType<UserToolRunService['listWorkerLostLockCleanup']>;
+    listQuarantinedRunsForRecovery(): ReturnType<UserToolRunService['listQuarantinedRunsForRecovery']>;
     markExpiredRunWorkerLost(
         executionId: string,
         attemptId: string,
@@ -34,6 +38,7 @@ export class MongoExpiredRunReconciler {
         private readonly fencing: DockerAttemptFencingProofPort,
         private readonly runs: ExpiredRunReconciliationStore = new UserToolRunService(),
         private readonly locks: RunWorkspaceLockRecovery = new MongoWorkspaceLockService(),
+        private readonly autoRecovery?: AutoRecoveryPort,
     ) {}
 
     async reconcile(): Promise<ExpiredRunReconciliationSummary> {
@@ -41,8 +46,11 @@ export class MongoExpiredRunReconciler {
             reconciled: 0,
             unresolved: 0,
             lockCleanupPending: 0,
+            autoRecovered: 0,
         };
         await this.retryWorkerLostLockCleanup(summary);
+
+        const quarantinedThisPass = new Set<string>();
 
         for (const run of await this.runs.listExpiredSupervisedRuns()) {
             const expectedContainerName = DockerAttemptReservation.containerName(run.attemptId);
@@ -63,12 +71,14 @@ export class MongoExpiredRunReconciler {
                     continue;
                 }
                 summary.unresolved += 1;
+                quarantinedThisPass.add(run.executionId);
                 console.warn('[MongoExpiredRunReconciler] Docker quiescence is not proven; run quarantined and workspace lock retained', {
                     executionId: run.executionId,
                     attemptId: run.attemptId,
                     containerName: expectedContainerName,
                     operationId: proof?.operationId ?? null,
                 });
+                await this.tryAutoRecover(run, summary);
                 continue;
             }
 
@@ -81,7 +91,35 @@ export class MongoExpiredRunReconciler {
             const release = await this.locks.releaseForRun(run.ownerUserId, run.workflowId, run.executionId);
             await this.recordLockRelease(run.executionId, run.attemptId, release, summary);
         }
+
+        // Runs déjà quarantinés avant ce pass (ex. redémarrage du worker) :
+        // l'auto-recovery s'évalue aussi pour eux, une seule fois par run.
+        for (const run of await this.runs.listQuarantinedRunsForRecovery()) {
+            if (quarantinedThisPass.has(run.executionId)) continue;
+            await this.tryAutoRecover(run, summary);
+        }
         return summary;
+    }
+
+    private async tryAutoRecover(
+        run: QuarantinedRunEntry,
+        summary: ExpiredRunReconciliationSummary,
+    ): Promise<void> {
+        if (!this.autoRecovery || !run.workflowId) return;
+        const outcome = await this.autoRecovery.tryRecoverQuarantinedRun(run);
+        if (outcome === 'recovered') {
+            summary.autoRecovered += 1;
+            console.info('[MongoExpiredRunReconciler] Auto-recovery relaunched quarantined run', {
+                executionId: run.executionId,
+                attemptId: run.attemptId,
+                recoveryAttemptCount: run.recoveryAttemptCount ?? 0,
+            });
+            return;
+        }
+        console.info('[MongoExpiredRunReconciler] Auto-recovery skipped quarantined run', {
+            executionId: run.executionId,
+            outcome,
+        });
     }
 
     private async retryWorkerLostLockCleanup(summary: ExpiredRunReconciliationSummary): Promise<void> {

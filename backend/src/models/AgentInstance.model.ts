@@ -1,6 +1,9 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import { CANONICAL_ROBOT_IDS } from '../types';
 import type { PersistedPersistenceConfig } from '../types/persistence';
+import { DEFAULT_RECOVERY_POLICY, type RecoveryPolicy } from '../domain/execution/recoveryPolicy.contract';
+
+export type IRecoveryPolicy = RecoveryPolicy;
 
 // ============================================
 // PERSISTENCE CONFIG (copie de AgentPrototype)
@@ -157,6 +160,9 @@ export interface IAgentInstance extends Document {
 
     // ⭐ NOUVEAU: Configuration de persistance (héritée du prototype avec override possible)
     persistenceConfig: IPersistenceConfig;
+
+    // ⭐ J7-08: Snapshot de la recoveryPolicy du prototype (copie indépendante)
+    recoveryPolicy?: IRecoveryPolicy;
 
     createdAt: Date;
     updatedAt: Date;
@@ -389,6 +395,15 @@ const AgentInstanceSchema = new Schema<IAgentInstance>({
             mediaStorage: 'db',
             cloudStorageConfig: null
         }
+    },
+
+    // ⭐ J7-08: recoveryPolicy snapshotée depuis le prototype (défaut off)
+    recoveryPolicy: {
+        type: new Schema<IRecoveryPolicy>({
+            autoFenceAndRetry: { type: Boolean, required: true, default: DEFAULT_RECOVERY_POLICY.autoFenceAndRetry },
+            maxAttempts: { type: Number, required: true, min: 0, max: 10, default: DEFAULT_RECOVERY_POLICY.maxAttempts }
+        }, { _id: false }),
+        default: () => ({ ...DEFAULT_RECOVERY_POLICY })
     }
 }, {
     timestamps: true,

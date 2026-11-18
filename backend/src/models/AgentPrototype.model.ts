@@ -2,6 +2,10 @@ import mongoose, { Document, Schema } from 'mongoose';
 import { CANONICAL_ROBOT_IDS, CANONICAL_ROBOT_IDS_LABEL } from '../types';
 import type { PersistedPersistenceConfig } from '../types/persistence';
 
+import { DEFAULT_RECOVERY_POLICY, type RecoveryPolicy } from '../domain/execution/recoveryPolicy.contract';
+
+export type IRecoveryPolicy = RecoveryPolicy;
+
 /**
  * ⭐ PERSISTENCE CONFIG: Configuration granulaire par agent
  * Permet de définir ce qui est sauvegardé pour chaque agent
@@ -39,6 +43,7 @@ export interface IAgentPrototype extends Document {
     isPrototype: true;
     persistenceConfig: IPersistenceConfig; // ⭐ NEW: Configuration de persistance
     localLLMProfileId?: string;            // ⭐ NEW: References local_llm_profiles._id
+    recoveryPolicy?: IRecoveryPolicy;      // ⭐ J7-08: politique de récupération (défaut off), snapshotée sur l'instance
     createdAt: Date;
     updatedAt: Date;
 }
@@ -165,6 +170,14 @@ const AgentPrototypeSchema = new Schema<IAgentPrototype>({
         type: String,
         required: false,
         default: undefined
+    },
+    // ⭐ J7-08: recoveryPolicy (défaut off) — snapshotée sur l'instance à l'instanciation
+    recoveryPolicy: {
+        type: new Schema<IRecoveryPolicy>({
+            autoFenceAndRetry: { type: Boolean, required: true, default: DEFAULT_RECOVERY_POLICY.autoFenceAndRetry },
+            maxAttempts: { type: Number, required: true, min: 0, max: 10, default: DEFAULT_RECOVERY_POLICY.maxAttempts }
+        }, { _id: false }),
+        default: () => ({ ...DEFAULT_RECOVERY_POLICY })
     }
 }, {
     timestamps: true,

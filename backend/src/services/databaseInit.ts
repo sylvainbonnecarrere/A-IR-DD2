@@ -176,6 +176,13 @@ const COLLECTION_SCHEMAS = {
           name: { bsonType: 'string' },
           description: { bsonType: 'string' },
           config: { bsonType: 'object' },
+          recoveryPolicy: {
+            bsonType: ['object', 'null'],
+            properties: {
+              autoFenceAndRetry: { bsonType: 'bool' },
+              maxAttempts: { bsonType: ['int', 'long'] }
+            }
+          },
           createdAt: { bsonType: 'date' },
           updatedAt: { bsonType: 'date' }
         }
@@ -195,6 +202,13 @@ const COLLECTION_SCHEMAS = {
           executionState: { bsonType: 'object' },
           capabilities: { bsonType: 'array' },
           logs: { bsonType: 'array' },
+          recoveryPolicy: {
+            bsonType: ['object', 'null'],
+            properties: {
+              autoFenceAndRetry: { bsonType: 'bool' },
+              maxAttempts: { bsonType: ['int', 'long'] }
+            }
+          },
           createdAt: { bsonType: 'date' },
           updatedAt: { bsonType: 'date' }
         }
