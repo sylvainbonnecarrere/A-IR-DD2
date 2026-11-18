@@ -15,6 +15,7 @@ import type { IUserToolRun } from '../models/UserToolRun.model';
 import type { RunLease } from './runtime/MongoRunLeaseService';
 import { executionTargetFingerprint } from './runtime/executionTargetFingerprint';
 import { isReconstructionRejectionCode } from '../domain/execution/runReconstructionQuarantine';
+import { USER_TOOL_RUN_RECONCILABLE_TERMINAL_STATUS_VALUES } from '../domain/execution/userToolRun.contract';
 import { RunReconstructionRejection } from './runtime/RunReconstructionRejection';
 
 export interface SandboxResult {
@@ -247,13 +248,7 @@ export class SandboxService {
     }
 
     async retryRun(executionId: string, userId: string, idempotencyKey: string): Promise<QueuedRunAcknowledgement> {
-        const ownerUserId = new mongoose.Types.ObjectId(userId);
-        const parentRun = await UserToolRun.findOne({ executionId, ownerUserId }).select('+privateContextCiphertext');
-        if (!parentRun) {
-            const error = new Error('Run introuvable');
-            Object.assign(error, { statusCode: 404, code: 'RUN_NOT_FOUND' });
-            throw error;
-        }
+        const parentRun = await this.loadOwnedRun(executionId, userId);
 
         const isRetryableTerminal = ['failed', 'timed_out'].includes(parentRun.status)
             && parentRun.error?.retryable === true;
@@ -263,6 +258,43 @@ export class SandboxService {
             throw error;
         }
 
+        return this.enqueueRetry(parentRun, userId, idempotencyKey);
+    }
+
+    /**
+     * Retry d'un run terminal réconciliable (`worker_lost`/`quarantined`) après
+     * fencing prouvé (US-J7-07) : nouveau run `queued`, parent strictement immutable.
+     */
+    async retryQuarantinedRun(executionId: string, userId: string, idempotencyKey: string): Promise<QueuedRunAcknowledgement> {
+        const parentRun = await this.loadOwnedRun(executionId, userId);
+
+        const isReconciliableTerminal = (USER_TOOL_RUN_RECONCILABLE_TERMINAL_STATUS_VALUES as readonly string[]).includes(parentRun.status)
+            && parentRun.error?.retryable === true;
+        if (!isReconciliableTerminal) {
+            const error = new Error('Seul un run worker_lost ou quarantined peut être fence-and-retry');
+            Object.assign(error, { statusCode: 409, code: 'RUN_NOT_QUARANTINED', status: parentRun.status });
+            throw error;
+        }
+
+        return this.enqueueRetry(parentRun, userId, idempotencyKey);
+    }
+
+    private async loadOwnedRun(executionId: string, userId: string) {
+        const ownerUserId = new mongoose.Types.ObjectId(userId);
+        const parentRun = await UserToolRun.findOne({ executionId, ownerUserId }).select('+privateContextCiphertext');
+        if (!parentRun) {
+            const error = new Error('Run introuvable');
+            Object.assign(error, { statusCode: 404, code: 'RUN_NOT_FOUND' });
+            throw error;
+        }
+        return parentRun;
+    }
+
+    private async enqueueRetry(
+        parentRun: Awaited<ReturnType<typeof this.loadOwnedRun>>,
+        userId: string,
+        idempotencyKey: string,
+    ): Promise<QueuedRunAcknowledgement> {
         const privateContext = await this.userToolRunService.getPrivateContext(parentRun);
         return this.queueFunctionRun({
             userId,

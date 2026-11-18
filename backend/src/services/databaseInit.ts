@@ -351,6 +351,67 @@ const COLLECTION_SCHEMAS = {
     }
   },
 
+  gateway_fence_audit: {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        additionalProperties: true,
+        properties: {
+          _id: { bsonType: 'objectId' },
+          actorUserId: { bsonType: 'string' },
+          timestamp: { bsonType: 'date' },
+          fencedOpUuid: { bsonType: 'string' },
+          operationId: { bsonType: 'string' },
+          workspaceId: { bsonType: 'string' },
+          runId: { bsonType: 'string' },
+          reason: { bsonType: 'string' },
+          fenceKind: { bsonType: 'string' },
+          quiescenceProven: { bsonType: 'bool' }
+        }
+      }
+    }
+  },
+
+  runtime_alerts: {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        additionalProperties: true,
+        properties: {
+          _id: { bsonType: 'objectId' },
+          severity: { enum: ['critical', 'high', 'medium', 'low'] },
+          code: { bsonType: 'string' },
+          message: { bsonType: 'string' },
+          userId: { bsonType: 'string' },
+          workspaceId: { bsonType: 'string' },
+          runId: { bsonType: 'string' },
+          operationId: { bsonType: ['string', 'null'] },
+          createdAt: { bsonType: 'date' },
+          acknowledgedAt: { bsonType: ['date', 'null'] }
+        }
+      }
+    }
+  },
+
+  run_command_idempotency: {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        additionalProperties: true,
+        properties: {
+          _id: { bsonType: 'string' },
+          userId: { bsonType: 'string' },
+          command: { bsonType: 'string' },
+          idempotencyKey: { bsonType: 'string' },
+          workspaceId: { bsonType: 'string' },
+          runId: { bsonType: 'string' },
+          response: { bsonType: 'object' },
+          createdAt: { bsonType: 'date' }
+        }
+      }
+    }
+  },
+
   secrets_metadata: {
     validator: {
       $jsonSchema: {
@@ -516,6 +577,24 @@ const INDEX_DEFINITIONS = {
       options: { unique: true, name: 'uq_secrets_metadata_owner_scope_alias' }
     },
     { spec: { ownerUserId: 1, status: 1, updatedAt: -1 }, options: { name: 'idx_secrets_metadata_owner_status_updated' } }
+  ],
+  gateway_fence_audit: [
+    { spec: { operationId: 1, timestamp: -1 }, options: { name: 'idx_gateway_fence_audit_operation' } },
+    { spec: { runId: 1, timestamp: -1 }, options: { name: 'idx_gateway_fence_audit_run' } },
+    { spec: { actorUserId: 1, timestamp: -1 }, options: { name: 'idx_gateway_fence_audit_actor' } }
+  ],
+  runtime_alerts: [
+    {
+      spec: { severity: 1, createdAt: -1 },
+      options: {
+        partialFilterExpression: { acknowledgedAt: null },
+        name: 'idx_runtime_alerts_open_severity'
+      }
+    },
+    { spec: { runId: 1, createdAt: -1 }, options: { name: 'idx_runtime_alerts_run' } }
+  ],
+  run_command_idempotency: [
+    { spec: { userId: 1, command: 1, createdAt: -1 }, options: { name: 'idx_run_command_idempotency_user' } }
   ]
 };
 
