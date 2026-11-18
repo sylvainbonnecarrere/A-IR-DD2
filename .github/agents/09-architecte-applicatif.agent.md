@@ -55,7 +55,7 @@ A-IR-DD2/
 # Invariants Architecturaux Non Négociables
 
 1. **Source de Vérité Unique (Cutover V2 Strict) :**
-   - **Zéro reliquat V1** : Ne jamais lire ni écrire dans `Workflow.nodes` ou `Workflow.edges` legacy.
+   - **Zéro reliquat V1** : Ne jamais lire ni écrire dans les champs legacy `nodes` / `edges` du modèle Workflow.
    - **Frontend** : `useDesignStore` est l'unique source de vérité du graphe en édition. `useRuntimeStore` reflète uniquement l'état autoritaire reçu du serveur (REST + événements WebSocket versionnés).
    - **Backend** : MongoDB est l'unique source de vérité persistante (aucune dépendance à Redis pour l'état métier ; aucune `Map` en mémoire ne doit porter la file d'exécution de production).
 
