@@ -127,13 +127,21 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 | J4 | Validation domaine et resilience | Haute | `05-testeur-domaine.agent.md` | Invariants, transitions et scenarios de panne couverts |
 | J5 | Cutover frontend V2 | Critique | `06-frontend.agent.md` | Frontend decouple de V1 et pilote par contrats V2 |
 | J6 | Validation finale de livraison | Critique | `08-testeur-e2e.agent.md` | Non-regression bout en bout et recommandation Go/No-Go |
-| J7 | Remediation des blocages J6 | Critique | `03-backend.agent.md` (coordination technique) | Runs durables et annulables, UI runtime V2, J6 reexecute avec gate Go/No-Go |
+| J7 | Remediation des blocages J6 | Critique | `03-backend.agent.md` (coordination technique) | Runs durables et annulables, sortie sure de quarantaine (fencing label/ID + fence-and-retry), deploiement valide sur l'hote cible, UI runtime V2, J6 reexecute avec gate Go/No-Go |
 
 ### Mise a jour d'etat au 2026-11-03
 
 - `J6` est en cours avec un verdict provisoire `NO-GO`; son rapport initial et les preuves sont suivis dans `Guides/Features/feature/refonte/j6-validation-report.md`.
 - J5 reste partiellement ferme. Cela ne bloque pas la preparation J6, mais l'UI commandes/runtime demeure une condition du cutover et du verdict final.
 - `J7` est ajoute pour traiter les ecarts runtime et UI prouvees par J6, puis fermer J6 sur une nouvelle campagne. Les tests live doivent utiliser une base de test explicitement isolee; ne pas lancer de smoke destructif sur la base de developpement par defaut.
+
+### Mise a jour d'etat au 2026-11-18 (reprise US-J7-02)
+
+- reprise de `US-J7-02` sur la branche `feat/j7-02-quarantine-exit-fencing` ; le travail J7-02 existant est committe (`e05f977`) et la baseline est verte : `npm test` 90 suites/542 tests, `cd backend && npm test` 114 suites/715 tests, `npm run ci:node25:runtime` 3 suites/20 tests, `npm run audit:workflow-architecture:strict` OK.
+- la conception de la sortie sure de quarantaine est validee et documentee dans `Guides/Features/feature/refonte/j7-02-quarantine-exit-fencing-design.md` (commit `aa2e6db`).
+- arbitrages retenus (responsable projet) : fencing automatique des operations `unknown` de l'ancienne epoch a l'activation d'une nouvelle epoch (le demon rouvre l'admission, plus aucun blocage global) ; run incertain en statut terminal `worker_lost`/`quarantined` avec verrou workspace tenu jusqu'a resolution ; operateur legitime = l'utilisateur proprietaire via `POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry` (fallback CLI admin reserve a la maintenance) ; `recoveryPolicy: { autoFenceAndRetry, maxAttempts }` optionnelle par agent (defaut `false`/`0`) ; borne de fencing 30 s (`RECONCILE_TIMEOUT_MS`) puis `504 FENCING_TIMEOUT_ESCALATED` + alerte critique persistée, verrou retenu.
+- `US-J7-02` devient un chapeau decoupe en `US-J7-05` a `US-J7-10` (gateway fencing label/ID, contrat de statuts, endpoint fence-and-retry, recoveryPolicy, visibilite, deploiement hote cible) ; `US-J7-11` stabilise les deux echecs connus (`minimize-restore`, attachement workspace live) avant la campagne finale ; `US-J7-12` traite la dette WebSocket (`userId` temporaire) ; `US-J7-03` consommera le nouvel endpoint pour le bouton Reset & Relance (plan UI detaille produit separement par `09-architecte-applicatif` avant execution) ; `US-J7-04` rejouera J6 apres livraison.
+- verdict J6 : toujours `NO-GO` tant que le chapeau J7 n'est pas ferme.
 
 ## 6. Backlog detaille par jalon
 
@@ -905,6 +913,8 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 **Criticite :** Critique
 **Description :** connecter le traitement de run a un worker de production et remplacer le `TaskQueueService`/`TaskWorkerService` purement en memoire comme preuve de resilience. La file durable doit pouvoir etre reconstruite depuis MongoDB apres redemarrage.
 
+**Plan de reprise (2026-11-18) :** la sortie sure de quarantaine d'un `run` incertain est desormais concue et decoupee en US executables : `US-J7-05` (gateway : label d'operation `airdd2.gateway.op`, etat `fenced` + `fencedOperations`, fencing auto a la rotation d'epoch, `verifyFenced` label/ID + reservation de nom, control plane `/v1/operations/:id/fence|verify`), `US-J7-06` (contrat : statuts terminaux `worker_lost`/`quarantined`, `recoveryAttemptCount`, reconciler quarantiné si preuve absente), `US-J7-07` (endpoint `POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry` + audit immuable + alertes + idempotence), `US-J7-08` (`recoveryPolicy` par agent + auto-recovery `AGENT_AUTO_RECOVERY`), `US-J7-09` (visibilite : journeaux agent, evenements runtime versionnes, alertes), `US-J7-10` (deploiement corrige sur l'hote Linux cible + validation operationnelle reelle). Conception de reference : `Guides/Features/feature/refonte/j7-02-quarantine-exit-fencing-design.md`. Branche de travail : `feat/j7-02-quarantine-exit-fencing`.
+
 **Avancement CI/CD et isolation Docker :** le gateway Unix dédié, l'autorité d'epoch persistée MongoDB, le routage des commandes Docker backend (runs, health checks et provisioning Python) et les unités systemd sont raccordés ; le déploiement Linux a été validé par le responsable du projet. La réconciliation des runs expirés est branchée avant le démarrage du worker. Les scénarios Linux/Docker ciblés ont été exécutés dans un environnement local isolé ; l'US reste ouverte notamment pour la sortie sûre des opérations `run` incertaines et la validation complète des critères ci-dessous.
 
 **Dependances :** US-J7-01.
@@ -954,7 +964,183 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - nouvelle validation ciblee : build backend, 11 suites/72 tests Linux Docker/Mongo, 8 tests de quarantaine queued et 7 tests de requetes retardees reussis ; les pannes backend systemd et la quarantaine gateway synthetique sont aussi validees. Campagne navigateur semi-E2E complete en serie : 10 reussites, 1 echec `minimize-restore` ;
 - campagne live sur backend/Mongo ephemeres : 6 reussites, 1 echec reproductible d'attachement workspace et 1 test d'artefact runtime ignore (sandbox Python non pret). Le test d'election replica Mongo n'a pas ete execute ; aucun E2E complet du worker n'est revendique ;
 - les permissions testees interdisent Docker directement au compte backend, autorisent le compte gateway et permettent au backend d'acceder au socket gateway. `npm run ci:node25:runtime` reussit avec Node 24.22.1 (3 suites, 20 tests) ;
-- reste a faire : concevoir et prouver la sortie sure de quarantaine d'un `run` incertain, valider le deploiement corrige sur l'hote cible et achever la validation E2E et les criteres de l'US. Ne pas effacer le journal ni liberer un verrou sur simple inspection. **US-J7-02 reste ouverte.**
+- reste a faire (2026-11-18) : livrer `US-J7-05` a `US-J7-10` selon la conception `j7-02-quarantine-exit-fencing-design.md`, valider le deploiement corrige sur l'hote Linux cible et achever la validation E2E et les criteres ci-dessous. Ne jamais effacer le journal (`docker_gateway_state`, `dockerJournal` du run, `gateway_fence_audit`) ni liberer un verrou sur simple inspection : la liberation exige `verifyFenced` (label/ID + reservation de nom + fenetre de grace, fail-closed) et `owner === runId`. **US-J7-02 reste ouverte (chapeau).**
+
+### US-J7-05 - Gateway : label d'operation, etat `fenced`, fencing auto a la rotation d'epoch, `verifyFenced` label/ID, control plane
+
+**Agent responsable :** `04-cicd-installation.agent.md` - CI/CD et installation
+**Co-responsable :** `03-backend.agent.md`
+**Criticite :** Critique
+**Description :** rendre le gateway resilient et sortable de quarantaine. Injecter par le serveur le label `airdd2.gateway.op=<operationId>` sur tout `run` admis ; ajouter `fencedOperations[]` a `docker_gateway_state` et passer l'operation `unknown` de l'ancienne epoch en `fenced` (fencing auto, `fenceKind: 'auto_epoch_rotation'`) a l'activation d'une nouvelle epoch, avec reservation de nom inerte (`docker create` labelise `airdd2.fence.op=<id>`), puis rouvrir l'admission immediatement. Implementer `verifyFenced` (aucun conteneur labelise non terminal, reservation verifiee par label, fenetre de grace 2x poll, fail-closed, borne `RECONCILE_TIMEOUT_MS` = 30 s) et exposer `POST /v1/operations/:operationId/fence` et `POST /v1/operations/:operationId/verify` sur le serveur, consommables via `DockerGatewayControlClient`.
+
+**Dependances :** US-J7-02 (chapeau) ; conception `Guides/Features/feature/refonte/j7-02-quarantine-exit-fencing-design.md` sections 3.1 a 3.5.
+
+**Risques et consequences :**
+- une reservation de nom verifiee par le nom seul rouvrirait la course a la suppression tardive par nom ; ne jamais cibler un nom nu pour les commandes mutantes apres fencing (ID/label uniquement) ;
+- le fencing auto confine mais ne pretend pas prouver la quiescence : ne pas marquer `quiescenceProven` sans `verifyFenced` ;
+- une regression de la serialisation mono-operation (`pendingOperation` unique) casserait l'exclusion mutuelle deux workers ;
+- le demon doit ouvrir son socket meme avec des operations fencées, sinon un seul run incertain bloque toute la production.
+
+**Impacts codebase et tests :**
+- `backend/src/services/runtime/DockerGatewayServer.ts` (injection label, routes `/v1/operations/*`), `DockerGatewayAdmission.ts`, `MongoDockerGatewayAdmission.ts` (`fencedOperations`, etat `fenced`, activation avec fencing auto), `DockerGatewayOperationReconciler.ts` (`verifyFenced`), `DockerGatewayDaemon.ts` (ouverture avec operations fencées), `DockerGatewayControlClient.ts` (fence/verify), `dockerGatewayMain.ts` ;
+- tests : `mongo-docker-gateway-admission.test.ts`, `docker-gateway-daemon.test.ts`, `docker-gateway-transport.test.ts`, `docker-gateway-recovery.integration.test.ts`, `docker-inflight-reservation.integration.test.ts`, `docker-name-reservation.integration.test.ts` + nouveaux tests unitaires `verifyFenced`.
+
+**Criteres d'acceptation :**
+- a chaque rotation d'epoch, l'operation `unknown` est fencée automatiquement et l'admission rouvre sans intervention ; epoch perimee toujours rejetee ;
+- tout `run` admis porte le label `airdd2.gateway.op=<operationId>` ; `docker ps -a --filter label=...` retrouve le conteneur meme apres deconnexion ;
+- `verifyFenced` retourne true seulement avec reservation labelisee + aucun conteneur labelise non terminal + fenetre de grace ; false sur inspect en erreur, label mismatch ou etat inconnu ;
+- deux workers concurrents ne peuvent pas executer le meme lease ; tests de restart gateway avec operation `run` unknown, creation differee (echoue sur nom reserve), kill differe par nom (ne touche pas la reservation), conteneur en pause (reste quarantine).
+
+### US-J7-06 - Contrat de run : statuts terminaux `worker_lost`/`quarantined`, `recoveryAttemptCount`, reconciler quarantinant
+
+**Agent responsable :** `03-backend.agent.md` - Backend
+**Co-responsable :** `01-architecte-bdd.agent.md` (contrat domaine)
+**Criticite :** Critique
+**Description :** etendre le contrat de statuts de `UserToolRun` avec deux statuts terminaux `worker_lost` et `quarantined` (transitions `[]`, `error.code` conserve pour compatibilite), ajouter `recoveryAttemptCount` (defaut 0), faire poser `status: 'worker_lost'` par `markExpiredRunWorkerLost`, et faire poser `status: 'quarantined'` (verrou tenu) par le reconciler quand la preuve de quiescence est absente au lieu de laisser le run `running` indefiniment. Migrer les filtres et index partiels existants.
+
+**Dependances :** US-J7-05 (preuve `verifyFenced`), US-J7-01.
+
+**Risques et consequences :**
+- changement de contrat versionne : impacter l'UI, les filtres (`$in: ['queued','running']` restent les seuls non terminaux), les fixtures runs et le snapshot ;
+- une transition illegale vers `queued`/`running` depuis un terminal casserait l'irreversibilite ; la state machine doit rester le garde-fou ;
+- les index partiels (`idx_user_tool_runs_active_watchdog`, running lease expiry) doivent etre revus pour les nouveaux statuts.
+
+**Impacts codebase et tests :**
+- `backend/src/domain/execution/userToolRun.contract.ts`, `backend/src/models/UserToolRun.model.ts`, `backend/src/services/userToolRun.service.ts` (`markExpiredRunWorkerLost`, `markRunQuarantined`, `listWorkerLostLockCleanup`, `listExpiredSupervisedRuns`), `backend/src/services/runtime/MongoExpiredRunReconciler.ts`, `backend/src/services/databaseInit.ts` (index) ;
+- tests : `user-tool-run.contract.test.ts`, `user-tool-run.service.test.ts`, `mongo-expired-run-reconciler.test.ts`, `runs-command.routes.test.ts`, `durable-worker-restart.integration.test.ts`, `queued-run-quarantine.integration.test.ts`, `database-init.run-lease.test.ts`.
+
+**Criteres d'acceptation :**
+- `worker_lost` et `quarantined` sont terminaux et irreversibles (`canTransitionUserToolRun` refuse toute sortie) ;
+- preuve de quiescence presente -> `worker_lost` + liberation conditionnelle du verrou ; preuve absente -> `quarantined` + verrou tenu ;
+- `recoveryAttemptCount` persiste et s'incremente uniquement via les chemins de retry/fence-and-retry ;
+- toutes les requêtes et index existants sont migrés et les suites impactees restent vertes.
+
+### US-J7-07 - Endpoint `POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry` + service + audit + alertes
+
+**Agent responsable :** `03-backend.agent.md` - Backend
+**Co-responsable :** `02-securite.agent.md` (ownership, idempotence)
+**Criticite :** Critique
+**Description :** implementer le contrat applicatif `fence-and-retry` de la conception section 4 : route dans un nouveau `backend/src/routes/workspaceRuns.routes.ts` monte sur `/api/workspaces`, `requireAuth` + ownership strict (workflow et run appartiennent a `req.user.id`), header `Idempotency-Key` obligatoire (Zod, rejeu idempotent), precondition run en `worker_lost`/`quarantined` sinon `409 RUN_NOT_QUARANTINED`. Sequence : fencing via gateway (`/v1/operations/:id/fence` puis `/verify`, 30 s) -> `504 FENCING_TIMEOUT_ESCALATED` + alerte critique persistée + verrou retenu si quiescence non prouvee ; marquage `fenced` + entree d'audit signee dans `gateway_fence_audit` (`actorUserId`, `timestamp`, `fencedOpUuid`, `reason: 'USER_MANUAL_RESET'`) ; liberation du verrou uniquement si `owner === runId` sinon `409 WORKSPACE_LOCKED_BY_OTHER_RUN` ; creation d'un nouveau run `queued` avec nouvel `executionId`, `retryOfExecutionId`, `recoveryAttemptCount` incremente, parent immutable. Reponse `202 { fencedRunId, newExecutionId, status: 'queued', recoveryAttemptCount }`.
+
+**Dependances :** US-J7-05, US-J7-06.
+
+**Risques et consequences :**
+- liberation de verrou sans preuve de quiescence = fail-open interdit ; toute erreur d'inspection reste fail-closed ;
+- l'idempotence doit couvrir le rejeu apres timeout client sans re-fencing ni double run ;
+- l'atomicite (transaction Mongo si replica set, sinon CAS ordonne + idempotency) doit laisser un etat coherent meme en cas d'echec intermediaire ;
+- aucun secret ni token dans les reponses ni les logs.
+
+**Impacts codebase et tests :**
+- nouveaux `backend/src/routes/workspaceRuns.routes.ts`, `backend/src/services/fenceAndRetry.service.ts` (ou `services/runtime/`), collections `gateway_fence_audit` (immuable) et `runtime_alerts`, montage dans `server.ts` ;
+- test nouveau `backend/src/__tests__/workspace-runs.fence-and-retry.routes.test.ts` : 202/400/404/409/504, idempotency replay, ownership 404, verrou tiers, parent immutable, audit persiste.
+
+**Criteres d'acceptation :**
+- tableau des reponses HTTP respecte (202/400/404/409/504 + codes) ;
+- `Idempotency-Key` obligatoire, rejeu sans effet de bord double ;
+- le verrou n'est libere que si `owner === runId` et apres quiescence prouvee ; sinon retenu + alerte ;
+- le journal et l'audit ne sont jamais modifies/effaces, seulement enrichis ;
+- parent terminal strictement immutable ; nouveau run `queued` avec lineage et compteur.
+
+### US-J7-08 - `recoveryPolicy` par agent et auto-recovery worker (`AGENT_AUTO_RECOVERY`)
+
+**Agent responsable :** `03-backend.agent.md` - Backend
+**Co-responsable :** `01-architecte-bdd.agent.md` (contrat domaine)
+**Criticite :** Haute
+**Description :** ajouter `recoveryPolicy: { autoFenceAndRetry: boolean; maxAttempts: number }` (defaut `{ autoFenceAndRetry: false, maxAttempts: 0 }`, validation Zod) sur le prototype d'agent et son snapshot d'instance ; quand un run `quarantined` appartient a un agent avec auto-recovery activee et `recoveryAttemptCount < maxAttempts`, le worker execute la meme sequence que `fence-and-retry` avec `reason: 'AGENT_AUTO_RECOVERY'` (audit signe) ; au seuil, le run reste `quarantined` et la main est rendue a l'utilisateur.
+
+**Dependances :** US-J7-06, US-J7-07.
+
+**Risques et consequences :**
+- une auto-recovery trop agressive pourrait relancer des effets externes non idempotents ; le seuil `maxAttempts` et l'audit sont obligatoires ;
+- la policy doit etre snapshotée sur le run au lancement (comme `policySnapshot`) pour rester coherente apres changement du prototype.
+
+**Impacts codebase et tests :**
+- `backend/src/models/AgentPrototype.model.ts`, snapshot d'instance, schemas Zod, reconciler/worker (`MongoExpiredRunReconciler` ou `DurableRunWorker`), tests unitaires + integration.
+
+**Criteres d'acceptation :**
+- policy persistee, validee par Zod, defaut off ;
+- auto-recovery sous le seuil : fencing + nouveau run + audit `AGENT_AUTO_RECOVERY` ; au seuil : run reste `quarantined`, aucune relance automatique.
+
+### US-J7-09 - Visibilite : journeaux agent, evenements runtime versionnes, alertes
+
+**Agent responsable :** `03-backend.agent.md` - Backend
+**Co-responsable :** `06-frontend.agent.md` (contrat consommateur)
+**Criticite :** Haute
+**Description :** rendre la quarantaine visible et tracable : nouveaux types d'evenements runtime versionnes `run.quarantined`, `run.fenced`, `run.recovery_relaunched` (whitelist de payload, aucun secret), entree dans `agent_journals` pour l'agent/noeud concerne (cause, etat du verrou, operation fencee), persistance des alertes dans `runtime_alerts` (severite `critical` sur `FENCING_TIMEOUT_ESCALATED`), exposition via `useRuntimeStore` pour la carte et le panneau de supervision (consommation UI realisee en US-J7-03).
+
+**Dependances :** US-J7-06, US-J7-07.
+
+**Risques et consequences :**
+- un payload d'evenement trop riche fuirait des donnees sensibles ; la whitelist Zod reste le garde-fou ;
+- un evenement de quarantaine emis vers le mauvais workspace casserait l'isolation ; filtrage strict par `workspaceId`.
+
+**Impacts codebase et tests :**
+- `backend/src/domain/execution/runtimeEvent.contract.ts`, `backend/src/services/runtimeEventPublisher.service.ts`, `backend/src/models/AgentJournal.model.ts`, `runtime_alerts`, tests `runtime-event.contract.test.ts`, `runtime-event.publisher.test.ts`, `websocket-auth.test.ts`.
+
+**Criteres d'acceptation :**
+- evenements versionnes emis et valides Zod, consommables par le front sans casser les clients existants ;
+- entree journal avec agent/noeud, cause, etat du verrou ; alerte critique persistée sur 504 ;
+- aucun secret dans les payloads ni les logs.
+
+### US-J7-10 - Deploiement corrige sur l'hote Linux cible et validation operationnelle
+
+**Agent responsable :** `04-cicd-installation.agent.md` - CI/CD et installation
+**Criticite :** Critique
+**Description :** deployer les unites systemd corrigees (`airdd2-docker-gateway.service`, `airdd2-backend.service`, env files root-owned 0640) sur l'hote Linux de production apres build (`dist/src/server.js`, `dist/src/services/runtime/dockerGatewayMain.js` verifies), `systemctl daemon-reload`, enable/start, puis valider : `/api/health/ready` = 200 (Mongo + epoch gateway + worker), SIGKILL reel du backend sous systemd (conteneur arrete, `worker_lost`/`quarantined` persiste, verrou tenu/libere selon preuve), restart du gateway avec operation incertaine reelle (admission rouvre, operation fencee, reservation de nom), puis `fence-and-retry` reel via API avec preuve label/ID -> `202` + nouveau run `queued`. Ne jamais lancer de smoke destructif sur la base de production ; base de test explicite, disposable et verifiee.
+
+**Dependances :** US-J7-05, US-J7-06, US-J7-07.
+
+**Risques et consequences :**
+- un deploiement sur la mauvaise base ou le mauvais hote serait destructif ; verifier l'URI Mongo et l'hote avant toute operation ;
+- les chemins `dist/src/...` doivent correspondre a la sortie reelle du build ;
+- aucun nettoyage de journal ni liberation de verrou manuel sur l'hote ; uniquement la procédure fence-and-retry.
+
+**Impacts codebase et tests :**
+- `backend/deploy/systemd/*`, `backend/deploy/recovery-validation/*` (scenarios fencing label/ID en labo isole avant l'hote), section deploiement du `README.md`, `backend/documentation/**` ;
+- validation documentee (commandes exactes, captures, resultats) dans `j6-validation-report.md`.
+
+**Criteres d'acceptation :**
+- unites a jour deployees sur l'hote cible, health/ready 200 ;
+- scenario SIGKILL + restart gateway + fence-and-retry reel execute et trace sur l'hote ;
+- aucune donnee de production perdue ou nettoyee manuellement.
+
+### US-J7-11 - Stabilisation avant campagne finale : `minimize-restore` et attachement workspace live
+
+**Agent responsable :** `08-testeur-e2e.agent.md` - Testeur E2E final
+**Co-responsable :** `06-frontend.agent.md`
+**Criticite :** Haute
+**Description :** corriger les deux echecs connus avant la campagne J7-04 : le scenario semi-E2E `minimize-restore` qui ciblait le port 4000 au lieu du serveur de test 4173, et l'echec reproductible d'attachement workspace en campagne live (fichier non retrouve dans l'UI). Aucune assertion ne doit etre assouplie pour masquer une regression.
+
+**Dependances :** aucune bloquante ; requis avant `US-J7-04`.
+
+**Risques et consequences :**
+- un test corrige en affaiblissant ses assertions invaliderait la campagne ; les corrections portent sur la cible (port, fixture, timing) pas sur les criteres.
+
+**Impacts codebase et tests :**
+- `tests/fonctionnels/minimize-restore.semi-e2e.spec.ts`, `tests/fonctionnels/AuthenticatedWorkspaceMedia.live.smoke.spec.ts`, `playwright.config.ts`, fixtures concernees.
+
+**Criteres d'acceptation :**
+- les deux scenarios passent en environnement isole sans assertion affaiblie ;
+- `npm run test:j6:semi-e2e` et la campagne live isolee sont vertes.
+
+### US-J7-12 - Securite WebSocket : remplacer le `userId` temporaire par une authentification JWT stricte
+
+**Agent responsable :** `02-securite.agent.md` - Securite
+**Criticite :** Critique
+**Description :** traiter la dette signalee en section 4.1 : `backend/src/websocket/WebSocketManager.ts` genere encore un `userId` temporaire cote socket. Remplacer par une authentification JWT stricte a la connexion/join, avec filtrage strict par `workspaceId` avant d'exposer les etats runtime (y compris les etats de quarantaine US-J7-09). Aucun `userId` temporaire ne doit subsister.
+
+**Dependances :** US-J7-09 (les evenements de quarantaine seront exposés sur ce canal).
+
+**Risques et consequences :**
+- exposer des etats de run/quarantaine sans authentification forte serait une fuite inter-utilisateurs ;
+- la reconnexion navigateur doit revalider le token (pas de session implicite).
+
+**Impacts codebase et tests :**
+- `backend/src/websocket/WebSocketManager.ts`, `backend/src/middleware/auth.middleware.ts` (helper de verification socket), tests `websocket-auth.test.ts` (etendus), contrat `runtime-events-versioning.md`.
+
+**Criteres d'acceptation :**
+- join refuse sans JWT valide ; invite et autre proprietaire refuses ; filtrage `workspaceId` verifie ;
+- aucun `userId` temporaire dans le code ; tests websocket-auth etendus restent verts.
 
 ### US-J7-03 - Terminer le cutover UI J5 des commandes et statuts runtime
 
@@ -962,7 +1148,7 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 **Criticite :** Critique
 **Description :** exposer les commandes V2 sur la carte et afficher l'etat serveur/realtime, en utilisant le contrat livre par US-J7-01/02 et sans graphe local concurrent.
 
-**Dependances :** US-J7-01, US-J7-02.
+**Dependances :** US-J7-01, US-J7-02 (chapeau : `US-J7-05` a `US-J7-10` livrees) ; `US-J7-07` (endpoint `fence-and-retry` consomme par le bouton Reset & Relance) ; `US-J7-09` (statuts et evenements de quarantaine a afficher) ; `US-J7-12` (canal temps reel securise avant d'exposer les etats de quarantaine). Le plan UI detaille (toolbar, bouton Reset & Relance, statuts `worker_lost`/`quarantined`, etat du verrou) sera produit par `09-architecte-applicatif` avant execution.
 **Risques et consequences :**
 - boutons sans contrat serveur coherents peuvent afficher pause/reprise alors qu'ils annulent ou relancent ;
 - un statut local ou un evenement d'un autre workflow peut afficher un run faux ;
@@ -992,7 +1178,7 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 **Criticite :** Critique
 **Description :** reexecuter les 18 scenarios J6-01 et la matrice J6-02 apres livraison des US-J7-01 a J7-03 ; classer les anomalies et fournir un verdict final documente.
 
-**Dependances :** US-J7-01, US-J7-02, US-J7-03 ; suites J3/J4 restent vertes.
+**Dependances :** US-J7-01, US-J7-02 (chapeau : `US-J7-05` a `US-J7-10` livrees et validees), `US-J7-11` (stabilisation des deux echecs connus), US-J7-03 ; suites J3/J4 restent vertes.
 **Risques et consequences :**
 - smoke live sur une base partagee peut detruire ou polluer des donnees ;
 - test uniquement chromium peut manquer des regressions de reload/focus/scroll ;
@@ -1074,6 +1260,7 @@ Toute suppression de fichier ou dossier legacy doit etre precedee d'un inventair
 5. Terminer J4 avant la validation finale.
 6. Terminer J5 avant J6.
 7. Si J6 conclut `NO-GO`, executer les US J7 applicable(s), puis reexecuter J6-01 et J6-02 avant tout verdict `GO`.
+8. Ordre impose dans J7 (2026-11-18) : `US-J7-05` -> `US-J7-06` -> `US-J7-07` -> `US-J7-08` et `US-J7-09` -> `US-J7-10` ; `US-J7-11` et `US-J7-12` peuvent tourner en parallele mais doivent etre fermees avant `US-J7-03` et avant la campagne `US-J7-04` ; `US-J7-04` rejouera J6-01/J6-02 apres livraison complete de J7.
 
 ## 11. Points de vigilance transverses
 

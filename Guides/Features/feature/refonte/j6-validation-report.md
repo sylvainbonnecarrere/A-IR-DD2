@@ -35,6 +35,10 @@ AIRDD2_TEST_DOCKER_RESERVATION=1 npm --prefix backend test -- --runInBand \
 
 Les tests créent puis suppriment uniquement leurs conteneurs identifiés par des labels de test uniques. Ils nécessitent un accès Docker et ne remplacent pas les essais contrôlés du service systemd en production.
 
+## Actualisation reprise J7 (2026-11-18)
+
+La feature `US-J7-02` est reprise sur la branche `feat/j7-02-quarantine-exit-fencing` (base commitée `e05f977`, baseline verte : root 90 suites/542 tests, backend 114 suites/715 tests, `ci:node25:runtime` 3 suites/20 tests, audit strict OK). La conception de la sortie sûre de quarantaine est validée dans `j7-02-quarantine-exit-fencing-design.md` et le backlog découpe le travail en `US-J7-05` à `US-J7-12` : fencing label/ID côté gateway, statuts terminaux `worker_lost`/`quarantined`, endpoint `POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry`, `recoveryPolicy` par agent, visibilité (journaux + événements runtime + alertes), déploiement sur l'hôte Linux cible, stabilisation de `minimize-restore` et de l'attachement workspace live, dette WebSocket. Le verdict J6 reste **NO-GO** tant que le chapeau J7 n'est pas fermé et rejoué via `US-J7-04`.
+
 ## Périmètre et isolation
 
 Les tests semi-E2E utilisent des utilisateurs, tokens et réponses API synthétiques. Aucun compte réel, fournisseur LLM ni clé API n'est utilisé. Les smoke tests live qui enregistrent un utilisateur dans la base configurée ne sont pas exécutés dans cette campagne isolée.

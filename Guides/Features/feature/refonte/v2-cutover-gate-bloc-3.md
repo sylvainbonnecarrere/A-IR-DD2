@@ -137,3 +137,7 @@ J5 est partiellement realise : hydratation et bascule de workflow decouplees de 
 
 Ecarts restants avant handoff vers `08-testeur-e2e.agent.md` : `WorkflowToolbar` non monte, reprise / confirmation d'annulation, statuts temps reel et etats offline / partial non affiches (specifies dans `Guides/Features/WORKFLOWLINKS/README.md`), plus deux ecarts reportes dans un autre backlog (`saveEdges`, tests de reconnexion et de parcours). L'agregat local `useWorkflowStore` (nodes / edges) a ete retire le 2026-10-29 : le graphe n'a plus qu'une source, `useDesignStore`. Le gate reste conditionnel a la fermeture de J5. Detail : section "Etat de contexte J5" du backlog.
 
+## 11. Etat de J7 au 2026-11-18 (reprise US-J7-02)
+
+Le gate reste egalement conditionnel a la fermeture de J7. La remédiation est reprise sur la branche `feat/j7-02-quarantine-exit-fencing` : conception de la sortie de quarantaine dans `j7-02-quarantine-exit-fencing-design.md`, découpage en `US-J7-05` a `US-J7-12` dans le backlog. Points bloquants traités : fin du blocage global du gateway (fencing auto a la rotation d'epoch, admission rouverte), sortie de quarantaine prouvée par label/ID + réservation de nom via `fence-and-retry` (jamais sur simple inspection), déploiement validé sur l'hôte Linux cible, puis campagne E2E rejouée (`US-J7-04`) avant tout verdict GO.
+
