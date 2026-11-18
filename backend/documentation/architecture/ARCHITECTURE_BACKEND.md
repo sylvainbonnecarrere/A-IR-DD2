@@ -718,7 +718,7 @@ npm run dev
 ### Build Production
 ```bash
 npm run build   # Compile TypeScript → dist/
-npm start       # Lance dist/server.js
+npm start       # Lance dist/src/server.js
 ```
 
 ### Tests

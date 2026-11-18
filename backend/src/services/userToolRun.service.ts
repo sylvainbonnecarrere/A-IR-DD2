@@ -14,6 +14,9 @@ import {
     UserToolRunStatus
 } from '../models';
 import { createRuntimeEventPublisher, RuntimeEventPublisher } from './runtimeEventPublisher.service';
+import type { RunLease } from './runtime/MongoRunLeaseService';
+import { DURABLE_RUN_WRITE_CONCERN } from './runtime/durableRunWriteConcern';
+import { isReconstructionRejectionCode, type RunReconstructionRejectionCode } from '../domain/execution/runReconstructionQuarantine';
 
 type ObjectIdLike = mongoose.Types.ObjectId | string | null | undefined;
 
@@ -33,6 +36,7 @@ export interface CreateUserToolRunData {
     agentInstanceId?: ObjectIdLike;
     retryOfExecutionId?: string;
     requestFingerprint?: string;
+    targetFingerprint?: string;
     privateContext?: Record<string, unknown>;
     queuedAt?: Date;
 }
@@ -65,6 +69,22 @@ export interface ListUserToolRunsFilter {
     statuses?: UserToolRunStatus[];
     limit?: number;
 }
+
+export interface ExpiredSupervisedRun {
+    executionId: string;
+    ownerUserId: string;
+    workflowId: string | null;
+    attemptId: string;
+}
+
+export interface WorkerLostLockCleanup {
+    executionId: string;
+    ownerUserId: string;
+    workflowId: string;
+    attemptId: string;
+}
+
+export type WorkerLostContainerState = 'absent' | 'created' | 'exited' | 'dead';
 
 export class UserToolRunStateError extends Error {
     constructor(message: string) {
@@ -140,6 +160,7 @@ export class UserToolRunService {
             agentInstanceId: toOptionalObjectId(data.agentInstanceId),
             retryOfExecutionId: data.retryOfExecutionId ?? null,
             requestFingerprint: data.requestFingerprint ?? null,
+            targetFingerprint: data.targetFingerprint ?? null,
             privateContextCiphertext: data.privateContext
                 ? encrypt(JSON.stringify(data.privateContext), ownerUserId.toString())
                 : null,
@@ -161,7 +182,7 @@ export class UserToolRunService {
             error: null
         });
 
-        await run.save();
+        await run.save({ w: DURABLE_RUN_WRITE_CONCERN.w, wtimeout: DURABLE_RUN_WRITE_CONCERN.wtimeoutMS });
         this.publishRuntimeStateChange(run, 'queued', 'queued');
         return run;
     }
@@ -195,11 +216,14 @@ export class UserToolRunService {
                     error: cancelledError,
                     cancellationRequestedAt: requestedAt,
                     cancellationRequestedBy: requestedById,
+                    lease: null,
+                    workspaceRetentionProtected: false,
+                    reconstructionQuarantine: null,
                     'timing.finishedAt': requestedAt,
                     'timing.durationMs': null,
                 },
             },
-            { new: true },
+            { new: true, writeConcern: DURABLE_RUN_WRITE_CONCERN },
         );
 
         if (stoppedQueuedRun) {
@@ -220,7 +244,7 @@ export class UserToolRunService {
                     cancellationRequestedBy: requestedById,
                 },
             },
-            { new: true },
+            { new: true, writeConcern: DURABLE_RUN_WRITE_CONCERN },
         );
 
         if (requestedRunningRun) {
@@ -228,7 +252,8 @@ export class UserToolRunService {
             return { kind: 'requested', run: requestedRunningRun };
         }
 
-        const currentRun = await UserToolRun.findOne({ executionId, ownerUserId: ownerId });
+        const currentRun = await UserToolRun.findOne({ executionId, ownerUserId: ownerId })
+            .read('primary').readConcern('majority').maxTimeMS(10_000);
         if (!currentRun) {
             return { kind: 'not_found' };
         }
@@ -267,7 +292,7 @@ export class UserToolRunService {
         return this.markRunning(data.executionId, startedAt);
     }
 
-    async markRunning(executionId: string, startedAt: Date = new Date(), runner?: UserToolRunRunner): Promise<IUserToolRun> {
+    async markRunning(executionId: string, startedAt: Date = new Date(), runner?: UserToolRunRunner, lease?: RunLease): Promise<IUserToolRun> {
         const run = await this.getRequiredRun(executionId);
         this.assertTransitionAllowed(run.status, 'running', executionId);
 
@@ -282,11 +307,26 @@ export class UserToolRunService {
                 'timing.startedAt': startedAt,
                 'timing.finishedAt': null,
                 'timing.durationMs': null
-            }
+            },
+            lease
         );
     }
 
-    async completeRun(executionId: string, data: CompleteUserToolRunData = {}): Promise<IUserToolRun> {
+    async assertRunningLease(lease: RunLease): Promise<void> {
+        const run = await UserToolRun.findOne({
+            executionId: lease.executionId,
+            status: 'running',
+            'lease.owner': lease.owner,
+            'lease.token': lease.token,
+            cancellationRequestedAt: null,
+            $expr: { $gt: ['$lease.expiresAt', '$$NOW'] },
+        }).read('primary').readConcern('majority').maxTimeMS(10_000);
+        if (!run) {
+            throw new UserToolRunStateError(`Invalid UserToolRun transition or lease for ${lease.executionId}`);
+        }
+    }
+
+    async completeRun(executionId: string, data: CompleteUserToolRunData = {}, lease?: RunLease): Promise<IUserToolRun> {
         const finishedAt = data.finishedAt ?? new Date();
         const run = await this.getRequiredRun(executionId);
         this.assertTransitionAllowed(run.status, 'completed', executionId);
@@ -302,11 +342,12 @@ export class UserToolRunService {
                 resourceUsage: data.resourceUsage ?? run.resourceUsage,
                 'timing.finishedAt': finishedAt,
                 'timing.durationMs': computeDurationMs(run.timing.startedAt ?? null, finishedAt)
-            }
+            },
+            lease
         );
     }
 
-    async failRun(executionId: string, data: FailUserToolRunData): Promise<IUserToolRun> {
+    async failRun(executionId: string, data: FailUserToolRunData, lease?: RunLease): Promise<IUserToolRun> {
         const finishedAt = data.finishedAt ?? new Date();
         const run = await this.getRequiredRun(executionId);
         this.assertTransitionAllowed(run.status, 'failed', executionId);
@@ -322,20 +363,200 @@ export class UserToolRunService {
                 resourceUsage: data.resourceUsage ?? run.resourceUsage,
                 'timing.finishedAt': finishedAt,
                 'timing.durationMs': computeDurationMs(run.timing.startedAt ?? null, finishedAt)
-            }
+            },
+            lease
         );
     }
 
-    async timeoutRun(executionId: string, data: StopUserToolRunData = {}): Promise<IUserToolRun> {
-        return this.finishWithTerminalStatus(executionId, 'timed_out', data);
+    async timeoutRun(executionId: string, data: StopUserToolRunData = {}, lease?: RunLease): Promise<IUserToolRun> {
+        return this.finishWithTerminalStatus(executionId, 'timed_out', data, lease);
     }
 
-    async stopRun(executionId: string, data: StopUserToolRunData = {}): Promise<IUserToolRun> {
-        return this.finishWithTerminalStatus(executionId, 'stopped', data);
+    async stopRun(executionId: string, data: StopUserToolRunData = {}, lease?: RunLease): Promise<IUserToolRun> {
+        return this.finishWithTerminalStatus(executionId, 'stopped', data, lease);
     }
 
-    async getRunByExecutionId(executionId: string): Promise<IUserToolRun | null> {
-        return UserToolRun.findOne({ executionId });
+    async getRunByExecutionId(
+        executionId: string,
+        consistency: 'local' | 'majority' = 'local',
+        ownerUserId?: ObjectIdLike,
+    ): Promise<IUserToolRun | null> {
+        const query = UserToolRun.findOne({
+            executionId,
+            ...(ownerUserId ? { ownerUserId: toObjectId(ownerUserId, 'ownerUserId') } : {}),
+        });
+        return consistency === 'majority'
+            ? query.read('primary').readConcern('majority').maxTimeMS(10_000)
+            : query;
+    }
+
+    async listExpiredSupervisedRuns(): Promise<ExpiredSupervisedRun[]> {
+        const runs = await UserToolRun.find({
+            status: 'running',
+            $expr: { $lte: ['$lease.expiresAt', '$$NOW'] },
+            'supervisedAttempt.attemptId': { $type: 'string' },
+        })
+            .select('executionId ownerUserId workflowId')
+            .select('+supervisedAttempt')
+            .read('primary')
+            .readConcern('majority')
+            .maxTimeMS(10_000)
+            .lean();
+        return runs.flatMap((run) => {
+            const attemptId = run.supervisedAttempt?.attemptId;
+            if (!attemptId) return [];
+            return [{
+                executionId: run.executionId,
+                ownerUserId: run.ownerUserId.toString(),
+                workflowId: run.workflowId?.toString() ?? null,
+                attemptId,
+            }];
+        });
+    }
+
+    async listWorkerLostLockCleanup(): Promise<WorkerLostLockCleanup[]> {
+        const runs = await UserToolRun.find({
+            status: 'failed',
+            'error.code': 'WORKER_LOST',
+            workflowId: { $type: 'objectId' },
+            'supervisedAttempt.workerLossReconciliation.workspaceLockReleased': false,
+        })
+            .select('executionId ownerUserId workflowId')
+            .select('+supervisedAttempt')
+            .read('primary')
+            .readConcern('majority')
+            .maxTimeMS(10_000)
+            .lean();
+        return runs.flatMap((run) => {
+            const attemptId = run.supervisedAttempt?.attemptId;
+            if (!attemptId || !run.workflowId) return [];
+            return [{
+                executionId: run.executionId,
+                ownerUserId: run.ownerUserId.toString(),
+                workflowId: run.workflowId.toString(),
+                attemptId,
+            }];
+        });
+    }
+
+    async markExpiredRunWorkerLost(
+        executionId: string,
+        attemptId: string,
+        containerState: WorkerLostContainerState,
+    ): Promise<boolean> {
+        if (!executionId.trim() || !attemptId.trim()
+            || !['absent', 'created', 'exited', 'dead'].includes(containerState)) {
+            throw new Error('Worker-loss reconciliation identity or proof is invalid');
+        }
+        const run = await UserToolRun.findOneAndUpdate(
+            {
+                executionId,
+                status: 'running',
+                'supervisedAttempt.attemptId': attemptId,
+                $expr: { $lte: ['$lease.expiresAt', '$$NOW'] },
+            },
+            [{
+                $set: {
+                    status: 'failed',
+                    error: {
+                        code: 'WORKER_LOST',
+                        subsystem: 'runner',
+                        failureKind: 'worker_lost',
+                        message: 'Le worker a été perdu ; le conteneur Docker supervisé a été réconcilié comme arrêté.',
+                        retryable: true,
+                    },
+                    'timing.finishedAt': '$$NOW',
+                    'timing.durationMs': {
+                        $cond: [
+                            { $eq: [{ $ifNull: ['$timing.startedAt', null] }, null] },
+                            null,
+                            { $subtract: ['$$NOW', '$timing.startedAt'] },
+                        ],
+                    },
+                    lease: null,
+                    workspaceRetentionProtected: false,
+                    'supervisedAttempt.dockerJournal.admission': 'closed',
+                    'supervisedAttempt.dockerJournal.pending': null,
+                    'supervisedAttempt.dockerJournal.hasUnknownOutcome': false,
+                    'supervisedAttempt.workerLossReconciliation': {
+                        containerName: `airdd2-j7-attempt-${attemptId}`,
+                        containerState: { $literal: containerState },
+                        verifiedAt: '$$NOW',
+                        workspaceLockReleased: { $eq: [{ $ifNull: ['$workflowId', null] }, null] },
+                    },
+                },
+            }],
+            { new: true, writeConcern: DURABLE_RUN_WRITE_CONCERN },
+        );
+        if (!run) return false;
+        this.publishRuntimeStateChange(run, 'running', 'failed');
+        return true;
+    }
+
+    async markWorkerLostWorkspaceLockReleased(executionId: string, attemptId: string): Promise<boolean> {
+        const result = await UserToolRun.updateOne(
+            {
+                executionId,
+                status: 'failed',
+                'error.code': 'WORKER_LOST',
+                'supervisedAttempt.attemptId': attemptId,
+                'supervisedAttempt.workerLossReconciliation.workspaceLockReleased': false,
+            },
+            { $set: { 'supervisedAttempt.workerLossReconciliation.workspaceLockReleased': true } },
+            { writeConcern: DURABLE_RUN_WRITE_CONCERN },
+        );
+        return result.modifiedCount === 1;
+    }
+
+    async failQuarantinedRun(
+        executionId: string,
+        expectedCode: RunReconstructionRejectionCode,
+        resolvedBy: ObjectIdLike,
+    ): Promise<{ kind: 'failed'; run: IUserToolRun } | { kind: 'not_found' } | { kind: 'conflict' }> {
+        if (!isReconstructionRejectionCode(expectedCode)) {
+            throw new Error('Invalid reconstruction quarantine code');
+        }
+        const actorId = toObjectId(resolvedBy, 'resolvedBy');
+        const run = await UserToolRun.findOneAndUpdate(
+            {
+                executionId,
+                status: 'queued',
+                'reconstructionQuarantine.code': expectedCode,
+                'reconstructionQuarantine.resolution': { $exists: false },
+                lease: null,
+                cancellationRequestedAt: null,
+            },
+            [{
+                $set: {
+                    reconstructionQuarantineResolution: {
+                        code: '$reconstructionQuarantine.code',
+                        quarantinedAt: '$reconstructionQuarantine.quarantinedAt',
+                        resolution: 'failed',
+                        resolvedAt: '$$NOW',
+                        resolvedBy: { $literal: actorId },
+                    },
+                    reconstructionQuarantine: null,
+                    status: 'failed',
+                    error: {
+                        code: 'RUN_RECONSTRUCTION_REJECTED',
+                        subsystem: 'validation',
+                        failureKind: 'reconstruction_rejected',
+                        message: 'Run clôturé par un administrateur après rejet de reconstruction.',
+                        retryable: false,
+                    },
+                    'timing.finishedAt': '$$NOW',
+                    'timing.durationMs': null,
+                },
+            }],
+            { new: true, writeConcern: DURABLE_RUN_WRITE_CONCERN },
+        );
+        if (run) {
+            this.publishRuntimeStateChange(run, 'queued', 'failed');
+            return { kind: 'failed', run };
+        }
+
+        const current = await UserToolRun.exists({ executionId });
+        return current ? { kind: 'conflict' } : { kind: 'not_found' };
     }
 
     async listRuns(filter: ListUserToolRunsFilter = {}): Promise<IUserToolRun[]> {
@@ -377,7 +598,8 @@ export class UserToolRunService {
     private async finishWithTerminalStatus(
         executionId: string,
         status: Extract<UserToolRunStatus, 'stopped' | 'timed_out'>,
-        data: StopUserToolRunData
+        data: StopUserToolRunData,
+        lease?: RunLease
     ): Promise<IUserToolRun> {
         const finishedAt = data.finishedAt ?? new Date();
         const run = await this.getRequiredRun(executionId);
@@ -394,7 +616,8 @@ export class UserToolRunService {
                 resourceUsage: data.resourceUsage ?? run.resourceUsage,
                 'timing.finishedAt': finishedAt,
                 'timing.durationMs': computeDurationMs(run.timing.startedAt ?? null, finishedAt)
-            }
+            },
+            lease
         );
     }
 
@@ -402,18 +625,34 @@ export class UserToolRunService {
         executionId: string,
         currentStatus: UserToolRunStatus,
         nextStatus: UserToolRunStatus,
-        patch: Record<string, unknown>
+        patch: Record<string, unknown>,
+        lease?: RunLease
     ): Promise<IUserToolRun> {
+        if (lease && lease.executionId !== executionId) {
+            throw new UserToolRunStateError(`Lease does not belong to executionId '${executionId}'`);
+        }
         const updatedRun = await UserToolRun.findOneAndUpdate(
             {
                 executionId,
-                status: currentStatus
+                status: currentStatus,
+                reconstructionQuarantine: null,
+                ...(lease
+                    ? {
+                        'lease.owner': lease.owner,
+                        'lease.token': lease.token,
+                        $expr: { $gt: ['$lease.expiresAt', '$$NOW'] },
+                    }
+                    : { lease: null }),
             },
             {
-                $set: patch
+                $set: {
+                    ...patch,
+                    ...(nextStatus === 'running' ? {} : { lease: null, workspaceRetentionProtected: false }),
+                }
             },
             {
-                new: true
+                new: true,
+                ...(lease ? { writeConcern: DURABLE_RUN_WRITE_CONCERN } : {}),
             }
         );
 
@@ -428,7 +667,7 @@ export class UserToolRunService {
         }
 
         throw new UserToolRunStateError(
-            `Invalid UserToolRun transition for ${executionId}: ${currentRun.status} -> ${nextStatus}`
+            `Invalid UserToolRun transition or lease for ${executionId}: ${currentRun.status} -> ${nextStatus}`
         );
     }
 

@@ -1,0 +1,40 @@
+[Unit]
+Description=A-IR-DD2 exclusive Docker command gateway
+PartOf=airdd2-backend.service
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=airdd2-gateway
+Group=airdd2-gateway-clients
+SupplementaryGroups=docker
+WorkingDirectory=/opt/airdd2/backend
+EnvironmentFile=/etc/airdd2/docker-gateway.env
+ExecStart=/usr/bin/env node dist/src/services/runtime/dockerGatewayMain.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0027
+RuntimeDirectory=airdd2-docker-gateway
+RuntimeDirectoryMode=0750
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

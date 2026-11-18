@@ -6,6 +6,7 @@ import { Workflow } from '../models/Workflow.model';
 import { UserTool } from '../models/UserTool.model';
 import { Workspace } from '../models/Workspace.model';
 import { BuildPreparationError, BuildService } from '../services/build.service';
+import { MongoWorkspaceLockService } from '../services/runtime/MongoWorkspaceLockService';
 
 function createToolVersion(overrides: Record<string, unknown> = {}) {
     return {
@@ -74,6 +75,41 @@ describe('BuildService', () => {
         await UserTool.deleteMany({});
         await Workflow.deleteMany({});
         await User.deleteMany({});
+    });
+
+    it('does not prepare files while the workflow workspace is locked', async () => {
+        const { user, workflow } = await createOwnedWorkflowFixture();
+        const fn = await UserTool.create({
+            name: 'locked_build_tool',
+            description: 'Tool whose workspace is locked',
+            runtime: 'typescript',
+            ownerUserId: user._id,
+            workspaceId: null,
+            scopeType: 'user',
+            workflowId: workflow._id,
+            status: 'ready',
+            trustLevel: 'user_private',
+            currentVersion: createToolVersion(),
+            versions: [createToolVersion()],
+            inputSchema: {},
+            outputSchema: {},
+            dependencies: { python: [], npm: [] },
+            policy: { networkMode: 'none', writablePaths: [], secretAliases: [] },
+            isEnabled: true,
+            isReadonly: false,
+            tags: []
+        });
+        const locks = new MongoWorkspaceLockService();
+        const lock = await locks.tryAcquire(user.id, workflow.id, 'active-execution');
+        expect(lock).not.toBeNull();
+
+        try {
+            await expect(buildService.prepareFunction(fn._id.toString(), user.id))
+                .rejects.toBeInstanceOf(BuildPreparationError);
+            expect(await Workspace.findOne({ ownerUserId: user._id, scopeId: workflow._id })).toBeNull();
+        } finally {
+            if (lock) await locks.release(lock);
+        }
     });
 
     it('prepares a workflow-scoped typescript tool through the legacy function build alias', async () => {

@@ -2,11 +2,17 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import mongoose from 'mongoose';
+import { randomUUID } from 'crypto';
 import { User } from '../models/User.model';
 import { UserTool } from '../models/UserTool.model';
 import { Workspace } from '../models/Workspace.model';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { UserToolRunRetentionService } from '../services/userToolRunRetention.service';
+import { DockerAttemptReservation } from '../services/runtime/DockerAttemptReservation';
+import { MongoDockerOperationJournal } from '../services/runtime/MongoDockerOperationJournal';
+import { MongoRunLeaseService } from '../services/runtime/MongoRunLeaseService';
+import { MongoWorkspaceLockService } from '../services/runtime/MongoWorkspaceLockService';
+import { UserToolRunService } from '../services/userToolRun.service';
 
 describe('UserToolRunRetentionService', () => {
     const service = new UserToolRunRetentionService();
@@ -214,5 +220,182 @@ describe('UserToolRunRetentionService', () => {
 
         await expect(fs.access(path.join(fixture.outputRoot, 'old.log'))).resolves.toBeUndefined();
         expect(await UserToolRun.countDocuments({ toolId: fixture.fn._id })).toBe(2);
+    });
+
+    it.each(['function', 'tool'] as const)('protects active runs and unreconciled attempts for %s cleanup', async (kind) => {
+        const fixture = await createFixture();
+        await UserToolRun.updateOne({ _id: fixture.oldRun._id }, {
+            $set: { status: 'running' },
+        });
+        await UserToolRun.updateOne({ _id: fixture.newRun._id }, {
+            $set: {
+                supervisedAttempt: {
+                    attemptId: 'attempt', leaseOwner: 'worker',
+                    leaseTokenDigest: 'digest', createdAt: new Date(),
+                },
+            },
+        });
+        const cleanup = kind === 'function'
+            ? service.cleanupRunsForFunction.bind(service)
+            : service.cleanupRunsForTool.bind(service);
+        for (const dryRun of [true, false]) {
+            const result = await cleanup(fixture.fn.id, fixture.user.id, { retainLatest: 0, dryRun });
+            expect(result).toEqual(expect.objectContaining({ deletedRuns: 0, retainedRuns: 2, deletedArtifacts: [] }));
+        }
+        expect(await UserToolRun.countDocuments({ toolId: fixture.fn._id })).toBe(2);
+        await expect(fs.access(path.join(fixture.outputRoot, 'old.log'))).resolves.toBeUndefined();
+    });
+
+    it.each(['queued', 'running'] as const)('never removes a %s run or its artifacts', async (status) => {
+        const fixture = await createFixture();
+        await UserToolRun.updateOne({ _id: fixture.oldRun._id }, { $set: { status } });
+        const result = await service.cleanupRunsForTool(fixture.fn.id, fixture.user.id, {
+            retentionDays: 14, retainLatest: 1,
+        });
+        expect(result).toEqual(expect.objectContaining({ deletedRuns: 0, retainedRuns: 2, deletedArtifacts: [] }));
+        expect(await UserToolRun.exists({ _id: fixture.oldRun._id })).not.toBeNull();
+        await expect(fs.access(path.join(fixture.outputRoot, 'old.log'))).resolves.toBeUndefined();
+    });
+
+    it('retains the embedded journal and pending operation even on a terminal run', async () => {
+        const fixture = await createFixture();
+        const attemptId = randomUUID();
+        const identity = {
+            executionId: fixture.oldRun.executionId,
+            attemptId,
+            containerName: DockerAttemptReservation.containerName(attemptId),
+        };
+        await UserToolRun.updateOne({ _id: fixture.oldRun._id }, {
+            $set: { supervisedAttempt: {
+                attemptId, leaseOwner: 'worker', leaseTokenDigest: 'digest', createdAt: new Date(),
+                dockerJournal: { admission: 'open', pending: null, lastOutcome: null, hasUnknownOutcome: false },
+            } },
+        });
+        const journal = new MongoDockerOperationJournal();
+        const operation = await journal.admit(identity, 'create');
+        await journal.close(identity);
+        const result = await service.cleanupRunsForTool(fixture.fn.id, fixture.user.id, {
+            retentionDays: 14, retainLatest: 1,
+        });
+        expect(result).toEqual(expect.objectContaining({ deletedRuns: 0, retainedRuns: 2 }));
+        expect(await journal.read(identity)).toMatchObject({ admission: 'closed', pending: operation });
+        await expect(fs.access(path.join(fixture.outputRoot, 'old.log'))).resolves.toBeUndefined();
+    });
+
+    it.each(['cancelled', 'completed'] as const)('retains a %s claimed workspace run and its artifacts', async (outcome) => {
+        const fixture = await createFixture();
+        await UserToolRun.updateOne({ _id: fixture.oldRun._id }, { $set: { status: 'queued' } });
+        const lease = await new MongoRunLeaseService(30_000).claimQueued('worker');
+        expect(lease?.executionId).toBe(fixture.oldRun.executionId);
+        const locks = new MongoWorkspaceLockService();
+        const lock = await locks.tryAcquire(fixture.user.id, fixture.oldRun.workflowId!.toString(), fixture.oldRun.executionId);
+        expect(lock).not.toBeNull();
+        try {
+            const run = await UserToolRun.findById(fixture.oldRun._id).select('+workspaceRetentionProtected').lean();
+            expect(run?.workspaceRetentionProtected).toBe(true);
+            const runs = new UserToolRunService();
+            if (outcome === 'cancelled') {
+                expect((await runs.requestCancellation(fixture.oldRun.executionId, fixture.user.id)).kind).toBe('stopped');
+            } else {
+                await runs.markRunning(fixture.oldRun.executionId, new Date(), undefined, lease!);
+                await runs.completeRun(fixture.oldRun.executionId, {}, lease!);
+            }
+            for (const dryRun of [true, false]) {
+                const result = await service.cleanupRunsForTool(fixture.fn.id, fixture.user.id, {
+                    retentionDays: 14, retainLatest: 1, dryRun,
+                });
+                expect(result).toEqual(expect.objectContaining({ deletedRuns: 0, retainedRuns: 2, deletedArtifacts: [] }));
+            }
+            expect(await UserToolRun.exists({ _id: fixture.oldRun._id })).not.toBeNull();
+            await expect(fs.access(path.join(fixture.outputRoot, 'old.log'))).resolves.toBeUndefined();
+            expect(await locks.tryAcquire(fixture.user.id, fixture.oldRun.workflowId!.toString(), 'other')).toBeNull();
+        } finally {
+            if (lock) {
+                await locks.release(lock);
+            }
+        }
+    });
+
+    it('does not delete terminal runs or artifacts while their workspace is locked', async () => {
+        const fixture = await createFixture();
+        const locks = new MongoWorkspaceLockService();
+        const lock = await locks.tryAcquire(
+            fixture.user.id,
+            fixture.oldRun.workflowId!.toString(),
+            fixture.oldRun.executionId,
+        );
+        expect(lock).not.toBeNull();
+
+        try {
+            const result = await service.cleanupRunsForTool(fixture.fn.id, fixture.user.id, {
+                retentionDays: 14, retainLatest: 1,
+            });
+
+            expect(result).toEqual(expect.objectContaining({ deletedRuns: 0, retainedRuns: 2, deletedArtifacts: [] }));
+            expect(await UserToolRun.exists({ _id: fixture.oldRun._id })).not.toBeNull();
+            await expect(fs.access(path.join(fixture.outputRoot, 'old.log'))).resolves.toBeUndefined();
+            expect(await locks.tryAcquire(fixture.user.id, fixture.oldRun.workflowId!.toString(), 'other')).toBeNull();
+        } finally {
+            if (lock) await locks.release(lock);
+        }
+    });
+
+    it.each(['status', 'attempt', 'workspace'] as const)('rechecks %s atomically before deleting and removing artifacts', async (change) => {
+        const fixture = await createFixture();
+        const original = UserToolRun.findOneAndDelete.bind(UserToolRun);
+        const spy = jest.spyOn(UserToolRun, 'findOneAndDelete').mockImplementationOnce((...args) => {
+            const query = original(...args);
+            query.pre(async () => {
+                const patch = change === 'status'
+                    ? { status: 'running' }
+                    : change === 'workspace'
+                        ? { workspaceRetentionProtected: true }
+                        : { supervisedAttempt: { attemptId: 'attempt', leaseOwner: 'worker', leaseTokenDigest: 'digest', createdAt: new Date() } };
+                await UserToolRun.collection.updateOne({ _id: fixture.oldRun._id }, { $set: patch });
+            });
+            return query;
+        });
+        try {
+            const result = await service.cleanupRunsForTool(fixture.fn.id, fixture.user.id, {
+                retentionDays: 14, retainLatest: 1,
+            });
+            expect(result).toEqual(expect.objectContaining({ deletedRuns: 0, retainedRuns: 2, deletedArtifacts: [] }));
+            expect(await UserToolRun.exists({ _id: fixture.oldRun._id })).not.toBeNull();
+            await expect(fs.access(path.join(fixture.outputRoot, 'old.log'))).resolves.toBeUndefined();
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('surfaces filesystem cleanup errors rather than reporting success', async () => {
+        const fixture = await createFixture();
+        const remove = jest.spyOn(fs, 'rm').mockRejectedValueOnce(new Error('filesystem unavailable'));
+        try {
+            await expect(service.cleanupRunsForTool(fixture.fn.id, fixture.user.id, {
+                retentionDays: 14, retainLatest: 1,
+            })).rejects.toThrow('filesystem unavailable');
+            await expect(fs.access(path.join(fixture.outputRoot, 'old.log'))).resolves.toBeUndefined();
+        } finally {
+            remove.mockRestore();
+        }
+    });
+
+    it('preserves artifacts referenced by a run of another tool in the same workspace', async () => {
+        const fixture = await createFixture();
+        await UserToolRun.create({
+            executionId: 'other-tool-active', ownerUserId: fixture.user._id,
+            toolId: new mongoose.Types.ObjectId(), toolVersionTag: '1', toolContentHash: 'hash',
+            workflowId: fixture.oldRun.workflowId, launchContext: 'editor_test',
+            status: 'running', runtime: 'typescript', runner: 'docker_sandbox', inputs: {},
+            policySnapshot: { networkMode: 'none' },
+            outputs: { artifacts: [{ path: 'output/old.log', kind: 'log' }] },
+        });
+        for (const dryRun of [true, false]) {
+            const result = await service.cleanupRunsForTool(fixture.fn.id, fixture.user.id, {
+                retentionDays: 14, retainLatest: 1, dryRun,
+            });
+            expect(result).toEqual(expect.objectContaining({ deletedRuns: 1, deletedArtifacts: [] }));
+            await expect(fs.access(path.join(fixture.outputRoot, 'old.log'))).resolves.toBeUndefined();
+        }
     });
 });

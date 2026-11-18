@@ -1,0 +1,38 @@
+[Unit]
+Description=A-IR-DD2 backend API and durable run worker
+Requires=airdd2-docker-gateway.service
+After=network-online.target airdd2-docker-gateway.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=airdd2-backend
+Group=airdd2-backend
+SupplementaryGroups=airdd2-gateway-clients
+WorkingDirectory=/opt/airdd2/backend
+EnvironmentFile=/etc/airdd2/backend.env
+ExecStart=/usr/bin/env node dist/src/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=180
+KillMode=control-group
+UMask=0027
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

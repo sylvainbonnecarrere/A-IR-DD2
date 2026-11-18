@@ -1,0 +1,11 @@
+[Unit]
+Description=Prepare isolated A-IR-DD2 recovery test configuration
+Before=airdd2-docker-gateway.service airdd2-backend.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/airdd2-validation-setup
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

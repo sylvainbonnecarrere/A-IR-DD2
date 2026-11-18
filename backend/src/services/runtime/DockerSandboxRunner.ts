@@ -10,6 +10,9 @@ import type {
     SandboxSyntaxCheckResult
 } from './execution.types';
 import { inferSandboxFailureSubsystem } from './errors';
+import { DockerAttemptReservation } from './DockerAttemptReservation';
+import type { SupervisedAttemptIdentity } from './MongoSupervisedAttemptService';
+import { createDockerProcessRunner } from './DockerGatewayRuntime';
 import {
     buildPythonCustomWrapper,
     buildPythonNativeWrapper,
@@ -51,7 +54,7 @@ export interface DockerProcessRunner {
     run(command: string, args: string[], options?: ProcessRunOptions): Promise<CommandExecutionResult>;
 }
 
-class SpawnDockerProcessRunner implements DockerProcessRunner {
+export class SpawnDockerProcessRunner implements DockerProcessRunner {
     async run(command: string, args: string[], options: ProcessRunOptions = {}): Promise<CommandExecutionResult> {
         const timeoutMs = options.timeoutMs ?? 15_000;
 
@@ -137,7 +140,7 @@ class SpawnDockerProcessRunner implements DockerProcessRunner {
 
 export class DockerSandboxRunner implements SandboxRunnerPort {
     constructor(
-        private readonly processRunner: DockerProcessRunner = new SpawnDockerProcessRunner(),
+        private readonly processRunner: DockerProcessRunner = createDockerProcessRunner(new SpawnDockerProcessRunner()),
         private readonly backendPythonRoot: string = path.resolve(__dirname, '../../../python')
     ) {}
 
@@ -175,17 +178,50 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
     }
 
     async execute(request: SandboxExecutionRequest): Promise<SandboxExecutionResult> {
+        return this.executeWithIdentity(request);
+    }
+
+    async executeForAttempt(request: SandboxExecutionRequest, attempt: SupervisedAttemptIdentity): Promise<SandboxExecutionResult> {
+        if (!request.signal || attempt.executionId !== request.executionId
+            || attempt.containerName !== DockerAttemptReservation.containerName(attempt.attemptId)) {
+            throw new Error('A supervised Docker launch requires a matching attempt identity and monitor signal');
+        }
+        return this.executeWithIdentity(request, attempt);
+    }
+
+    private async executeWithIdentity(request: SandboxExecutionRequest, attempt?: SupervisedAttemptIdentity): Promise<SandboxExecutionResult> {
         const startedAt = Date.now();
         const timeoutMs = Math.max((request.policySnapshot.timeoutSeconds ?? 15) * 1000, 1_000);
         const maxMemoryMb = Math.max(request.policySnapshot.maxMemoryMb ?? 256, 64);
         const containerWorkspaceDir = request.workspace ? CONTAINER_SOURCE_ROOT : CONTAINER_FALLBACK_WORKSPACE;
+        if (request.signal?.aborted) {
+            return {
+                success: false,
+                output: null,
+                stderr: 'Sandbox execution cancelled before launch; any previous container is not verified.',
+                durationMs: Date.now() - startedAt,
+                timedOut: false,
+                exitCode: 130,
+                runner: this.getRunnerId(),
+                metadata: {
+                    exitCode: 130,
+                    failureKind: 'cancelled',
+                    failureSubsystem: 'runner',
+                    cancellationConfirmed: false,
+                    containerWorkspaceDir,
+                    timeoutMs,
+                    maxMemoryMb,
+                },
+                resourceUsage: {
+                    wallTimeMs: Date.now() - startedAt,
+                    memoryLimitMb: maxMemoryMb,
+                },
+            };
+        }
         const stdinPayload = this.buildStdinPayload(request);
-        // Debug: log the stdin payload that will be sent to the sandbox (helps verify transformed query propagation)
-        try {
-            console.debug('[DockerSandboxRunner] stdinPayload:', stdinPayload);
-        } catch {}
-        const containerName = `airdd2-${request.executionId.replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 48)}`;
-        const args = this.buildDockerArgs(request, maxMemoryMb, containerWorkspaceDir, containerName);
+        const containerName = attempt?.containerName
+            ?? `airdd2-${request.executionId.replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 48)}`;
+        const args = this.buildDockerArgs(request, maxMemoryMb, containerWorkspaceDir, containerName, attempt);
         let containerKill: Promise<boolean> | undefined;
         const killContainer = () => {
             containerKill ??= this.processRunner.run('docker', ['kill', containerName], { timeoutMs: 5_000 })
@@ -225,8 +261,9 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
 
         const durationMs = Date.now() - startedAt;
         const normalized = this.normalizeResult(result, request.mode, durationMs);
-        if (request.signal?.aborted && result.aborted) {
-            const cancellationConfirmed = await containerKill ?? false;
+        if (request.signal?.aborted && (result.aborted || attempt)) {
+            const containerStopped = await containerKill ?? false;
+            const cancellationConfirmed = !attempt && containerStopped;
             return {
                 ...normalized,
                 success: false,
@@ -253,7 +290,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
 
         if (result.timedOut) {
             const terminationConfirmed = await killContainer();
-            if (!terminationConfirmed) {
+            if (!terminationConfirmed || attempt) {
                 return {
                     ...normalized,
                     success: false,
@@ -289,7 +326,8 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
                 timeoutMs,
                 maxMemoryMb,
                 ...(result.timedOut ? { runnerTerminationConfirmed: true } : {}),
-                ...(normalized.metadata ?? {})
+                ...(normalized.metadata ?? {}),
+                ...(attempt ? { runnerTerminationConfirmed: false } : {})
             },
             resourceUsage: {
                 wallTimeMs: durationMs,
@@ -335,11 +373,11 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
         };
     }
 
-    private buildDockerArgs(request: SandboxExecutionRequest, maxMemoryMb: number, containerWorkspaceDir: string, containerName: string): string[] {
+    private buildDockerArgs(request: SandboxExecutionRequest, maxMemoryMb: number, containerWorkspaceDir: string, containerName: string, attempt?: SupervisedAttemptIdentity): string[] {
         const networkMode = this.resolveDockerNetworkMode(request.policySnapshot.networkMode);
         const baseArgs = [
             'run',
-            '--rm',
+            ...(attempt ? ['--label', `airdd2.execution.attempt=${attempt.attemptId}`] : ['--rm']),
             `--name=${containerName}`,
             '--interactive',
             `--network=${networkMode}`,

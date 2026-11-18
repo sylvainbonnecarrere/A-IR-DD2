@@ -24,6 +24,9 @@ import type {
     SandboxSyntaxCheckResult
 } from './execution.types';
 import { buildSandboxErrorDetails, inferSandboxFailureSubsystem, RuntimeNotReadyError } from './errors';
+import { executionTargetFingerprint } from './executionTargetFingerprint';
+import type { RunLease } from './MongoRunLeaseService';
+import { MongoWorkspaceLockService, type WorkspaceLock } from './MongoWorkspaceLockService';
 
 export interface ExecutionOrchestratorRequest {
     fn: ExecutionFunctionRef;
@@ -36,6 +39,10 @@ export interface ExecutionOrchestratorRequest {
     retryOfExecutionId?: string;
     persistedExecutionId?: string;
     executeExistingQueued?: boolean;
+    verifiedInlineSource?: boolean;
+    lease?: RunLease;
+    leaseSignal?: AbortSignal;
+    workspaceLock?: WorkspaceLock;
 }
 
 export interface QueuedRunAcknowledgement {
@@ -52,6 +59,13 @@ export class IdempotencyKeyReuseError extends Error {
     constructor() {
         super('Idempotency-Key was already used with a different run request.');
         this.name = 'IdempotencyKeyReuseError';
+    }
+}
+
+export class RunCompletionTimeoutError extends Error {
+    constructor(public readonly executionId: string) {
+        super(`Run ${executionId} is still active; retrieve its status through the runs API.`);
+        this.name = 'RunCompletionTimeoutError';
     }
 }
 
@@ -76,11 +90,11 @@ export class ExecutionOrchestrator {
     private readonly buildService = new BuildService();
     private readonly mediaCatalogService = new MediaCatalogService();
     private readonly userToolRunService = new UserToolRunService();
+    private readonly workspaceLocks = new MongoWorkspaceLockService();
     private readonly workspaceManager = createWorkspaceManager();
     private readonly sandboxRunnerFactory = createSandboxRunnerFactory();
     private readonly dockerRunner = new DockerSandboxRunner();
     private readonly firecrackerRunner = new FirecrackerRunner();
-    private readonly queuedDispatches = new Map<string, Promise<void>>();
     private readonly activeRunControllers = new Map<string, AbortController>();
     private readonly activeRunCompletions = new Map<string, Promise<void>>();
 
@@ -113,20 +127,17 @@ export class ExecutionOrchestrator {
         return this.dockerRunner.checkPythonSyntax(code);
     }
 
-    async enqueue(request: ExecutionOrchestratorRequest, prepareForDispatch?: RunPreparation): Promise<QueuedRunAcknowledgement> {
+    async enqueue(request: ExecutionOrchestratorRequest): Promise<QueuedRunAcknowledgement> {
         const executionMetadata = deriveExecutionMetadataFromLegacyFunction(request.fn);
         const executionId = request.persistedExecutionId
             ?? this.buildExecutionId(request, executionMetadata.toolId.toString());
         const requestFingerprint = this.buildRequestFingerprint(request, executionMetadata);
         const existingRun = request.idempotencyKey || request.persistedExecutionId
-            ? await this.userToolRunService.getRunByExecutionId(executionId)
+            ? await this.userToolRunService.getRunByExecutionId(executionId, 'majority')
             : null;
 
         if (existingRun) {
             this.assertMatchingRequestFingerprint(existingRun.requestFingerprint, requestFingerprint);
-            if (existingRun.status === 'queued') {
-                this.scheduleQueuedExecution(request, executionId, prepareForDispatch);
-            }
             return { executionId, status: existingRun.status, replayed: true };
         }
 
@@ -147,6 +158,7 @@ export class ExecutionOrchestrator {
                 agentInstanceId: request.agentInstanceId,
                 retryOfExecutionId: request.retryOfExecutionId,
                 requestFingerprint,
+                targetFingerprint: executionTargetFingerprint(request.fn),
                 privateContext: request.privateContext,
                 policySnapshot: executionMetadata.policySnapshot,
             });
@@ -155,18 +167,14 @@ export class ExecutionOrchestrator {
                 throw error;
             }
 
-            const duplicateRun = await this.userToolRunService.getRunByExecutionId(executionId);
+            const duplicateRun = await this.userToolRunService.getRunByExecutionId(executionId, 'majority');
             if (!duplicateRun) {
                 throw error;
             }
             this.assertMatchingRequestFingerprint(duplicateRun.requestFingerprint, requestFingerprint);
-            if (duplicateRun.status === 'queued') {
-                this.scheduleQueuedExecution(request, executionId, prepareForDispatch);
-            }
             return { executionId, status: duplicateRun.status, replayed: true };
         }
 
-        this.scheduleQueuedExecution(request, executionId, prepareForDispatch);
         return { executionId, status: 'queued', replayed: false };
     }
 
@@ -179,7 +187,7 @@ export class ExecutionOrchestrator {
         this.activeRunControllers.get(executionId)?.abort();
         const workCompleted = await this.waitForRunWork(executionId);
         if (workCompleted) {
-            const currentRun = await this.userToolRunService.getRunByExecutionId(executionId);
+            const currentRun = await this.userToolRunService.getRunByExecutionId(executionId, 'majority');
             if (currentRun?.status === 'stopped' && currentRun.error?.code === 'RUN_CANCELLED') {
                 return { kind: 'stopped' as const, run: currentRun };
             }
@@ -196,16 +204,14 @@ export class ExecutionOrchestrator {
 
     private async waitForRunWork(executionId: string, timeoutMs = 10_000): Promise<boolean> {
         const activeCompletion = this.activeRunCompletions.get(executionId);
-        const queuedDispatch = this.queuedDispatches.get(executionId);
-        if (!activeCompletion && !queuedDispatch) {
+        if (!activeCompletion) {
             return true;
         }
 
         let timeout: ReturnType<typeof setTimeout> | undefined;
         try {
             return await Promise.race([
-                Promise.all([activeCompletion, queuedDispatch].filter((work): work is Promise<void> => Boolean(work)))
-                    .then(() => true),
+                activeCompletion.then(() => true),
                 new Promise<boolean>((resolve) => {
                     timeout = setTimeout(() => resolve(false), timeoutMs);
                 }),
@@ -217,18 +223,98 @@ export class ExecutionOrchestrator {
         }
     }
 
+    async waitForRunCompletion(
+        executionId: string,
+        ownerUserId: string,
+        timeoutMs = 300_000,
+        pollIntervalMs = 250,
+    ): Promise<OrchestratedExecutionResult> {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const run = await this.userToolRunService.getRunByExecutionId(executionId, 'majority', ownerUserId);
+            if (!run) {
+                throw new Error('Run not found or access denied');
+            }
+            if (['completed', 'failed', 'stopped', 'timed_out'].includes(run.status)) {
+                return this.mapPersistedRun(run, true);
+            }
+            await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, Math.max(0, deadline - Date.now()))));
+        }
+
+        throw new RunCompletionTimeoutError(executionId);
+    }
+
     async execute(request: ExecutionOrchestratorRequest, prepareForDispatch?: RunPreparation): Promise<OrchestratedExecutionResult> {
-        const executionMetadata = deriveExecutionMetadataFromLegacyFunction(request.fn);
+        if (request.workspaceLock || !request.fn.workflowId) {
+            return this.executeCore(request, prepareForDispatch);
+        }
+
+        const metadata = deriveExecutionMetadataFromLegacyFunction(request.fn);
         const executionId = request.persistedExecutionId
+            ?? this.buildExecutionId(request, metadata.toolId.toString());
+        const ownerUserId = request.userId;
+        const workflowId = request.fn.workflowId.toString();
+        const lock = await this.workspaceLocks.tryAcquire(ownerUserId, workflowId, executionId);
+        if (!lock) {
+            throw new Error('Workspace is locked by another execution or requires reconciliation');
+        }
+
+        let runnerStarted = false;
+        let safeToRelease = false;
+        try {
+            const result = await this.executeCore({
+                ...request,
+                workspaceLock: lock,
+            }, prepareForDispatch, () => { runnerStarted = true; }, executionId);
+            safeToRelease = !request.lease
+                && ['completed', 'failed', 'stopped', 'timed_out'].includes(result.status ?? '')
+                && result.metadata?.runnerTerminationConfirmed !== false;
+            return result;
+        } finally {
+            if (!runnerStarted || safeToRelease) {
+                if (!await this.workspaceLocks.release(lock)) {
+                    throw new Error(`Workspace lock release was not confirmed for ${executionId}`);
+                }
+            }
+        }
+    }
+
+    private async executeCore(
+        request: ExecutionOrchestratorRequest,
+        prepareForDispatch?: RunPreparation,
+        onRunnerStart?: () => void,
+        executionIdOverride?: string,
+    ): Promise<OrchestratedExecutionResult> {
+        if (request.lease && (
+            !request.executeExistingQueued
+            || request.persistedExecutionId !== request.lease.executionId
+            || !request.leaseSignal
+        )) {
+            throw new Error('A leased dispatch requires a matching persisted execution and a lease monitor signal');
+        }
+        const assertLeaseMonitorActive = () => {
+            if (request.leaseSignal?.aborted) {
+                throw new Error('Leased dispatch stopped because the lease monitor was interrupted');
+            }
+        };
+        assertLeaseMonitorActive();
+        const executionMetadata = deriveExecutionMetadataFromLegacyFunction(request.fn);
+        const executionId = executionIdOverride ?? request.persistedExecutionId
             ?? this.buildExecutionId(request, executionMetadata.toolId.toString());
         const requestFingerprint = this.buildRequestFingerprint(request, executionMetadata);
         const existingRun = request.idempotencyKey || request.persistedExecutionId
             ? await this.userToolRunService.getRunByExecutionId(executionId)
             : null;
         const isQueuedDispatch = request.executeExistingQueued === true && existingRun?.status === 'queued';
+        if (request.lease && !isQueuedDispatch) {
+            throw new Error('Leased dispatch requires an existing queued run');
+        }
 
         if (existingRun) {
             this.assertMatchingRequestFingerprint(existingRun.requestFingerprint, requestFingerprint);
+            if (isQueuedDispatch && existingRun.reconstructionQuarantine) {
+                throw new Error('Queued run is quarantined pending reconciliation');
+            }
             if (!isQueuedDispatch) {
                 return this.mapPersistedRun(existingRun, true);
             }
@@ -251,9 +337,16 @@ export class ExecutionOrchestrator {
             runner: selectedRunnerId,
         });
 
+        if (request.lease) {
+            assertLeaseMonitorActive();
+            await this.userToolRunService.markRunning(executionId, new Date(), selectedRunnerId, request.lease);
+        }
+
         let executionRequest: SandboxExecutionRequest;
         try {
+            assertLeaseMonitorActive();
             await prepareForDispatch?.();
+            assertLeaseMonitorActive();
             executionRequest = await this.buildExecutionRequest({
                 ...request,
                 executionId,
@@ -262,8 +355,14 @@ export class ExecutionOrchestrator {
                 executionMetadataPolicy: executionMetadata.policySnapshot,
                 launchContext: request.launchContext
             });
+            assertLeaseMonitorActive();
         } catch (error) {
-            if (isQueuedDispatch) {
+            if (request.lease) {
+                console.error('[ExecutionOrchestrator] Leased preparation outcome is unknown', {
+                    executionId,
+                    errorType: error instanceof Error ? error.name : 'UnknownError',
+                });
+            } else if (isQueuedDispatch && !request.leaseSignal?.aborted) {
                 await this.userToolRunService.failRun(executionId, {
                     error: buildSandboxErrorDetails({
                         code: 'RUN_PREPARATION_FAILED',
@@ -279,7 +378,8 @@ export class ExecutionOrchestrator {
         try {
             if (isQueuedDispatch) {
                 const persistedRun = await this.userToolRunService.getRunByExecutionId(executionId);
-                if (persistedRun?.status !== 'queued') {
+                const expectedStatus = request.lease ? 'running' : 'queued';
+                if (persistedRun?.status !== expectedStatus) {
                     return persistedRun ? this.mapPersistedRun(persistedRun, true) : this.mapPersistedRun(await this.userToolRunService.getRunByExecutionId(executionId) as any, true);
                 }
             } else {
@@ -297,6 +397,7 @@ export class ExecutionOrchestrator {
                 agentInstanceId: request.agentInstanceId,
                 retryOfExecutionId: request.retryOfExecutionId,
                 requestFingerprint,
+                targetFingerprint: executionTargetFingerprint(request.fn),
                 privateContext: request.privateContext,
                 policySnapshot: executionMetadata.policySnapshot
             });
@@ -321,18 +422,41 @@ export class ExecutionOrchestrator {
         try {
         return await this.executeSerializedForWorkspace(executionRequest.workspace, async () => {
             const controller = new AbortController();
+            const abortFromLease = () => controller.abort();
+            request.leaseSignal?.addEventListener('abort', abortFromLease, { once: true });
+            if (request.leaseSignal?.aborted) {
+                controller.abort();
+            }
             this.activeRunControllers.set(executionId, controller);
             try {
-                await this.userToolRunService.markRunning(executionId, new Date(), selectedRunnerId);
+                assertLeaseMonitorActive();
+                if (!request.lease) {
+                    await this.userToolRunService.markRunning(executionId, new Date(), selectedRunnerId);
+                }
                 const artifactBaseline = await this.snapshotOutputArtifacts(executionRequest.workspace);
                 let runnerCompleted = false;
 
                 try {
+                assertLeaseMonitorActive();
+                if (request.lease) {
+                    await this.userToolRunService.assertRunningLease(request.lease);
+                    assertLeaseMonitorActive();
+                }
+                onRunnerStart?.();
                 const executionResult = await this.getExecutionRunner(selectedRunnerId).execute({
                     ...executionRequest,
                     signal: controller.signal,
                 });
                 runnerCompleted = true;
+                if (request.leaseSignal?.aborted) {
+                    return {
+                        ...executionResult,
+                        success: false,
+                        executionId,
+                        replayed: false,
+                        status: 'running',
+                    };
+                }
                 const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
                 const outputs = {
                     result: executionResult.output,
@@ -364,7 +488,7 @@ export class ExecutionOrchestrator {
                         },
                         outputs,
                         resourceUsage: this.buildResourceUsage(executionResult),
-                    });
+                    }, ...(request.lease ? [request.lease] as const : []));
                 } else if (executionResult.metadata?.runnerTerminationConfirmed === false) {
                     return {
                         ...executionResult,
@@ -377,7 +501,7 @@ export class ExecutionOrchestrator {
                     await this.userToolRunService.completeRun(executionId, {
                         outputs,
                         resourceUsage: this.buildResourceUsage(executionResult)
-                    });
+                    }, ...(request.lease ? [request.lease] as const : []));
                 } else if (executionResult.timedOut) {
                     await this.userToolRunService.timeoutRun(executionId, {
                         error: this.buildPersistedRunError(
@@ -386,7 +510,7 @@ export class ExecutionOrchestrator {
                         ),
                         outputs,
                         resourceUsage: this.buildResourceUsage(executionResult)
-                    });
+                    }, ...(request.lease ? [request.lease] as const : []));
                 } else {
                     await this.userToolRunService.failRun(executionId, {
                         error: this.buildPersistedRunError(
@@ -395,7 +519,7 @@ export class ExecutionOrchestrator {
                         ),
                         outputs,
                         resourceUsage: this.buildResourceUsage(executionResult)
-                    });
+                    }, ...(request.lease ? [request.lease] as const : []));
                 }
 
                 await this.catalogOutputArtifacts({
@@ -424,10 +548,22 @@ export class ExecutionOrchestrator {
                     metadata: {
                         exitCode: executionResult.exitCode,
                         ...(executionResult.metadata ?? {}),
+                        runnerTerminationConfirmed: executionResult.metadata?.runnerTerminationConfirmed ?? true,
                         ...(outputArtifacts.length > 0 ? { artifacts: outputArtifacts } : {})
                     }
                 };
             } catch (error) {
+                if (request.leaseSignal?.aborted) {
+                    throw error;
+                }
+                if (request.lease && !runnerCompleted) {
+                    console.error('[ExecutionOrchestrator] Leased runner outcome is unknown', {
+                        executionId,
+                        runner: selectedRunnerId,
+                        errorType: error instanceof Error ? error.name : 'UnknownError',
+                    });
+                    throw error;
+                }
                 if (controller.signal.aborted && !runnerCompleted) {
                     const currentRun = await this.userToolRunService.getRunByExecutionId(executionId);
                     if (currentRun?.status === 'stopped' && currentRun.error?.code === 'RUN_CANCELLED') {
@@ -468,7 +604,7 @@ export class ExecutionOrchestrator {
                             }
                         }
                         : {})
-                });
+                }, ...(request.lease ? [request.lease] as const : []));
 
                 await this.catalogOutputArtifacts({
                     executionId,
@@ -482,6 +618,7 @@ export class ExecutionOrchestrator {
                 throw error;
                 }
             } finally {
+                request.leaseSignal?.removeEventListener('abort', abortFromLease);
                 if (this.activeRunControllers.get(executionId) === controller) {
                     this.activeRunControllers.delete(executionId);
                 }
@@ -528,7 +665,7 @@ export class ExecutionOrchestrator {
         executionMetadataPolicy: SandboxExecutionRequest['policySnapshot'];
     }): Promise<SandboxExecutionRequest> {
         const workspace = await this.resolveWorkspace(input.fn, input.userId);
-        const sourceCode = await this.resolveSourceCode(input.fn, input.userId, workspace);
+        const sourceCode = await this.resolveSourceCode(input.fn, input.userId, workspace, input.verifiedInlineSource);
         const mode = this.resolveExecutionMode(input.fn);
 
         return {
@@ -567,8 +704,18 @@ export class ExecutionOrchestrator {
     private async resolveSourceCode(
         fn: ExecutionFunctionRef,
         userId: string,
-        workspace: WorkspaceProvisioningResult | null
+        workspace: WorkspaceProvisioningResult | null,
+        verifiedInlineSource = false,
     ): Promise<string | undefined> {
+        if (verifiedInlineSource) {
+            if (fn.origin !== 'custom' || typeof fn.codeInline !== 'string') {
+                throw new Error('Verified inline execution requires a custom tool with inline source');
+            }
+            return fn.language === 'typescript'
+                ? this.transpileTypescriptSource(fn.codeInline, `${fn.name || 'tool'}.ts`)
+                : fn.codeInline;
+        }
+
         if (fn.language === 'python' && fn.origin === 'native') {
             return undefined;
         }
@@ -674,7 +821,6 @@ export class ExecutionOrchestrator {
         if (!lockKey) {
             return operation();
         }
-
         const previous = ExecutionOrchestrator.workspaceExecutionChains.get(lockKey) ?? Promise.resolve();
         let releaseCurrent!: () => void;
         const current = new Promise<void>((resolve) => {
@@ -849,44 +995,6 @@ export class ExecutionOrchestrator {
         if (existing && existing !== requested) {
             throw new IdempotencyKeyReuseError();
         }
-    }
-
-    private scheduleQueuedExecution(request: ExecutionOrchestratorRequest, executionId: string, prepareForDispatch?: RunPreparation): void {
-        if (this.queuedDispatches.has(executionId)) {
-            return;
-        }
-
-        const queuedRequest: ExecutionOrchestratorRequest = {
-            ...request,
-            persistedExecutionId: executionId,
-            executeExistingQueued: true,
-        };
-        const pending = Promise.resolve()
-            .then(() => this.execute(queuedRequest, prepareForDispatch))
-            .then(() => undefined)
-            .catch(async (error: unknown) => {
-                const run = await this.userToolRunService.getRunByExecutionId(executionId).catch(() => null);
-                if (run?.status === 'queued' && !(error instanceof RuntimeNotReadyError)) {
-                    await this.userToolRunService.failRun(executionId, {
-                        error: buildSandboxErrorDetails({
-                            code: 'RUN_DISPATCH_FAILED',
-                            subsystem: 'unknown',
-                            message: error instanceof Error ? error.message : 'Run dispatch failed',
-                            retryable: false,
-                        }),
-                    }).catch(() => undefined);
-                }
-
-                console.error('[ExecutionOrchestrator] queued execution failed before completion', {
-                    executionId,
-                    errorType: error instanceof Error ? error.name : 'UnknownError',
-                });
-            })
-            .finally(() => {
-                this.queuedDispatches.delete(executionId);
-            });
-
-        this.queuedDispatches.set(executionId, pending);
     }
 
     private buildExecutionId(request: ExecutionOrchestratorRequest, toolId: string): string {

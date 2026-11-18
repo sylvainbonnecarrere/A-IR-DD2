@@ -334,6 +334,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   const llmConfigs = useRuntimeStore((state) => state.llmConfigs);
   const localLLMProfiles = useRuntimeStore((state) => state.localLLMProfiles);
   const getNodePendingAttachment = useRuntimeStore((state) => state.getNodePendingAttachment) ?? (() => null);
+  const pendingAttachment = useRuntimeStore((state) => state.getNodePendingAttachment?.(id) ?? null);
   const setNodePendingAttachment = useRuntimeStore((state) => state.setNodePendingAttachment) ?? (() => undefined);
   const clearNodePendingAttachment = useRuntimeStore((state) => state.clearNodePendingAttachment) ?? (() => undefined);
   const getNodeInvisibleHistorySummary = useRuntimeStore((state) => state.getNodeInvisibleHistorySummary) ?? (() => null);
@@ -421,7 +422,6 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
   // C1 FIX: Auth token pour les appels sandbox (requireAuth)
   const { accessToken } = useAuth();
-  const pendingAttachment = getNodePendingAttachment(id);
 
   // Local states
   const [userInput, setUserInput] = useState('');
