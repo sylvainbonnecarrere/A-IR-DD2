@@ -3,6 +3,8 @@ Description=A-IR-DD2 backend API and durable run worker
 Requires=airdd2-docker-gateway.service
 After=network-online.target airdd2-docker-gateway.service
 Wants=network-online.target
+RequiresMountsFor=/opt/airdd2/backend/storage/workspaces
+ConditionPathExists=/etc/airdd2/backend.env
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
@@ -13,6 +15,7 @@ Group=airdd2-backend
 SupplementaryGroups=airdd2-gateway-clients
 WorkingDirectory=/opt/airdd2/backend
 EnvironmentFile=/etc/airdd2/backend.env
+ExecStartPre=/usr/bin/test -f /opt/airdd2/backend/dist/src/server.js
 ExecStart=/usr/bin/env node dist/src/server.js
 Restart=on-failure
 RestartSec=5

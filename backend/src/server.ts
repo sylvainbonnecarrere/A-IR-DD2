@@ -45,6 +45,7 @@ import { DockerGatewayFencedAttemptProof } from './services/runtime/DockerGatewa
 import { MongoDockerGatewayAdmission } from './services/runtime/MongoDockerGatewayAdmission';
 import { MongoExpiredRunReconciler } from './services/runtime/MongoExpiredRunReconciler';
 import { AgentAutoRecoveryService } from './services/runtime/agentAutoRecovery.service';
+import { MongoRunVisibilityService } from './services/runtime/runVisibility.service';
 import { FenceAndRetryService } from './services/fenceAndRetry.service';
 
 // SOLID: Valider la configuration au démarrage (fail-fast pattern)
@@ -236,12 +237,25 @@ async function startServer() {
         );
         const gatewayAdmission = new MongoDockerGatewayAdmission();
         const gatewayControl = new DockerGatewayControlClient({ socketPath: gatewaySocket });
-        const fenceAndRetryService = new FenceAndRetryService(gatewayControl, gatewayAdmission);
+        const runVisibility = new MongoRunVisibilityService();
+        const fenceAndRetryService = new FenceAndRetryService(
+          gatewayControl,
+          gatewayAdmission,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          runVisibility,
+        );
         const recovery = await new MongoExpiredRunReconciler(
           new DockerGatewayFencedAttemptProof(gatewayAdmission, gatewayControl),
           undefined,
           undefined,
           new AgentAutoRecoveryService(fenceAndRetryService),
+          runVisibility,
         ).reconcile();
         if (recovery.unresolved > 0 || recovery.lockCleanupPending > 0 || recovery.autoRecovered > 0) {
           console.warn('[Backend startup] Some expired runs remain quarantined after Docker reconciliation', recovery);

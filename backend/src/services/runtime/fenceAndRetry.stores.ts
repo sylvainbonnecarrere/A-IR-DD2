@@ -104,6 +104,7 @@ export class MongoQuarantinedRunStore implements QuarantinedRunStorePort {
             error: run.error ?? null,
             recoveryAttemptCount: run.recoveryAttemptCount ?? null,
             supervisedAttempt: run.supervisedAttempt ? { attemptId: run.supervisedAttempt.attemptId } : null,
+            agentInstanceId: run.agentInstanceId?.toString() ?? null, // ⭐ J7-09
         };
     }
 }

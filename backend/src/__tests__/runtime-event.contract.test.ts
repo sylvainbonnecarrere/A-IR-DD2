@@ -69,4 +69,65 @@ describe('Runtime event contract', () => {
     });
     expect('secretValue' in event.payload).toBe(false);
   });
+
+  // ⭐ J7-09: événements de visibilité quarantaine/fencing (extension additive v1)
+  it('accepts the quarantine visibility event types at version 1', () => {
+    for (const type of ['run:quarantined', 'run:fenced', 'run:recovery_relaunched'] as const) {
+      expect(RuntimeEventTypeSchema.safeParse(type).success).toBe(true);
+      const event = buildRuntimeEvent({
+        type,
+        aggregateType: 'run',
+        aggregateId: 'run_quar_1',
+        workspaceId: '507f1f77bcf86cd799439011',
+        payload: { status: 'quarantined', lockHeld: true },
+      });
+      expect(event.version).toBe(1);
+      expect(event.type).toBe(type);
+    }
+  });
+
+  it('keeps the quarantine payload whitelist strict and free of secrets', () => {
+    const event = buildRuntimeEvent({
+      type: 'run:recovery_relaunched',
+      aggregateType: 'run',
+      aggregateId: 'run_quar_1',
+      workspaceId: '507f1f77bcf86cd799439011',
+      payload: {
+        status: 'relaunched',
+        lockHeld: false,
+        reason: 'AGENT_AUTO_RECOVERY',
+        operationId: 'op-123',
+        recoveryAttemptCount: 2,
+        newRunId: 'run_child_1',
+        runId: 'run_quar_1',
+        agentId: '507f1f77bcf86cd799439012',
+        userId: 'should-be-stripped',
+        token: 'should-be-stripped',
+        internalNotes: 'should-be-stripped',
+      },
+    });
+
+    expect(event.payload).toEqual({
+      status: 'relaunched',
+      lockHeld: false,
+      reason: 'AGENT_AUTO_RECOVERY',
+      operationId: 'op-123',
+      recoveryAttemptCount: 2,
+      newRunId: 'run_child_1',
+      runId: 'run_quar_1',
+      agentId: '507f1f77bcf86cd799439012',
+    });
+  });
+
+  it('rejects a quarantine event with an invalid workspaceId', () => {
+    expect(() =>
+      buildRuntimeEvent({
+        type: 'run:quarantined',
+        aggregateType: 'run',
+        aggregateId: 'run_1',
+        workspaceId: 'not-an-objectid',
+        payload: { status: 'quarantined' },
+      }),
+    ).toThrow('Invalid runtime event payload');
+  });
 });

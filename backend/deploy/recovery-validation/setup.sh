@@ -11,6 +11,9 @@ MONGODB_URI=mongodb://127.0.0.1:27017/airdd2_recovery_validation
 DOCKER_GATEWAY_SOCKET=/run/airdd2-docker-gateway/docker.sock
 DOCKER_BIN=/usr/local/bin/docker
 DOCKER_GATEWAY_ALLOWED_BIND_ROOTS=/opt/airdd2/backend/storage/workspaces
+RUNTIME_NODE_IMAGE=ubuntu:noble
+RUNTIME_PYTHON_IMAGE=ubuntu:noble
+RUNTIME_PYTHON_PROVISIONING_IMAGE=ubuntu:noble
 EOF
 cat > /etc/airdd2/backend.env <<EOF
 NODE_ENV=production
@@ -22,4 +25,7 @@ DOCKER_GATEWAY_REQUIRED=true
 DOCKER_GATEWAY_SOCKET=/run/airdd2-docker-gateway/docker.sock
 WORKSPACE_STORAGE_PATH=/opt/airdd2/backend/storage/workspaces
 RUNTIME_NATIVE_PYTHON_PROVISION_ON_STARTUP=false
+RUNTIME_NODE_IMAGE=ubuntu:noble
+RUNTIME_PYTHON_IMAGE=ubuntu:noble
+RUNTIME_PYTHON_PROVISIONING_IMAGE=ubuntu:noble
 EOF

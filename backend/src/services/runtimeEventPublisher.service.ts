@@ -26,6 +26,7 @@ export interface RuntimeEventPublishContext {
   resultCount?: number;
   agentId?: string;
   workflowId?: string;
+  lockHeld?: boolean; // ⭐ J7-09
   [key: string]: unknown;
 }
 
@@ -36,6 +37,7 @@ const RUN_TYPE_MAP: Record<string, RuntimeEventType> = {
   failed: 'run:failed',
   stopped: 'run:stopped',
   timed_out: 'run:failed',
+  quarantined: 'run:quarantined', // ⭐ J7-09
 };
 
 const TASK_TYPE_MAP: Record<string, RuntimeEventType> = {
@@ -72,6 +74,56 @@ export class RuntimeEventPublisher {
     });
   }
 
+  // ⭐ J7-09: événements de visibilité quarantaine/fencing (payload whitelisté, aucun secret).
+
+  public publishRunQuarantined(context: RuntimeEventPublishContext & { lockHeld?: boolean; reason?: string; operationId?: string }): boolean {
+    return this.emitRunEvent('run:quarantined', context, {
+      lockHeld: context.lockHeld ?? true,
+      reason: context.reason,
+      operationId: context.operationId,
+    });
+  }
+
+  public publishRunFenced(context: RuntimeEventPublishContext & { operationId?: string; reason?: string; lockHeld?: boolean }): boolean {
+    return this.emitRunEvent('run:fenced', context, {
+      operationId: context.operationId,
+      reason: context.reason,
+      lockHeld: context.lockHeld,
+    });
+  }
+
+  public publishRunRecoveryRelaunched(context: RuntimeEventPublishContext & { newRunId?: string; recoveryAttemptCount?: number; reason?: string }): boolean {
+    return this.emitRunEvent('run:recovery_relaunched', context, {
+      newRunId: context.newRunId,
+      recoveryAttemptCount: context.recoveryAttemptCount,
+      reason: context.reason,
+    });
+  }
+
+  private emitRunEvent(
+    type: RuntimeEventType,
+    context: RuntimeEventPublishContext,
+    extraPayload: Record<string, unknown>,
+  ): boolean {
+    const workspaceId = context.workspaceId.trim();
+    const roomWorkspaceId = context.roomWorkspaceId ? context.roomWorkspaceId.trim() : workspaceId;
+    if (!workspaceId || roomWorkspaceId !== workspaceId) {
+      return false;
+    }
+    const basePayload: Record<string, unknown> = {
+      status: typeof context.status === 'string' ? context.status : undefined,
+      message: typeof context.message === 'string' && context.message.trim().length > 0 ? context.message.trim() : undefined,
+      errorCode: typeof context.errorCode === 'string' && context.errorCode.trim().length > 0 ? context.errorCode.trim() : undefined,
+      agentId: typeof context.agentId === 'string' && context.agentId.trim().length > 0 ? context.agentId.trim() : undefined,
+      workflowId: typeof context.workflowId === 'string' && context.workflowId.trim().length > 0 ? context.workflowId.trim() : undefined,
+      runId: typeof context.runId === 'string' && context.runId.trim().length > 0 ? context.runId.trim() : undefined,
+    };
+    const payload: Record<string, unknown> = Object.fromEntries(
+      Object.entries({ ...basePayload, ...extraPayload }).filter(([, value]) => value !== undefined),
+    );
+    return this.emit(workspaceId, type, 'run', context.runId ?? context.workflowId ?? workspaceId, payload, context.correlationId as string | undefined);
+  }
+
   private publishStateChange(context: RuntimeEventPublishContext & { aggregateType: RuntimeEventAggregateType; aggregateId: string }): boolean {
     const workspaceId = context.workspaceId.trim();
     const roomWorkspaceId = context.roomWorkspaceId ? context.roomWorkspaceId.trim() : workspaceId;
@@ -84,7 +136,18 @@ export class RuntimeEventPublisher {
     const type = this.resolveEventType(context.aggregateType, status, context.progress, context.stage);
     const payload = this.buildPayload(context, status, type);
 
-    const signature = this.buildEventSignature(workspaceId, context.aggregateType, context.aggregateId, type, payload);
+    return this.emit(workspaceId, type, context.aggregateType, context.aggregateId, payload, context.correlationId as string | undefined);
+  }
+
+  private emit(
+    workspaceId: string,
+    type: RuntimeEventType,
+    aggregateType: RuntimeEventAggregateType,
+    aggregateId: string,
+    payload: Record<string, unknown>,
+    correlationId?: string,
+  ): boolean {
+    const signature = this.buildEventSignature(workspaceId, aggregateType, aggregateId, type, payload);
     if (this.dedupeCache.has(signature)) {
       return false;
     }
@@ -92,10 +155,10 @@ export class RuntimeEventPublisher {
     try {
       const event = buildRuntimeEvent({
         type,
-        aggregateType: context.aggregateType,
-        aggregateId: context.aggregateId,
+        aggregateType,
+        aggregateId,
         workspaceId,
-        correlationId: context.correlationId as string | undefined,
+        correlationId,
         payload,
       });
 
@@ -163,6 +226,10 @@ export class RuntimeEventPublisher {
 
     if (typeof context.taskId === 'string' && context.taskId.trim().length > 0) {
       payload.taskId = context.taskId.trim();
+    }
+
+    if (typeof context.lockHeld === 'boolean') {
+      payload.lockHeld = context.lockHeld; // ⭐ J7-09
     }
 
     if (type === 'run:progressed' || type === 'task:progressed') {
