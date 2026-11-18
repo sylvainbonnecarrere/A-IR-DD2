@@ -5,6 +5,7 @@ import {
     USER_TOOL_RUN_RUNTIME_VALUES,
     USER_TOOL_RUN_STATUS_VALUES,
 } from '../domain/execution/userToolRun.contract';
+import { RECONSTRUCTION_REJECTION_CODES, type RunReconstructionRejectionCode } from '../domain/execution/runReconstructionQuarantine';
 
 export type UserToolRunLaunchContext = 'editor_test' | 'workflow_run' | 'system_validation';
 export type UserToolRunStatus = (typeof USER_TOOL_RUN_STATUS_VALUES)[number];
@@ -54,6 +55,40 @@ export interface IUserToolRunError {
     retryable?: boolean;
 }
 
+export interface IUserToolRunLease {
+    owner: string;
+    token: string;
+    acquiredAt: Date;
+    expiresAt: Date;
+}
+
+export interface IUserToolRunSupervisedAttempt {
+    attemptId: string;
+    leaseOwner: string;
+    leaseTokenDigest: string;
+    createdAt: Date;
+    dockerJournal?: {
+        admission: 'open' | 'closed';
+        pending: { id: string; kind: string } | null;
+        lastOutcome: { operation: { id: string; kind: string }; outcome: 'response_observed' | 'unknown' } | null;
+        hasUnknownOutcome: boolean;
+    };
+    workerLossReconciliation?: {
+        containerName: string;
+        containerState: 'absent' | 'created' | 'exited' | 'dead';
+        verifiedAt: Date;
+        workspaceLockReleased: boolean;
+    };
+}
+
+export interface IUserToolRunReconstructionQuarantineResolution {
+    code: RunReconstructionRejectionCode;
+    quarantinedAt: Date;
+    resolution: 'failed';
+    resolvedAt: Date;
+    resolvedBy: mongoose.Types.ObjectId;
+}
+
 export interface IUserToolRun extends Document {
     executionId: string;
     ownerUserId: mongoose.Types.ObjectId;
@@ -65,9 +100,15 @@ export interface IUserToolRun extends Document {
     agentInstanceId?: mongoose.Types.ObjectId | null;
     retryOfExecutionId?: string | null;
     requestFingerprint?: string | null;
+    targetFingerprint?: string | null;
     privateContextCiphertext?: string | null;
     cancellationRequestedAt?: Date | null;
     cancellationRequestedBy?: mongoose.Types.ObjectId | null;
+    lease?: IUserToolRunLease | null;
+    reconstructionQuarantine?: { code: RunReconstructionRejectionCode; quarantinedAt: Date } | null;
+    reconstructionQuarantineResolution?: IUserToolRunReconstructionQuarantineResolution | null;
+    workspaceRetentionProtected?: boolean;
+    supervisedAttempt?: IUserToolRunSupervisedAttempt | null;
     launchContext: UserToolRunLaunchContext;
     status: UserToolRunStatus;
     runtime: UserToolRunRuntime;
@@ -92,6 +133,14 @@ const UserToolRunOutputsSchema = new Schema<IUserToolRunOutputs>({
     stdout: { type: String, default: undefined },
     stderr: { type: String, default: undefined },
     artifacts: { type: [UserToolRunArtifactSchema], default: undefined }
+}, { _id: false });
+
+const UserToolRunReconstructionQuarantineResolutionSchema = new Schema<IUserToolRunReconstructionQuarantineResolution>({
+    code: { type: String, enum: RECONSTRUCTION_REJECTION_CODES, required: true },
+    quarantinedAt: { type: Date, required: true },
+    resolution: { type: String, enum: ['failed'], required: true },
+    resolvedAt: { type: Date, required: true },
+    resolvedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
 }, { _id: false });
 
 const UserToolRunPolicySnapshotSchema = new Schema<IUserToolRunPolicySnapshot>({
@@ -129,6 +178,50 @@ const UserToolRunErrorSchema = new Schema<IUserToolRunError>({
     failureKind: { type: String, trim: true, default: undefined },
     message: { type: String, required: true },
     retryable: { type: Boolean, default: false }
+}, { _id: false });
+
+const UserToolRunLeaseSchema = new Schema<IUserToolRunLease>({
+    owner: { type: String, required: true },
+    token: { type: String, required: true, select: false },
+    acquiredAt: { type: Date, required: true },
+    expiresAt: { type: Date, required: true },
+}, { _id: false });
+
+const DockerJournalOperationSchema = new Schema({
+    id: { type: String, required: true },
+    kind: { type: String, enum: ['create', 'start', 'stop', 'kill', 'remove', 'inspect'], required: true },
+}, { _id: false });
+
+const DockerJournalOutcomeSchema = new Schema({
+    operation: { type: DockerJournalOperationSchema, required: true },
+    outcome: { type: String, enum: ['response_observed', 'unknown'], required: true },
+}, { _id: false });
+
+const WorkerLossReconciliationSchema = new Schema({
+    containerName: { type: String, required: true },
+    containerState: { type: String, enum: ['absent', 'created', 'exited', 'dead'], required: true },
+    verifiedAt: { type: Date, required: true },
+    workspaceLockReleased: { type: Boolean, required: true },
+}, { _id: false });
+
+const UserToolRunSupervisedAttemptSchema = new Schema<IUserToolRunSupervisedAttempt>({
+    attemptId: { type: String, required: true },
+    leaseOwner: { type: String, required: true },
+    leaseTokenDigest: { type: String, required: true },
+    createdAt: { type: Date, required: true },
+    dockerJournal: {
+        type: new Schema({
+            admission: { type: String, enum: ['open', 'closed'], required: true },
+            pending: { type: DockerJournalOperationSchema, default: null },
+            lastOutcome: { type: DockerJournalOutcomeSchema, default: null },
+            hasUnknownOutcome: { type: Boolean, required: true },
+        }, { _id: false }),
+        default: undefined,
+    },
+    workerLossReconciliation: {
+        type: WorkerLossReconciliationSchema,
+        default: undefined,
+    },
 }, { _id: false });
 
 const UserToolRunSchema = new Schema<IUserToolRun>({
@@ -182,6 +275,11 @@ const UserToolRunSchema = new Schema<IUserToolRun>({
         trim: true,
         default: null
     },
+    targetFingerprint: {
+        type: String,
+        trim: true,
+        default: null
+    },
     privateContextCiphertext: {
         type: String,
         select: false,
@@ -195,6 +293,31 @@ const UserToolRunSchema = new Schema<IUserToolRun>({
         type: Schema.Types.ObjectId,
         ref: 'User',
         default: null
+    },
+    lease: {
+        type: UserToolRunLeaseSchema,
+        default: null
+    },
+    reconstructionQuarantine: {
+        type: new Schema({
+            code: { type: String, enum: RECONSTRUCTION_REJECTION_CODES, required: true },
+            quarantinedAt: { type: Date, required: true },
+        }, { _id: false }),
+        default: null,
+    },
+    reconstructionQuarantineResolution: {
+        type: UserToolRunReconstructionQuarantineResolutionSchema,
+        default: null,
+    },
+    workspaceRetentionProtected: {
+        type: Boolean,
+        select: false,
+        default: false,
+    },
+    supervisedAttempt: {
+        type: UserToolRunSupervisedAttemptSchema,
+        select: false,
+        default: null,
     },
     launchContext: {
         type: String,
@@ -287,6 +410,14 @@ UserToolRunSchema.index(
     {
         partialFilterExpression: { status: 'queued' },
         name: 'idx_user_tool_runs_queued_dispatch'
+    }
+);
+
+UserToolRunSchema.index(
+    { status: 1, 'lease.expiresAt': 1 },
+    {
+        partialFilterExpression: { status: 'running', 'lease.expiresAt': { $type: 'date' } },
+        name: 'idx_user_tool_runs_running_lease_expiry'
     }
 );
 

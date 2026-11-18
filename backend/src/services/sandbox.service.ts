@@ -3,13 +3,19 @@ import { UserTool } from '../models/UserTool.model';
 import { BuildPreparationError, BuildService } from './build.service';
 import { NativePythonProvisioningService } from './nativePythonProvisioning.service';
 import { RuntimeHealthService } from './runtimeHealth.service';
-import { ExecutionOrchestrator, type QueuedRunAcknowledgement } from './runtime/ExecutionOrchestrator';
-import type { ExecutionFunctionRef, SandboxExecutionMetadata, SandboxExecutionResourceUsage, SandboxSyntaxCheckResult } from './runtime/execution.types';
-import { getSandboxErrorDetailsFromExecutionResult, RuntimeNotReadyError, type SandboxErrorDetails } from './runtime/errors';
+import { ExecutionOrchestrator, type ExecutionOrchestratorRequest, type QueuedRunAcknowledgement, type RunPreparation } from './runtime/ExecutionOrchestrator';
+import type { ExecutionFunctionRef, OrchestratedExecutionResult, SandboxExecutionMetadata, SandboxExecutionResourceUsage, SandboxSyntaxCheckResult } from './runtime/execution.types';
+import { getSandboxErrorDetailsFromExecutionResult, type SandboxErrorDetails } from './runtime/errors';
 import type { IUserToolPolicy, IUserToolVersion } from '../models/UserTool.model';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { UserToolRunService } from './userToolRun.service';
 import { buildGlobalToolClauses, buildOwnedToolClause } from '../utils/sharedExampleAccess';
+import { deriveExecutionMetadataFromLegacyFunction } from '../utils/userToolLegacyMapper';
+import type { IUserToolRun } from '../models/UserToolRun.model';
+import type { RunLease } from './runtime/MongoRunLeaseService';
+import { executionTargetFingerprint } from './runtime/executionTargetFingerprint';
+import { isReconstructionRejectionCode } from '../domain/execution/runReconstructionQuarantine';
+import { RunReconstructionRejection } from './runtime/RunReconstructionRejection';
 
 export interface SandboxResult {
     success: boolean;
@@ -57,6 +63,8 @@ interface VersionedExecutionTarget extends ExecutionFunctionRef {
     policySnapshot?: IUserToolPolicy;
 }
 
+type RetrySnapshot = Pick<IUserToolRun, 'toolVersionTag' | 'toolContentHash' | 'runtime' | 'workflowId' | 'policySnapshot' | 'targetFingerprint'>;
+
 export class SandboxService {
     private readonly buildService = new BuildService();
     private readonly nativePythonProvisioningService = new NativePythonProvisioningService();
@@ -85,19 +93,17 @@ export class SandboxService {
         authHeader?: string,
         idempotencyKey?: string,
     ): Promise<SandboxResult> {
-        const fn = await this.resolveExecutionTarget(functionId, userId, toolSelection);
-        await this.prepareResolvedExecutionTarget(fn, userId, functionId, toolSelection);
-        await this.ensureRuntimeReadyForRun(fn.language);
-
-        const executionResult = await this.executionOrchestrator.execute({
-            fn,
+        const acknowledgement = await this.queueFunctionRun({
+            functionId,
             userId,
-            args: testArgs,
+            testArgs,
+            toolSelection,
             agentInstanceId,
             privateContext,
             launchContext: agentInstanceId ? 'workflow_run' : 'editor_test',
             idempotencyKey,
         });
+        const executionResult = await this.waitForRunCompletion(acknowledgement.executionId, userId);
 
         const errorDetails = getSandboxErrorDetailsFromExecutionResult(executionResult);
         return errorDetails
@@ -118,8 +124,12 @@ export class SandboxService {
         idempotencyKey?: string;
         retryOfExecutionId?: string;
         launchContext?: 'editor_test' | 'workflow_run' | 'system_validation';
+        retrySnapshot?: RetrySnapshot;
     }): Promise<QueuedRunAcknowledgement> {
         const fn = await this.resolveExecutionTarget(input.functionId, input.userId, input.toolSelection);
+        if (input.retrySnapshot) {
+            this.assertTargetMatchesSnapshot(fn, input.retrySnapshot, 'RUN_RETRY_TARGET_CHANGED');
+        }
         return this.executionOrchestrator.enqueue({
             fn,
             userId: input.userId,
@@ -129,13 +139,109 @@ export class SandboxService {
             launchContext: input.launchContext ?? (input.agentInstanceId ? 'workflow_run' : 'editor_test'),
             idempotencyKey: input.idempotencyKey,
             retryOfExecutionId: input.retryOfExecutionId,
-        }, async () => {
-            await this.prepareResolvedExecutionTarget(fn, input.userId, input.functionId, input.toolSelection);
         });
+    }
+
+    async waitForRunCompletion(executionId: string, userId: string, timeoutMs?: number): Promise<OrchestratedExecutionResult> {
+        return this.executionOrchestrator.waitForRunCompletion(executionId, userId, timeoutMs);
+    }
+
+    async executeLeasedRun(
+        request: ExecutionOrchestratorRequest,
+        prepareForDispatch: RunPreparation,
+    ): Promise<OrchestratedExecutionResult> {
+        return this.executionOrchestrator.execute(request, prepareForDispatch);
     }
 
     async cancelRun(executionId: string, userId: string) {
         return this.executionOrchestrator.requestCancellation(executionId, userId);
+    }
+
+    async reconstructQueuedRun(lease: RunLease): Promise<{
+        request: ExecutionOrchestratorRequest;
+        prepareForDispatch: RunPreparation;
+    }> {
+        try {
+            return await this.reconstructQueuedRunUnchecked(lease);
+        } catch (error) {
+            if (error instanceof SandboxServiceError && isReconstructionRejectionCode(error.code)) {
+                throw new RunReconstructionRejection(error.code);
+            }
+            throw error;
+        }
+    }
+
+    private async reconstructQueuedRunUnchecked(lease: RunLease): Promise<{
+        request: ExecutionOrchestratorRequest;
+        prepareForDispatch: RunPreparation;
+    }> {
+        const run = await UserToolRun.findOne({
+            executionId: lease.executionId,
+            status: 'queued',
+            'lease.owner': lease.owner,
+            'lease.token': lease.token,
+            $expr: { $gt: ['$lease.expiresAt', '$$NOW'] },
+        }).select('+privateContextCiphertext');
+        if (!run) {
+            throw new SandboxServiceError('RUN_LEASE_LOST', 409, 'Le lease du run est absent ou expiré.');
+        }
+
+        const userId = run.ownerUserId.toString();
+        const toolSelection: SandboxToolSelection = {
+            toolId: run.toolId.toString(),
+            versionRef: { versionTag: run.toolVersionTag },
+        };
+        const fn = await this.resolveExecutionTarget(undefined, userId, toolSelection);
+        this.assertTargetMatchesSnapshot(fn, run, 'RUN_TARGET_CHANGED');
+        if (!run.targetFingerprint) {
+            throw new SandboxServiceError(
+                'RUN_TARGET_SNAPSHOT_MISSING',
+                409,
+                'Le run ne contient pas l’empreinte de sa cible ; sa reconstruction sûre est impossible.',
+            );
+        }
+        if (executionTargetFingerprint(fn) !== run.targetFingerprint) {
+            throw new SandboxServiceError(
+                'RUN_TARGET_CHANGED',
+                409,
+                'La cible enregistrée a changé ; sa reconstruction est refusée.',
+            );
+        }
+        if (fn.origin !== 'custom' || typeof fn.codeInline !== 'string') {
+            throw new SandboxServiceError(
+                'RUN_TARGET_SOURCE_UNVERIFIED',
+                409,
+                'Le contenu de la source sur disque ne peut pas encore être vérifié pour ce run.',
+            );
+        }
+        const privateContext = await this.userToolRunService.getPrivateContext(run);
+
+        return {
+            request: {
+                fn,
+                userId,
+                args: run.inputs,
+                agentInstanceId: run.agentInstanceId?.toString(),
+                privateContext,
+                launchContext: run.launchContext,
+                retryOfExecutionId: run.retryOfExecutionId ?? undefined,
+                persistedExecutionId: run.executionId,
+                executeExistingQueued: true,
+                verifiedInlineSource: true,
+            },
+            prepareForDispatch: async () => {
+                await this.prepareResolvedExecutionTarget(fn, userId, undefined, toolSelection);
+                const currentTarget = await this.resolveExecutionTarget(undefined, userId, toolSelection);
+                this.assertTargetMatchesSnapshot(currentTarget, run, 'RUN_TARGET_CHANGED');
+                if (executionTargetFingerprint(currentTarget) !== run.targetFingerprint) {
+                    throw new SandboxServiceError(
+                        'RUN_TARGET_CHANGED',
+                        409,
+                        'La cible du run a changé pendant sa préparation ; son exécution est refusée.',
+                    );
+                }
+            },
+        };
     }
 
     async retryRun(executionId: string, userId: string, idempotencyKey: string): Promise<QueuedRunAcknowledgement> {
@@ -168,7 +274,43 @@ export class SandboxService {
             idempotencyKey,
             retryOfExecutionId: parentRun.executionId,
             launchContext: parentRun.launchContext,
+            retrySnapshot: {
+                toolVersionTag: parentRun.toolVersionTag,
+                toolContentHash: parentRun.toolContentHash,
+                runtime: parentRun.runtime,
+                workflowId: parentRun.workflowId,
+                policySnapshot: parentRun.policySnapshot,
+                targetFingerprint: parentRun.targetFingerprint,
+            },
         });
+    }
+
+    private assertTargetMatchesSnapshot(
+        fn: VersionedExecutionTarget,
+        snapshot: RetrySnapshot,
+        errorCode: 'RUN_RETRY_TARGET_CHANGED' | 'RUN_TARGET_CHANGED',
+    ): void {
+        const target = deriveExecutionMetadataFromLegacyFunction(fn);
+        const targetPolicy = target.policySnapshot;
+        const savedPolicy = snapshot.policySnapshot;
+        const aliases = (values?: string[]) => JSON.stringify([...(values ?? [])].sort());
+        const matches = target.toolVersionTag === snapshot.toolVersionTag
+            && target.toolContentHash === snapshot.toolContentHash
+            && target.runtime === snapshot.runtime
+            && (target.workflowId?.toString() ?? null) === (snapshot.workflowId?.toString() ?? null)
+            && targetPolicy.networkMode === savedPolicy.networkMode
+            && (targetPolicy.timeoutSeconds ?? null) === (savedPolicy.timeoutSeconds ?? null)
+            && (targetPolicy.maxMemoryMb ?? null) === (savedPolicy.maxMemoryMb ?? null)
+            && aliases(targetPolicy.secretAliases) === aliases(savedPolicy.secretAliases)
+            && (!snapshot.targetFingerprint || executionTargetFingerprint(fn) === snapshot.targetFingerprint);
+
+        if (!matches) {
+            throw new SandboxServiceError(
+                errorCode,
+                409,
+                'La version ou la politique de l’outil a changé depuis le run initial ; l’exécution est refusée.',
+            );
+        }
     }
 
     private async resolveExecutionTarget(
@@ -240,7 +382,11 @@ export class SandboxService {
             : tool.currentVersion;
 
         if (!resolvedVersion) {
-            throw new Error(`Version de tool introuvable pour '${tool.name}' (${requestedVersionTag})`);
+            throw new SandboxServiceError(
+                'RUN_TARGET_VERSION_NOT_FOUND',
+                409,
+                `Version de tool introuvable pour '${tool.name}' (${requestedVersionTag})`,
+            );
         }
 
         const versionNumber = toolSelection.versionRef?.versionNumber
@@ -359,14 +505,6 @@ export class SandboxService {
         }
 
         return null;
-    }
-
-    private async ensureRuntimeReadyForRun(language: 'python' | 'typescript'): Promise<void> {
-        const { report, readiness } = await this.executionOrchestrator.getPreferredRunnerReadiness(language);
-
-        if (!readiness.ready) {
-            throw new RuntimeNotReadyError(readiness.reason ?? report.summary);
-        }
     }
 
     /**

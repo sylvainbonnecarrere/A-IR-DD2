@@ -307,9 +307,37 @@ const COLLECTION_SCHEMAS = {
           agentInstanceId: { bsonType: ['objectId', 'null'] },
           retryOfExecutionId: { bsonType: ['string', 'null'] },
           requestFingerprint: { bsonType: ['string', 'null'] },
+          targetFingerprint: { bsonType: ['string', 'null'] },
           privateContextCiphertext: { bsonType: ['string', 'null'] },
           cancellationRequestedAt: { bsonType: ['date', 'null'] },
           cancellationRequestedBy: { bsonType: ['objectId', 'null'] },
+          workspaceRetentionProtected: { bsonType: 'bool' },
+          reconstructionQuarantine: {
+            bsonType: ['object', 'null'],
+            properties: {
+              code: { bsonType: 'string' },
+              quarantinedAt: { bsonType: 'date' }
+            }
+          },
+          reconstructionQuarantineResolution: {
+            bsonType: ['object', 'null'],
+            properties: {
+              code: { bsonType: 'string' },
+              quarantinedAt: { bsonType: 'date' },
+              resolution: { enum: ['failed'] },
+              resolvedAt: { bsonType: 'date' },
+              resolvedBy: { bsonType: 'objectId' }
+            }
+          },
+          lease: {
+            bsonType: ['object', 'null'],
+            properties: {
+              owner: { bsonType: 'string' },
+              token: { bsonType: 'string' },
+              acquiredAt: { bsonType: 'date' },
+              expiresAt: { bsonType: 'date' }
+            }
+          },
           launchContext: { bsonType: 'string' },
           status: { bsonType: 'string' },
           runtime: { bsonType: 'string' },
@@ -446,6 +474,13 @@ const INDEX_DEFINITIONS = {
       }
     },
     {
+      spec: { status: 1, 'lease.expiresAt': 1 },
+      options: {
+        partialFilterExpression: { status: 'running', 'lease.expiresAt': { $type: 'date' } },
+        name: 'idx_user_tool_runs_running_lease_expiry'
+      }
+    },
+    {
       spec: { status: 1, cancellationRequestedAt: 1 },
       options: {
         partialFilterExpression: { status: 'running', cancellationRequestedAt: { $type: 'date' } },
@@ -532,6 +567,13 @@ export async function runDatabaseBootstrap(db: any): Promise<void> {
 
     console.info('🔄 Ensuring collection schemas are up to date...');
     await updateCollectionSchemas(db);
+    await db.collection('user_tool_runs').createIndex(
+      { status: 1, 'lease.expiresAt': 1 },
+      {
+        partialFilterExpression: { status: 'running', 'lease.expiresAt': { $type: 'date' } },
+        name: 'idx_user_tool_runs_running_lease_expiry'
+      }
+    );
 
     if (!testUserExists && process.env.NODE_ENV === 'development') {
       console.info('👤 Injecting test user...');
@@ -772,8 +814,11 @@ async function createNewCollections(db: any, existingNames: Set<string>): Promis
         await db.createCollection(collectionName);
       }
       console.debug(`  ✓ ${collectionName}`);
-    } catch (error: any) {
-      throw error;  // Treat as error - should not happen for new collections
+    } catch (error: unknown) {
+      if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 48) {
+        throw error;
+      }
+      console.debug(`  ✓ ${collectionName} (created concurrently; schema will be updated)`);
     }
   }
   

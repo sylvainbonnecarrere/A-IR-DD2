@@ -7,7 +7,7 @@
  *
  * Sécurité :
  *   - requireAuth requis sur toutes les routes
- *   - Timeout global (15s Python / 10s TypeScript)
+ *   - Wait for the durable run result; return HTTP 202 if the wait limit is reached
  *   - Validation Zod stricte des inputs
  *   - Rate-limit (10 req/min par utilisateur — via rateLimiter middleware)
  */
@@ -19,6 +19,7 @@ import { validateRequest } from '../middleware/validation.middleware';
 import { BuildPreparationError } from '../services/build.service';
 import { RuntimeHealthService } from '../services/runtimeHealth.service';
 import { SandboxService } from '../services/sandbox.service';
+import { RunCompletionTimeoutError } from '../services/runtime/ExecutionOrchestrator';
 import { buildSandboxErrorDetails, RuntimeNotReadyError } from '../services/runtime/errors';
 import { IUser } from '../models/User.model';
 
@@ -123,6 +124,13 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
     } catch (error: any) {
         console.error('[SandboxRoute] POST /run error:', error);
 
+        if (error instanceof RunCompletionTimeoutError) {
+            return res.status(202).json({
+                executionId: error.executionId,
+                status: 'accepted',
+                statusUrl: `/api/runs/executions/${encodeURIComponent(error.executionId)}`,
+            });
+        }
         if (error.message?.includes('introuvable') || error.message?.includes('not found')) {
             return res.status(404).json({
                 error: error.message,

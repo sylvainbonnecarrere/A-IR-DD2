@@ -50,6 +50,18 @@ type RuntimeEventEnvelope = {
 | Task | cancelled | `task:cancelled` |
 | Task | blocked | `task:blocked` |
 
+### Évolutions prévues (US-J7-09) — événements de quarantaine et de fencing
+
+Trois nouveaux types seront ajoutés au contrat (version 1 conservée, whitelist de payload inchangée) :
+
+| Aggregate | Événement | Émis quand |
+| --- | --- | --- |
+| Run | `run:quarantined` | run passé en `quarantined` (worker perdu, preuve de quiescence absente, verrou tenu) |
+| Run | `run:fenced` | opération gateway passée en `fenced` avec audit signé |
+| Run | `run:recovery_relaunched` | nouveau run créé par `fence-and-retry` / auto-recovery (`retryOfExecutionId` renseigné) |
+
+Règles inchangées : payload validé par Zod, aucune clé sensible, émission uniquement vers le workspace autorisé (filtrage renforcé par US-J7-12).
+
 ## Invariants métier
 
 - Le `version` est strictement `1` pour les événements courants.

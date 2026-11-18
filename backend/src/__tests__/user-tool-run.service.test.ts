@@ -35,6 +35,53 @@ describe('UserToolRunService', () => {
         };
     }
 
+    it('acknowledges creation and cancellation with majority writes', async () => {
+        const data = buildCreateData();
+        const save = jest.spyOn(UserToolRun.prototype, 'save');
+        const update = jest.spyOn(UserToolRun, 'findOneAndUpdate');
+        try {
+            await service.createQueuedRun(data);
+            expect(save).toHaveBeenCalledWith({
+                w: 'majority', wtimeout: 10_000,
+            });
+            await service.requestCancellation(data.executionId, data.ownerUserId);
+            expect(update.mock.calls[0][2]).toEqual(expect.objectContaining({
+                writeConcern: { w: 'majority', wtimeoutMS: 10_000 },
+            }));
+
+            const running = buildCreateData();
+            await service.createQueuedRun(running);
+            await service.markRunning(running.executionId);
+            update.mockClear();
+            await service.requestCancellation(running.executionId, running.ownerUserId);
+            expect(update).toHaveBeenCalledTimes(2);
+            for (const call of update.mock.calls) {
+                expect(call[2]).toEqual(expect.objectContaining({
+                    writeConcern: { w: 'majority', wtimeoutMS: 10_000 },
+                }));
+            }
+        } finally {
+            save.mockRestore();
+            update.mockRestore();
+        }
+    });
+
+    it('uses majority reads for idempotent cancellation and confirmed run lookup', async () => {
+        const data = buildCreateData();
+        await service.createQueuedRun(data);
+        await service.requestCancellation(data.executionId, data.ownerUserId);
+        const readConcern = jest.spyOn(mongoose.Query.prototype, 'readConcern');
+        try {
+            expect((await service.requestCancellation(data.executionId, data.ownerUserId)).kind).toBe('stopped');
+            expect(readConcern).toHaveBeenCalledWith('majority');
+            readConcern.mockClear();
+            expect((await service.getRunByExecutionId(data.executionId, 'majority'))?.status).toBe('stopped');
+            expect(readConcern).toHaveBeenCalledWith('majority');
+        } finally {
+            readConcern.mockRestore();
+        }
+    });
+
     it('creates, starts and completes a run with the expected timing metadata', async () => {
         const createData = buildCreateData();
         const queuedAt = new Date('2026-03-17T11:00:00.000Z');
