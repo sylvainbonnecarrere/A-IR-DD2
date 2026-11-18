@@ -1,6 +1,7 @@
 # Résolution des 2 erreurs CI `npm audit --audit-level=high` (push main, 2026-11-18)
 
-Stacks : `erreurs.md` (root), `apperror.md` (backend).
+Stacks bruts (supprimés après résolution) : `erreurs.md` (root), `apperror.md` (backend) —
+contenu intégralement consigné ci-dessous.
 
 ## Cause racine
 
