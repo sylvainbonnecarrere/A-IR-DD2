@@ -77,6 +77,7 @@ flowchart LR
 
       Local[Local models\nLMStudio / Ollama / Jan]
       CloudLLM[Cloud LLMs\nGemini · OpenAI · Mistral · Anthropic · ...]
+      DockerGateway[Exclusive Docker command gateway\nProduction only]
       Docker[Docker sandbox runner\nPython and TypeScript tools]
       Firecracker[Firecracker prototype\noptional runner path]
 
@@ -87,7 +88,8 @@ flowchart LR
       API <--> CloudLLM
       API --> Catalog
       API --> Mongo
-      Sandbox --> Docker
+      Sandbox --> DockerGateway
+      DockerGateway --> Docker
       Sandbox -. optional .-> Firecracker
       Docker --> Workspace
       Sandbox --> Catalog
@@ -97,6 +99,7 @@ flowchart LR
 ```
 
 - **Dockerized runtime:** MongoDB is typically started through Docker Compose, and agent code execution uses hardened Docker sandboxes as the current default runner.
+- **Production Docker boundary:** on the dedicated Linux host, the backend sends sandbox, runtime-health, and native-Python provisioning commands through the `airdd2-docker-gateway` Unix socket. Only the gateway service joins the Docker group; the backend receives access to the gateway socket, not the Docker socket. Local development retains the direct Docker fallback unless `DOCKER_GATEWAY_REQUIRED=true`.
 - **Sandbox outputs:** Python/TypeScript tool executions publish artifacts into workflow-scoped workspace roots, then the backend projects them into the media catalog for BOS exploration.
 - **Media persistence modes:** each agent can persist media to database-backed journals, workspace storage, or cloud storage; workspace publication can remain enabled as a companion write path.
 - **Cloud secret boundary:** S3/GCS credentials live in secure settings profiles, while agents only reference a profile identifier.
@@ -180,7 +183,7 @@ Then update `backend/.env` with at least these values:
 - `ENCRYPTION_KEY`
 - `JWT_EXPIRATION` (for example `1h`)
 
-> Redis is intentionally not required for the supported runtime. MongoDB remains the source of truth for workflow state, task history, and worker coordination; Redis is not used as a business-state store in the current implementation.
+> Redis is intentionally not required for the supported runtime. MongoDB is the source of truth for run state and the durable queue. After MongoDB and database initialization succeed, the backend starts a Mongo-backed worker in the API process. Queued runs are recovered after a process restart; runs already marked `running` are not replayed automatically because their external outcome may be uncertain, and their workspace stays quarantined until reconciled. A target that cannot be reconstructed from a verified inline source is quarantined rather than run from a mutable path.
 
 If you already have an older local `.env`, rename these deprecated keys:
 
@@ -197,7 +200,7 @@ docker-compose --env-file ../.env up -d
 cd ../..
 ```
 
-A healthy local startup is expected with MongoDB only. Redis is not part of the supported startup contract and is not required for the worker/queue model in this codebase.
+A healthy local startup is expected with MongoDB only. Redis is not part of the supported startup contract.
 
 ### 6. Install Python dependencies for native agent functions
 
@@ -244,7 +247,47 @@ Open this endpoint in a browser or call it from your shell:
 http://localhost:3001/api/health
 ```
 
-The backend must respond before you continue to the UI.
+This is the liveness endpoint. Before relying on run execution, also check readiness:
+
+```bash
+http://localhost:3001/api/health/ready
+```
+
+Readiness returns HTTP 200 only when MongoDB is connected and the durable run worker is running (the worker is intentionally disabled in tests). If MongoDB initialization fails or the worker fails, readiness returns HTTP 503; liveness remains available for guest-mode behavior and diagnostics.
+
+On the dedicated Linux production host, the backend also requires the Docker gateway to activate its persisted worker epoch. Install the two systemd units from `backend/deploy/systemd/` and create separate, root-owned environment files from the examples:
+
+- `/etc/airdd2/docker-gateway.env` for MongoDB, the socket path, Docker CLI path, and allowed workspace bind root;
+- `/etc/airdd2/backend.env` for MongoDB, `NODE_ENV=production`, `DOCKER_GATEWAY_REQUIRED=true`, the same socket path, and the same workspace storage root.
+
+The configured `WORKSPACE_STORAGE_PATH` must be within `DOCKER_GATEWAY_ALLOWED_BIND_ROOTS`. Keep the actual MongoDB URI and other credentials out of the repository. Add only the gateway service account to the Docker group; `airdd2-backend.service` is configured with the gateway-client group and no Docker-group access. After building the backend, install both unit files under `/etc/systemd/system`, run `systemctl daemon-reload`, and enable/start `airdd2-backend.service` (which requires the gateway). Production readiness remains HTTP 503 until MongoDB, the gateway epoch, and the durable run worker are all ready. If the gateway finds an operation with uncertain Docker effects after restart, it fails closed and requires reconciliation rather than silently accepting new commands.
+
+The backend build emits `dist/src/server.js` and `dist/src/services/runtime/dockerGatewayMain.js`; the npm start scripts and the supplied systemd units use these paths. Reinstall the updated units and run `systemctl daemon-reload` when upgrading an existing deployment.
+
+An uncertain `docker run` remains quarantined, including when a point-in-time inspection finds no container: a delayed Docker request could still create or start it. On gateway restart, an uncertain `kill` is also retained because a delayed name-based command could affect a replacement container. The gateway will not reopen while such an operation remains unresolved. Do not clear the journal or release the workspace lock based on container inspection alone; a verified procedure for fencing and reconciling delayed effects remains necessary.
+
+#### Isolated Linux recovery validation
+
+For development only, `backend/deploy/recovery-validation/compose.yaml` starts systemd, an ephemeral MongoDB and a separate Docker-in-Docker engine. It does not mount the host Docker socket or publish service ports, but the systemd and engine containers are **privileged**, and the internal Docker API is unauthenticated on the Compose network. Use only on a trusted local machine and never attach untrusted containers or production services. The sandbox removes its MongoDB and Docker state when stopped. Generated service credentials are ephemeral.
+
+From the repository root in PowerShell, with Docker Desktop running:
+
+```powershell
+docker compose -p airdd2-j7-validation -f backend\deploy\recovery-validation\compose.yaml up -d --build --wait --wait-timeout 120
+docker compose -p airdd2-j7-validation -f backend\deploy\recovery-validation\compose.yaml exec -T linux docker pull ubuntu:noble
+docker compose -p airdd2-j7-validation -f backend\deploy\recovery-validation\compose.yaml exec -T -e AIRDD2_RECOVERY_VALIDATION=1 linux node deploy/recovery-validation/validate-systemd.cjs
+docker compose -p airdd2-j7-validation -f backend\deploy\recovery-validation\compose.yaml down
+```
+
+The script deliberately kills and restarts the **sandbox** backend, creates isolated test fixtures, and injects a synthetic pending gateway operation. It removes only its own fixtures; it must never be adapted to clear production journal entries. Stop the Compose project even if validation fails. Linux/systemd sandbox results do not replace validation on the actual production host or end-to-end testing, and do not resolve uncertain `run` operations.
+
+If runtime images are customized, set the same `RUNTIME_NODE_IMAGE`, `RUNTIME_PYTHON_IMAGE`, and `RUNTIME_PYTHON_PROVISIONING_IMAGE` values in both service environment files; the gateway independently allowlists those images.
+
+The worker is started and stopped with the backend process. On shutdown it stops claiming work before MongoDB disconnects. Use a process supervisor to restart the backend after an unexpected worker failure; the health endpoint reports the failure and the worker does not silently restart itself.
+
+Current worker defaults are a 60-second lease, renewal every 10 seconds with a 10-second renewal timeout, and a 1-second queue poll interval. These are currently fixed in the backend composition root, not environment-variable settings.
+
+An occupied workspace lock defers that queued run to the back of the queue, while the worker remains available for unrelated work. If a prior run is still `running` with an expired lease, the lock is deliberately not stolen or cleared automatically; investigate and reconcile the external runner before reusing that workspace.
 
 ### 9. Run the Node 24 runtime verification slice
 
@@ -315,6 +358,37 @@ npm run ci:node25:runtime
 npm test
 cd backend && npm test
 ```
+
+Backend Jest tests connect to the MongoDB server specified by `MONGODB_URI`
+(or localhost by default). Each test suite uses a uniquely named temporary
+database, deletes its test collections between tests, and drops that database
+afterward. Use a disposable, isolated MongoDB server rather than a shared or
+production instance. An interrupted test process can leave its temporary database
+behind; inspect the exact database before any manual cleanup.
+
+The experimental J7 journal replica-set test is opt-in. It requires a local
+`mongo:6` image, Docker, and a separate disposable MongoDB for Jest's global
+setup. On Windows PowerShell, after setting `MONGODB_URI` to that disposable
+server, run:
+
+```powershell
+$env:AIRDD2_TEST_MONGO_REPLICA = '1'
+npm --prefix backend test -- --runInBand src/__tests__/mongo-docker-journal-replica.integration.test.ts
+Remove-Item Env:AIRDD2_TEST_MONGO_REPLICA
+```
+
+The test starts three isolated, randomly labelled MongoDB containers and a
+dedicated network, then removes only its own resources. An interrupted process
+may leave those resources behind. It tests MongoDB election and loss of quorum,
+not Docker daemon restart or safe worker activation.
+
+An explicit retry is rejected with `RUN_RETRY_TARGET_CHANGED` (HTTP 409) if
+the recorded version, content hash, runtime, workflow or persisted policy
+fields no longer match the selected tool. A missing version returns
+`RUN_TARGET_VERSION_NOT_FOUND` (HTTP 409). New runs also record a fingerprint
+of the tool's inline source, dependencies and complete policy, checked on retry;
+older runs without it only have the original metadata checks. The terminal parent
+is unchanged. This fingerprint does not verify files or build artifacts.
 
 For runtime image security checks, start Docker and rebuild the three sandbox and
 provisioning images before scanning:

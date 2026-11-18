@@ -4,6 +4,37 @@
 **État :** campagne commencée, J6 non clos.  
 **Décision provisoire : NO-GO.** Les parcours de l'interface dépendant des écarts J5 1 à 3 seront traités au cutover final, conformément à la décision projet. Ils restent bloquants pour le verdict de livraison, mais ne bloquent pas la préparation et l'exécution des autres validations J6.
 
+## Actualisation J7-02 au 17/11/2026
+
+Les éléments datés ci-dessous décrivent la campagne J6 initiale et ne sont pas un état courant de l'implémentation. Depuis, un worker Mongo durable et un gateway Docker ont été raccordés. Une campagne Linux locale isolée avec systemd, Node 24.22.1, MongoDB et Docker-in-Docker a réussi : **10 suites et 61 tests**, sans test ignoré. Elle couvre notamment la reprise des workers, le fencing, la création Docker différée et la réconciliation d'un conteneur réel. La commande `npm run ci:node25:runtime` a également réussi sous Node 24.22.1 : 3 suites et 20 tests.
+
+En complément, deux `SIGKILL` du backend sous systemd ont confirmé respectivement l'arrêt d'un conteneur actif, la persistance de `WORKER_LOST` et la libération de son verrou, puis le maintien en quarantaine d'un conteneur suspendu et de son workspace. Un redémarrage du gateway avec opération `run` synthétique injectée dans le journal confirme le maintien de l'incertitude et l'absence d'ouverture du socket ; ce scénario ne simule pas une vraie requête en transit. Les permissions entre comptes backend, gateway et Docker ont été vérifiées dans cet environnement.
+
+La campagne a également démontré qu'une création Docker différée peut survenir après une inspection indiquant l'absence du conteneur. Le gateway conserve désormais une opération `run` incertaine en quarantaine, sans rouvrir l'admission sur cette seule inspection. La sortie sûre de cette quarantaine, le redéploiement et la validation sur l'hôte Linux cible restent ouverts. Le verdict J6 demeure **NO-GO** ; ces tests ciblés ne remplacent pas la campagne E2E.
+
+Un test complémentaire sur le moteur Docker-in-Docker isolé maintient une requête de démarrage en attente après déconnexion du client : un conteneur observé `created` démarre ensuite réellement. Si le conteneur initial est d'abord supprimé et remplacé par une réservation inerte, le démarrage différé par ancien ID échoue et la réservation reste valide. Ces essais ciblés (2 suites, 16 tests réussis) ne prouvent pas la sécurité de toutes les courses : une suppression tardive par nom peut notamment détruire la réservation, et les effets déjà exécutés doivent aussi être neutralisés. Aucune sortie de quarantaine de production n'est revendiquée.
+
+Les admissions Mongo et en mémoire transmettent désormais au vérificateur de `reconcileUnknown` les métadonnées d'effet de l'opération, conservées après redémarrage. Le vérificateur utilisé au redémarrage refuse toujours les `run` et `kill` incertains : le raccordement des métadonnées ne constitue pas une preuve de quiescence. Un test réel montre qu'une suppression différée par nom détruit une réservation inerte ; un autre montre qu'un `kill` différé par nom peut atteindre un conteneur de remplacement.
+
+Nouvelle validation locale : build backend et **11 suites, 72 tests** ciblés réussis sous Linux/Docker-in-Docker isolé ; la suite de quarantaine queued passe aussi (8 tests), ainsi que les sept tests de requêtes Docker retardées après ajout de la suppression différée. Le script systemd valide à nouveau les deux pannes backend et la quarantaine d'une opération synthétique. Le runtime CI passe sous Node 24.22.1 (3 suites, 20 tests).
+
+La campagne Playwright semi-E2E complète en série a produit **10 succès et 1 échec** : le scénario `minimize-restore` ne trouve pas le canvas attendu ; avec sa configuration par défaut, il ciblait initialement le port 4000 au lieu du serveur de test 4173. Les dix scénarios de la campagne J6 sont passés lors de cette exécution séquentielle. Les tests navigateur avec réponses mockées ne démontrent pas un parcours E2E complet du worker réel.
+
+La campagne live navigateur a été rejouée avec le backend et MongoDB éphémères du laboratoire, exposés temporairement sur loopback et avec l'origine CORS du frontend configurée : **6 succès, 1 échec, 1 test ignoré**. Le scénario d'attachement workspace ne retrouve pas le fichier dans l'interface, y compris lors d'une seconde exécution isolée. Le scénario d'artefact runtime a été ignoré parce que le sandbox Python n'était pas prêt. Ces résultats ne constituent pas une validation complète du runtime réel. Le test d'élection MongoDB en replica set n'a pas été exécuté dans ce laboratoire : il exige une topologie et des ports de test adaptés.
+
+La procédure de démarrage et d'arrêt du laboratoire local privilégié est détaillée dans le README racine. Elle utilise des données temporaires et ne doit pas être exécutée sur une infrastructure de production.
+
+Pour rejouer les tests Docker ciblés sur un environnement de test isolé, avec MongoDB accessible en loopback et l'image locale `ubuntu:noble` :
+
+```bash
+AIRDD2_TEST_DOCKER_RESERVATION=1 npm --prefix backend test -- --runInBand \
+  src/__tests__/docker-gateway-recovery.integration.test.ts \
+  src/__tests__/docker-inflight-reservation.integration.test.ts \
+  src/__tests__/docker-name-reservation.integration.test.ts
+```
+
+Les tests créent puis suppriment uniquement leurs conteneurs identifiés par des labels de test uniques. Ils nécessitent un accès Docker et ne remplacent pas les essais contrôlés du service systemd en production.
+
 ## Périmètre et isolation
 
 Les tests semi-E2E utilisent des utilisateurs, tokens et réponses API synthétiques. Aucun compte réel, fournisseur LLM ni clé API n'est utilisé. Les smoke tests live qui enregistrent un utilisateur dans la base configurée ne sont pas exécutés dans cette campagne isolée.

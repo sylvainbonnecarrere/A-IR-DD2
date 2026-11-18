@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { User } from '../models/User.model';
 import { UserTool } from '../models/UserTool.model';
 import { Workspace } from '../models/Workspace.model';
-import { ExecutionOrchestrator } from '../services/runtime/ExecutionOrchestrator';
+import { SandboxService } from '../services/sandbox.service';
 import * as userToolMirrorService from '../services/userToolMirror.service';
 import { executeFunctionById } from '../pythonExecutor';
 
@@ -64,7 +64,12 @@ describe('pythonExecutor.executeFunctionById', () => {
             isReadonly: false,
         });
 
-        const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
+        const queueSpy = jest.spyOn(SandboxService.prototype, 'queueFunctionRun').mockResolvedValue({
+            executionId: 'utr-python-executor',
+            status: 'queued',
+            replayed: false,
+        });
+        const waitSpy = jest.spyOn(SandboxService.prototype, 'waitForRunCompletion').mockResolvedValue({
             success: true,
             output: { value: 'ok' },
             stdout: 'sandbox ok',
@@ -87,23 +92,14 @@ describe('pythonExecutor.executeFunctionById', () => {
 
         expect(result).toEqual({ value: 'ok' });
         expect(syncMirrorSpy).not.toHaveBeenCalled();
-        expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({
+        expect(queueSpy).toHaveBeenCalledWith(expect.objectContaining({
+            functionId: fn.id,
             userId: user.id,
-            args: { value: 'ok' },
+            testArgs: { value: 'ok' },
             launchContext: 'workflow_run',
             agentInstanceId: 'agent-123',
-            fn: expect.objectContaining({
-                _id: expect.anything(),
-                name: fn.name,
-                language: 'python',
-                toolVersionTag: 'v7',
-                toolContentHash: 'hash-python-executor-v7',
-                policySnapshot: expect.objectContaining({
-                    networkMode: 'restricted',
-                    timeoutSeconds: 45
-                })
-            })
         }));
+        expect(waitSpy).toHaveBeenCalledWith('utr-python-executor', user.id);
     });
 
     it('uses system_validation launch context when no agent id is provided', async () => {
@@ -136,7 +132,12 @@ describe('pythonExecutor.executeFunctionById', () => {
             isReadonly: false,
         });
 
-        const executeSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'execute').mockResolvedValue({
+        const queueSpy = jest.spyOn(SandboxService.prototype, 'queueFunctionRun').mockResolvedValue({
+            executionId: 'utr-python-system-validation',
+            status: 'queued',
+            replayed: false,
+        });
+        jest.spyOn(SandboxService.prototype, 'waitForRunCompletion').mockResolvedValue({
             success: true,
             output: { ok: true },
             stdout: '',
@@ -152,7 +153,9 @@ describe('pythonExecutor.executeFunctionById', () => {
 
         await executeFunctionById(fn.id, { ok: true }, user.id);
 
-        expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({
+        expect(queueSpy).toHaveBeenCalledWith(expect.objectContaining({
+            functionId: fn.id,
+            testArgs: { ok: true },
             launchContext: 'system_validation',
             agentInstanceId: undefined
         }));

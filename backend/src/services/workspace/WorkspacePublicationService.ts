@@ -9,6 +9,7 @@ import {
 } from '../../types/persistence';
 import { MediaStorageError } from '../mediaStorage.service';
 import { createWorkspaceManager, WorkspaceManager } from './WorkspaceManager';
+import { MongoWorkspaceLockService } from '../runtime/MongoWorkspaceLockService';
 
 export interface WorkspacePublicationContext {
     userId: string;
@@ -25,6 +26,7 @@ function isAllowedMimeType(mimeType: string): mimeType is AllowedMimeType {
 export class WorkspacePublicationService {
     constructor(
         private readonly workspaceManager: WorkspaceManager = createWorkspaceManager(),
+        private readonly workspaceLocks: MongoWorkspaceLockService = new MongoWorkspaceLockService(),
     ) {}
 
     canPublishToWorkflowWorkspace(context: WorkspacePublicationContext): boolean {
@@ -39,56 +41,70 @@ export class WorkspacePublicationService {
     ): Promise<MediaPayload> {
         this.validateMimeType(metadata.mimeType);
 
-        const workspace = await this.workspaceManager.ensureWorkflowWorkspace(context.userId, context.workflowId);
-        const checksum = this.generateChecksum(file);
-        const now = new Date();
-        const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        const uniqueFileName = this.generateUniqueFileName(metadata.originalName);
-        const agentDirectory = this.sanitizePathSegment(context.agentInstanceId) || 'agent';
-
-        const relativeFilePath = path.posix.join(
-            'output',
-            'media',
-            'agents',
-            agentDirectory,
-            yearMonth,
-            uniqueFileName,
-        );
-
-        const absolutePath = path.join(
-            workspace.runtimeRoots.outputRoot,
-            'media',
-            'agents',
-            agentDirectory,
-            yearMonth,
-            uniqueFileName,
-        );
-
-        await fs.mkdir(path.dirname(absolutePath), { recursive: true });
-
-        try {
-            await fs.writeFile(absolutePath, file);
-        } catch (error) {
+        const owner = `media:${crypto.randomUUID()}`;
+        const lock = await this.workspaceLocks.tryAcquire(context.userId, context.workflowId, owner);
+        if (!lock) {
             throw new MediaStorageError(
-                `Erreur d'écriture du fichier workspace: ${error instanceof Error ? error.message : 'Unknown'}`,
-                'WRITE_ERROR',
-                { path: absolutePath },
+                'Workspace is locked by an active execution or requires reconciliation.',
+                'WORKSPACE_LOCKED',
             );
         }
+        try {
+            const workspace = await this.workspaceManager.ensureWorkflowWorkspace(context.userId, context.workflowId);
+            const checksum = this.generateChecksum(file);
+            const now = new Date();
+            const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            const uniqueFileName = this.generateUniqueFileName(metadata.originalName);
+            const agentDirectory = this.sanitizePathSegment(context.agentInstanceId) || 'agent';
 
-        return {
-            mimeType: metadata.mimeType,
-            fileName: uniqueFileName,
-            size: file.length,
-            storageMode: 'local',
-            path: relativeFilePath,
-            checksum,
-            metadata: {
-                generatedBy: metadata.generatedBy,
-                prompt: metadata.prompt,
-                storedAt: now.toISOString(),
-            },
-        };
+            const relativeFilePath = path.posix.join(
+                'output',
+                'media',
+                'agents',
+                agentDirectory,
+                yearMonth,
+                uniqueFileName,
+            );
+
+            const absolutePath = path.join(
+                workspace.runtimeRoots.outputRoot,
+                'media',
+                'agents',
+                agentDirectory,
+                yearMonth,
+                uniqueFileName,
+            );
+
+            await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+
+            try {
+                await fs.writeFile(absolutePath, file);
+            } catch (error) {
+                throw new MediaStorageError(
+                    `Erreur d'écriture du fichier workspace: ${error instanceof Error ? error.message : 'Unknown'}`,
+                    'WRITE_ERROR',
+                    { path: absolutePath },
+                );
+            }
+
+            return {
+                mimeType: metadata.mimeType,
+                fileName: uniqueFileName,
+                size: file.length,
+                storageMode: 'local',
+                path: relativeFilePath,
+                checksum,
+                metadata: {
+                    generatedBy: metadata.generatedBy,
+                    prompt: metadata.prompt,
+                    storedAt: now.toISOString(),
+                },
+            };
+        } finally {
+            if (!await this.workspaceLocks.release(lock)) {
+                throw new Error(`Workspace lock release was not confirmed after media publication for ${owner}`);
+            }
+        }
     }
 
     private validateMimeType(mimeType: string): void {

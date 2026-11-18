@@ -1,0 +1,54 @@
+services:
+  mongo:
+    image: mongo:7.0.26@sha256:8c3ce64d1a433bf57ea79035b48a38ea3e532997a1328fe3266e2e2e8bfb41b6
+    tmpfs:
+      - /data/db
+      - /data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping:1}).ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  engine:
+    image: docker:29.9.3-dind@sha256:7bf70dcb85c822e3fa6f2d332143e474b99147b9d7b39102b0cfe8b04a7dd61b
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command: ["--host=tcp://0.0.0.0:2375", "--host=unix:///var/run/docker.sock", "--storage-driver=vfs"]
+    tmpfs:
+      - /var/lib/docker:exec
+    volumes:
+      - workspaces:/opt/airdd2/backend/storage/workspaces
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  linux:
+    build:
+      context: ../..
+      dockerfile: deploy/recovery-validation/Dockerfile
+    privileged: true
+    cgroup: private
+    tmpfs:
+      - /run
+      - /run/lock
+      - /tmp
+    volumes:
+      - workspaces:/opt/airdd2/backend/storage/workspaces
+    depends_on:
+      mongo:
+        condition: service_healthy
+      engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3001/api/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  workspaces:

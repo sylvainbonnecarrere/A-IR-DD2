@@ -4,6 +4,7 @@ import request from 'supertest';
 import '../middleware/auth.middleware';
 import { User } from '../models/User.model';
 import { UserToolRun } from '../models/UserToolRun.model';
+import { UserTool } from '../models/UserTool.model';
 import runsRoutes from '../routes/runs.routes';
 import { SandboxService } from '../services/sandbox.service';
 import { IdempotencyKeyReuseError } from '../services/runtime/ExecutionOrchestrator';
@@ -120,6 +121,82 @@ describe('Run command routes', () => {
             .expect(503);
 
         expect(response.body).toEqual(expect.objectContaining({ code: 'RUNTIME_NOT_READY' }));
+    });
+
+    it('allows only an admin to fail a quarantined run with an exact code match', async () => {
+        const fixture = await createFixture();
+        await User.updateOne({ _id: fixture.user._id }, { $set: { role: 'admin' } });
+        await UserToolRun.create({
+            executionId: 'run-command-test-quarantine',
+            ownerUserId: fixture.user._id,
+            toolId: '66c111111111111111111111',
+            toolVersionTag: 'v1',
+            toolContentHash: 'hash',
+            workflowId: null,
+            launchContext: 'editor_test',
+            status: 'queued',
+            runtime: 'typescript',
+            runner: 'docker_sandbox',
+            inputs: {},
+            policySnapshot: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256, secretAliases: [] },
+            timing: { queuedAt: new Date(), startedAt: null, finishedAt: null, durationMs: null },
+            error: null,
+            reconstructionQuarantine: { code: 'RUN_TARGET_CHANGED', quarantinedAt: new Date() },
+        });
+
+        const response = await request(app)
+            .post('/api/runs/executions/run-command-test-quarantine/reconstruction-quarantine/fail')
+            .set('Authorization', 'Bearer ' + fixture.accessToken)
+            .send({ expectedCode: 'RUN_TARGET_CHANGED' })
+            .expect(200);
+        expect(response.body).toMatchObject({
+            status: 'failed',
+            error: { code: 'RUN_RECONSTRUCTION_REJECTED', retryable: false },
+            quarantineResolution: {
+                code: 'RUN_TARGET_CHANGED',
+                resolution: 'failed',
+                resolvedAt: expect.any(String),
+                resolvedBy: fixture.user.id,
+            },
+        });
+        expect(await UserToolRun.findOne({ executionId: 'run-command-test-quarantine' }).lean())
+            .toMatchObject({ status: 'failed', reconstructionQuarantine: null });
+    });
+
+    it('rejects quarantine resolution by a regular user and rejects stale codes', async () => {
+        const fixture = await createFixture();
+        await UserToolRun.create({
+            executionId: 'run-command-test-quarantine-denied',
+            ownerUserId: fixture.user._id,
+            toolId: '66c111111111111111111111',
+            toolVersionTag: 'v1',
+            toolContentHash: 'hash',
+            workflowId: null,
+            launchContext: 'editor_test',
+            status: 'queued',
+            runtime: 'typescript',
+            runner: 'docker_sandbox',
+            inputs: {},
+            policySnapshot: { networkMode: 'restricted', timeoutSeconds: 30, maxMemoryMb: 256, secretAliases: [] },
+            timing: { queuedAt: new Date(), startedAt: null, finishedAt: null, durationMs: null },
+            error: null,
+            reconstructionQuarantine: { code: 'RUN_TARGET_CHANGED', quarantinedAt: new Date() },
+        });
+
+        await request(app)
+            .post('/api/runs/executions/run-command-test-quarantine-denied/reconstruction-quarantine/fail')
+            .set('Authorization', 'Bearer ' + fixture.accessToken)
+            .send({ expectedCode: 'RUN_TARGET_CHANGED' })
+            .expect(403);
+
+        await User.updateOne({ _id: fixture.user._id }, { $set: { role: 'admin' } });
+        const stale = await request(app)
+            .post('/api/runs/executions/run-command-test-quarantine-denied/reconstruction-quarantine/fail')
+            .set('Authorization', 'Bearer ' + fixture.accessToken)
+            .send({ expectedCode: 'RUN_TARGET_NOT_FOUND' })
+            .expect(409);
+        expect(stale.body.code).toBe('RUN_QUARANTINE_STATE_CONFLICT');
+        expect((await UserToolRun.findOne({ executionId: 'run-command-test-quarantine-denied' }).lean())?.status).toBe('queued');
     });
 
     it('cancels a queued run owned by the authenticated user', async () => {
@@ -283,6 +360,53 @@ describe('Run command routes', () => {
             idempotencyKey: 'new-retry-intent',
         }));
         expect((await UserToolRun.findOne({ executionId: 'run-command-test-retry-parent' }).lean())?.status).toBe('failed');
+    });
+
+    it('returns a conflict without creating a child when the retry target has changed', async () => {
+        const fixture = await createFixture();
+        const version = {
+            versionTag: 'v1',
+            contentHash: 'changed-hash',
+            sourceMode: 'inline' as const,
+            sourceInline: 'export default () => 1',
+            createdAt: new Date(),
+            buildStatus: 'built' as const,
+            validationStatus: 'valid' as const,
+        };
+        const tool = await UserTool.create({
+            ownerUserId: fixture.user._id,
+            scopeType: 'user',
+            name: 'retry-conflict-tool',
+            description: 'Retry conflict fixture',
+            runtime: 'typescript',
+            currentVersion: version,
+            versions: [version],
+            policy: { networkMode: 'none' },
+        });
+        await UserToolRun.create({
+            executionId: 'run-command-test-drifted-parent',
+            ownerUserId: fixture.user._id,
+            toolId: tool._id,
+            toolVersionTag: 'v1',
+            toolContentHash: 'original-hash',
+            launchContext: 'editor_test',
+            status: 'failed',
+            runtime: 'typescript',
+            inputs: {},
+            policySnapshot: { networkMode: 'none' },
+            timing: { queuedAt: new Date(), startedAt: new Date(), finishedAt: new Date(), durationMs: 1 },
+            error: { code: 'WORKER_LOST', message: 'worker lost', retryable: true },
+        });
+
+        const response = await request(app)
+            .post('/api/runs/executions/run-command-test-drifted-parent/retry')
+            .set('Authorization', `Bearer ${fixture.accessToken}`)
+            .set('Idempotency-Key', 'drifted-retry')
+            .expect(409);
+
+        expect(response.body.code).toBe('RUN_RETRY_TARGET_CHANGED');
+        expect(await UserToolRun.countDocuments({ retryOfExecutionId: 'run-command-test-drifted-parent' })).toBe(0);
+        expect((await UserToolRun.findOne({ executionId: 'run-command-test-drifted-parent' }).lean())?.status).toBe('failed');
     });
 
     it('rejects retry of a completed run and never enqueues a child', async () => {

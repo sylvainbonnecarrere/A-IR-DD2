@@ -3,6 +3,7 @@ import path from 'path';
 import { stat } from 'fs/promises';
 import config from '../config/environment';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
+import { createDockerCommandRunner } from './runtime/DockerGatewayRuntime';
 import type {
     RuntimeBinaryHealth,
     RuntimeCapabilities,
@@ -193,7 +194,7 @@ export class RuntimeHealthService {
     private readonly kvmAvailable: () => Promise<boolean>;
 
     constructor(options: RuntimeHealthServiceOptions = {}) {
-        this.runner = options.runner ?? new SpawnCommandRunner();
+        this.runner = options.runner ?? createDockerCommandRunner(new SpawnCommandRunner(), config.runtime.dockerExecutable);
         this.now = options.now ?? (() => new Date());
         this.socketExists = options.socketExists ?? defaultSocketExists;
         this.kvmAvailable = options.kvmAvailable ?? defaultKvmAvailable;

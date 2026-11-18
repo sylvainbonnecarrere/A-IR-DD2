@@ -1,0 +1,11 @@
+[Unit]
+Description=Private isolated Docker daemon Unix socket
+Before=airdd2-docker-gateway.service airdd2-backend.service
+
+[Service]
+ExecStart=/usr/bin/socat UNIX-LISTEN:/run/docker.sock,mode=0660,group=docker,fork TCP:engine:2375
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

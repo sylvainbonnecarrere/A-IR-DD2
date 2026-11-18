@@ -4,7 +4,6 @@ import path from 'path';
 import mongoose from 'mongoose';
 import { ExecutionOrchestrator } from '../services/runtime/ExecutionOrchestrator';
 import { IdempotencyKeyReuseError } from '../services/runtime/ExecutionOrchestrator';
-import { RuntimeNotReadyError } from '../services/runtime/errors';
 
 describe('ExecutionOrchestrator', () => {
     async function createCancellationHarness(cancellationConfirmed: boolean, runnerSucceeded = false) {
@@ -106,6 +105,11 @@ describe('ExecutionOrchestrator', () => {
         };
 
         const queued = await orchestrator.enqueue(requestPayload);
+        void orchestrator.execute({
+            ...requestPayload,
+            persistedExecutionId: queued.executionId,
+            executeExistingQueued: true,
+        });
         await startedPromise;
         return { orchestrator, executionId: queued.executionId, storedRun, runner, completedRun, stoppedRun };
     }
@@ -205,7 +209,7 @@ describe('ExecutionOrchestrator', () => {
         expect(timeoutRun).not.toHaveBeenCalled();
     });
 
-    it('persists queued work before dispatch and rejects reuse of an idempotency key with changed inputs', async () => {
+    it('persists queued work without local dispatch and rejects idempotency keys reused with changed inputs', async () => {
         const orchestrator = new ExecutionOrchestrator();
         const storedRuns = new Map<string, any>();
         const createQueuedRun = jest.fn().mockImplementation(async (data) => {
@@ -219,40 +223,10 @@ describe('ExecutionOrchestrator', () => {
             storedRuns.set(data.executionId, run);
             return run;
         });
-        const scheduleQueuedExecution = jest.spyOn(orchestrator as any, 'scheduleQueuedExecution');
         (orchestrator as any).userToolRunService = {
             createQueuedRun,
             getRunByExecutionId: jest.fn(async (executionId: string) => storedRuns.get(executionId) ?? null),
         };
-        jest.spyOn(orchestrator, 'getPreferredRunnerReadiness').mockResolvedValue({
-            report: { summary: 'ready' } as any,
-            runner: { getRunnerId: () => 'docker_sandbox' } as any,
-            readiness: { ready: true },
-        });
-        let releasePreparation!: () => void;
-        const preparationGate = new Promise<void>((resolve) => {
-            releasePreparation = resolve;
-        });
-        let signalPreparationStarted!: () => void;
-        const preparationStarted = new Promise<void>((resolve) => {
-            signalPreparationStarted = resolve;
-        });
-        const prepareForDispatch = jest.fn(() => {
-            signalPreparationStarted();
-            return preparationGate;
-        });
-        jest.spyOn(orchestrator, 'execute').mockImplementation(async (_request, prepare) => {
-            await prepare?.();
-            return {
-                executionId: 'unused',
-                status: 'queued',
-                success: false,
-                output: null,
-                durationMs: 0,
-                exitCode: 0,
-                runner: 'docker_sandbox',
-            };
-        });
 
         const requestPayload = {
             fn: {
@@ -270,33 +244,30 @@ describe('ExecutionOrchestrator', () => {
             launchContext: 'workflow_run' as const,
             idempotencyKey: 'queue-idem-key',
         };
-        const first = await orchestrator.enqueue(requestPayload, prepareForDispatch);
+        const first = await orchestrator.enqueue(requestPayload);
         expect(first).toEqual({ executionId: expect.stringMatching(/^utr-idem-/), status: 'queued', replayed: false });
         expect(createQueuedRun).toHaveBeenCalledTimes(1);
         expect(createQueuedRun.mock.calls[0][0]).toEqual(expect.objectContaining({
             requestFingerprint: expect.any(String),
+            targetFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
             privateContext: requestPayload.privateContext,
         }));
-        expect(scheduleQueuedExecution).toHaveBeenCalledWith(requestPayload, first.executionId, prepareForDispatch);
-        await preparationStarted;
-        expect(prepareForDispatch).toHaveBeenCalledTimes(1);
         expect(first.status).toBe('queued');
 
         const replay = await orchestrator.enqueue(requestPayload);
         expect(replay).toEqual({ executionId: first.executionId, status: 'queued', replayed: true });
         expect(createQueuedRun).toHaveBeenCalledTimes(1);
+        expect((orchestrator as any).userToolRunService.getRunByExecutionId)
+            .toHaveBeenLastCalledWith(first.executionId, 'majority');
 
         await expect(orchestrator.enqueue({
             ...requestPayload,
             args: { value: 'different-intent' },
         })).rejects.toBeInstanceOf(IdempotencyKeyReuseError);
         expect(createQueuedRun).toHaveBeenCalledTimes(1);
-        const activeDispatch = (orchestrator as any).queuedDispatches.get(first.executionId) as Promise<void>;
-        releasePreparation();
-        await activeDispatch;
     });
 
-    it('converges concurrent enqueue requests with the same idempotency key to one dispatch', async () => {
+    it('converges concurrent enqueue requests with the same idempotency key to one persisted run', async () => {
         const orchestrator = new ExecutionOrchestrator();
         const storedRuns = new Map<string, any>();
         const createQueuedRun = jest.fn(async (data: any) => {
@@ -310,16 +281,6 @@ describe('ExecutionOrchestrator', () => {
             storedRuns.set(data.executionId, run);
             return run;
         });
-        const executeSpy = jest.spyOn(orchestrator, 'execute').mockResolvedValue({
-            executionId: 'unused',
-            status: 'queued',
-            success: false,
-            output: null,
-            durationMs: 0,
-            exitCode: 0,
-            runner: 'docker_sandbox',
-        });
-        const scheduleQueuedExecution = jest.spyOn(orchestrator as any, 'scheduleQueuedExecution');
         (orchestrator as any).userToolRunService = {
             createQueuedRun,
             getRunByExecutionId: jest.fn(async (executionId: string) => storedRuns.get(executionId) ?? null),
@@ -356,28 +317,35 @@ describe('ExecutionOrchestrator', () => {
             acknowledgements[0].executionId,
         ]);
         expect(createQueuedRun).toHaveBeenCalledTimes(2);
-        expect(scheduleQueuedExecution).toHaveBeenCalledTimes(2);
-        await Promise.resolve();
-        expect(executeSpy).toHaveBeenCalledTimes(1);
         expect(storedRuns.size).toBe(1);
     });
 
-    it('leaves queued work durable when runtime readiness is temporarily unavailable', async () => {
+    it('leaves persisted queued work for the durable consumer instead of dispatching locally', async () => {
         const orchestrator = new ExecutionOrchestrator();
-        const queuedRun = { executionId: 'run-runtime-not-ready', status: 'queued' };
-        const failRun = jest.fn();
+        const createQueuedRun = jest.fn().mockResolvedValue({ executionId: 'unused', status: 'queued' });
+        const getRunByExecutionId = jest.fn().mockResolvedValue(null);
         (orchestrator as any).userToolRunService = {
-            getRunByExecutionId: jest.fn().mockResolvedValue(queuedRun),
-            failRun,
+            createQueuedRun,
+            getRunByExecutionId,
         };
-        jest.spyOn(orchestrator, 'execute').mockRejectedValue(new RuntimeNotReadyError('runner temporarily unavailable'));
+        const readiness = jest.spyOn(orchestrator, 'getPreferredRunnerReadiness');
+        const acknowledgement = await orchestrator.enqueue({
+            fn: {
+                _id: new mongoose.Types.ObjectId(),
+                name: 'durable_queue_only',
+                language: 'typescript',
+                origin: 'custom',
+                workflowId: new mongoose.Types.ObjectId(),
+                codeInline: 'function run() { return true; }',
+            },
+            userId: new mongoose.Types.ObjectId().toString(),
+            args: {},
+            launchContext: 'workflow_run',
+        });
 
-        (orchestrator as any).scheduleQueuedExecution({ fn: {}, userId: 'owner', args: {}, launchContext: 'workflow_run' }, queuedRun.executionId);
-        const dispatch = (orchestrator as any).queuedDispatches.get(queuedRun.executionId);
-        await dispatch;
-
-        expect(failRun).not.toHaveBeenCalled();
-        expect(queuedRun.status).toBe('queued');
+        expect(acknowledgement.status).toBe('queued');
+        expect(createQueuedRun).toHaveBeenCalledTimes(1);
+        expect(readiness).not.toHaveBeenCalled();
     });
 
     it('replays the persisted result when the same idempotency key is reused', async () => {
@@ -1173,19 +1141,12 @@ describe('ExecutionOrchestrator', () => {
         expect(createQueuedRun).toHaveBeenCalledTimes(2);
         expect(markRunning).toHaveBeenCalledTimes(2);
         expect(completeRun).toHaveBeenCalledTimes(2);
-        expect(completeRun.mock.calls[0][1]).toEqual(expect.objectContaining({
-            outputs: expect.objectContaining({
-                artifacts: [{ path: 'output/A.json', kind: 'json' }]
-            })
-        }));
-        expect(completeRun.mock.calls[1][1]).toEqual(expect.objectContaining({
-            outputs: expect.objectContaining({
-                artifacts: [{ path: 'output/B.json', kind: 'json' }]
-            })
-        }));
-        expect(completeRun.mock.calls[1][1].outputs.artifacts).not.toEqual(
-            expect.arrayContaining([{ path: 'output/A.json', kind: 'json' }])
-        );
+        const completedMarkers = completeRun.mock.calls.map(([, payload]) => payload.outputs.result.marker);
+        expect(new Set(completedMarkers)).toEqual(new Set(['A', 'B']));
+        completeRun.mock.calls.forEach(([, payload]) => {
+            const marker = payload.outputs.result.marker;
+            expect(payload.outputs.artifacts).toEqual([{ path: `output/${marker}.json`, kind: 'json' }]);
+        });
         expect(failRun).not.toHaveBeenCalled();
 
         await fs.rm(tempRoot, { recursive: true, force: true });
