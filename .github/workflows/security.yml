@@ -50,8 +50,8 @@ jobs:
       - name: Install root dependencies
         run: npm ci
 
-      - name: Audit root dependencies
-        run: npm audit --audit-level=high
+      - name: Audit root dependencies (gate high, withdrawn advisories allowlisted)
+        run: node scripts/ci/audit-gate.mjs
 
   npm-audit-backend:
     name: Backend Audit
@@ -72,8 +72,8 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
-      - name: Audit backend dependencies
-        run: npm --prefix backend audit --audit-level=high
+      - name: Audit backend dependencies (gate high, withdrawn advisories allowlisted)
+        run: node scripts/ci/audit-gate.mjs --prefix backend
 
   codeql:
     name: CodeQL

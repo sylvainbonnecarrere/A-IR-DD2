@@ -12,7 +12,7 @@
     "build": "tsc",
     "dev": "node --watch --env-file=.env --import tsx src/server.ts",
     "test": "jest",
-    "audit:deps": "npm audit --audit-level=high",
+    "audit:deps": "node ../scripts/ci/audit-gate.mjs",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "runtime:setup": "node scripts/runtime/setup-runtime.cjs",
