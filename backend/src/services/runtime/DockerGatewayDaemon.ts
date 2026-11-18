@@ -1,6 +1,7 @@
 import type {
     DockerGatewayAdmissionPort,
     DockerGatewayOperation,
+    DockerGatewayOperationFencer,
     DockerGatewayQuiescenceVerifier,
 } from './DockerGatewayAdmission';
 
@@ -17,6 +18,7 @@ export interface DockerGatewayDaemonOptions {
     admission: DockerGatewayRestartAdmission;
     server: DockerGatewayServerPort;
     quiescenceVerifier?: DockerGatewayQuiescenceVerifier;
+    fencer?: DockerGatewayOperationFencer;
 }
 
 export class DockerGatewayDaemon {
@@ -27,17 +29,23 @@ export class DockerGatewayDaemon {
     async start(): Promise<void> {
         if (this.started) throw new Error('Docker gateway daemon is already started');
 
+        // Une opération incertaine de l'ancienne epoch ne bloque plus jamais l'ouverture
+        // du socket : elle est fencée (confinée dans fencedOperations, réservation de nom
+        // best-effort journalisée) et l'admission rouvrira à la prochaine activation d'epoch.
         const pending = await this.options.admission.recoverAfterRestart();
-        const unresolved: string[] = [];
         for (const operation of pending) {
-            if (!this.options.quiescenceVerifier
-                || !await this.options.admission.reconcileUnknown(operation.id, this.options.quiescenceVerifier)) {
-                unresolved.push(operation.id);
+            try {
+                const fenced = await this.options.admission.fencePendingOperation(operation.id, 'auto_epoch_rotation');
+                if (this.options.fencer) {
+                    const result = await this.options.fencer.fence(operation, fenced);
+                    await this.options.admission.markNameReservation(operation.id, result.nameReserved);
+                    if (result.quiescent) {
+                        await this.options.admission.markQuiescenceProven(operation.id);
+                    }
+                }
+            } catch {
+                // Best-effort : l'opération reste journalisée ; le socket doit s'ouvrir quoi qu'il arrive.
             }
-        }
-        if (unresolved.length > 0) {
-            const ids = unresolved.join(', ');
-            throw new Error(`Docker gateway startup blocked: operations require quiescence reconciliation (${ids})`);
         }
 
         await this.options.server.listen();
@@ -48,6 +56,7 @@ export class DockerGatewayDaemon {
         if (!this.started) return;
         this.started = false;
         let closeError: unknown;
+
         try {
             await this.options.admission.closeAdmission();
         } catch (error) {
