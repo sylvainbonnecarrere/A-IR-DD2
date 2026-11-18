@@ -3,6 +3,8 @@ Description=A-IR-DD2 exclusive Docker command gateway
 PartOf=airdd2-backend.service
 Wants=network-online.target
 After=network-online.target
+RequiresMountsFor=/opt/airdd2/backend/storage/workspaces
+ConditionPathExists=/etc/airdd2/docker-gateway.env
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
@@ -13,6 +15,7 @@ Group=airdd2-gateway-clients
 SupplementaryGroups=docker
 WorkingDirectory=/opt/airdd2/backend
 EnvironmentFile=/etc/airdd2/docker-gateway.env
+ExecStartPre=/usr/bin/test -f /opt/airdd2/backend/dist/src/services/runtime/dockerGatewayMain.js
 ExecStart=/usr/bin/env node dist/src/services/runtime/dockerGatewayMain.js
 Restart=on-failure
 RestartSec=5
