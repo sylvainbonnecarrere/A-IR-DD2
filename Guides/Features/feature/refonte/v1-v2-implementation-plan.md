@@ -561,3 +561,7 @@ L'ordre a suivre sans deviation est le suivant :
 12. QA finale et suppression du code mort.
 
 Cet ordre est impose pour reduire les regressions : il fige d'abord les invariants, deplace ensuite la logique, migre ensuite la donnee et ne coupe enfin le legacy qu'apres validation runtime et frontend.
+
+## 11. Reprise J7 (2026-11-18) — remediation post-NO-GO de J6
+
+Apres le verdict provisoire NO-GO de J6, la remediation est reprise sur la branche `feat/j7-02-quarantine-exit-fencing`. Le plan detaille vit dans le backlog (`backlog/v1-v2-refonte-backlog.md`, jalon J7 : `US-J7-05` a `US-J7-12`) et la conception de la sortie de quarantaine dans `j7-02-quarantine-exit-fencing-design.md`. Ordre impose : gateway fencing -> contrat de statuts -> endpoint `fence-and-retry` -> `recoveryPolicy`/visibilite -> deploiement sur l'hote Linux cible, puis `US-J7-03` (cutover UI) et `US-J7-04` (rejeu de J6 + gate). Cet ordre reste coherent avec la sequence ci-dessus : aucun verdict GO avant validation runtime et E2E rejouees.
