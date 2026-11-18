@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
 import { UserToolRun, type IUserToolRun } from '../models/UserToolRun.model';
+import { USER_TOOL_RUN_TERMINAL_STATUS_VALUES, isUserToolRunTerminalStatus } from '../domain/execution/userToolRun.contract';
 import { MongoWorkspaceLockService, type WorkspaceLock } from './runtime/MongoWorkspaceLockService';
 import { UserToolQueryService } from './userToolQuery.service';
 import { createWorkspaceManager } from './workspace/WorkspaceManager';
@@ -98,7 +99,7 @@ export class UserToolRunRetentionService {
 
         const runsToDelete = runs.filter((run) => {
             if (protectedIds.has(run.executionId)
-                || !['completed', 'failed', 'stopped', 'timed_out'].includes(run.status)
+                || !isUserToolRunTerminalStatus(run.status)
                 || run.workspaceRetentionProtected === true
                 || run.supervisedAttempt != null) {
                 return false;
@@ -137,7 +138,7 @@ export class UserToolRunRetentionService {
                         _id: run._id,
                         ownerUserId: ownerId,
                         toolId,
-                        status: { $in: ['completed', 'failed', 'stopped', 'timed_out'] },
+                        status: { $in: [...USER_TOOL_RUN_TERMINAL_STATUS_VALUES] },
                         workspaceRetentionProtected: { $ne: true },
                         supervisedAttempt: null,
                     }).lean<IUserToolRun>();

@@ -325,4 +325,123 @@ describe('UserToolRunService', () => {
             progress: 50,
         }));
     });
+
+    async function createExpiredSupervisedRun(executionId: string, workflowId: mongoose.Types.ObjectId) {
+        const data = buildCreateData();
+        const run = { ...data, executionId, workflowId };
+        await service.createQueuedRun(run);
+        await service.markRunning(executionId, new Date(), 'docker_sandbox');
+        const attemptId = '123e4567-e89b-42d3-a456-426614174000';
+        await UserToolRun.updateOne({ executionId }, {
+            $set: {
+                lease: { owner: 'worker-1', token: 'lease-token', acquiredAt: new Date(), expiresAt: new Date(0) },
+                supervisedAttempt: {
+                    attemptId,
+                    leaseOwner: 'worker-1',
+                    leaseTokenDigest: 'digest',
+                    createdAt: new Date(),
+                },
+            },
+        });
+        return { ...run, attemptId };
+    }
+
+    it('defaults recoveryAttemptCount to 0 and persists an explicit increment on retry lineage', async () => {
+        const createData = buildCreateData();
+        const run = await service.createQueuedRun(createData);
+        expect(run.recoveryAttemptCount).toBe(0);
+
+        const retry = await service.createQueuedRun({
+            ...buildCreateData(),
+            retryOfExecutionId: createData.executionId,
+            recoveryAttemptCount: 1,
+        });
+        expect(retry.retryOfExecutionId).toBe(createData.executionId);
+        expect(retry.recoveryAttemptCount).toBe(1);
+        expect((await service.getRunByExecutionId(retry.executionId))?.recoveryAttemptCount).toBe(1);
+
+        await expect(service.createQueuedRun({ ...buildCreateData(), recoveryAttemptCount: -1 }))
+            .rejects.toThrow('recoveryAttemptCount must be a non-negative integer');
+        await expect(service.createQueuedRun({ ...buildCreateData(), recoveryAttemptCount: 1.5 }))
+            .rejects.toThrow('recoveryAttemptCount must be a non-negative integer');
+    });
+
+    it('marks an expired supervised run worker_lost (terminal, error.code WORKER_LOST conservé)', async () => {
+        const workflowId = new mongoose.Types.ObjectId();
+        const { executionId, attemptId } = await createExpiredSupervisedRun(`run-wl-${new mongoose.Types.ObjectId()}`, workflowId);
+
+        await expect(service.listExpiredSupervisedRuns()).resolves.toHaveLength(1);
+        await expect(service.markExpiredRunWorkerLost(executionId, attemptId, 'exited')).resolves.toBe(true);
+
+        const stored = await UserToolRun.findOne({ executionId }).select('+supervisedAttempt').lean();
+        expect(stored?.status).toBe('worker_lost');
+        expect(stored?.error?.code).toBe('WORKER_LOST');
+        expect(stored?.error?.retryable).toBe(true);
+        expect(stored?.lease).toBeNull();
+        expect(stored?.supervisedAttempt?.workerLossReconciliation).toMatchObject({
+            containerState: 'exited',
+            workspaceLockReleased: false,
+        });
+
+        // Irréversible : aucune transition vers queued/running depuis worker_lost.
+        await expect(service.markRunning(executionId)).rejects.toBeInstanceOf(UserToolRunStateError);
+        await expect(service.failRun(executionId, { error: { message: 'nope' } }))
+            .rejects.toBeInstanceOf(UserToolRunStateError);
+        expect((await service.getRunByExecutionId(executionId))?.status).toBe('worker_lost');
+    });
+
+    it('marks an expired supervised run quarantined when quiescence is unproven and keeps the workspace lock held', async () => {
+        const workflowId = new mongoose.Types.ObjectId();
+        const { executionId, attemptId } = await createExpiredSupervisedRun(`run-q-${new mongoose.Types.ObjectId()}`, workflowId);
+        await UserToolRun.updateOne({ executionId }, { $set: { workspaceRetentionProtected: true } });
+
+        await expect(service.markRunQuarantined(executionId, attemptId)).resolves.toBe(true);
+
+        const stored = await UserToolRun.findOne({ executionId }).select('+supervisedAttempt +workspaceRetentionProtected').lean();
+        expect(stored?.status).toBe('quarantined');
+        expect(stored?.error?.code).toBe('QUARANTINED');
+        expect(stored?.error?.retryable).toBe(true);
+        expect(stored?.lease).toBeNull();
+        // Verrou tenu : la rétention du workspace reste protégée et aucune réconciliation worker_lost n'est posée.
+        expect(stored?.workspaceRetentionProtected).toBe(true);
+        expect(stored?.supervisedAttempt?.workerLossReconciliation).toBeUndefined();
+
+        // Irréversible : aucune transition vers queued/running depuis quarantined.
+        await expect(service.markRunning(executionId)).rejects.toBeInstanceOf(UserToolRunStateError);
+        await expect(service.completeRun(executionId)).rejects.toBeInstanceOf(UserToolRunStateError);
+        expect((await service.getRunByExecutionId(executionId))?.status).toBe('quarantined');
+    });
+
+    it('does not mark a run whose lease is still valid', async () => {
+        const createData = buildCreateData();
+        await service.createQueuedRun(createData);
+        await service.markRunning(createData.executionId, new Date(), 'docker_sandbox');
+        const attemptId = '123e4567-e89b-42d3-a456-426614174000';
+        await UserToolRun.updateOne({ executionId: createData.executionId }, {
+            $set: {
+                lease: { owner: 'worker-1', token: 'lease-token', acquiredAt: new Date(), expiresAt: new Date(Date.now() + 60_000) },
+                supervisedAttempt: { attemptId, leaseOwner: 'worker-1', leaseTokenDigest: 'd', createdAt: new Date() },
+            },
+        });
+
+        await expect(service.markRunQuarantined(createData.executionId, attemptId)).resolves.toBe(false);
+        await expect(service.markExpiredRunWorkerLost(createData.executionId, attemptId, 'absent')).resolves.toBe(false);
+        expect((await service.getRunByExecutionId(createData.executionId))?.status).toBe('running');
+    });
+
+    it('lists worker_lost runs pending lock cleanup only', async () => {
+        const workflowId = new mongoose.Types.ObjectId();
+        const lost = await createExpiredSupervisedRun(`run-lost-${new mongoose.Types.ObjectId()}`, workflowId);
+        await service.markExpiredRunWorkerLost(lost.executionId, lost.attemptId, 'absent');
+        const quarantined = await createExpiredSupervisedRun(`run-quar-${new mongoose.Types.ObjectId()}`, workflowId);
+        await service.markRunQuarantined(quarantined.executionId, quarantined.attemptId);
+
+        const cleanup = await service.listWorkerLostLockCleanup();
+        expect(cleanup.map((entry) => entry.executionId)).toEqual([lost.executionId]);
+
+        await expect(service.markWorkerLostWorkspaceLockReleased(lost.executionId, lost.attemptId)).resolves.toBe(true);
+        expect(await service.listWorkerLostLockCleanup()).toHaveLength(0);
+        // Un run quarantined n'est jamais éligible au cleanup worker_lost.
+        await expect(service.markWorkerLostWorkspaceLockReleased(quarantined.executionId, quarantined.attemptId)).resolves.toBe(false);
+    });
 });

@@ -6,6 +6,7 @@ import { MongoWorkspaceLockService, type WorkspaceLock } from './MongoWorkspaceL
 import { MongoRunLeaseService } from './MongoRunLeaseService';
 import { RunReconstructionRejection } from './RunReconstructionRejection';
 import type { RunReconstructionRejectionCode } from '../../domain/execution/runReconstructionQuarantine';
+import { USER_TOOL_RUN_TERMINAL_STATUS_VALUES } from '../../domain/execution/userToolRun.contract';
 
 export interface QuarantinedDispatch {
     kind: 'quarantined';
@@ -106,7 +107,7 @@ export class MonitoredRunDispatch {
                 workspaceLock,
             }, prepareForDispatch);
             if (workspaceLock
-                && ['completed', 'failed', 'stopped', 'timed_out'].includes(result.status ?? '')
+                && (USER_TOOL_RUN_TERMINAL_STATUS_VALUES as readonly string[]).includes(result.status ?? '')
                 && result.metadata?.runnerTerminationConfirmed === true) {
                 if (!await this.workspaceLocks.release(workspaceLock)) {
                     throw new Error(`Workspace lock release was not confirmed after terminal run ${lease.executionId}`);

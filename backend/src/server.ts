@@ -39,7 +39,9 @@ import {
   isDockerGatewayRequired,
   isDockerGatewayWorkerActive,
 } from './services/runtime/DockerGatewayRuntime';
-import { DockerGatewayAttemptRecovery } from './services/runtime/DockerGatewayAttemptRecovery';
+import { DockerGatewayControlClient } from './services/runtime/DockerGatewayControlClient';
+import { DockerGatewayFencedAttemptProof } from './services/runtime/DockerGatewayFencedAttemptProof';
+import { MongoDockerGatewayAdmission } from './services/runtime/MongoDockerGatewayAdmission';
 import { MongoExpiredRunReconciler } from './services/runtime/MongoExpiredRunReconciler';
 
 // SOLID: Valider la configuration au démarrage (fail-fast pattern)
@@ -229,7 +231,10 @@ async function startServer() {
           `backend:${os.hostname()}:${process.pid}:${randomUUID()}`,
         );
         const recovery = await new MongoExpiredRunReconciler(
-          new DockerGatewayAttemptRecovery(),
+          new DockerGatewayFencedAttemptProof(
+            new MongoDockerGatewayAdmission(),
+            new DockerGatewayControlClient({ socketPath: gatewaySocket }),
+          ),
         ).reconcile();
         if (recovery.unresolved > 0 || recovery.lockCleanupPending > 0) {
           console.warn('[Backend startup] Some expired runs remain quarantined after Docker reconciliation', recovery);
