@@ -145,7 +145,7 @@ describeDocker('Docker gateway recovery against the Linux daemon', () => {
         const oldResult = await client.run('docker', ['inspect', attempt.containerName]);
         expect(oldResult).toMatchObject({ exitCode: 1, errorMessage: expect.stringContaining('stale') });
 
-        expect(summary).toEqual({ reconciled: 1, unresolved: 0, lockCleanupPending: 0 });
+        expect(summary).toEqual({ reconciled: 1, unresolved: 0, lockCleanupPending: 0, autoRecovered: 0 });
         // La réservation inerte occupe le nom sous le label de fencing (jamais le nom nu).
         expect(await docker('inspect', '--format', '{{.State.Status}}', attempt.containerName)).toBe('created');
         expect(await docker('inspect', '--format', '{{ index .Config.Labels "airdd2.fence.op" }}', attempt.containerName))
@@ -173,7 +173,7 @@ describeDocker('Docker gateway recovery against the Linux daemon', () => {
 
         const { summary } = await reconcileWithNewWorker();
 
-        expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0 });
+        expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0, autoRecovered: 0 });
         expect((await UserToolRun.findOne({ executionId: attempt.executionId }).lean())?.status).toBe('quarantined');
         expect(await locks.getOwner(userId.toHexString(), workflowId.toHexString())).toBe(attempt.executionId);
         expect(await docker('inspect', '--format', '{{.State.Status}}', attempt.containerName)).toBe('running');
@@ -191,7 +191,7 @@ describeDocker('Docker gateway recovery against the Linux daemon', () => {
         try {
             const { summary } = await reconcileWithNewWorker();
 
-            expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0 });
+            expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0, autoRecovered: 0 });
             expect((await UserToolRun.findOne({ executionId: attempt.executionId }).lean())?.status).toBe('quarantined');
             expect(await locks.getOwner(userId.toHexString(), workflowId.toHexString())).toBe(attempt.executionId);
         } finally {

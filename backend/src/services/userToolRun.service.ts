@@ -76,6 +76,19 @@ export interface ExpiredSupervisedRun {
     ownerUserId: string;
     workflowId: string | null;
     attemptId: string;
+    agentInstanceId?: string | null;
+    agentPrototypeId?: string | null;
+    recoveryAttemptCount?: number | null;
+}
+
+export interface QuarantinedRecoveryRun {
+    executionId: string;
+    ownerUserId: string;
+    workflowId: string | null;
+    attemptId: string;
+    recoveryAttemptCount: number;
+    agentInstanceId?: string | null;
+    agentPrototypeId?: string | null;
 }
 
 export interface WorkerLostLockCleanup {
@@ -403,7 +416,7 @@ export class UserToolRunService {
             $expr: { $lte: ['$lease.expiresAt', '$$NOW'] },
             'supervisedAttempt.attemptId': { $type: 'string' },
         })
-            .select('executionId ownerUserId workflowId')
+            .select('executionId ownerUserId workflowId agentInstanceId agentPrototypeId recoveryAttemptCount')
             .select('+supervisedAttempt')
             .read('primary')
             .readConcern('majority')
@@ -417,6 +430,36 @@ export class UserToolRunService {
                 ownerUserId: run.ownerUserId.toString(),
                 workflowId: run.workflowId?.toString() ?? null,
                 attemptId,
+                agentInstanceId: run.agentInstanceId?.toString() ?? null,
+                agentPrototypeId: run.agentPrototypeId?.toString() ?? null,
+                recoveryAttemptCount: run.recoveryAttemptCount ?? null,
+            }];
+        });
+    }
+
+    async listQuarantinedRunsForRecovery(): Promise<QuarantinedRecoveryRun[]> {
+        const runs = await UserToolRun.find({
+            status: 'quarantined',
+            workflowId: { $type: 'objectId' },
+            'supervisedAttempt.attemptId': { $type: 'string' },
+        })
+            .select('executionId ownerUserId workflowId agentInstanceId agentPrototypeId recoveryAttemptCount')
+            .select('+supervisedAttempt')
+            .read('primary')
+            .readConcern('majority')
+            .maxTimeMS(10_000)
+            .lean();
+        return runs.flatMap((run) => {
+            const attemptId = run.supervisedAttempt?.attemptId;
+            if (!attemptId || !run.workflowId) return [];
+            return [{
+                executionId: run.executionId,
+                ownerUserId: run.ownerUserId.toString(),
+                workflowId: run.workflowId.toString(),
+                attemptId,
+                recoveryAttemptCount: run.recoveryAttemptCount ?? 0,
+                agentInstanceId: run.agentInstanceId?.toString() ?? null,
+                agentPrototypeId: run.agentPrototypeId?.toString() ?? null,
             }];
         });
     }

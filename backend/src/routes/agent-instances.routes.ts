@@ -17,6 +17,7 @@ import { transformAgentInstanceForFrontend } from '../utils/transforms';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
 import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
 import { extractPersistenceConfigValue, normalizePersistenceConfigForPersistence, normalizePersistenceConfigForProduct, summarizePersistenceConfigBoundary } from '../types/persistence';
+import { DEFAULT_RECOVERY_POLICY, RecoveryPolicySchema, normalizeRecoveryPolicy } from '../domain/execution/recoveryPolicy.contract';
 import { AgentInstanceDeletionPolicyService } from '../services/agentInstanceDeletionPolicy.service';
 
 // Type pour les paramètres de route hérités (via mergeParams)
@@ -82,6 +83,7 @@ const createAgentInstanceSchema = z.object({
         cloudConnectionProfileId: z.string().optional(),
         retentionDays: z.number().int().positive().optional()
     }).strict().optional(),
+    recoveryPolicy: RecoveryPolicySchema.optional(), // ⭐ J7-08: snapshot de la policy de récupération
 
     // Canvas properties
     position: z.object({
@@ -366,6 +368,15 @@ router.post('/from-prototype', requireAuth,
             ? { ...prototypePersistenceConfig, ...normalizedRequestPersistence }
             : prototypePersistenceConfig;
 
+        // ⭐ J7-08: snapshot de la recoveryPolicy (override frontend > prototype > défaut off)
+        const prototypeRecoveryPolicy = (prototype as any).recoveryPolicy;
+        const plainPrototypeRecoveryPolicy = typeof prototypeRecoveryPolicy?.toObject === 'function'
+            ? prototypeRecoveryPolicy.toObject()
+            : prototypeRecoveryPolicy;
+        const finalRecoveryPolicy = normalizeRecoveryPolicy(
+            configuration_json?.recoveryPolicy ?? plainPrototypeRecoveryPolicy ?? DEFAULT_RECOVERY_POLICY,
+        );
+
         // Log des valeurs finales pour debugging
         console.log('[AgentInstances] 📋 Instance data prepared (PHASE 2):', {
             name: finalName,
@@ -413,6 +424,9 @@ router.post('/from-prototype', requireAuth,
 
             // persistenceConfig avec overrides
             persistenceConfig: finalPersistenceConfig,
+
+            // ⭐ J7-08: recoveryPolicy snapshotée depuis le prototype
+            recoveryPolicy: finalRecoveryPolicy,
 
             // ⭐ J6: functionInheritance — hériter les fonctions du prototype par défaut
             functionInheritance: {
