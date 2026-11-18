@@ -11,6 +11,8 @@ import { MongoDockerGatewayAdmission } from '../services/runtime/MongoDockerGate
 
 import { DockerGatewayControlClient } from '../services/runtime/DockerGatewayControlClient';
 
+import { MongoRunVisibilityService } from '../services/runtime/runVisibility.service';
+
 const objectIdParamSchema = z.string().regex(/^[a-f\d]{24}$/i, 'ID doit être un ObjectId MongoDB valide');
 
 const fenceAndRetryParamsSchema = z.object({
@@ -116,7 +118,8 @@ function createProductionFenceAndRetryService(): FenceAndRetryService {
     const control = gatewaySocket
         ? new DockerGatewayControlClient({ socketPath: gatewaySocket })
         : new UnavailableFenceControlClient();
-    return new FenceAndRetryService(control, new MongoDockerGatewayAdmission());
+    // ⭐ J7-09: visibilité (journal agent + événements runtime) sur le flux fence-and-retry.
+    return new FenceAndRetryService(control, new MongoDockerGatewayAdmission(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, new MongoRunVisibilityService());
 }
 
 export default createWorkspaceRunsRouter(createProductionFenceAndRetryService());

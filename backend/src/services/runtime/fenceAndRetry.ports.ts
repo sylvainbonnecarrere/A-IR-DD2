@@ -82,6 +82,7 @@ export interface FenceAndRetryRunView {
     error?: { code?: string; retryable?: boolean } | null;
     recoveryAttemptCount: number | null;
     supervisedAttempt?: { attemptId: string } | null;
+    agentInstanceId?: string | null; // ⭐ J7-09: pour la journalisation agent
 }
 
 export interface QuarantinedRunStorePort {

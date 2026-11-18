@@ -156,7 +156,9 @@ const SystemPayloadSchema = new Schema({
         enum: [
             'instance_created', 'instance_started', 'instance_paused',
             'instance_resumed', 'instance_stopped', 'config_changed',
-            'persistence_config_updated'
+            'persistence_config_updated',
+            // ⭐ J7-09
+            'run_quarantined', 'run_fenced', 'run_recovery_relaunched'
         ],
         required: true
     },

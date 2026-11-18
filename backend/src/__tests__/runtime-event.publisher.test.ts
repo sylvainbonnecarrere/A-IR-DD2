@@ -147,4 +147,101 @@ describe('RuntimeEventPublisher', () => {
       configureRuntimeEventEmitter(null);
     }
   });
+
+  // ⭐ J7-09: visibilité quarantaine/fencing
+  it('maps the quarantined status to run:quarantined with lockHeld', () => {
+    const emitted: Array<{ workspaceId: string; event: any }> = [];
+    const publisher = new RuntimeEventPublisher({
+      emitRuntimeEvent: (workspaceId: string, event: unknown) => {
+        emitted.push({ workspaceId, event: event as any });
+        return true;
+      },
+    } as any);
+
+    const published = publisher.publishRunStatusChange({
+      workspaceId: '507f1f77bcf86cd799439011',
+      runId: 'run-quar-1',
+      status: 'quarantined',
+      message: 'Quiescence unproven',
+      errorCode: 'QUARANTINED',
+      lockHeld: true,
+      agentId: '507f1f77bcf86cd799439012',
+    });
+
+    expect(published).toBe(true);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].event.type).toBe('run:quarantined');
+    expect(emitted[0].event.version).toBe(1);
+    expect(emitted[0].event.payload).toEqual(expect.objectContaining({
+      status: 'quarantined',
+      lockHeld: true,
+      errorCode: 'QUARANTINED',
+      runId: 'run-quar-1',
+      agentId: '507f1f77bcf86cd799439012',
+    }));
+  });
+
+  it('publishes run:fenced and run:recovery_relaunched with whitelisted payloads', () => {
+    const emitted: Array<{ workspaceId: string; event: any }> = [];
+    const publisher = new RuntimeEventPublisher({
+      emitRuntimeEvent: (workspaceId: string, event: unknown) => {
+        emitted.push({ workspaceId, event: event as any });
+        return true;
+      },
+    } as any);
+
+    publisher.publishRunFenced({
+      workspaceId: '507f1f77bcf86cd799439011',
+      runId: 'run-quar-1',
+      operationId: 'op-123',
+      reason: 'AGENT_AUTO_RECOVERY',
+      lockHeld: true,
+      userId: 'must-be-stripped',
+    } as any);
+
+    publisher.publishRunRecoveryRelaunched({
+      workspaceId: '507f1f77bcf86cd799439011',
+      runId: 'run-quar-1',
+      newRunId: 'run-child-1',
+      recoveryAttemptCount: 1,
+      reason: 'AGENT_AUTO_RECOVERY',
+      password: 'must-be-stripped',
+    } as any);
+
+    expect(emitted.map((entry) => entry.event.type)).toEqual(['run:fenced', 'run:recovery_relaunched']);
+    expect(emitted[0].event.payload).toEqual(expect.objectContaining({
+      operationId: 'op-123',
+      reason: 'AGENT_AUTO_RECOVERY',
+      lockHeld: true,
+      runId: 'run-quar-1',
+    }));
+    expect(emitted[0].event.payload.userId).toBeUndefined();
+    expect(emitted[1].event.payload).toEqual(expect.objectContaining({
+      newRunId: 'run-child-1',
+      recoveryAttemptCount: 1,
+      reason: 'AGENT_AUTO_RECOVERY',
+    }));
+    expect(emitted[1].event.payload.password).toBeUndefined();
+  });
+
+  it('blocks quarantine visibility events when the workspace id does not match the room', () => {
+    const emitted: unknown[] = [];
+    const publisher = new RuntimeEventPublisher({
+      emitRuntimeEvent: (workspaceId: string, event: unknown) => {
+        emitted.push({ workspaceId, event });
+        return true;
+      },
+    } as any);
+
+    const result = publisher.publishRunQuarantined({
+      workspaceId: '507f1f77bcf86cd799439011',
+      roomWorkspaceId: '507f1f77bcf86cd799439012',
+      runId: 'run-quar-1',
+      lockHeld: true,
+      reason: 'QUARANTINED',
+    });
+
+    expect(result).toBe(false);
+    expect(emitted).toHaveLength(0);
+  });
 });
