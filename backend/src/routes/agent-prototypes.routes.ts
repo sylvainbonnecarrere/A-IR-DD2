@@ -12,6 +12,8 @@ import { CanonicalRobotIdEnum } from '../types/robotIds';
 import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
 import { extractPersistenceConfigValue, normalizePersistenceConfigForPersistence, normalizePersistenceConfigForProduct } from '../types/persistence';
 
+import { RecoveryPolicySchema } from '../domain/execution/recoveryPolicy.contract';
+
 const router = Router();
 
 const toolSelectionSchema = z.object({
@@ -68,7 +70,8 @@ const createAgentPrototypeSchema = z.object({
     persistenceConfig: persistenceConfigSchema,
     robotId: CanonicalRobotIdEnum,
     workflowId: z.string().optional(), // ⭐ V2: Optional workflow scope
-    localLLMProfileId: z.string().optional() // ⭐ NEW: Optional local LLM profile reference
+    localLLMProfileId: z.string().optional(), // ⭐ NEW: Optional local LLM profile reference
+    recoveryPolicy: RecoveryPolicySchema.optional() // ⭐ J7-08: politique de récupération (défaut off), snapshotée sur l'instance
 });
 
 const updateAgentPrototypeSchema = createAgentPrototypeSchema.partial();

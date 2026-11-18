@@ -235,7 +235,7 @@ describe('persisted supervised attempt launch', () => {
 
         const summary = await new MongoExpiredRunReconciler(fencing, runs, workspaceLocks).reconcile();
 
-        expect(summary).toEqual({ reconciled: 1, unresolved: 0, lockCleanupPending: 0 });
+        expect(summary).toEqual({ reconciled: 1, unresolved: 0, lockCleanupPending: 0, autoRecovered: 0 });
         const stored = await UserToolRun.findOne({ executionId: lease.executionId })
             .select('+supervisedAttempt')
             .lean();
@@ -268,7 +268,7 @@ describe('persisted supervised attempt launch', () => {
 
         const summary = await new MongoExpiredRunReconciler(fencing, runs, workspaceLocks).reconcile();
 
-        expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0 });
+        expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0, autoRecovered: 0 });
 
         const stored = await UserToolRun.findOne({ executionId: lease.executionId })
             .select('+supervisedAttempt')
