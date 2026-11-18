@@ -99,6 +99,7 @@ export interface IUserToolRun extends Document {
     agentPrototypeId?: mongoose.Types.ObjectId | null;
     agentInstanceId?: mongoose.Types.ObjectId | null;
     retryOfExecutionId?: string | null;
+    recoveryAttemptCount?: number | null;
     requestFingerprint?: string | null;
     targetFingerprint?: string | null;
     privateContextCiphertext?: string | null;
@@ -270,6 +271,11 @@ const UserToolRunSchema = new Schema<IUserToolRun>({
         trim: true,
         default: null
     },
+    recoveryAttemptCount: {
+        type: Number,
+        min: 0,
+        default: 0
+    },
     requestFingerprint: {
         type: String,
         trim: true,
@@ -434,6 +440,22 @@ UserToolRunSchema.index(
     {
         partialFilterExpression: { retryOfExecutionId: { $type: 'string' } },
         name: 'idx_user_tool_runs_retry_lineage'
+    }
+);
+
+UserToolRunSchema.index(
+    { ownerUserId: 1, retryOfExecutionId: 1, recoveryAttemptCount: -1 },
+    {
+        partialFilterExpression: { retryOfExecutionId: { $type: 'string' } },
+        name: 'idx_user_tool_runs_recovery_attempts'
+    }
+);
+
+UserToolRunSchema.index(
+    { status: 1, updatedAt: -1 },
+    {
+        partialFilterExpression: { status: { $in: ['worker_lost', 'quarantined'] } },
+        name: 'idx_user_tool_runs_terminal_reconcilable'
     }
 );
 

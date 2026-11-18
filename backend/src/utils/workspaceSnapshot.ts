@@ -127,7 +127,7 @@ export interface WorkspaceSnapshot {
         agentPrototypeId?: string;
         agentInstanceId?: string;
         launchContext: 'editor_test' | 'workflow_run' | 'system_validation';
-        status: 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out';
+        status: 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out' | 'worker_lost' | 'quarantined';
         runtime: 'typescript' | 'python';
         runner: 'docker_sandbox' | 'docker_rootless' | 'firecracker';
         inputs: Record<string, unknown>;

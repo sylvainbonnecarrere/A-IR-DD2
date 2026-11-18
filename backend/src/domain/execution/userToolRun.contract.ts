@@ -6,8 +6,30 @@ export const USER_TOOL_RUN_STATUS_VALUES = [
     'completed',
     'failed',
     'stopped',
-    'timed_out'
+    'timed_out',
+    'worker_lost',
+    'quarantined'
 ] as const;
+
+// `queued` et `running` restent les seuls statuts non terminaux.
+export const USER_TOOL_RUN_NON_TERMINAL_STATUS_VALUES = ['queued', 'running'] as const;
+
+export const USER_TOOL_RUN_TERMINAL_STATUS_VALUES = [
+    'completed',
+    'failed',
+    'stopped',
+    'timed_out',
+    'worker_lost',
+    'quarantined'
+] as const;
+
+// Statuts terminaux réconciliables : la sortie exige une preuve de quiescence
+// (verifyFenced gateway) puis un retry via un nouvel executionId.
+export const USER_TOOL_RUN_RECONCILABLE_TERMINAL_STATUS_VALUES = ['worker_lost', 'quarantined'] as const;
+
+export function isUserToolRunTerminalStatus(status: UserToolRunDomainStatus): boolean {
+    return (USER_TOOL_RUN_TERMINAL_STATUS_VALUES as readonly string[]).includes(status);
+}
 
 export const USER_TOOL_RUN_RUNTIME_VALUES = ['typescript', 'python'] as const;
 export const USER_TOOL_RUN_RUNNER_VALUES = ['docker_sandbox', 'docker_rootless', 'firecracker'] as const;
@@ -33,11 +55,14 @@ export type UserToolRunPolicySnapshot = z.infer<typeof UserToolRunPolicySnapshot
 
 export const USER_TOOL_RUN_ALLOWED_TRANSITIONS: Readonly<Record<UserToolRunDomainStatus, readonly UserToolRunDomainStatus[]>> = {
     queued: ['running', 'failed', 'stopped', 'timed_out'],
-    running: ['completed', 'failed', 'stopped', 'timed_out'],
+    running: ['completed', 'failed', 'stopped', 'timed_out', 'worker_lost', 'quarantined'],
     completed: [],
     failed: [],
     stopped: [],
     timed_out: [],
+    // Statuts terminaux irréversibles : aucune transition sortante (retry = nouveau executionId).
+    worker_lost: [],
+    quarantined: [],
 };
 
 export function canTransitionUserToolRun(

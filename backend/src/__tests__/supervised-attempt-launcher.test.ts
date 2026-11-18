@@ -212,7 +212,7 @@ describe('persisted supervised attempt launch', () => {
         await expect(attempts.create(lease)).rejects.toThrow('was not created');
     });
 
-    it('marks an expired run WORKER_LOST only after Docker quiescence and releases its owned workspace lock', async () => {
+    it('marks an expired run worker_lost only after gateway-proven quiescence and releases its owned workspace lock', async () => {
         await attempts.create(lease);
         const acquired = await workspaceLocks.tryAcquire(
             ownerUserId.toHexString(),
@@ -225,20 +225,58 @@ describe('persisted supervised attempt launch', () => {
             { $set: { 'lease.expiresAt': new Date(0) } },
         );
         expect(await runs.listExpiredSupervisedRuns()).toHaveLength(1);
-        const docker = { stopAndVerify: jest.fn().mockResolvedValue('exited' as const) };
+        const fencing = {
+            proveFencedAttempt: jest.fn().mockResolvedValue({
+                operationId: '123e4567-e89b-42d3-a456-426614174000',
+                quiescent: true,
+                containerState: 'exited' as const,
+            }),
+        };
 
-        const summary = await new MongoExpiredRunReconciler(docker, runs, workspaceLocks).reconcile();
+        const summary = await new MongoExpiredRunReconciler(fencing, runs, workspaceLocks).reconcile();
 
         expect(summary).toEqual({ reconciled: 1, unresolved: 0, lockCleanupPending: 0 });
         const stored = await UserToolRun.findOne({ executionId: lease.executionId })
             .select('+supervisedAttempt')
             .lean();
-        expect(stored?.status).toBe('failed');
+        expect(stored?.status).toBe('worker_lost');
         expect(stored?.error?.code).toBe('WORKER_LOST');
         expect(stored?.supervisedAttempt?.workerLossReconciliation).toMatchObject({
             containerState: 'exited',
             workspaceLockReleased: true,
         });
         expect(await workspaceLocks.getOwner(ownerUserId.toHexString(), workflowId.toHexString())).toBeNull();
+    });
+
+    it('quarantines an expired run and retains its workspace lock when quiescence is not proven', async () => {
+        await attempts.create(lease);
+
+        const acquired = await workspaceLocks.tryAcquire(
+            ownerUserId.toHexString(),
+            workflowId.toHexString(),
+            lease.executionId,
+        );
+        if (!acquired) throw new Error('Expected workspace lock acquisition');
+
+        await UserToolRun.updateOne(
+            { executionId: lease.executionId },
+            { $set: { 'lease.expiresAt': new Date(0) } },
+        );
+        expect(await runs.listExpiredSupervisedRuns()).toHaveLength(1);
+
+        const fencing = { proveFencedAttempt: jest.fn().mockResolvedValue(null) };
+
+        const summary = await new MongoExpiredRunReconciler(fencing, runs, workspaceLocks).reconcile();
+
+        expect(summary).toEqual({ reconciled: 0, unresolved: 1, lockCleanupPending: 0 });
+
+        const stored = await UserToolRun.findOne({ executionId: lease.executionId })
+            .select('+supervisedAttempt')
+            .lean();
+
+        expect(stored?.status).toBe('quarantined');
+        expect(stored?.error?.code).toBe('QUARANTINED');
+        expect(stored?.supervisedAttempt?.workerLossReconciliation).toBeUndefined();
+        expect(await workspaceLocks.getOwner(ownerUserId.toHexString(), workflowId.toHexString())).toBe(lease.executionId);
     });
 });
