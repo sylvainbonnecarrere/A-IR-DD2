@@ -214,6 +214,9 @@ jobs:
       actions: read
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
       - name: Collect run jobs and artifacts
         shell: bash
         env:
