@@ -11,9 +11,13 @@ import {
   WorkspaceRoomIdSchema,
 } from '../domain/workflow/workspaceCollaboration.contract';
 import { RuntimeEventEnvelopeSchema, type RuntimeEventEnvelope } from '../domain/execution/runtimeEvent.contract';
-import { User } from '../models/User.model';
 import { Workflow } from '../models/Workflow.model';
-import { verifyAccessToken } from '../utils/jwt';
+import {
+  verifySocketAccessToken,
+  buildAuthenticatedSocketData,
+  generateUserColor,
+  type AuthenticatedSocketData,
+} from '../middleware/socketAuth.middleware';
 
 // Types pour les événements WebSocket
 interface ClientToServerEvents {
@@ -50,16 +54,13 @@ interface InterServerEvents {
   ping: () => void;
 }
 
-interface SocketData {
-  userId: string;
-  role?: string;
-  isAuthenticated: boolean;
-  workspaceId?: string;
-  userInfo?: {
-    name: string;
-    color: string;
-  };
-}
+/**
+ * US-J7-12 — SocketData strictement authentifié.
+ * `userId` provient exclusivement du JWT vérifié + base de données.
+ * Aucun identifiant temporaire de session invite n'est possible.
+ * Tout socket connecté est authentifié (deny by default au handshake).
+ */
+type SocketData = AuthenticatedSocketData;
 
 type WorkspaceSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
@@ -98,6 +99,9 @@ export class WebSocketManager {
       transports: ['websocket', 'polling']
     });
 
+    // US-J7-12 — Authentification JWT stricte au handshake.
+    // Toute connexion sans JWT valide est rejetée (deny by default).
+    // Aucun userId temporaire n'est créé.
     this.io.use((socket, next) => {
       void this.authenticateSocket(socket)
         .then(() => next())
@@ -111,7 +115,7 @@ export class WebSocketManager {
 
   private setupEventHandlers() {
     this.io.on('connection', (socket) => {
-      console.log(`[WebSocket] Client connecté: ${socket.id}`);
+      console.log(`[WebSocket] Client connecté: ${socket.id} (user: ${socket.data.userId})`);
       
       // Envoyer confirmation de connexion
       socket.emit('connection:status', 'connected');
@@ -166,62 +170,35 @@ export class WebSocketManager {
 
       // === DÉCONNEXION ===
       socket.on('disconnect', () => {
-        console.log(`[WebSocket] Client déconnecté: ${socket.id}`);
+        console.log(`[WebSocket] Client déconnecté: ${socket.id} (user: ${socket.data.userId})`);
         this.handleDisconnect(socket);
       });
     });
   }
 
+  /**
+   * US-J7-12 — Authentification JWT stricte.
+   * Rejette la connexion si le token est absent, invalide, ou si l'utilisateur
+   * est introuvable/inactif. Ne crée JAMAIS d'identité temporaire.
+   */
   private async authenticateSocket(socket: WorkspaceSocket): Promise<void> {
-    const token = this.extractHandshakeToken(socket);
-
-    if (!token) {
-      socket.data.userId = `guest:${socket.id}`;
-      socket.data.isAuthenticated = false;
-      socket.data.userInfo = {
-        name: 'guest',
-        color: this.generateUserColor(socket.id)
-      };
-      return;
-    }
-
-    let payload;
-    try {
-      payload = verifyAccessToken(token);
-    } catch {
-      throw new Error('Socket authentication failed');
-    }
-
-    const user = await User.findById(payload.sub).select('_id email username role isActive').lean();
-    if (!user || !user.isActive) {
-      throw new Error('Socket authentication failed');
-    }
-
-    socket.data.userId = user._id.toString();
-    socket.data.role = user.role;
-    socket.data.isAuthenticated = true;
-    socket.data.userInfo = {
-      name: typeof user.username === 'string' && user.username.trim().length > 0 ? user.username : user.email,
-      color: this.generateUserColor(user._id.toString())
-    };
+    const result = await verifySocketAccessToken(socket);
+    const socketData = buildAuthenticatedSocketData(result);
+    socket.data.userId = socketData.userId;
+    socket.data.role = socketData.role;
+    socket.data.userInfo = socketData.userInfo;
   }
 
-  private extractHandshakeToken(socket: WorkspaceSocket): string | null {
-    const authToken = typeof socket.handshake.auth?.token === 'string'
-      ? socket.handshake.auth.token.trim()
-      : '';
-
-    if (authToken) {
-      return authToken;
-    }
-
-    const authorizationHeader = socket.handshake.headers.authorization;
-    if (typeof authorizationHeader === 'string' && authorizationHeader.startsWith('Bearer ')) {
-      const bearerToken = authorizationHeader.slice('Bearer '.length).trim();
-      return bearerToken || null;
-    }
-
-    return null;
+  /**
+   * US-J7-12 — Vérifie qu'un utilisateur authentifié est bien propriétaire
+   * du workspace avant toute exposition d'état runtime ou join de room.
+   */
+  private async hasWorkspaceOwnership(userId: string, workspaceId: string): Promise<boolean> {
+    const exists = await Workflow.exists({
+      _id: workspaceId,
+      userId: userId,
+    });
+    return exists !== null;
   }
 
   private async handleWorkspaceJoin(socket: WorkspaceSocket, workspaceId: string) {
@@ -231,15 +208,9 @@ export class WebSocketManager {
       return;
     }
 
-    if (!socket.data.isAuthenticated) {
-      this.denySocketAction(socket, 'workspace:join', 'auth_required');
-      return;
-    }
-
-    const canAccessWorkspace = await Workflow.exists({
-      _id: workspaceParseResult.data,
-      userId: socket.data.userId,
-    });
+    // US-J7-12 — filtrage strict par workspaceId : seul le propriétaire
+    // authentifié peut rejoindre la room et recevoir les états runtime.
+    const canAccessWorkspace = await this.hasWorkspaceOwnership(socket.data.userId, workspaceParseResult.data);
 
     if (!canAccessWorkspace) {
       this.denySocketAction(socket, 'workspace:join', 'workspace_forbidden', {
@@ -266,7 +237,7 @@ export class WebSocketManager {
     // Notifier les autres utilisateurs
     socket.to(workspaceId).emit('workspace:user:joined', {
       userId: socket.data.userId,
-      userInfo: socket.data.userInfo || { name: socket.data.userId, color: this.generateUserColor(socket.data.userId) }
+      userInfo: socket.data.userInfo || { name: socket.data.userId, color: generateUserColor(socket.data.userId) }
     });
 
     console.log(`[WebSocket] User ${socket.data.userId} rejoint workspace ${workspaceId}`);
@@ -330,11 +301,8 @@ export class WebSocketManager {
   }
 
   private ensureWorkspaceAccess(socket: WorkspaceSocket, eventName: string): boolean {
-    if (!socket.data.isAuthenticated) {
-      this.denySocketAction(socket, eventName, 'auth_required');
-      return false;
-    }
-
+    // US-J7-12 — tout socket connecté est authentifié (JWT strict au handshake).
+    // Seul le workspaceId (ownership vérifié au join) est requis.
     if (!socket.data.workspaceId) {
       this.denySocketAction(socket, eventName, 'workspace_required');
       return false;
@@ -354,17 +322,10 @@ export class WebSocketManager {
       eventName,
       reason,
       userId: socket.data.userId,
-      isAuthenticated: socket.data.isAuthenticated,
       workspaceId: socket.data.workspaceId,
       ...metadata,
     });
     socket.emit('connection:status', 'error');
-  }
-
-  private generateUserColor(seed: string): string {
-    const colors = ['#00ff88', '#ff6b00', '#0066ff', '#ff0066', '#66ff00', '#ff6600'];
-    const hash = Array.from(seed).reduce((acc, character) => acc + character.charCodeAt(0), 0);
-    return colors[Math.abs(hash) % colors.length];
   }
 
   // Méthodes publiques pour monitoring
@@ -376,6 +337,16 @@ export class WebSocketManager {
     return Array.from(this.connectedUsers.keys());
   }
 
+  /**
+   * US-J7-12 — Émission d'un événement runtime vers une room workspace.
+   * Filtrage strict :
+   * - le workspaceId doit être un ObjectId valide ;
+   * - l'événement doit être conforme au contrat Zod ;
+   * - l'event.workspaceId doit correspondre exactement au workspaceId de la room ;
+   * - seuls les sockets authentifiés propriétaires du workspace sont dans la room
+   *   (garanti par le handshake JWT strict + ownership check au join).
+   * Aucun événement n'est émis vers une room non authentifiée.
+   */
   public emitRuntimeEvent(workspaceId: string, event: unknown): boolean {
     const workspaceParseResult = WorkspaceRoomIdSchema.safeParse(workspaceId);
     if (!workspaceParseResult.success) {
@@ -392,8 +363,22 @@ export class WebSocketManager {
       return false;
     }
 
+    // Filtrage strict : la room ne contient que des sockets authentifiés
+    // ayant prouvé l'ownership du workspace (US-J7-12).
     this.io.to(workspaceId).emit('runtime:event', normalizedEvent);
     return true;
+  }
+
+  /**
+   * US-J7-12 — Vérifie qu'un utilisateur authentifié a accès à un workspace.
+   * Utilisé pour valider avant toute exposition d'état runtime (y compris quarantaine).
+   */
+  public async canAccessWorkspace(userId: string, workspaceId: string): Promise<boolean> {
+    const workspaceParseResult = WorkspaceRoomIdSchema.safeParse(workspaceId);
+    if (!workspaceParseResult.success) {
+      return false;
+    }
+    return this.hasWorkspaceOwnership(userId, workspaceParseResult.data);
   }
 
   public async close(): Promise<void> {
