@@ -1392,3 +1392,22 @@ Le backlog est considere execute quand :
 **Condition de continuation :**
 - le cutover ne doit pas etre lance tant que le gate n'est pas validé par la triade architecture / backend / validation domaine ;
 - `J5` doit alors servir la bascule front sur le contrat V2 deja verrouille, tandis que `J6` confirme la livraison finale et la non-regression E2E.
+
+### Evaluation de cloture du gate (2026-11-19, `09-architecte-applicatif`) : gate VALIDE, tous les points traites
+
+| Point §13 | Preuve (re-executee ou consignee) | Statut |
+|---|---|---|
+| J3 valide : bootstrap, migrations idempotentes, reprise, runtime infra | commits Jalon 3 ; `database-init.run-lease/seeding` PASS (rejoues 2026-11-19) ; migration V1->V2 rejouable | VALIDE |
+| J4 valide : invariants, transitions, migrations, reprise, resilience | commits Jalon 4 ; `task-instance.contract`, `user-tool-run.contract` PASS (rejoues 2026-11-19) | VALIDE |
+| lectures legacy critiques neutralisees | `audit:workflow-architecture:strict` OK (rejoue 2026-11-19) ; mutations legacy refusees 410/400 (`auth-workflows` dans `test:j6:backend` 126/126 PASS rejoue) | VALIDE |
+| V2 source de verite operationnelle | `workspace-snapshot.test.ts` V2-only PASS (rejoue) ; routes V2 + ownership | VALIDE |
+| audit zero lecture legacy critique | idem audit strict OK | VALIDE |
+| migration sans doublon + reprise apres echec | `workflow-v1-v2-migration.test.ts` PASS (dans `test:j6:backend` + suite dediee, rejoue 2026-11-19) | VALIDE |
+| non-regression : workflows invalides, transitions interdites, ownership | `test:j6:backend` 10 suites/126 tests PASS (rejoue 2026-11-19) : auth-workflows, validator, contrats | VALIDE |
+| tests panne, retry, annulation, reprise sur runs/tasks | `runs-command.routes`, `worker-lease.service`, `docker-sandbox.runner`, `execution-orchestrator` (dans `test:j6:backend`) + `durable-worker-restart.integration` + labo systemd 5/5 PASS | VALIDE |
+| gestion des runs/erreurs : retention, reconciliation, liberation, preuves, etats incertains (jamais de suppression de preuves ni liberation sans surete) | J7-05..J7-09 : `user-tool-run-retention.service` PASS (rejoue) ; reconciler fail-closed ; `fence-and-retry` 11 tests (202/409/504, audit `gateway_fence_audit` append-only, `releaseForRun` owner===runId) ; statuts `worker_lost`/`quarantined` irreversibles | VALIDE |
+| fixtures QA et jeux de donnees historiques | §8 matrice ; `workspace-snapshot`, fixtures hydratation ; aucune fixture affaiblie (J6-02 revalidee, rapport `Guides/Features/feature/suivi/j6-validation-report.md`) | VALIDE |
+| Definition of Done phase 2 (§12) | toutes les US J0-J7 closes ; synthese dans `Guides/Features/feature/refonte/README.md` | VALIDE |
+| validation fonctionnelle front + runtime | US-J7-13 (cutover UI) + US-J7-15 : 18/18 scenarios J6-01 en isole, matrice J6-02 revalidee, verdict **GO** signe 2026-11-19 | VALIDE |
+
+**Decision gate : GO** (2026-11-19, signe `08-testeur-e2e`, US-J7-15). Reserves tracees et non bloquantes : releve CI a chaque push de release (procedural, US-J7-14, rapport du push `ef19500...` consigne) ; dette `saveEdges` reportee a la prochaine feature « liens entre nodes ». Responsabilites de validation remplies par les agents pilotes + revue architecte (`insight/rapport-feature.md`). Condition de continuation satisfaite : J5 ferme via US-J7-13, J6 confirme via US-J7-15.
