@@ -81,6 +81,7 @@ Rapport par push (à remplir par le responsable à chaque push ; état au 2026-1
 
 | Push (date) | SHA | ci.yml | runtime.yml | security.yml | deploy.yml (env) | Artefacts | Verdict |
 |---|---|---|---|---|---|---|---|
+| 2026-11-19 | `3481b75` | KO job `report` (checkout manquant -> MODULE_NOT_FOUND build-run-report.cjs, artefact ci-report-<sha>.json absent) ; autres jobs verts | — | — | — | — | corrigé (checkout ajouté au job `report`), voir commit suivant |
 | — | — | — | — | — | — | — | en attente push responsable |
 
 Aucune opération destructive sur des données réelles ; environnements CI isolés uniquement. **Reste ouvert** : déploiement sur l'hôte Linux de production (hors accès agent) — la procédure README § déploiement systemd s'applique telle quelle ; le labo ne s'y substitue pas.
