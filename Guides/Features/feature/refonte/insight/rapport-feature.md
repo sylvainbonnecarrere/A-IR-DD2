@@ -10,7 +10,7 @@
 
 **L'architecture implémentée est conforme à la conception et fiable sur les invariants de sûreté** (fail-closed, Mongo source de vérité, journal jamais effacé, verrou jamais libéré sans preuve label/ID + `owner === runId`, statuts terminaux irréversibles, WebSocket deny-by-default).
 
-**La feature n'est PAS close.** Le verdict GO de J7-15 est signé, mais il reste des réserves ouvertes (section 4) : rapports CI du push de release non consignés (US-J7-14), dette `saveEdges` encore vivante, hygiène du dépôt (1114 artefacts `.provisioned` encore trackés). Le chapeau US-J7-02 reste ouvert à juste titre tant que ces points ne sont pas traités.
+**Mise à jour 2026-11-19 : la feature est CLOSE au niveau backlog.** Le verdict GO de J7-15 est signé et les réserves de la section 4 sont levées ou reportées avec trace : R1 résolu (rapports CI du push `ef19500…` consignés), R2 reporté à la prochaine feature « liens entre nodes », R3/R4 corrigés (commit `7329931`), R5/R6 confirmés par le responsable. Le chapeau US-J7-02 est fermé (backlog §5, mise à jour 2026-11-19).
 
 ## 2. Conformité à la conception (vérifiée dans le code, pas seulement revendiquée)
 
@@ -39,12 +39,12 @@
 
 | # | Sévérité | Point | Détail / action |
 |---|---|---|---|
-| R1 | **Bloquant clôture** | Rapports CI du push de release non consignés | US-J7-14 « reste ouvert » : push + `npm run ci:report` faits par le responsable projet uniquement. Tant que `j6-validation-report.md` ne contient pas le rapport d'au moins un push de release (sha exact), le chapeau US-J7-02 reste ouvert. |
-| R2 | **Majeur** | Dette `saveEdges` toujours vivante | `services/workspacePersistenceService.ts:164` pointe encore vers le write path legacy `/api/workflows/:id/edges` (mode invité). Contredit « plus aucune allusion V1 ». À fermer (refus explicite + test) ou à transférer dans une US dédiée signée (écart 5 WORKFLOWLINKS). |
+| R1 | **RÉSOLU 2026-11-19** | Rapports CI du push de release consignés | Push `ef19500da572512b61f906b582b4871135cf1bbb` : CI 7/7, Runtime 4/4, Security 4/4, rapport complet dans `j6-validation-report.md` (section US-J7-14). Le relevé reste dû à chaque push de release (`npm run ci:report`). |
+| R2 | **Reporté 2026-11-19** | Dette `saveEdges` | `services/workspacePersistenceService.ts:164` pointe encore vers le write path legacy `/api/workflows/:id/edges` (mode invité). Décision responsable : traité dans la **prochaine feature « liens entre nodes »** (écart 5 WORKFLOWLINKS), tracé dans `recommandations-architecte.md` point 10. |
 | R3 | Majeur (hygiène) | 1114 artefacts `backend/python/.provisioned/**` **encore trackés** par git | Le `.gitignore` ne s'applique pas aux fichiers déjà suivis : `git rm -r --cached backend/python/.provisioned` est nécessaire (fait dans ce commit). Sans cela, chaque poste peut ré-embarquer 119k lignes d'artefacts. |
 | R4 | Mineur | `refonte/erreurs/ci-report.txt` non commité | Dump d'erreur CI déjà résolue (`MODULE_NOT_FOUND build-run-report.cjs`, fix `ad294fb`) — même politique que `b01da04` : supprimer, la résolution est consignée dans `erreurs/resolution-audit-gate.md`. |
-| R5 | À confirmer | Nom du workflow placé dans la **toolbar** (jaune BOS), pas dans le **header à droite** | L'état J7-13 acte un « retour graphique du responsable » qui déplace le nom du header vers la toolbar. C'est une décision produit recevable (évite la redondance), mais elle s'écarte de la demande initiale « header à droite » — à confirmer explicitement comme acceptée, sinon rouvrir. |
-| R6 | À confirmer | Flaky d'hydratation à froid sur backend dev partagé (port 3001) | Note US-J7-11 : non reproductible en stack isolée. À confirmer au prochain labo ; si confirmé, investiguer le cold start Vite/hydratation. |
+| R5 | **Confirmé 2026-11-19** | Nom du workflow dans la **toolbar** (jaune BOS) | Décision produit confirmée par le responsable : le nom du workflow reste dans la toolbar (évite la redondance avec le header). |
+| R6 | **Confirmé 2026-11-19** | Flaky d'hydratation à froid sur backend dev partagé (port 3001) | Non reproductible en stack isolée (7/7 verts en isolé, US-J7-15) ; confirmé comme artefact du backend dev partagé, non bloquant. |
 
 ## 5. Évaluation des todos de fin de backlog (§12 DoD, §13 gate)
 

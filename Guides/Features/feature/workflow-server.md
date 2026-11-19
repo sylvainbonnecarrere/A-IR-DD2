@@ -1,3 +1,5 @@
+> **Document historique (note ajoutée le 2026-11-19, 09-architecte-applicatif).** Ce plan de conception date d'avant la refonte V1→V2 ; le « modèle de domaine à implémenter » mentionné ci-dessous est aujourd'hui implémenté en V2 (voir `refonte/backlog/v1-v2-refonte-backlog.md`, jalon J7 clos, verdict GO 2026-11-19). Conserver ce fichier comme archive de conception, ne plus s'y référer pour l'état courant.
+
 Parfait. Avec ces sept profils, le découpage devient clair. Je propose de les utiliser dans un ordre strict, avec quelques interventions en parallèle uniquement lorsque les contrats sont stabilisés.
 
 Les identifiants ci-dessous correspondent aux responsabilités des agents. Dans les user stories, chaque agent devra naturellement utiliser le fichier réel de `.github/agents` qui correspond à son profil.
