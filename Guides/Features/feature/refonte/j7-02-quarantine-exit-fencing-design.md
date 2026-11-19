@@ -12,7 +12,7 @@
 1. **Pas d'opérateur sysadmin au quotidien.** L'opérateur légitime est **l'utilisateur propriétaire du workspace**, via l'interface applicative. Un fallback CLI admin existe uniquement pour la maintenance d'infrastructure.
 2. **Niveau gateway (disponibilité globale)** : fencing **automatique** des opérations `unknown` de l'ancienne epoch à l'activation d'une nouvelle epoch. Le démon rouvre l'admission immédiatement et ne bloque jamais les autres workspaces.
 3. **Niveau workspace (sécurité métier)** : le run incertain passe en état terminal réconciliable (`worker_lost` / `quarantined`) et le **verrou workspace reste tenu** jusqu'à résolution explicite par `fence-and-retry`.
-4. **Visibilité** : erreur persistée dans le journal (`agent_journals` / `UserToolRun`) avec agent/nœud, cause et état du verrou ; remontée UI (carte + panneau de supervision, US-J7-03).
+4. **Visibilité** : erreur persistée dans le journal (`agent_journals` / `UserToolRun`) avec agent/nœud, cause et état du verrou ; remontée UI (carte + panneau de supervision, US-J7-13).
 5. **Action manuelle** : bouton « Reset & Relance » pour l'utilisateur authentifié propriétaire.
 6. **Auto-recovery optionnelle par agent** : `recoveryPolicy: { autoFenceAndRetry: boolean; maxAttempts: number }`, défaut `false` / `0`. Si activée et sous le seuil, le worker exécute automatiquement fencing + nouveau `executionId`.
 7. **Borne de fencing** : `RECONCILE_TIMEOUT_MS = 30 s`, avec retour `504 FENCING_TIMEOUT_ESCALATED` et persistance d'une alerte critique (verrou reste fermé).
@@ -154,7 +154,7 @@ Lors de la réconciliation au démarrage (ou via le worker), si le run `quaranti
 
 - `UserToolRun.error` : `code` (`WORKER_LOST`/`QUARANTINED`/`FENCING_TIMEOUT_ESCALATED`), `subsystem: 'runner'`, `failureKind`, `message` explicite, `retryable: true` ;
 - entrée dans `agent_journals` pour l'agent/nœud concerné (agentInstanceId) : cause, état du verrou, opération fencée ;
-- événements runtime versionnés (`run.quarantined`, `run.fenced`, `run.recovery_relaunched`) → WebSocket → `useRuntimeStore` → UI (carte workflow + panneau de supervision, US-J7-03) ;
+- événements runtime versionnés (`run.quarantined`, `run.fenced`, `run.recovery_relaunched`) → WebSocket → `useRuntimeStore` → UI (carte workflow + panneau de supervision, US-J7-13) ;
 - `gateway_fence_audit` : piste d'audit immuable (qui, quand, quelle opération, quelle preuve).
 
 ## 6. Fichiers impactés (prévision)
@@ -187,7 +187,7 @@ Lors de la réconciliation au démarrage (ou via le worker), si le run `quaranti
 - [ ] Journal et audit jamais effacés (`docker_gateway_state`, `dockerJournal`, `gateway_fence_audit`).
 - [ ] `recoveryPolicy` par agent, défaut off, auto-recovery sous le seuil avec audit `AGENT_AUTO_RECOVERY`.
 - [ ] Déploiement validé sur l'hôte Linux cible (health/ready, SIGKILL, restart gateway, fence-and-retry réel).
-- [ ] E2E complet (scénarios 6/10/11/12/16 + matrice J6-02) puis US-J7-04 prononce le gate.
+- [ ] E2E complet (scénarios 6/10/11/12/16 + matrice J6-02) puis US-J7-15 prononce le gate.
 
 ## 10. Résidus / questions suivies
 
