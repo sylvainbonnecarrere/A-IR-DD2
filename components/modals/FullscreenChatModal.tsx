@@ -2,8 +2,12 @@ import React, { Suspense, lazy, useState, useRef, useEffect } from 'react';
 import { Button } from '../UI';
 import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon, ErrorIcon, HistorySynthesisIcon } from '../Icons';
 import { ToolCallBlock } from '../workflow/ToolCallBlock';
+import { RunStatusBadge } from '../workflow/RunStatusBadge';
+import { ShieldAlertIcon } from '../Icons';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { selectResolvedAgentHasToolNamed, useDesignStore } from '../../stores/useDesignStore';
+import { useInstanceRunStatus } from '../../hooks/useWorkflowRuntimeState';
+import { useRunCommandModals } from '../../hooks/useRunCommandModals';
 import { useFunctionStore } from '../../stores/useFunctionStore';
 import { useAgentChat } from '../../hooks/useAgentChat';
 import { useLocalization } from '../../hooks/useLocalization';
@@ -142,6 +146,11 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const isLoading = fullscreenChatNodeId ? isNodeExecuting(fullscreenChatNodeId) : false;
 
   const llmConfigs = useRuntimeStore(state => state.llmConfigs);
+
+  // ⭐ US-J7-13: statut du run de l'instance dans la fenêtre agrandie + modales de commandes
+  const fullscreenWorkflowId = useDesignStore((state) => state.currentWorkflowId);
+  const fullscreenRunStatus = useInstanceRunStatus(inferredInstanceId);
+  const runCommandModals = useRunCommandModals(fullscreenWorkflowId, () => { /* refresh via événements workspace */ });
 
   // Read prototype from store to ensure it's fresh (not stale from Runtime prop)
   // This is critical: if user edits LLM capabilities, we need the latest prototype
@@ -423,6 +432,8 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+      {/* ⭐ US-J7-13: modales de commandes du run (détail / reset & relance) */}
+      {runCommandModals.modals}
       {/* Main container - Split-View Layout with Dynamic Expansion */}
       <div className={`flex flex-col bg-gray-800 rounded-lg shadow-2xl transition-all duration-500 ease-in-out ${
         activeSidePanel !== 'none' 
@@ -442,6 +453,23 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                 {llmDisplayString}
               </span>
             </div>
+            {/* ⭐ US-J7-13: badge de statut du run dans la fenêtre agrandie + Reset & Relance si quarantaine */}
+            <RunStatusBadge
+              instanceId={inferredInstanceId}
+              onOpenRunDetail={runCommandModals.openRunDetail}
+              onOpenResetAndRelaunch={runCommandModals.requestResetAndRelaunch}
+            />
+            {fullscreenRunStatus && (fullscreenRunStatus.status === 'worker_lost' || fullscreenRunStatus.status === 'quarantined' || fullscreenRunStatus.lockHeld) ? (
+              <button
+                type="button"
+                onClick={() => fullscreenRunStatus.runId && runCommandModals.requestResetAndRelaunch(fullscreenRunStatus.runId)}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-semibold bg-orange-600 hover:bg-orange-700 text-white transition-colors"
+                data-testid="fullscreen-reset-and-relaunch"
+              >
+                <ShieldAlertIcon className="w-3.5 h-3.5" />
+                {t('workflow.resetAndRelaunch.title')}
+              </button>
+            ) : null}
           </div>
 
           {/* Header Control Buttons (Minimize, Delete only) */}

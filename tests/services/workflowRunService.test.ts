@@ -101,4 +101,101 @@ describe('WorkflowRunService V2 contract bridge', () => {
     expect(result.status).toBe('stopped');
     expect(result.success).toBe(true);
   });
+
+  it('retryRun appelle POST /api/runs/executions/:id/retry avec un header Idempotency-Key', async () => {
+    jest.spyOn(apiClient, 'post').mockResolvedValue({
+      data: { executionId: 'run-new', retryOfExecutionId: 'run-7', status: 'queued' },
+    } as never);
+
+    const result = await WorkflowRunService.retryRun('run-7', 'idem-uuid-1');
+
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/api/runs/executions/run-7/retry',
+      {},
+      { headers: { 'Idempotency-Key': 'idem-uuid-1' } },
+    );
+    expect(result.executionId).toBe('run-new');
+    expect(result.retryOfExecutionId).toBe('run-7');
+    expect(result.status).toBe('queued');
+  });
+
+  it('retryRun génère une clé d’idempotence uuid v4 par défaut', async () => {
+    jest.spyOn(apiClient, 'post').mockResolvedValue({
+      data: { executionId: 'run-new', retryOfExecutionId: 'run-7', status: 'queued' },
+    } as never);
+
+    await WorkflowRunService.retryRun('run-7');
+
+    const [, , config] = (apiClient.post as jest.Mock).mock.calls[0];
+    expect(config.headers['Idempotency-Key']).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  });
+
+  it('retryRun mappe une erreur axios en RunCommandError (status + code contrat)', async () => {
+    jest.spyOn(apiClient, 'post').mockRejectedValue({
+      response: { status: 409, data: { error: 'Run not retryable', code: 'RUN_NOT_RETRYABLE' } },
+      message: 'Request failed with status code 409',
+    });
+
+    await expect(WorkflowRunService.retryRun('run-7', 'k')).rejects.toMatchObject({
+      name: 'RunCommandError',
+      status: 409,
+      code: 'RUN_NOT_RETRYABLE',
+      message: 'Run not retryable',
+    });
+  });
+
+  it('fenceAndRetry appelle POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry (202)', async () => {
+    jest.spyOn(apiClient, 'post').mockResolvedValue({
+      status: 202,
+      data: { fencedRunId: 'run-9', newExecutionId: 'run-10', status: 'queued', recoveryAttemptCount: 1 },
+    } as never);
+
+    const result = await WorkflowRunService.fenceAndRetry('wf-1', 'run-9', 'idem-uuid-2');
+
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/api/workspaces/wf-1/runs/run-9/fence-and-retry',
+      {},
+      { headers: { 'Idempotency-Key': 'idem-uuid-2' } },
+    );
+    expect(result.fencedRunId).toBe('run-9');
+    expect(result.newExecutionId).toBe('run-10');
+    expect(result.status).toBe('queued');
+    expect(result.recoveryAttemptCount).toBe(1);
+  });
+
+  it.each([
+    [409, 'RUN_NOT_QUARANTINED'],
+    [409, 'WORKSPACE_LOCKED_BY_OTHER_RUN'],
+    [504, 'FENCING_TIMEOUT_ESCALATED'],
+  ])('fenceAndRetry propage le refus contrat %s %s via RunCommandError', async (status, code) => {
+    jest.spyOn(apiClient, 'post').mockRejectedValue({
+      response: { status, data: { error: `refus ${code}`, code } },
+      message: 'Request failed',
+    });
+
+    await expect(WorkflowRunService.fenceAndRetry('wf-1', 'run-9', 'k')).rejects.toMatchObject({
+      name: 'RunCommandError',
+      status,
+      code,
+    });
+  });
+
+  it('cancelRun mappe un 409 RUN_NOT_CANCELLABLE en RunCommandError typé', async () => {
+    jest.spyOn(apiClient, 'post').mockRejectedValue({
+      response: { status: 409, data: { error: 'Run not cancellable', code: 'RUN_NOT_CANCELLABLE' } },
+      message: 'Request failed with status code 409',
+    });
+
+    await expect(WorkflowRunService.cancelRun('run-1')).rejects.toMatchObject({
+      name: 'RunCommandError',
+      status: 409,
+      code: 'RUN_NOT_CANCELLABLE',
+    });
+  });
+
+  it('newIdempotencyKey produit un uuid v4', () => {
+    const { newIdempotencyKey } = require('../../services/workflowRunService');
+    expect(newIdempotencyKey()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  });
+
 });

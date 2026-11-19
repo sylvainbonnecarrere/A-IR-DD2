@@ -17,7 +17,7 @@
 | Service run | `services/workflowRunService.ts` | `listWorkflowRuns`, `launchRun`, `getRun`, `cancelRun` ; **pas de `retryRun` ni `fenceAndRetry`** |
 | Politique d'actions | `services/runtimeActionPolicy.ts` | Gère `loading/offline/partial` ; à étendre aux nouveaux statuts |
 | Types statuts | `types/function.types.ts` | `worker_lost`/`quarantined` à ajouter |
-| i18n | `i18n/{de,en,es,fr,pt,ua,ru}.ts` + `locales.ts` | 8 langues à garnir pour tous les nouveaux libellés |
+| i18n | `i18n/{de,en,es,fr,pt,ua}.ts` + `locales.ts` | 6 locales à garnir pour tous les nouveaux libellés (corrigé le 2026-11-19 : il n'y a pas de `ru`) |
 | Nœud agent | `components/V2AgentNode.tsx` (2095 l) | Badge de statut à ajouter (pastille coin supérieur droit) |
 | Supervision | `components/BosWorkflowManagementPage.tsx` / page `bosSupervision` | Liste des runs + alertes `runtime_alerts` à afficher |
 
@@ -51,7 +51,7 @@ Palette et règles issues de la charte (fond cosmique `#000814`, néons maîtris
 
 - Icônes vectorielles avec glow laser au hover (style `Icons.tsx` existant) : `PlayIcon` (Lancer), `StopIcon` (Annuler), `RefreshCwIcon` (Relancer = nouveau run), `ShieldAlertIcon` (Reset & Relance), `DownloadIcon`, `CogIcon`.
 - **Retirer `Pause`** (pas de sémantique serveur) ; renommer `Reprendre` en **`Relancer`** (crée un nouveau run via retry, jamais de `resume`).
-- Modales : `role="alertdialog"`, focus initial sur « Annuler l'action », Échap ferme, libellés localisés (8 langues), contraste WCAG.
+- Modales : `role="alertdialog"`, focus initial sur « Annuler l'action », Échap ferme, libellés localisés (6 locales), contraste WCAG.
 
 ### 2.4 Bouton Reset & Relance (consomme US-J7-07)
 
@@ -61,18 +61,22 @@ Palette et règles issues de la charte (fond cosmique `#000814`, néons maîtris
 - Réponses : **202** → toast succès + mise à jour `runStatuses` + nouveau run `queued` ; **200 replay** → idem sans effet ; **409** `RUN_NOT_QUARANTINED` / `WORKSPACE_LOCKED_BY_OTHER_RUN` → message d'erreur localisé, état serveur conservé ; **504** `FENCING_TIMEOUT_ESCALATED` → alerte critique affichée (persistée dans `runtime_alerts`), verrou reste tenu.
 - Événements reçus : `run:quarantined`, `run:fenced`, `run:recovery_relaunched` → mise à jour du badge/toolbar sans rechargement (via `useRuntimeStore`, filtrés par `workflowId`).
 
-### 2.5 Confort : nom du workflow dans le header de page
+### 2.5 Confort : nom du workflow + diode de connexion dans la barre de commandes
 
-Sur la page de la carte du workflow, dans le **header à droite**, afficher le **nom du workflow courant** (`currentWorkflow.name`, tronqué avec `ellipsis` + tooltip du nom complet au survol), à côté des actions globales du header. Source unique : `useWorkflowStore.currentWorkflow` / `useDesignStore` (pas de nouvel état local). Libellé/localisation via `i18n` (8 langues). La toolbar conserve son affichage du workflow à gauche ; ce header est un confort de lecture, pas un doublon de logique.
+**Retour graphique du responsable (2026-11-19, appliqué) :** le nom du workflow courant n'est PAS dans le header de page (doublon avec la toolbar, retiré). Il s'affiche dans la **barre de commandes**, à gauche, en **jaune doré BOS** (`text-yellow-400`, cf. `BosSubMenu`), tronqué avec `ellipsis` + tooltip (`data-testid="workflow-current-name"`).
+
+Juste **devant** ce nom : une **diode LED** d'état de la connexion (`data-testid="workflow-connection-led"`, vert `connected` / ambre `reconnecting`/`degraded` / rouge `offline`) avec **bulle explicative au survol** (`data-testid="workflow-connection-bubble"`) précisant que la diode reflète le **canal temps réel WebSocket**, pas le serveur API (les commandes passent par l'API même diode rouge). Plus aucune ligne/bandeau dédié sous le header : la carte garde toute sa hauteur.
+
+**Résultats de commandes ET avertissements de validation** (clic Lancer sur un graphe invalide : nœuds non connectés, pas de nœud de départ…) : toast flottant éphémère en haut à droite via `NotificationDisplay` (vert succès / **orange warning** / rouge erreur — même style que la page Connexions API, message en `whitespace-pre-line`), jamais de panneau inline qui déplacerait la carte. Le lancement reste bloqué tant que le graphe est invalide.
 
 ## 3. Todolist d'implémentation pour `06-frontend` (ordre recommandé)
 
-1. **Types + i18n** : statuts `worker_lost`/`quarantined` (+ `lockHeld`) dans `types/function.types.ts` ; libellés dans les 8 langues (`workflow.status.*`, `workflow.quarantine.*`, `workflow.resetAndRelaunch.*`, modales, erreurs 409/504).
+1. **Types + i18n** : statuts `worker_lost`/`quarantined` (+ `lockHeld`) dans `types/function.types.ts` ; libellés dans les 6 locales (`workflow.status.*`, `workflow.quarantine.*`, `workflow.resetAndRelaunch.*`, modales, erreurs 409/504).
 2. **Services** : `workflowRunService.ts` gagne `retryRun(executionId, idempotencyKey)` et `fenceAndRetry(workspaceId, runId, idempotencyKey)` ; `runtimeActionPolicy.ts` étendu (nouveaux statuts, `canResetAndRelaunch`, `lockHeld`).
 3. **Store runtime** : consommer `useRuntimeStore` (runStatuses, runtimeConnectionState, latestRuntimeEvent), filtrage strict par `workflowId` courant ; aucun secret affiché/stocké.
 4. **Toolbar** : monter `WorkflowToolbar` dans `WorkflowPage` (bosDashboard/bosSupervision uniquement, flux layout) ; brancher `isOffline`/`isPartial` sur le store ; retirer `Pause` ; renommer `Reprendre`→`Relancer` ; confirmation modale avant `Annuler` ; bandeau de connexion (`role="status"`).
 5. **Badge nœud — 3 représentations** : pastille de statut sur `V2AgentNode`, fidèle dans les 3 modes : minimisée (pastille compacte seule + tooltip), normale (pastille + libellé dans le header du nœud), fenêtre agrandie `fullscreenChatNodeId` (pastille + panneau run intégré + Reset & Relance si quarantaine) ; clic → panneau détail.
-5b. **Header de page** : nom du workflow courant à droite du header de la page carte (`ellipsis` + tooltip), localisé.
+5b. **Toolbar** : nom du workflow courant en jaune doré BOS (`text-yellow-400`, `ellipsis` + tooltip, `workflow-current-name`) + diode LED de connexion devant (`workflow-connection-led` + bulle `workflow-connection-bubble`) ; header de page sans nom (retour graphique 2026-11-19). Résultats de commandes en toasts `NotificationDisplay`. 6 locales.
 6. **Modale Reset & Relance** + mapping des réponses 202/200/409/504 + toasts/alertes.
 7. **Supervision** : liste des runs du workflow avec statuts complets + `lockHeld` + alertes `runtime_alerts`.
 8. **Tests** : composants (toolbar montée/absente selon route, 5 états + quarantaine, modales clavier), store (filtrage workflowId, événements), service (retry/fence-and-retry, idempotency), semi-E2E `WorkflowCanvas.route-reentry` étendu (positions identiques avec toolbar), `J7.Editor.RealBrowser.semi-e2e` à rejouer.
@@ -87,7 +91,7 @@ Sur la page de la carte du workflow, dans le **header à droite**, afficher le *
 - Commandes indisponibles quand run actif/terminal ou canal hors ligne/partiel ; accessibilité (clavier, focus, `role="status"`/`alertdialog`, WCAG).
 - Playwright : positions nodes/minimap/controls identiques avec la toolbar, pendant un run et après retour/reload ;
 - badge de statut présent et fidèle dans les 3 représentations du bloc agent (minimisée, normale, fenêtre agrandie) ;
-- header de la page carte : nom du workflow courant affiché à droite (tronqué + tooltip).
+- barre de commandes : nom du workflow en jaune doré BOS + diode LED de connexion (bulle au survol) ; aucun bandeau inline de résultat (toasts flottants haut-droite) ; header de page sans nom de workflow.
 - Aucune régression des suites existantes ; audit strict OK.
 
 ## 5. Hors périmètre

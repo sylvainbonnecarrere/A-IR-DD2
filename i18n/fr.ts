@@ -153,10 +153,82 @@ export default {
         import: 'Importer',
         config: 'Configuration',
         status: {
-            running: 'En cours',
-            completed: 'Terminé',
-            failed: 'Échec',
-            paused: 'En pause'
+            running: "En cours",
+            completed: "Terminé",
+            failed: "Échec",
+            paused: "En pause",
+            queued: "En file",
+            stopped: "Arrêté",
+            timed_out: "Délai dépassé",
+            worker_lost: "Worker perdu",
+            quarantined: "Quarantaine"
+        },
+        cancel: "Annuler",
+        relaunch: "Relancer",
+        states: {
+            loading: "Chargement…",
+            empty: "Aucun run",
+            error: "Erreur de lecture du statut",
+        },
+        connection: {
+            connected: "Connecté",
+            reconnecting: "Reconnexion…",
+            degraded: "Connexion dégradée",
+            offline: "Hors ligne",
+        },
+        connectionLed: {
+            label: "État de la connexion temps réel",
+            title: "Canal temps réel",
+            hint: "Cette diode reflète le canal temps réel (WebSocket) vers le serveur, pas l'état du serveur API lui-même : les commandes (Lancer, Annuler…) passent par l'API même si la diode est rouge.",
+        },
+        runs: {
+            title: "Runs du workflow",
+            open: "Historique des runs",
+            empty: "Aucun run pour ce workflow",
+            lockHeld: "Verrou tenu",
+        },
+        badge: {
+            tooltip: "Statut du run",
+        },
+        header: {
+            currentWorkflow: "Workflow courant",
+        },
+        actionError: "Erreur lors de la commande",
+
+        notifications: {
+            commandSent: "Commande envoyée au serveur",
+        },
+        relaunchSuccess: "Relance demandée : nouveau run créé",        cancelRun: {
+            title: "Annuler le run ?",
+            body: "Le run en cours sera annulé côté serveur. Cette action est irréversible.",
+            confirm: "Annuler le run",
+            cancel: "Conserver le run",
+            success: "Annulation demandée",
+            error: "Annulation refusée par le serveur",
+        },
+        resetAndRelaunch: {
+            title: "Reset & Relance",
+            body: "Le run est en quarantaine (worker perdu, verrou workspace tenu). Le fencing gateway sera tenté (borne 30 s) puis un NOUVEAU run sera créé ; le run parent reste inchangé.",
+            confirm: "Reset & Relancer",
+            cancel: "Fermer",
+            success: "Nouveau run créé",
+            lockHeld: "Verrou workspace tenu",
+            errors: {
+                RUN_NOT_QUARANTINED: "Ce run n'est pas en quarantaine",
+                WORKSPACE_LOCKED_BY_OTHER_RUN: "Le verrou est détenu par un autre run",
+                FENCING_TIMEOUT_ESCALATED: "Fencing dépassé (borne 30 s) — alerte critique, verrou tenu",
+                default: "Échec du reset & relance",
+            },
+        },
+        runDetail: {
+            title: "Détail du run",
+            runId: "Run",
+            status: "Statut",
+            createdAt: "Créé le",
+            startedAt: "Démarré le",
+            finishedAt: "Terminé le",
+            durationMs: "Durée",
+            error: "Erreur",
         },
         validation: {
             warnings: 'Avertissements de Validation',

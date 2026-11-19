@@ -25,6 +25,9 @@ export const useNotifications = () => {
   return context;
 };
 
+/** Variante sans erreur hors provider (toasts désactivés silencieusement, ex. tests sans provider). */
+export const useNotificationsOptional = () => useContext(NotificationContext) ?? null;
+
 interface NotificationProviderProps {
   children: ReactNode;
 }

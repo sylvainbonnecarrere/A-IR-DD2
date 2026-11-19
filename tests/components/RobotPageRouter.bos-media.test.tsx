@@ -29,6 +29,9 @@ describe('RobotPageRouter BOS media button', () => {
         },
       ],
       currentWorkflowId: 'wf-1',
+      // ⭐ US-J7-13: la WorkflowToolbar réelle lit nodes/edges
+      nodes: [],
+      edges: [],
     };
 
     (useLocalization as unknown as jest.Mock).mockReturnValue({

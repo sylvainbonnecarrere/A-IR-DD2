@@ -99,14 +99,18 @@ jest.mock('../../hooks/useAuth', () => ({
   useAuth: () => ({ accessToken: 'token-123' }),
 }));
 
-jest.mock('../../stores/useRuntimeStore', () => ({
-  useRuntimeStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => {
-    const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore;
-    return selector ? selector(state) : state;
-  }, {
-    getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore,
-  }),
-}));
+jest.mock('../../stores/useRuntimeStore', () => {
+  const actual = jest.requireActual('../../stores/useRuntimeStore');
+  return {
+    ...actual, // ⭐ US-J7-13: sélecteurs purs (getWorkflowLatestRunId, getInstanceRunStatus)
+    useRuntimeStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => {
+      const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore;
+      return selector ? selector(state) : state;
+    }, {
+      getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore,
+    }),
+  };
+});
 
 jest.mock('../../stores/useDesignStore', () => {
   const actual = jest.requireActual('../../stores/useDesignStore');

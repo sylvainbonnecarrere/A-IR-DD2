@@ -152,10 +152,82 @@ export default {
         import: 'Import',
         config: 'Configuration',
         status: {
-            running: 'Running',
-            completed: 'Completed',
-            failed: 'Failed',
-            paused: 'Paused'
+            running: "Running",
+            completed: "Completed",
+            failed: "Failed",
+            paused: "Paused",
+            queued: "Queued",
+            stopped: "Stopped",
+            timed_out: "Timed out",
+            worker_lost: "Worker lost",
+            quarantined: "Quarantined"
+        },
+        cancel: "Cancel",
+        relaunch: "Relaunch",
+        states: {
+            loading: "Loading…",
+            empty: "No run",
+            error: "Unable to read run status",
+        },
+        connection: {
+            connected: "Connected",
+            reconnecting: "Reconnecting…",
+            degraded: "Degraded connection",
+            offline: "Offline",
+        },
+        connectionLed: {
+            label: "Realtime connection state",
+            title: "Realtime channel",
+            hint: "This LED reflects the realtime channel (WebSocket) to the server, not the API server itself: commands (Launch, Cancel…) go through the API even when the LED is red.",
+        },
+        runs: {
+            title: "Workflow runs",
+            open: "Run history",
+            empty: "No run for this workflow",
+            lockHeld: "Lock held",
+        },
+        badge: {
+            tooltip: "Run status",
+        },
+        header: {
+            currentWorkflow: "Current workflow",
+        },
+        actionError: "Command failed",
+
+        notifications: {
+            commandSent: "Command sent to the server",
+        },
+        relaunchSuccess: "Relaunch requested: new run created",        cancelRun: {
+            title: "Cancel the run?",
+            body: "The current run will be cancelled server-side. This action cannot be undone.",
+            confirm: "Cancel run",
+            cancel: "Keep run",
+            success: "Cancellation requested",
+            error: "Cancellation rejected by the server",
+        },
+        resetAndRelaunch: {
+            title: "Reset & Relaunch",
+            body: "The run is quarantined (worker lost, workspace lock held). Gateway fencing will be attempted (30 s bound) then a NEW run is created; the parent run stays unchanged.",
+            confirm: "Reset & Relaunch",
+            cancel: "Close",
+            success: "New run created",
+            lockHeld: "Workspace lock held",
+            errors: {
+                RUN_NOT_QUARANTINED: "This run is not quarantined",
+                WORKSPACE_LOCKED_BY_OTHER_RUN: "The lock is held by another run",
+                FENCING_TIMEOUT_ESCALATED: "Fencing timed out (30 s bound) — critical alert, lock held",
+                default: "Reset & relaunch failed",
+            },
+        },
+        runDetail: {
+            title: "Run details",
+            runId: "Run",
+            status: "Status",
+            createdAt: "Created",
+            startedAt: "Started",
+            finishedAt: "Finished",
+            durationMs: "Duration",
+            error: "Error",
         },
         validation: {
             warnings: 'Validation Warnings',

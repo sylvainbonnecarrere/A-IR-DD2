@@ -25,7 +25,9 @@ const STATUS_LABELS: Record<FunctionRunRecord['status'], string> = {
     completed: 'Execution validee',
     failed: 'Echec d execution',
     stopped: 'Execution arretee',
-    timed_out: 'Execution expiree'
+    timed_out: 'Execution expiree',
+    worker_lost: 'Worker perdu (run incertain)',
+    quarantined: 'Run en quarantaine (verrou tenu)'
 };
 
 const SUBSYSTEM_LABELS: Record<string, string> = {
