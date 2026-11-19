@@ -88,13 +88,23 @@ class WebSocketService {
     const accessToken = this.readAccessToken();
     this.lastHandshakeToken = accessToken;
 
+    // US-J7-12: le backend exige un JWT strict au handshake.
+    // Sans token, aucune tentative de connexion n'est faite (deny by default).
+    if (!accessToken) {
+      this.connectionState.isConnected = false;
+      this.connectionState.isConnecting = false;
+      this.connectionState.error = 'Authentification requise pour le canal temps reel';
+      this.emit('connectionStateChanged', this.connectionState);
+      return;
+    }
+
     this.connectionState.isConnecting = true;
     this.connectionState.error = null;
     this.emit('connectionStateChanged', this.connectionState);
 
     try {
       this.socket = io('http://localhost:3001', {
-        auth: accessToken ? { token: accessToken } : undefined,
+        auth: { token: accessToken },
         transports: ['websocket', 'polling'],
         timeout: 5000,
         forceNew: true,
@@ -150,7 +160,15 @@ class WebSocketService {
       this.connectionState.isConnecting = false;
       this.connectionState.error = error?.message || 'Erreur de connexion';
       this.emit('connectionStateChanged', this.connectionState);
-      
+
+      // US-J7-12: erreur d'authentification -> ne pas retenter avec le meme token.
+      // La reconnexion devra relire un token frais depuis le stockage.
+      const isAuthError = /SOCKET_AUTH|authentication/i.test(error?.message || '');
+      if (isAuthError) {
+        this.reconnectAttempts = this.maxReconnectAttempts;
+        return;
+      }
+
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         this.scheduleReconnect();
       }
@@ -166,7 +184,8 @@ class WebSocketService {
     this.socket.on('connection:status', (status) => {
       try {
         if (status === 'connected') {
-          this.connectionState.userId = this.socket?.id || null;
+          // US-J7-12: le userId cote serveur provient du JWT verifie.
+          // On ne stocke plus l'id socket comme identite utilisateur.
           this.emit('connectionStateChanged', this.connectionState);
         }
       } catch (error) {
