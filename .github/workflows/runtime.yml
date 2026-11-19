@@ -150,6 +150,19 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.run_replica_tests == true
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      mongo:
+        image: mongo:6.0
+        ports:
+          - 27018:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval \"db.runCommand({ ping: 1 }).ok\""
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MONGODB_URI: mongodb://127.0.0.1:27018/irdd-test
 
     steps:
       - name: Checkout repository
