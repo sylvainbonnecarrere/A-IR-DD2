@@ -552,7 +552,7 @@ remplacement cible
 statut
 ```
 
-Le rapport versionne de reference pour ce gel J0 est `Guides/Features/feature/refonte/v1-v2-code-inventory.md`. Il complete cette analyse avec la classification effective des surfaces `App.tsx`, `backend/src/routes/workflows.routes.ts`, `backend/src/routes/agent-instances.routes.ts`, `backend/src/routes/runs.routes.ts`, `backend/src/services/databaseInit.ts`, `stores/useWorkflowStore.ts` et `services/workspacePersistenceService.ts`.
+Le rapport versionne de reference pour ce gel J0 est `Guides/Features/feature/suivi/v1-v2-code-inventory.md`. Il complete cette analyse avec la classification effective des surfaces `App.tsx`, `backend/src/routes/workflows.routes.ts`, `backend/src/routes/agent-instances.routes.ts`, `backend/src/routes/runs.routes.ts`, `backend/src/services/databaseInit.ts`, `stores/useWorkflowStore.ts` et `services/workspacePersistenceService.ts`.
 
 ### Phase 2 — Introduire les repositories canoniques
 
