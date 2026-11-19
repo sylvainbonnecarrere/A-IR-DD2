@@ -15,6 +15,8 @@ import * as llmService from '../services/llmService';
 import { createAdapter } from '../services/adapters/AdapterFactory';
 import { runAgentLoop } from '../services/llm/AgentLoop';
 import { ToolCallBlock } from './workflow/ToolCallBlock';
+import { RunStatusBadge } from './workflow/RunStatusBadge';
+import { useRunCommandModals } from '../hooks/useRunCommandModals';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
 import { getEffectiveCredential, isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
@@ -389,6 +391,11 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
   // Use instance name if available, otherwise use prototype name with null safety
   const displayName = agentInstance?.name || agent?.name || 'Unknown Agent';
+
+  // ⭐ US-J7-13: badge de statut du run de l'instance (présent dans les 3 représentations :
+  // le header du nœud reste visible quand le nœud est minimisé, compact si minimisé).
+  const runInstanceId = agentInstance?.id ?? agentInstanceProp?.id ?? id.replace(/^node-/, '');
+  const runCommandModals = useRunCommandModals(resolvedWorkflowId ?? data?.workflowId, () => { /* refresh assuré par le sync de la page via les événements workspace */ });
 
   // Résoudre la configuration effective (instance > prototype)
   // Créer un "agent effectif" qui utilise la config de l'instance si disponible
@@ -1693,6 +1700,9 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
         // Les boutons et le reste du canvas fonctionnent normalement
       }}
     >
+      {/* ⭐ US-J7-13: modales de commandes du run (détail / reset & relance) */}
+      {runCommandModals.modals}
+
       {/* Laser border effect on hover */}
       <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300">
         <div className="absolute inset-[1px] rounded-lg bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-purple-500/20 animate-pulse"></div>
@@ -1728,6 +1738,14 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
               </h3>
             </div>
           </div>
+
+          {/* ⭐ US-J7-13: badge de statut du run (pastille + libellé ; compact si minimisé) */}
+          <RunStatusBadge
+            instanceId={runInstanceId}
+            compact={isMinimized}
+            onOpenRunDetail={runCommandModals.openRunDetail}
+            onOpenResetAndRelaunch={runCommandModals.requestResetAndRelaunch}
+          />
 
           <div data-arc-agent-node="header-controls" className="flex items-center space-x-1 flex-none">
           <Button

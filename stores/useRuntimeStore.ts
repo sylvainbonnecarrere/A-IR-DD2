@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { ChatMessage, InvisibleHistorySummaryState, LLMConfig, LLMProvider, LocalLLMProfile, PendingNodeAttachment, RobotId } from '../types';
+import type { FunctionRunRecord, FunctionRunStatus } from '../types/function.types';
 
 const isDevelopmentEnvironment = process.env.NODE_ENV !== 'production';
 
@@ -93,6 +94,14 @@ interface RuntimeStore {
   latestRuntimeEvent: RuntimeEventEnvelope | null;
   runStatuses: Record<string, string>;
   taskStatuses: Record<string, string>;
+  // ⭐ US-J7-13: observation des runs V2 (quarantaine/fencing inclus, US-J7-09)
+  runLockHeld: Record<string, boolean>; // runId -> verrou workspace tenu
+  instanceRunIds: Record<string, string>; // agentInstanceId -> dernier runId connu (badge nœud)
+  workflowLatestRunId: Record<string, string>; // workflowId -> dernier runId (lecture REST)
+  workflowRuns: Record<string, FunctionRunRecord[]>; // workflowId -> runs (lecture REST, tri desc)
+  runSyncState: Record<string, 'loading' | 'ready' | 'error'>; // workflowId -> état de la lecture REST
+  setRunSnapshot: (workflowId: string, runs: FunctionRunRecord[]) => void;
+  setRunSyncState: (workflowId: string, state: 'loading' | 'ready' | 'error') => void;
 
   // LLM Configuration (runtime)
   llmConfigs: LLMConfig[];
@@ -179,7 +188,7 @@ interface RuntimeStore {
 const normalizeRuntimeStatus = (event: RuntimeEventEnvelope): string | null => {
   const payloadStatus = typeof event.payload?.status === 'string' ? event.payload.status : null;
 
-  if (payloadStatus === 'queued' || payloadStatus === 'running' || payloadStatus === 'completed' || payloadStatus === 'failed' || payloadStatus === 'stopped' || payloadStatus === 'timed_out') {
+  if (payloadStatus === 'queued' || payloadStatus === 'running' || payloadStatus === 'completed' || payloadStatus === 'failed' || payloadStatus === 'stopped' || payloadStatus === 'timed_out' || payloadStatus === 'worker_lost' || payloadStatus === 'quarantined') {
     return payloadStatus;
   }
 
@@ -190,6 +199,10 @@ const normalizeRuntimeStatus = (event: RuntimeEventEnvelope): string | null => {
   if (eventType === 'run:failed' || eventType === 'task:failed') return 'failed';
   if (eventType === 'run:stopped' || eventType === 'task:cancelled') return 'stopped';
   if (eventType === 'task:blocked') return 'queued';
+  // ⭐ US-J7-09: événements de quarantaine/fencing (contrat v1, extension additive)
+  if (eventType === 'run:quarantined') return 'quarantined';
+  if (eventType === 'run:fenced') return 'quarantined'; // opération fencée, run toujours en quarantaine
+  if (eventType === 'run:recovery_relaunched') return 'queued'; // nouveau run créé par fence-and-retry
   if (eventType === 'run:progressed' || eventType === 'task:progressed') {
     return payloadStatus ?? null;
   }
@@ -207,6 +220,11 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   latestRuntimeEvent: null,
   runStatuses: {},
   taskStatuses: {},
+  runLockHeld: {},
+  instanceRunIds: {},
+  workflowLatestRunId: {},
+  workflowRuns: {},
+  runSyncState: {},
   llmConfigs: [],
   localLLMProfiles: [],
   isImagePanelOpen: false,
@@ -290,6 +308,8 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     const nextStatus = normalizeRuntimeStatus(event);
     const nextRunStatuses = { ...state.runStatuses };
     const nextTaskStatuses = { ...state.taskStatuses };
+    const nextRunLockHeld = { ...state.runLockHeld };
+    const nextInstanceRunIds = { ...state.instanceRunIds };
 
     if (event.aggregateType === 'run' && nextStatus) {
       nextRunStatuses[event.aggregateId] = nextStatus;
@@ -299,13 +319,82 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       nextTaskStatuses[event.aggregateId] = nextStatus;
     }
 
+    // ⭐ US-J7-09/J7-13: quarantaine — verrou tenu + mapping instance -> run
+    if (event.aggregateType === 'run') {
+      if (event.payload?.lockHeld === true) {
+        nextRunLockHeld[event.aggregateId] = true;
+      }
+      const agentId = typeof event.payload?.agentId === 'string' ? event.payload.agentId : null;
+      if (agentId) {
+        // `run:recovery_relaunched` porte le nouveau run dans payload.newRunId
+        const newRunId = typeof event.payload?.newRunId === 'string' ? event.payload.newRunId : null;
+        nextInstanceRunIds[agentId] = newRunId ?? event.aggregateId;
+        if (newRunId) {
+          nextRunStatuses[newRunId] = 'queued';
+        }
+      }
+    }
+
     return {
       latestRuntimeEvent: event,
       runStatuses: nextRunStatuses,
       taskStatuses: nextTaskStatuses,
+      runLockHeld: nextRunLockHeld,
+      instanceRunIds: nextInstanceRunIds,
     };
   }),
-  clearRuntimeObservation: () => set({ latestRuntimeEvent: null, runStatuses: {}, taskStatuses: {} }),
+  clearRuntimeObservation: () => set({
+    latestRuntimeEvent: null,
+    runStatuses: {},
+    taskStatuses: {},
+    runLockHeld: {},
+    instanceRunIds: {},
+    workflowLatestRunId: {},
+    workflowRuns: {},
+    runSyncState: {},
+  }),
+  /**
+   * ⭐ US-J7-13: ingère une lecture REST `GET /api/runs?workflowId=…` (liste triée
+   * desc) dans l'état d'observation. Le REST reste autoritaire à la (re)connexion.
+   */
+  setRunSnapshot: (workflowId, runs) => set((state) => {
+    const nextRunStatuses = { ...state.runStatuses };
+    const nextRunLockHeld = { ...state.runLockHeld };
+    const nextInstanceRunIds = { ...state.instanceRunIds };
+    const nextWorkflowLatestRunId = { ...state.workflowLatestRunId };
+    const nextRunSyncState = { ...state.runSyncState };
+
+    if (!Array.isArray(runs)) {
+      return { runSyncState: { ...nextRunSyncState, [workflowId]: 'error' } };
+    }
+
+    for (const run of runs) {
+      if (!run || typeof run.executionId !== 'string') continue;
+      nextRunStatuses[run.executionId] = run.status;
+      // Le verrou est tenu pour un run quarantined ; les événements peuvent aussi le signaler.
+      nextRunLockHeld[run.executionId] = run.lockHeld ?? (run.status === 'quarantined');
+      const runWorkflowId = typeof run.workflowId === 'string' && run.workflowId ? run.workflowId : workflowId;
+      if (!nextWorkflowLatestRunId[runWorkflowId]) {
+        nextWorkflowLatestRunId[runWorkflowId] = run.executionId; // premier = plus récent (tri desc)
+      }
+      if (typeof run.agentInstanceId === 'string' && run.agentInstanceId && !nextInstanceRunIds[run.agentInstanceId]) {
+        nextInstanceRunIds[run.agentInstanceId] = run.executionId;
+      }
+    }
+
+    nextRunSyncState[workflowId] = 'ready';
+    return {
+      workflowRuns: { ...state.workflowRuns, [workflowId]: runs },
+      runStatuses: nextRunStatuses,
+      runLockHeld: nextRunLockHeld,
+      instanceRunIds: nextInstanceRunIds,
+      workflowLatestRunId: nextWorkflowLatestRunId,
+      runSyncState: nextRunSyncState,
+    };
+  }),
+  setRunSyncState: (workflowId, syncState) => set((state) => ({
+    runSyncState: { ...state.runSyncState, [workflowId]: syncState },
+  })),
 
   // Execution state
   setNodeExecuting: (nodeId, isExecuting) => set((state) => {
@@ -502,6 +591,11 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     latestRuntimeEvent: null,
     runStatuses: {},
     taskStatuses: {},
+    runLockHeld: {},
+    instanceRunIds: {},
+    workflowLatestRunId: {},
+    workflowRuns: {},
+    runSyncState: {},
     llmConfigs: [],
     localLLMProfiles: [],
     isImagePanelOpen: false,
@@ -535,6 +629,11 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       latestRuntimeEvent: null,
       runStatuses: {},
       taskStatuses: {},
+      runLockHeld: {},
+      instanceRunIds: {},
+      workflowLatestRunId: {},
+      workflowRuns: {},
+      runSyncState: {},
       llmConfigs: currentConfigs, // ⭐ PRÉSERVÉ: configs sont user-level
       localLLMProfiles: currentProfiles, // ⭐ PRÉSERVÉ: profiles sont user-level
       isImagePanelOpen: false,
@@ -549,3 +648,38 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     });
   }
 }));
+
+// ⭐ US-J7-13: sélecteurs dérivés (lecture seule, utilisables avec useRuntimeStore(selector))
+export interface InstanceRunStatus {
+  runId: string;
+  status: FunctionRunStatus | string;
+  lockHeld: boolean;
+}
+
+interface RuntimeObservationSlice {
+  instanceRunIds: Record<string, string>;
+  runStatuses: Record<string, string>;
+  runLockHeld: Record<string, boolean>;
+  workflowLatestRunId: Record<string, string>;
+}
+
+/** Badge de statut d'un nœud : dernier run connu de son agentInstance. */
+export const getInstanceRunStatus = (
+  state: RuntimeObservationSlice,
+  instanceId?: string | null,
+): InstanceRunStatus | null => {
+  if (!instanceId) return null;
+  const runId = state.instanceRunIds[instanceId];
+  if (!runId) return null;
+  return {
+    runId,
+    status: state.runStatuses[runId] ?? 'queued',
+    lockHeld: state.runLockHeld[runId] === true,
+  };
+};
+
+/** Dernier run connu d'un workflow (lecture REST + événements). */
+export const getWorkflowLatestRunId = (state: RuntimeObservationSlice, workflowId?: string | null): string | null => {
+  if (!workflowId) return null;
+  return state.workflowLatestRunId[workflowId] ?? null;
+};

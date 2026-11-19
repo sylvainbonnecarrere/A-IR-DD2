@@ -5,6 +5,8 @@ import { useDesignStore } from '../stores/useDesignStore';
 import { publishHydrationComponentReady } from '../utils/hydrationComponentReadiness';
 import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from '../utils/robotPageRouting';
 
+import { WorkflowToolbar } from './workflow/WorkflowToolbar';
+
 const LazyWorkflowCanvas = lazy(() => import('./WorkflowCanvas'));
 const LazyArchiPrototypingPage = lazy(async () => {
   const module = await import('./ArchiPrototypingPage');
@@ -92,6 +94,7 @@ const WorkflowPage: React.FC<{
   headerActions,
   currentWorkflowId,
 }) => {
+    const { t } = useLocalization();
     return (
       <div className="h-full flex flex-col bg-gray-900 text-gray-100">
         {/* Header */}
@@ -100,15 +103,18 @@ const WorkflowPage: React.FC<{
             <h1 className="text-xl font-bold text-white">{robotName}</h1>
             <p className="text-gray-400 text-sm">{description}</p>
           </div>
-          {headerActions ? (
-            <div className="flex items-center gap-3">
-              {headerActions}
-            </div>
-          ) : null}
+          <div className="flex items-center gap-3">
+            {/* ⭐ Retour graphique 2026-11-19 : plus de nom de workflow dans le header (redondant avec la toolbar) */}
+            {headerActions}
+          </div>
         </div>
 
+        {/* ⭐ US-J7-13 : barre de commandes V2 en flux layout (h-12 retiré du conteneur canvas,
+            le viewport React Flow n'est pas déplacé) — uniquement sur les pages carte */}
+        <WorkflowToolbar className="shrink-0" />
+
         {/* Workflow Canvas avec toutes les props nécessaires */}
-        <div className="flex-1">
+        <div className="flex-1 min-h-0">
           <Suspense fallback={<RouteFallback message="Chargement du workflow..." />}>
             <LazyWorkflowCanvas
               agents={agents}

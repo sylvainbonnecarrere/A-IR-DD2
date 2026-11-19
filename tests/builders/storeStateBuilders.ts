@@ -15,6 +15,20 @@ export type RuntimeStoreTestState = ExtraState & {
   getNodeMessages: jest.Mock<ChatMessage[], [string]>;
   resetForWorkflowSwitch: jest.Mock;
   resetAll: jest.Mock;
+  // ⭐ US-J7-13: état d'observation des runs (miroir du store runtime réel)
+  runtimeConnectionState: string;
+  latestRuntimeEvent: unknown;
+  runStatuses: Record<string, string>;
+  taskStatuses: Record<string, string>;
+  runLockHeld: Record<string, boolean>;
+  instanceRunIds: Record<string, string>;
+  workflowLatestRunId: Record<string, string>;
+  workflowRuns: Record<string, unknown[]>;
+  runSyncState: Record<string, string>;
+  recordRuntimeEvent: jest.Mock;
+  setRunSnapshot: jest.Mock;
+  setRunSyncState: jest.Mock;
+  clearRuntimeObservation: jest.Mock;
 };
 
 export type DesignStoreTestState = ExtraState & {
@@ -77,6 +91,20 @@ export function createRuntimeStoreTestState(
     getNodeMessages: overrides.getNodeMessages ?? jest.fn((nodeId: string) => state.nodeMessages[nodeId] || []),
     resetForWorkflowSwitch: overrides.resetForWorkflowSwitch ?? jest.fn(),
     resetAll: overrides.resetAll ?? jest.fn(),
+    // ⭐ US-J7-13: état d'observation des runs
+    runtimeConnectionState: overrides.runtimeConnectionState ?? 'connected',
+    latestRuntimeEvent: overrides.latestRuntimeEvent ?? null,
+    runStatuses: overrides.runStatuses ?? {},
+    taskStatuses: overrides.taskStatuses ?? {},
+    runLockHeld: overrides.runLockHeld ?? {},
+    instanceRunIds: overrides.instanceRunIds ?? {},
+    workflowLatestRunId: overrides.workflowLatestRunId ?? {},
+    workflowRuns: overrides.workflowRuns ?? {},
+    runSyncState: overrides.runSyncState ?? {},
+    recordRuntimeEvent: overrides.recordRuntimeEvent ?? jest.fn(),
+    setRunSnapshot: overrides.setRunSnapshot ?? jest.fn(),
+    setRunSyncState: overrides.setRunSyncState ?? jest.fn(),
+    clearRuntimeObservation: overrides.clearRuntimeObservation ?? jest.fn(),
     ...overrides,
   } satisfies RuntimeStoreTestState;
 

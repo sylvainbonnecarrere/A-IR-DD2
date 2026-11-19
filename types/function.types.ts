@@ -264,12 +264,48 @@ export interface SandboxRunResult {
     };
 }
 
+/**
+ * Statuts canoniques d'un run (contrat backend `USER_TOOL_RUN_STATUS_VALUES`, US-J7-05..J7-09).
+ * `worker_lost` et `quarantined` sont terminaux mais conservent le verrou workspace
+ * (`lockHeld`) jusqu'au `fence-and-retry` (US-J7-07).
+ */
+export type FunctionRunStatus =
+    | 'queued'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'stopped'
+    | 'timed_out'
+    | 'worker_lost'
+    | 'quarantined';
+
+export const FUNCTION_RUN_ACTIVE_STATUSES: readonly FunctionRunStatus[] = ['queued', 'running'];
+
+export const FUNCTION_RUN_TERMINAL_STATUSES: readonly FunctionRunStatus[] = [
+    'completed',
+    'failed',
+    'stopped',
+    'timed_out',
+];
+
+/** Statuts de quarantaine : run incertain, verrou workspace potentiellement tenu. */
+export const FUNCTION_RUN_QUARANTINE_STATUSES: readonly FunctionRunStatus[] = ['worker_lost', 'quarantined'];
+
 export interface FunctionRunRecord {
     executionId: string;
-    status: 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out';
+    status: FunctionRunStatus;
     runtime: FunctionLanguage;
     runner: string;
     launchContext: 'editor_test' | 'workflow_run' | 'system_validation';
+    /** Présent quand le run est scopingué à un workflow (filtrage UI strict par workflowId). */
+    workflowId?: string | null;
+    /** Instance d'agent déclenchée par ce run (badge de statut du nœud). */
+    agentInstanceId?: string | null;
+    /** Run parent quand ce run est une relance (`retry` / `fence-and-retry`). */
+    retryOfExecutionId?: string | null;
+    recoveryAttemptCount?: number | null;
+    /** Vrai quand le verrou workspace est tenu (renseigné par les événements `run:quarantined`/`run:fenced`). */
+    lockHeld?: boolean | null;
     createdAt: string;
     updatedAt: string;
     timing: {
@@ -302,6 +338,41 @@ export interface FunctionRunRecord {
 }
 
 export type FunctionRunSortField = 'createdAt' | 'durationMs' | 'status';
+
+/** Codes d'erreur du contrat de commandes de runs (US-J7-05..J7-09). */
+export type RunCommandErrorCode =
+    | 'RUN_NOT_CANCELLABLE'
+    | 'RUN_NOT_QUARANTINED'
+    | 'WORKSPACE_LOCKED_BY_OTHER_RUN'
+    | 'FENCING_TIMEOUT_ESCALATED'
+    | 'IDEMPOTENCY_KEY_REQUIRED'
+    | 'FENCE_AND_RETRY_FAILED'
+    | 'RUN_COMMAND_FAILED';
+
+/** Réponse 202/200 de `POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry` (US-J7-07). */
+export interface FenceAndRetryResponse {
+    fencedRunId: string;
+    newExecutionId: string;
+    status: 'queued';
+    recoveryAttemptCount: number;
+    idempotency?: { key: string | null; replayed: boolean };
+}
+
+/** Réponse 202/200 de `POST /api/runs/executions/:executionId/retry`. */
+export interface RetryRunResponse {
+    executionId: string;
+    retryOfExecutionId: string;
+    status: FunctionRunStatus;
+    idempotency?: { key: string | null; replayed: boolean };
+}
+
+/** Réponse de `POST /api/runs/executions/:executionId/cancel`. */
+export interface CancelRunResponse {
+    success: boolean;
+    executionId: string;
+    status: FunctionRunStatus;
+    cancellationRequested?: boolean;
+}
 export type FunctionRunSortOrder = 'asc' | 'desc';
 
 export interface FunctionRunListResponse {
