@@ -1171,13 +1171,14 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 
 **Agent responsable :** `06-frontend.agent.md` - Front-end
 **Criticite :** Critique
-**Description :** exposer les commandes V2 sur la carte et afficher l'etat serveur/realtime, en utilisant le contrat livre par US-J7-01/02 et sans graphe local concurrent.
+**Description :** exposer les commandes V2 sur la carte et afficher l'etat serveur/realtime, en utilisant le contrat livre par US-J7-01/02 et sans graphe local concurrent. Precisions (2026-11-19) : le badge de statut du bloc agent doit etre correct dans les **3 representations du noeud** (minimisee `isMinimized`, normale, fenetre agrandie `fullscreenChatNodeId`) ; ajout confort : le **nom du workflow courant affiche a droite dans le header** de la page carte.
 
 **Dependances :** US-J7-01, US-J7-02 (chapeau : `US-J7-05` a `US-J7-12` livrees et validees) ; `US-J7-07` (endpoint `fence-and-retry` consomme par le bouton Reset & Relance) ; `US-J7-09` (statuts et evenements de quarantaine a afficher) ; `US-J7-12` (canal temps reel securise). Plan UI detaille produit par `09-architecte-applicatif` : `Guides/Features/feature/refonte/j7-13-ui-runtime-plan.md` (périmètre, placement des commandes, representation graphique conforme a la charte, modale Reset & Relance, todolist pour `06-frontend`).
 **Risques et consequences :**
 - boutons sans contrat serveur coherents peuvent afficher pause/reprise alors qu'ils annulent ou relancent ;
 - un statut local ou un evenement d'un autre workflow peut afficher un run faux ;
-- l'ajout d'une barre overlay peut deplacer le canvas et violer la non-regression de position/minimap/controls.
+- l'ajout d'une barre overlay peut deplacer le canvas et violer la non-regression de position/minimap/controls ;
+- un badge de statut absent ou faux selon la representation du noeud (minimisee / normale / fenetre agrandie) induirait l'utilisateur en erreur sur l'etat reel du run.
 
 **Impacts codebase et tests :**
 - `components/RobotPageRouter.tsx`, `components/workflow/WorkflowToolbar.tsx`, `services/workflowRunService.ts`, `services/runtimeActionPolicy.ts`, stores runtime/design, localization `i18n/*.ts` ;
@@ -1195,7 +1196,9 @@ Le projet a ete stabilise sur la ligne runtime supportee Node 24.22.1 LTS, avec 
 - confirmation refusee = aucune commande; confirmation acceptee = annulation serveur effective ; erreur serveur conserve et affiche l'etat autoritaire ;
 - evenement de progression/succes/echec du workflow actif met a jour l'UI sans reload ; evenement d'un autre workflow ignore ; refresh REST retablit l'etat apres reconnexion ;
 - commandes indisponibles lorsque le run est actif/terminal ou le canal est hors ligne/partiel ; clavier, focus, `role="status"` et messages d'erreur accessibles ;
-- Playwright verifie que nodes, minimap et controls gardent leurs positions avec la toolbar, durant un run et apres retour/reload.
+- Playwright verifie que nodes, minimap et controls gardent leurs positions avec la toolbar, durant un run et apres retour/reload ;
+- le badge de statut est present et fidele dans les 3 representations du bloc agent (minimisee, normale, fenetre agrandie) ;
+- le header de la page carte affiche le nom du workflow courant a droite (tronque avec ellipsis + tooltip).
 
 ### US-J7-14 - Validation du deploiement via CI GitHub (rapports) et cloture du reste ouvert US-J7-10
 
