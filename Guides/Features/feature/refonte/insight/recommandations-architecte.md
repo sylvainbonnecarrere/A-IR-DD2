@@ -22,6 +22,12 @@ Chaque point est une piste à étudier, pas une US engageante : à faire voter/c
 
 ## Dettes connues à planifier
 
-10. **`saveEdges`** (écart 5 de `Guides/Features/WORKFLOWLINKS/README.md`) : write path legacy frontend encore ouvert en mode invité — à traiter dans un backlog dédié.
-11. **Overlay d'hydratation > 60 s à froid** sur backend dev partagé (note US-J7-11) : non reproductible en stack isolée ; à confirmer au labo US-J7-15, puis investiguer le cold start Vite si confirmé.
-12. **Artefacts `.provisioned`** : désormais gitignorés ; vérifier qu'aucun workflow CI ne les ré-embarque (check `git ls-files backend/python/.provisioned` à chaque release).
+10. **`saveEdges`** (écart 5 de `Guides/Features/WORKFLOWLINKS/README.md`, réserve R2 du `rapport-feature.md`) : write path legacy `/api/workflows/:id/edges` encore vivant en mode invité (`services/workspacePersistenceService.ts:164`) — à fermer (refus explicite + test) ou US dédiée signée ; bloque la clôture de la feature.
+11. **Overlay d'hydratation > 60 s à froid** sur backend dev partagé (port 3001, réserve R6 du rapport) : non reproductible en stack isolée ; à confirmer au prochain labo, puis investiguer le cold start Vite si confirmé.
+12. **Artefacts `.provisioned`** (réserve R3 du rapport) : gitignorés MAIS encore trackés par git — `git rm -r --cached backend/python/.provisioned` effectué le 2026-11-19 ; à chaque release, vérifier `git ls-files backend/python/.provisioned | wc -l` == 0.
+
+## Clôture de feature (réserves du rapport-feature.md, 2026-11-19)
+
+13. **Rapports CI du push de release** (réserve R1, US-J7-14) : tant qu'aucun push de release n'est documenté avec son rapport `npm run ci:report` dans `j6-validation-report.md`, le chapeau US-J7-02 reste ouvert.
+
+14. **Nom du workflow dans la toolbar vs header** (réserve R5) : décision produit du 2026-11-19 (toolbar, jaune BOS) à confirmer par écrit comme acceptée, sinon rouvrir l'US-J7-13 sur ce point.
