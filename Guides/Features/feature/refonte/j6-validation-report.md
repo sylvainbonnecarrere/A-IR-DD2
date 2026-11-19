@@ -79,8 +79,11 @@ Rapport par push (à remplir par le responsable à chaque push ; état au 2026-1
 
 | Push (date) | SHA | ci.yml | runtime.yml | security.yml | deploy.yml (env) | Artefacts | Verdict |
 |---|---|---|---|---|---|---|---|
-| 2026-11-19 | `3481b75` | KO job `report` (checkout manquant -> MODULE_NOT_FOUND build-run-report.cjs, artefact ci-report-<sha>.json absent) ; autres jobs verts | — | — | — | — | corrigé (checkout ajouté au job `report`), voir commit suivant |
-| — | — | — | — | — | — | — | en attente push responsable |
+| 2026-11-19 | `3481b75` | KO job `report` (run [#44567437342](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44567437342), 6/7) — checkout manquant | — | — | — | — | corrigé (checkout ajouté), voir `ad294fb` |
+| 2026-11-19 | `ad294fb` | success 7/7 (run [#44569723328](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44569723328)) — job `report` vert, artefact `ci-report-ad294fb….json` | — | — | — | `ci-report-ad294fb…` | fix vérifié en CI |
+| 2026-11-19 | `7329931` | success 7/7 (run [#44584156283](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44584156283)) | push run [#44588892714](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44588892714) success 4/4 ; dispatch [#44593799575](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44593799575) failure 3/4 — job `Mongo Replica Journal (opt-in)` KO (beforeAll global sans service Mongo, timeout 30 s) | — | — | `ci-report-7329931….json` | replica job corrigé (service mongo:6.0 + MONGODB_URI loopback 27018), test rejoué localement 1/1 PASS EXIT=0 — voir commit suivant |
+
+Rapport brut collecté par `npm run ci:report -- --branch main --limit 3` le 2026-11-19 (gh 2.105.0, compte sylvainbonnecarrere) : CI `7329931` 7/7, `ad294fb` 7/7, `3481b75` 6/7 (incident `report`), `365f238` et antérieurs 6/6 ; Runtime push `7329931` 4/4 success.
 
 Aucune opération destructive sur des données réelles ; environnements CI isolés uniquement. **Reste ouvert** : déploiement sur l'hôte Linux de production (hors accès agent) — la procédure README § déploiement systemd s'applique telle quelle ; le labo ne s'y substitue pas.
 
