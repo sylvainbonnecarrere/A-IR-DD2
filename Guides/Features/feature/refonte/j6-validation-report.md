@@ -86,6 +86,72 @@ Rapport par push (à remplir par le responsable à chaque push ; état au 2026-1
 
 Aucune opération destructive sur des données réelles ; environnements CI isolés uniquement. **Reste ouvert** : déploiement sur l'hôte Linux de production (hors accès agent) — la procédure README § déploiement systemd s'applique telle quelle ; le labo ne s'y substitue pas.
 
+## US-J7-15 — Rejeu de J6 en environnement isolé et gate (2026-11-19, agent `08-testeur-e2e`)
+
+**Branche/sha audités :** `main` @ `ad294fb` (contient `feat/j7-02-quarantine-exit-fencing` : son seul commit non mergé `79a310f` est le même fix CI que `ad294fb` sur main ; J7-11 `4446e91`, J7-13 `365f238`, J7-14 `5721d69`+`3481b75`+`ad294fb` tous présents). Aucun écart de merge restant.
+
+### Commandes exactes exécutées et résultats
+
+| # | Commande | Résultat |
+|---|---|---|
+| 1 | `npm run audit:workflow-architecture:strict` | PASS (`Audit result: OK`) |
+| 2 | `npm run ci:node25:runtime` | PASS, Node 24.22.1 (« Node 24 runtime verification succeeded ») |
+| 3 | `npm run audit:all` | EXIT=0 (root + backend, aucune vulnérabilité effective ≥ high) |
+| 4 | `npm --prefix backend run build` | EXIT=0 ; `dist/src/server.js` et `dist/src/services/runtime/dockerGatewayMain.js` présents |
+| 5 | `npm test -- --runInBand` (racine) | EXIT=0 — **93 suites / 585 tests PASS** |
+| 6 | `npm --prefix backend test -- --runInBand` | EXIT=0 — **121 suites passées / 5 skippées, 821 tests passés / 29 skippés** |
+| 7 | `npm run test:j6:backend` | **10 suites / 126 tests PASS** (exécuté 4× ; 1 échec isolé non reproduit, voir A1) |
+| 8 | `npm run test:j6:semi-e2e` (serveur 4173 démarré à froid par Playwright, `--strictPort`) | **11/11 PASS** |
+| 9 | Campagne live isolée : `mongo:6` éphémère (port 27018) + backend dédié (port 3101, `MONGODB_URI` jetable, `health/ready` 200) + frontend 4174 froid + specs live copiées vers 3101 | **7 PASS / 1 skip / 0 fail** en 55,7 s (skip = A2) |
+| 10 | `AIRDD2_TEST_DOCKER_RESERVATION=1 npm --prefix backend test -- --runInBand src/__tests__/docker-gateway-recovery.integration.test.ts docker-inflight-reservation.integration.test.ts docker-name-reservation.integration.test.ts` | 3 suites / 21 tests PASS |
+| 11 | idem `docker-gateway-admission.test.ts mongo-docker-gateway-admission.test.ts` | 2 suites / 21 tests PASS |
+| 12 | idem `docker-gateway-fencing.integration.test.ts docker-gateway-daemon.test.ts docker-gateway-fencing.test.ts docker-gateway-transport.test.ts` | 4 suites / 46 tests PASS, 1 skip |
+| 13 | `AIRDD2_TEST_MONGO_REPLICA=1 npm --prefix backend test -- --runInBand src/__tests__/mongo-docker-journal-replica.integration.test.ts` | **1/1 PASS** — replica set jetable créé par le test (opt-in **exécuté**, pas seulement classé) |
+| 14 | Labo systemd/gateway : `docker compose -p airdd2-j7-validation -f backend/deploy/recovery-validation/compose.yaml up -d --build --wait --wait-timeout 600` → `exec -T linux docker pull ubuntu:noble` → `exec -T -e AIRDD2_RECOVERY_VALIDATION=1 linux node deploy/recovery-validation/validate-systemd.cjs` → `down -v` | UP_EXIT=0, PULL_EXIT=0, **5/5 PASS**, VALIDATE_EXIT=0, DOWN_EXIT=0 (SIGKILL backend → `quarantined` + verrou tenu ; restart gateway op incertaine → fencing auto + réservation de nom + quiescence ; restart backend → `worker_lost` + verrou libéré ; fence-and-retry réel 202 + run fils `queued` + audit immuable + rejeu 200 sans effet ; cas négatif 504 + alerte `critical` + verrou tenu) |
+| 15 | `npm run ci:report -- --self-test` | PASS (`self-test OK`) |
+| 16 | `npm run ci:report -- --branch main --sha ad294fb --require-green` | Relevé réel **impossible côté agent** (`spawn gh ENOENT` : pas de CLI/auth GitHub dans l'environnement agent) → en attente du push de release par le responsable, conformément à US-J7-14 (voir A3) |
+
+### Matrice J6-01 (18 scénarios) après replay
+
+| # | Scénario | Preuve exécutée ce jour | Statut |
+|---:|---|---|---|
+| 1 | Installation et démarrage local | #2, #4, #9 (backend `ready` 200 sur Mongo éphémère ; Vite lancé par Playwright) | PASS |
+| 2 | Authentification | A2.4 semi-e2e (4 tests, #8) + `auth-workflows.routes` (#7) + AuthWorkspace live (#9) | PASS |
+| 3 | Création/chargement workflow | `workspace-snapshot` (#7) + A2.4 hydratation (#8) + hydrate live (#9) | PASS |
+| 4 | Ajout d'un agent | `instances/from-prototype` live (#9, instance visible dans l'UI) + stores/isolation + composants J7-13 | PASS |
+| 5 | Activation workflow | `auth-workflows.routes` graphe/cycles (#7) + toolbar J7-13 (composants, racine #5) | PASS |
+| 6 | Lancement d'un run | `runs-command.routes` (queued persisté avant 202, idempotence) + `execution-orchestrator` (#7) | PASS |
+| 7 | Suivi d'exécution | `useRuntimeStore.runtime-events` + contrat/publisher événements versionnés + `RunStatusBadge`/toolbar J7-13 (#5) | PASS |
+| 8 | Tâche en succès | `UserToolRun`/`ExecutionOrchestrator` + worker durable (#6) | PASS |
+| 9 | Tâche en échec | timeout/sandbox (`docker-sandbox.runner`, `runtime-health`) (#6, #7) | PASS |
+| 10 | Annulation effective | `runs-command.routes` cancel (queued→`stopped` ; running terminal seulement après confirmation) + labo #14 | PASS |
+| 11 | Retry / nouveau run | `runs-command` retry + `user-tool-run.service` (enfant, idempotence, lineage) + labo fence-and-retry 202 (#14) | PASS |
+| 12 | Reload pendant run | A2.4 reload (#8) + AuthWorkspace live reload (#9) + persistance run Mongo + reconciler (#6) | PASS |
+| 13 | Reconnexion canal temps réel | `websocket-auth` (JWT strict J7-12) (#7) + `runtime-events` offline/reconnecting (#5) | PASS |
+| 14 | Refus ressource d'un autre utilisateur | ownership HTTP + ownership WebSocket (#7) | PASS |
+| 15 | Migration historique | `workflow-v1-v2-migration` (nominale, idempotente, reprise) + snapshot V2-only (#7) | PASS |
+| 16 | Redémarrage backend/worker | labo #14 5/5 (SIGKILL, restart gateway, `worker_lost`/`quarantined`, fence-and-retry) + `durable-worker-restart.integration` + reconciler (#6) | PASS |
+| 17 | Dépendance externe indisponible | `docker-sandbox.runner` (dependency-missing simulé) + `runtime-health` (#7) ; aucun appel réseau réel | PASS |
+| 18 | Non-régression existante | #5 (585), #6 (821), #8 (11), #9 (7), #1 audit strict | PASS |
+
+### Matrice J6-02 (non-régression legacy) revalidée
+
+Toutes les lignes revalidées via `test:j6:backend` (#7, 126/126) et la suite backend complète (#6) : mutations V1 refusées (410/400, y compris `PATCH /:id/patch`), GET V2-only, snapshot unifié V2-only, migration V1→V2 idempotente, ownership HTTP et WebSocket, mode invité isolé, `saveEdges` refusé en authentifié. **Aucune fixture affaiblie** (pas de diff sur les fixtures de ces suites dans ce replay).
+
+### Anomalies classées
+
+| ID | Sévérité | Description | Classement |
+|---|---|---|---|
+| A1 | Mineure | 1 échec isolé dans `test:j6:backend` à la 1ère exécution (126 tests), non reproduit sur 3 relances ni dans la suite backend complète (121 suites/821 tests EXIT=0) | Non bloquant — flake à surveiller ; aucune assertion modifiée |
+| A2 | Non bloquant (justifié) | Skip du scénario « artefact runtime sandbox » en live isolée : `test.skip` conditionnel du test lui-même (health sandbox Python non prêt dans cet environnement) ; provisioning Python validé par ailleurs (#2, suites web-search-py) | Non bloquant — skip déclaratif, pas opportuniste |
+| A3 | Tracé (hors code) | Relevé `ci:report` réel des rapports CI du push : impossible côté agent (`gh` absent) ; `--self-test` OK | En attente du push de release par le responsable (US-J7-14) ; consigné, non bloquant pour le gate J6 isolé |
+| A4 | Information | Campagne live sur backend dev **partagé** (3001) flaky à froid (overlay d'hydratation > 60 s) ; 7/7 verts en stack isolée (#9) | Non reproductible en isolé — à confirmer au prochain labo ; non bloquant |
+| A5 | Mineure | Warnings React Flow `nodeTypes/edgeTypes` dans les traces Playwright | Sans impact sur les suites ; triage cosmétique |
+
+### Verdict
+
+**GO** — signé `08-testeur-e2e`, 2026-11-19. Les 18 scénarios J6-01 sont exécutés avec preuve verte en environnement isolé (aucune exception non classée, aucun `test.skip` opportuniste), la matrice J6-02 est revalidée sans affaiblir aucune fixture, les suites racines/backend/audit/runtime sont 100 % vertes, le labo systemd/gateway est 5/5 PASS, le test replica Mongo opt-in est exécuté et vert. Aucune anomalie critique ouverte, les scénarios de redémarrage (#16) et d'annulation (#10) sont couverts. Réserve consignée : le relevé des rapports CI du push de release (A3) reste dû par le responsable à chaque push, conformément à US-J7-14, avant clôture du chapeau US-J7-02 côté déploiement tracé.
+
 ## Périmètre et isolation
 
 Les tests semi-E2E utilisent des utilisateurs, tokens et réponses API synthétiques. Aucun compte réel, fournisseur LLM ni clé API n'est utilisé. Les smoke tests live qui enregistrent un utilisateur dans la base configurée ne sont pas exécutés dans cette campagne isolée.
