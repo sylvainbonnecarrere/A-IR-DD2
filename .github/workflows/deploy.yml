@@ -368,6 +368,10 @@ jobs:
       - preflight
       - package-release
     timeout-minutes: 30
+    permissions:
+      contents: read
+      deployments: write
+      actions: read
     environment:
       name: ${{ inputs.environment }}
       url: ${{ vars.DEPLOY_URL }}
@@ -472,4 +476,63 @@ jobs:
             echo "- Ref: ${{ needs.preflight.outputs.deploy_ref }}"
             echo "- Commit: ${{ needs.preflight.outputs.deploy_sha }}"
             echo "- Runtime checks: ${{ inputs.run_runtime_checks }}"
+            echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish deployment report artifact
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          report_file="deploy-report-${{ needs.preflight.outputs.deploy_sha }}.json"
+
+          deployment_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/deployment" --jq '.' 2>/dev/null || echo 'null')"
+          environment_json="$(gh api "repos/${GITHUB_REPOSITORY}/environments" --jq --arg name "${{ inputs.environment }}" '.environments[] | select(.name == $name)' 2>/dev/null || echo 'null')"
+
+          node - "$report_file" "$deployment_json" "$environment_json" <<'EOF'
+          const fs = require('node:fs');
+          const [file, deploymentRaw, environmentRaw] = process.argv.slice(2);
+          const deployment = JSON.parse(deploymentRaw);
+          const environment = JSON.parse(environmentRaw);
+          const report = {
+            repository: process.env.GITHUB_REPOSITORY,
+            workflow: 'Deploy',
+            run_id: Number(process.env.GITHUB_RUN_ID),
+            run_number: Number(process.env.GITHUB_RUN_NUMBER),
+            sha: '${{ needs.preflight.outputs.deploy_sha }}',
+            ref: '${{ needs.preflight.outputs.deploy_ref }}',
+            environment: '${{ inputs.environment }}',
+            event: process.env.GITHUB_EVENT_NAME,
+            url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            deployment: deployment ? {
+              id: deployment.id,
+              state: deployment.state,
+              url: deployment.html_url ?? null,
+            } : null,
+            github_environment: environment ? {
+              name: environment.name,
+              url: environment.html_url ?? null,
+            } : null,
+            bundle_artifact: 'deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}',
+            generated_at: new Date().toISOString(),
+          };
+          fs.writeFileSync(file, `${JSON.stringify(report, null, 2)}\n`);
+          {
+            echo "### Deployment report"
+            echo "- Environment: ${report.environment}"
+            echo "- SHA: \`${report.sha}\`"
+            echo "- GitHub Deployment: ${deployment ? `${deployment.state} — ${deployment.html_url ?? ''}` : 'n/a'}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          EOF
+
+      - name: Upload deployment report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-report-${{ needs.preflight.outputs.deploy_sha }}
+          path: deploy-report-${{ needs.preflight.outputs.deploy_sha }}.json
+          if-no-files-found: error
+          retention-days: 90

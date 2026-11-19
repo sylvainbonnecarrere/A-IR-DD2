@@ -14,6 +14,12 @@ name: Runtime
   schedule:
     - cron: '11 3 * * *'
   workflow_dispatch:
+    inputs:
+      run_replica_tests:
+        description: Run the opt-in MongoDB replica-set journal integration test
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -138,3 +144,32 @@ jobs:
           path: backend/runtime-scan-report.json
           if-no-files-found: warn
           retention-days: 14
+
+  mongo-replica-journal:
+    name: Mongo Replica Journal (opt-in)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_replica_tests == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Pull MongoDB image for the disposable replica set
+        run: docker pull mongo:6
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Run replica-set journal integration test
+        env:
+          AIRDD2_TEST_MONGO_REPLICA: '1'
+          AIRDD2_TEST_DOCKER_RESERVATION: '1'
+        run: npm --prefix backend test -- --runInBand src/__tests__/mongo-docker-journal-replica.integration.test.ts

@@ -196,3 +196,52 @@ jobs:
 
       - name: Run backend Jest suite
         run: npm --prefix backend test -- --runInBand
+
+  report:
+    name: CI Run Report
+    needs:
+      - frontend-build
+      - frontend-component-tests
+      - frontend-hydration-integration
+      - frontend-canvas-non-regression
+      - backend-build
+      - backend-tests-mongo
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Collect run jobs and artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          report_file="ci-report-${{ github.sha }}.json"
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" --paginate --slurp > .jobs.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" --paginate --slurp > .artifacts.json
+
+          node scripts/ci/build-run-report.cjs "$report_file" .jobs.json .artifacts.json
+
+          {
+            echo "## CI run report"
+            echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "- SHA: \`${GITHUB_SHA}\`"
+            echo "| Job | Conclusion |"
+            echo "|---|---|"
+            node -e "const r=require('./${report_file}'); for (const j of r.jobs) console.log('| ' + j.name + ' | ' + (j.conclusion || j.status) + ' |')"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload CI run report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-report-${{ github.sha }}
+          path: ci-report-${{ github.sha }}.json
+          if-no-files-found: error
+          retention-days: 30
