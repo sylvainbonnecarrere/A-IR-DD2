@@ -28,6 +28,7 @@
 - **Une seule barre de commandes, centralisée**, montée dans `WorkflowPage` (`RobotPageRouter.tsx`) **entre l'en-tête de page et le canvas**, uniquement sur `bosDashboard` et `bosSupervision` — jamais sur Archi/Com/Phil/Tim ni en gestion des workflows.
 - **En flux layout, pas en overlay** : la hauteur de la barre (h-12) est retirée du conteneur `flex-1` du canvas pour ne **pas déplacer le viewport React Flow** (non-régression positions nodes/minimap/controls, déjà couverte par `WorkflowCanvas.route-reentry.semi-e2e.spec.ts` à étendre).
 - **Sur le nœud agent : pas de boutons de commande**, seulement un **badge de statut** (pastille néon en coin supérieur droit du nœud). Le clic sur le badge ouvre le panneau de détail du run ; le clic sur le badge **quarantaine** ouvre directement la modale Reset & Relance.
+- **Les 3 représentations du bloc nœud doivent toutes être traitées** : (a) **minimisée** (`isMinimized`, `w-64`, contenu replié) → pastille compacte seule, toujours visible, tooltip au survol ; (b) **normale** (`w-96`) → pastille + libellé de statut dans le header du nœud ; (c) **fenêtre agrandie** (`fullscreenChatNodeId`) → pastille + panneau de statut/run intégré dans la vue agrandie (dernier run, `lockHeld`, bouton Reset & Relance si quarantaine). Le badge ne doit jamais disparaître ni changer de sémantique selon la représentation (mêmes couleurs/états que §2.3).
 
 ### 2.2 Est-ce que ce sont les blocs d'agents qui déclenchent les process ?
 
@@ -60,13 +61,18 @@ Palette et règles issues de la charte (fond cosmique `#000814`, néons maîtris
 - Réponses : **202** → toast succès + mise à jour `runStatuses` + nouveau run `queued` ; **200 replay** → idem sans effet ; **409** `RUN_NOT_QUARANTINED` / `WORKSPACE_LOCKED_BY_OTHER_RUN` → message d'erreur localisé, état serveur conservé ; **504** `FENCING_TIMEOUT_ESCALATED` → alerte critique affichée (persistée dans `runtime_alerts`), verrou reste tenu.
 - Événements reçus : `run:quarantined`, `run:fenced`, `run:recovery_relaunched` → mise à jour du badge/toolbar sans rechargement (via `useRuntimeStore`, filtrés par `workflowId`).
 
+### 2.5 Confort : nom du workflow dans le header de page
+
+Sur la page de la carte du workflow, dans le **header à droite**, afficher le **nom du workflow courant** (`currentWorkflow.name`, tronqué avec `ellipsis` + tooltip du nom complet au survol), à côté des actions globales du header. Source unique : `useWorkflowStore.currentWorkflow` / `useDesignStore` (pas de nouvel état local). Libellé/localisation via `i18n` (8 langues). La toolbar conserve son affichage du workflow à gauche ; ce header est un confort de lecture, pas un doublon de logique.
+
 ## 3. Todolist d'implémentation pour `06-frontend` (ordre recommandé)
 
 1. **Types + i18n** : statuts `worker_lost`/`quarantined` (+ `lockHeld`) dans `types/function.types.ts` ; libellés dans les 8 langues (`workflow.status.*`, `workflow.quarantine.*`, `workflow.resetAndRelaunch.*`, modales, erreurs 409/504).
 2. **Services** : `workflowRunService.ts` gagne `retryRun(executionId, idempotencyKey)` et `fenceAndRetry(workspaceId, runId, idempotencyKey)` ; `runtimeActionPolicy.ts` étendu (nouveaux statuts, `canResetAndRelaunch`, `lockHeld`).
 3. **Store runtime** : consommer `useRuntimeStore` (runStatuses, runtimeConnectionState, latestRuntimeEvent), filtrage strict par `workflowId` courant ; aucun secret affiché/stocké.
 4. **Toolbar** : monter `WorkflowToolbar` dans `WorkflowPage` (bosDashboard/bosSupervision uniquement, flux layout) ; brancher `isOffline`/`isPartial` sur le store ; retirer `Pause` ; renommer `Reprendre`→`Relancer` ; confirmation modale avant `Annuler` ; bandeau de connexion (`role="status"`).
-5. **Badge nœud** : pastille de statut sur `V2AgentNode` (coin supérieur droit), clic → panneau détail ; badge quarantaine → modale Reset & Relance.
+5. **Badge nœud — 3 représentations** : pastille de statut sur `V2AgentNode`, fidèle dans les 3 modes : minimisée (pastille compacte seule + tooltip), normale (pastille + libellé dans le header du nœud), fenêtre agrandie `fullscreenChatNodeId` (pastille + panneau run intégré + Reset & Relance si quarantaine) ; clic → panneau détail.
+5b. **Header de page** : nom du workflow courant à droite du header de la page carte (`ellipsis` + tooltip), localisé.
 6. **Modale Reset & Relance** + mapping des réponses 202/200/409/504 + toasts/alertes.
 7. **Supervision** : liste des runs du workflow avec statuts complets + `lockHeld` + alertes `runtime_alerts`.
 8. **Tests** : composants (toolbar montée/absente selon route, 5 états + quarantaine, modales clavier), store (filtrage workflowId, événements), service (retry/fence-and-retry, idempotency), semi-E2E `WorkflowCanvas.route-reentry` étendu (positions identiques avec toolbar), `J7.Editor.RealBrowser.semi-e2e` à rejouer.
@@ -79,7 +85,9 @@ Palette et règles issues de la charte (fond cosmique `#000814`, néons maîtris
 - Statuts serveur + temps réel affichés (`queued/running/completed/failed/stopped/timed_out/worker_lost/quarantined`) + états `loading/empty/error/offline/partial` ; événements filtrés par `workflowId` ; refresh REST après reconnexion.
 - Bouton **Reset & Relance** sur run `worker_lost`/`quarantined` : modale, appel `fence-and-retry` idempotent, réponses 202/409/504 gérées et affichées ; badge nœud + alerte en cas de verrou tenu.
 - Commandes indisponibles quand run actif/terminal ou canal hors ligne/partiel ; accessibilité (clavier, focus, `role="status"`/`alertdialog`, WCAG).
-- Playwright : positions nodes/minimap/controls identiques avec la toolbar, pendant un run et après retour/reload.
+- Playwright : positions nodes/minimap/controls identiques avec la toolbar, pendant un run et après retour/reload ;
+- badge de statut présent et fidèle dans les 3 représentations du bloc agent (minimisée, normale, fenêtre agrandie) ;
+- header de la page carte : nom du workflow courant affiché à droite (tronqué + tooltip).
 - Aucune régression des suites existantes ; audit strict OK.
 
 ## 5. Hors périmètre
