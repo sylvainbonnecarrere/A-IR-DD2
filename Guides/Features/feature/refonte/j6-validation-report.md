@@ -52,7 +52,38 @@ docker compose -p airdd2-j7-validation -f backend\deploy\recovery-validation\com
 docker compose -p airdd2-j7-validation -f backend\deploy\recovery-validation\compose.yaml down -v                                    # FINAL_DOWN_EXIT=0
 ```
 
-Résultat `validate-systemd.cjs` : **VALIDATE_EXIT=0, 5/5 PASS** — (1) SIGKILL réel du backend sous systemd → run sans preuve gateway `quarantined`, verrou tenu, conteneur intact ; (2) restart du gateway avec opération `run` incertaine réelle (pending injecté + conteneur labelisé `airdd2.gateway.op`/`airdd2.execution.attempt`) → fencing auto `auto_epoch_rotation`, epoch+1, socket rouvert immédiatement, réservation de nom (création différée sur le nom refusée), quiescence prouvée, conteneur tué par ID immuable ; (3) restart du backend → run `worker_lost`, verrou libéré (`owner === runId`) ; (4) `POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry` réel (JWT + `Idempotency-Key`) → **202 + run fils `queued`** (`retryOfExecutionId`, `recoveryAttemptCount` 1) + entrée `gateway_fence_audit` immuable + verrou libéré, rejeu même clé → 200 `replayed` sans effet ; (5) cas négatif sans opération fencée → **504 `FENCING_TIMEOUT_ESCALATED`** + alerte `critical` persistée + verrou tenu + aucun audit. Journaux jamais effacés ; cleanup limité aux fixtures du script. Non-régression même jour : `npm --prefix backend run build` exit 0 ; backend 121 suites passées/5 skippées, 808 tests, EXIT=0 ; root 90 suites/542 tests EXIT=0 ; `audit:workflow-architecture:strict` OK ; `ci:node25:runtime` 3 suites/20 tests PASS (Node 24.22.1) ; `npm run audit:all` exit 0 ; live Docker gateway 4 suites/23 tests PASS. **Reste ouvert** : déploiement sur l'hôte Linux de production (hors accès agent) — la procédure README § déploiement systemd s'applique telle quelle ; le labo ne s'y substitue pas.
+Résultat `validate-systemd.cjs` : **VALIDATE_EXIT=0, 5/5 PASS** — (1) SIGKILL réel du backend sous systemd → run sans preuve gateway `quarantined`, verrou tenu, conteneur intact ; (2) restart du gateway avec opération `run` incertaine réelle (pending injecté + conteneur labelisé `airdd2.gateway.op`/`airdd2.execution.attempt`) → fencing auto `auto_epoch_rotation`, epoch+1, socket rouvert immédiatement, réservation de nom (création différée sur le nom refusée), quiescence prouvée, conteneur tué par ID immuable ; (3) restart du backend → run `worker_lost`, verrou libéré (`owner === runId`) ; (4) `POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry` réel (JWT + `Idempotency-Key`) → **202 + run fils `queued`** (`retryOfExecutionId`, `recoveryAttemptCount` 1) + entrée `gateway_fence_audit` immuable + verrou libéré, rejeu même clé → 200 `replayed` sans effet ; (5) cas négatif sans opération fencée → **504 `FENCING_TIMEOUT_ESCALATED`** + alerte `critical` persistée + verrou tenu + aucun audit. Journaux jamais effacés ; cleanup limité aux fixtures du script. Non-régression même jour : `npm --prefix backend run build` exit 0 ; backend 121 suites passées/5 skippées, 808 tests, EXIT=0 ; root 90 suites/542 tests EXIT=0 ; `audit:workflow-architecture:strict` OK ; `ci:node25:runtime` 3 suites/20 tests PASS (Node 24.22.1) ; `npm run audit:all` exit 0 ; live Docker gateway 4 suites/23 tests PASS.
+
+### Validation du déploiement via rapports CI GitHub — US-J7-14 (2026-11-19, agent `04-cicd-installation`)
+
+Aucun hôte de production n'est accessible aux agents : la **preuve de déploiement** est le retour CI de GitHub, push et relevés effectués par le responsable projet. Trois niveaux de preuve sont distingués explicitement :
+
+| Niveau | Preuve | Où |
+|---|---|---|
+| Labo Linux isolé (systemd + dind) | preuve **opérationnelle locale** : US-J7-10, 5/5 PASS (SIGKILL, restart gateway op incertaine, fence-and-retry réel 202) | `backend/deploy/recovery-validation/`, section ci-dessus |
+| CI GitHub sur la branche de release | preuve de **déploiement tracée** : runs/jobs/artefacts de `ci.yml`, `runtime.yml`, `security.yml` + rapports consolidés | rapports ci-dessous, artefacts `ci-report-<sha>` |
+| Production | déploiements GitHub (environnements `staging`/`production`, `deploy.yml` workflow_dispatch + preflight + gates + `confirm_production`, bundle `deploy-bundle-<sha>.tgz` + sha256, `deploy-metadata.json`) | environnements GitHub + artefact `deploy-report-<sha>` |
+
+Renforcements CI livrés pour cette US : job `report` dans `ci.yml` (artefact `ci-report-<sha>.json` : jobs/conclusions/artefacts du run + step summary) ; step « Publish deployment report artifact » dans `deploy.yml` (artefact `deploy-report-<sha>.json` : environment, sha, run, état/URL du GitHub Deployment) ; job opt-in `mongo-replica-journal` dans `runtime.yml` (input `run_replica_tests=true` en workflow_dispatch, exécute `mongo-docker-journal-replica.integration.test.ts` contre un replica set jetable — dépendance US-J7-15) ; collecteur `scripts/ci/collect-ci-report.mjs` (`npm run ci:report`, `--self-test` OK) qui relève runs/jobs/artefacts via `gh api` et rend un rapport markdown/JSON consignable ici.
+
+Procédure exacte après chaque push de la branche de release (responsable) :
+
+```powershell
+gh auth login                                      # une fois
+git push origin main                                # push de la branche de release
+npm run ci:report -- --branch main --sha <sha> --out ci-report-<sha>.md --require-green
+# copier le rapport dans cette section avec le sha exact
+# déploiement staging/production : Actions > Deploy > Run workflow (ref main / tag v*.*.*),
+# input confirm_production=DEPLOY_PRODUCTION obligatoire en production
+```
+
+Rapport par push (à remplir par le responsable à chaque push ; état au 2026-11-19 : **en attente du premier push de release**, aucun rapport CI réel relevé côté agent) :
+
+| Push (date) | SHA | ci.yml | runtime.yml | security.yml | deploy.yml (env) | Artefacts | Verdict |
+|---|---|---|---|---|---|---|---|
+| — | — | — | — | — | — | — | en attente push responsable |
+
+Aucune opération destructive sur des données réelles ; environnements CI isolés uniquement. **Reste ouvert** : déploiement sur l'hôte Linux de production (hors accès agent) — la procédure README § déploiement systemd s'applique telle quelle ; le labo ne s'y substitue pas.
 
 ## Périmètre et isolation
 
