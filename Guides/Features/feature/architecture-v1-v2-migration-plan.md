@@ -12,7 +12,7 @@ Voici le plan détaillé prêt à intégrer.
 
 **Statut :** Plan de mise en œuvre  
 **Date :** 30 septembre 2026  
-**Dépendance :** `v1-v2-drift-analysis.md`  
+**Dépendance :** `Guides/Features/feature/suivi/v1-v2-drift-analysis.md`  
 **Objectif :** supprimer progressivement la dérive V1/V2 et établir V2 comme architecture canonique
 
 ## 1. Objectif général
@@ -237,7 +237,7 @@ Aucune nouvelle feature ne peut dépendre de Workflow.nodes ou Workflow.edges.
 ### Fichiers concernés
 
 ```text
-Guides/Features/feature/v1-v2-drift-analysis.md
+Guides/Features/feature/suivi/v1-v2-drift-analysis.md
 backend/src/routes/workflows.routes.ts
 backend/src/services/databaseInit.ts
 backend/src/models/*
@@ -298,7 +298,7 @@ UNKNOWN
 Créer :
 
 ```text
-Guides/Features/feature/v1-v2-code-inventory.md
+Guides/Features/feature/suivi/v1-v2-code-inventory.md
 ```
 
 avec un tableau :
@@ -1340,9 +1340,9 @@ La migration sera terminée lorsque :
 ## 20. Livrables documentaires à créer
 
 ```text
-Guides/Features/feature/v1-v2-drift-analysis.md
+Guides/Features/feature/suivi/v1-v2-drift-analysis.md
 Guides/Features/feature/architecture-v1-v2-migration-plan.md
-Guides/Features/feature/v1-v2-code-inventory.md
+Guides/Features/feature/suivi/v1-v2-code-inventory.md
 
 Guides/Architecture/adr/001-canonical-workflow-v2.md
 Guides/Architecture/adr/002-workflow-migration-strategy.md
@@ -1362,9 +1362,9 @@ Le prochain livrable logique est maintenant la création des huit fichiers `.md`
 Chaque profil pourra référencer directement :
 
 ```text
-Guides/Features/feature/v1-v2-drift-analysis.md
+Guides/Features/feature/suivi/v1-v2-drift-analysis.md
 Guides/Features/feature/architecture-v1-v2-migration-plan.md
-Guides/Features/feature/v1-v2-code-inventory.md
+Guides/Features/feature/suivi/v1-v2-code-inventory.md
 ```
 
 et imposer l’ordre de dépendance entre agents.

@@ -2,7 +2,7 @@
 
 **Rédacteur :** `09-architecte-applicatif`
 **Date :** 2026-11-19
-**Périmètre évalué :** backlog `Guides/Features/feature/refonte/backlog/v1-v2-refonte-backlog.md` (J0–J7), conception `j7-02-quarantine-exit-fencing-design.md`, plan UI `j7-13-ui-runtime-plan.md`, code `main` @ `ad294fb`.
+**Périmètre évalué :** backlog `Guides/Features/feature/refonte/backlog/v1-v2-refonte-backlog.md` (J0–J7), conception `Guides/Features/feature/refonte/README.md`, plan UI `Guides/Features/feature/refonte/README.md`, code `main` @ `ad294fb`.
 
 ---
 
@@ -27,7 +27,7 @@
 | J7-12 | WebSocket JWT strict, deny-by-default, plus de `userId` temporaire | `socketAuth.middleware.ts` (`verifySocketAccessToken`) ; `WebSocketManager.ts` (plus de branche guest) | conforme |
 | J7-13 | toolbar montée, badge de statut dans les 3 représentations du nœud, toasts | `RobotPageRouter.tsx:114` ; `V2AgentNode.tsx:395,1742-1743` (`RunStatusBadge`) | conforme (voir réserve R5) |
 | J7-14 | outillage rapports CI (`ci:report`, job `report` ci.yml, artefact deploy report) | `scripts/ci/collect-ci-report.mjs`, workflows | conforme ; **rapports réels en attente du push** |
-| J7-15 | rejoué J6 en isolé, verdict GO signé, test replica Mongo PASS | `j6-validation-report.md` § US-J7-15 | conforme |
+| J7-15 | rejoué J6 en isolé, verdict GO signé, test replica Mongo PASS | `Guides/Features/feature/suivi/j6-validation-report.md` § US-J7-15 | conforme |
 
 ## 3. Validation re-exécutée par l'architecte (2026-11-19)
 
@@ -39,7 +39,7 @@
 
 | # | Sévérité | Point | Détail / action |
 |---|---|---|---|
-| R1 | **RÉSOLU 2026-11-19** | Rapports CI du push de release consignés | Push `ef19500da572512b61f906b582b4871135cf1bbb` : CI 7/7, Runtime 4/4, Security 4/4, rapport complet dans `j6-validation-report.md` (section US-J7-14). Le relevé reste dû à chaque push de release (`npm run ci:report`). |
+| R1 | **RÉSOLU 2026-11-19** | Rapports CI du push de release consignés | Push `ef19500da572512b61f906b582b4871135cf1bbb` : CI 7/7, Runtime 4/4, Security 4/4, rapport complet dans `Guides/Features/feature/suivi/j6-validation-report.md` (section US-J7-14). Le relevé reste dû à chaque push de release (`npm run ci:report`). |
 | R2 | **Reporté 2026-11-19** | Dette `saveEdges` | `services/workspacePersistenceService.ts:164` pointe encore vers le write path legacy `/api/workflows/:id/edges` (mode invité). Décision responsable : traité dans la **prochaine feature « liens entre nodes »** (écart 5 WORKFLOWLINKS), tracé dans `recommandations-architecte.md` point 10. |
 | R3 | Majeur (hygiène) | 1114 artefacts `backend/python/.provisioned/**` **encore trackés** par git | Le `.gitignore` ne s'applique pas aux fichiers déjà suivis : `git rm -r --cached backend/python/.provisioned` est nécessaire (fait dans ce commit). Sans cela, chaque poste peut ré-embarquer 119k lignes d'artefacts. |
 | R4 | Mineur | `refonte/erreurs/ci-report.txt` non commité | Dump d'erreur CI déjà résolue (`MODULE_NOT_FOUND build-run-report.cjs`, fix `ad294fb`) — même politique que `b01da04` : supprimer, la résolution est consignée dans `erreurs/resolution-audit-gate.md`. |
@@ -63,7 +63,7 @@
 
 ## 6. Conditions de clôture de la feature
 
-1. R1 : au moins un push de release documenté avec son rapport CI (`npm run ci:report`) dans `j6-validation-report.md` → ferme US-J7-14.
+1. R1 : au moins un push de release documenté avec son rapport CI (`npm run ci:report`) dans `Guides/Features/feature/suivi/j6-validation-report.md` → ferme US-J7-14.
 2. R2 : `saveEdges` fermé (refus explicite côté serveur + test) ou US dédiée signée avec justification.
 3. R3/R4 : hygiène dépôt (`.provisioned` désindexé, dump CI supprimé) — fait dans ce commit.
 4. R5/R6 : confirmations écrites du responsable.

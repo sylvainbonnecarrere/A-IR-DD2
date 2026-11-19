@@ -2,7 +2,7 @@
 /**
  * US-J7-14 — collecte les rapports CI GitHub après chaque push de la branche de
  * release et produit un rapport markdown/JSON consignable dans
- * `Guides/Features/feature/refonte/j6-validation-report.md`.
+ * `Guides/Features/feature/suivi/j6-validation-report.md`.
  *
  * Le push et l'authentification `gh` sont faits par le responsable projet
  * (aucun hôte de production n'est accessible aux agents) :

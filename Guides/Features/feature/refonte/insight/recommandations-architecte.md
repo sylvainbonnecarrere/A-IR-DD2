@@ -28,6 +28,6 @@ Chaque point est une piste à étudier, pas une US engageante : à faire voter/c
 
 ## Clôture de feature (réserves du rapport-feature.md, 2026-11-19)
 
-13. **Rapports CI du push de release** (réserve R1, US-J7-14) — **RÉSOLU le 2026-11-19** : push `ef19500da572512b61f906b582b4871135cf1bbb` consigné dans `j6-validation-report.md` (CI 7/7, Runtime 4/4, Security 4/4). Le relevé reste dû à chaque push de release (`npm run ci:report`).
+13. **Rapports CI du push de release** (réserve R1, US-J7-14) — **RÉSOLU le 2026-11-19** : push `ef19500da572512b61f906b582b4871135cf1bbb` consigné dans `Guides/Features/feature/suivi/j6-validation-report.md` (CI 7/7, Runtime 4/4, Security 4/4). Le relevé reste dû à chaque push de release (`npm run ci:report`).
 
 14. **Nom du workflow dans la toolbar vs header** (réserve R5) — **CONFIRMÉ le 2026-11-19** par le responsable : le nom du workflow reste dans la toolbar (jaune BOS), pas dans le header. Point clos.
