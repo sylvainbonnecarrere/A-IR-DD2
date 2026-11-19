@@ -193,3 +193,6 @@ TODO.md
 NOTES.md
 *.todo.md
 Guides/TODO/
+
+# Artefacts de provisioning Python generes en local (ne pas versionner)
+backend/python/.provisioned/
