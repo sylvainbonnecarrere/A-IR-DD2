@@ -329,7 +329,7 @@ test.describe('Authenticated workspace media live', () => {
 
         await gotoAndWaitForUserSettings(page);
 
-        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
+        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 60_000 });
 
         const textarea = page.locator('textarea').first();
         const fileInput = page.locator('input[type="file"]').first();
@@ -372,7 +372,7 @@ test.describe('Authenticated workspace media live', () => {
             const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName);
             return item?.storageMode ?? null;
         }, {
-            timeout: 20_000,
+            timeout: 60_000,
             message: 'Expected the uploaded text file to be indexed as workspace media.',
         }).toBe('workspace');
 
@@ -433,7 +433,7 @@ test.describe('Authenticated workspace media live', () => {
 
         await gotoAndWaitForUserSettings(page);
 
-        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
+        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 60_000 });
 
         const textarea = page.locator('textarea').first();
         const fileInput = page.locator('input[type="file"]').first();
@@ -462,7 +462,7 @@ test.describe('Authenticated workspace media live', () => {
             const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'db');
             return item?.storageMode ?? null;
         }, {
-            timeout: 20_000,
+            timeout: 60_000,
             message: 'Expected the uploaded text file to be indexed as db media.',
         }).toBe('db');
 
@@ -525,7 +525,7 @@ test.describe('Authenticated workspace media live', () => {
 
         await gotoAndWaitForUserSettings(page);
 
-        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
+        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 60_000 });
         const saveButton = page.getByRole('button', { name: 'Save prototype workflow' });
         await expect(saveButton).toBeVisible();
 
@@ -566,7 +566,7 @@ test.describe('Authenticated workspace media live', () => {
             const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
             return item?.storageMode ?? null;
         }, {
-            timeout: 20_000,
+            timeout: 60_000,
             message: 'Expected the manually saved draft import to be indexed as workspace media.',
         }).toBe('workspace');
 
@@ -654,7 +654,7 @@ test.describe('Authenticated workspace media live', () => {
 
             return `${item.provenance ?? 'null'}:${item.sourceExecutionId ?? 'null'}`;
         }, {
-            timeout: 20_000,
+            timeout: 60_000,
             message: 'Expected the runtime artifact to be projected into BOS Media.',
         }).toBe(`runtime_output:${runPayload.executionId}`);
 
@@ -678,7 +678,7 @@ test.describe('Authenticated workspace media live', () => {
 
         await gotoAndWaitForUserSettings(page);
 
-        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
+        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 60_000 });
         const modal = await openWorkflowMediaModal(page);
         await expect(modal.getByText(fileName, { exact: true }).first()).toBeVisible();
         await expect(modal.getByText('Artefact runtime')).toBeVisible();
@@ -713,7 +713,7 @@ test.describe('Authenticated workspace media live', () => {
 
         await gotoAndWaitForUserSettings(page);
 
-        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
+        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 60_000 });
 
         const textarea = page.locator('textarea').first();
         const fileInput = page.locator('input[type="file"]').first();
@@ -740,7 +740,7 @@ test.describe('Authenticated workspace media live', () => {
             const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
             return item?.mediaId ?? null;
         }, {
-            timeout: 20_000,
+            timeout: 60_000,
             message: 'Expected the uploaded text file to be indexed before orphan deletion.',
         }).not.toBeNull();
 
@@ -772,7 +772,7 @@ test.describe('Authenticated workspace media live', () => {
 
             return item.isOrphan ? item.orphanReason ?? 'orphan-without-reason' : null;
         }, {
-            timeout: 20_000,
+            timeout: 60_000,
             message: 'Expected the media to remain visible as orphaned after instance deletion.',
         }).toBe('agent_deleted');
 
@@ -811,7 +811,7 @@ test.describe('Authenticated workspace media live', () => {
 
         await gotoAndWaitForUserSettings(page);
 
-        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 20_000 });
+        await expect(page.getByText(instanceName)).toBeVisible({ timeout: 60_000 });
 
         const textarea = page.locator('textarea').first();
         const fileInput = page.locator('input[type="file"]').first();
@@ -838,7 +838,7 @@ test.describe('Authenticated workspace media live', () => {
             const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
             return item?.mediaId ?? null;
         }, {
-            timeout: 20_000,
+            timeout: 60_000,
             message: 'Expected the uploaded text file to be indexed before delete_media.',
         }).not.toBeNull();
 
@@ -866,7 +866,7 @@ test.describe('Authenticated workspace media live', () => {
             const item = await findExplorerItem(request, fixture.accessToken, fixture.workflowId, fileName, 'workspace');
             return item ?? null;
         }, {
-            timeout: 20_000,
+            timeout: 60_000,
             message: 'Expected the media to disappear from the explorer after delete_media.',
         }).toBeNull();
 

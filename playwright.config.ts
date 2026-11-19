@@ -5,7 +5,8 @@ export default defineConfig({
     testMatch: '**/*.semi-e2e.spec.ts',
     timeout: 60_000,
     expect: {
-        timeout: 10_000,
+        // Marge de timing pour le premier rendu après chargement dev (compilation Vite à la demande).
+        timeout: 30_000,
     },
     fullyParallel: false,
     retries: 0,
@@ -18,7 +19,9 @@ export default defineConfig({
         video: 'retain-on-failure',
     },
     webServer: {
-        command: 'npm run dev -- --host 127.0.0.1 --port 4173',
+        // --strictPort garantit que le serveur de test sert bien sur 4173
+        // et ne bascule jamais silencieusement sur le port 4000 de vite.config.ts.
+        command: 'npm run dev -- --host 127.0.0.1 --port 4173 --strictPort',
         url: 'http://127.0.0.1:4173',
         reuseExistingServer: true,
         timeout: 120_000,

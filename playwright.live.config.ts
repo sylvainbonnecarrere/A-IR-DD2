@@ -10,7 +10,9 @@ export default defineConfig({
     testMatch: '**/*.live.smoke.spec.ts',
     timeout: 120_000,
     expect: {
-        timeout: 15_000,
+        // Démarrage à froid (compilation Vite + hydratation) : marge de timing,
+        // sans assouplir les critères des scénarios.
+        timeout: 45_000,
     },
     fullyParallel: false,
     retries: 0,

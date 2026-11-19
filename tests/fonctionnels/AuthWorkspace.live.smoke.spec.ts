@@ -25,6 +25,9 @@ function buildQaEmail(): string {
 
 test.describe('Live backend/browser smoke', () => {
     test('registers, purges guest state, logs back in, hydrates workspace, and survives reload', async ({ page, request }) => {
+        // Démarrage à froid du serveur dev : budget triple pour le reload/hydratation.
+        test.slow();
+
         const email = buildQaEmail();
         const registerModal = page.locator('div[role="dialog"], div.fixed.inset-0.z-50').last();
 
