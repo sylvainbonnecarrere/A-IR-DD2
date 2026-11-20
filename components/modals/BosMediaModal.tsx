@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useLocalization } from '@/hooks/useLocalization';
-import { CloseIcon } from '@/components/Icons';
+import { CloseIcon, EyeIcon, DownloadIcon, TrashIcon } from '@/components/Icons';
 import {
   workflowMediaExplorerService,
   WorkflowMediaExplorerItem,
@@ -75,6 +75,23 @@ function getSourceSortValue(item: WorkflowMediaExplorerItem): string {
   return [item.provenance ?? '', item.sourceExecutionId ?? '', item.canonicalLocator]
     .filter(Boolean)
     .join(' ');
+}
+
+/** Tronque une chaîne en gardant les 30 derniers caractères (préfixe « … » si tronqué). */
+function truncateTail(value: string, max = 30): string {
+    if (value.length <= max) return value;
+    return `…${value.slice(-max)}`;
+}
+
+/** Sélectionne le texte de l'élément cliqué (colonne Source). */
+function selectTextOnClick(event: React.MouseEvent<HTMLElement>) {
+    const target = event.currentTarget;
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    selection.removeAllRanges();
+    selection.addRange(range);
 }
 
 function getSourceLabel(item: WorkflowMediaExplorerItem, t: ReturnType<typeof useLocalization>['t']): string | null {
@@ -493,7 +510,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-950 shadow-[0_32px_120px_rgba(15,23,42,0.55)]">
+      <div className="flex max-h-[85vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-950 shadow-[0_32px_120px_rgba(15,23,42,0.55)]">
         <div className="border-b border-slate-800 bg-slate-900/90 px-6 py-5">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -607,15 +624,17 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
               <table className="min-w-full table-fixed border-collapse text-sm text-slate-200">
                 <thead className="sticky top-0 z-[1] bg-slate-950/95 backdrop-blur">
                   <tr className="border-b border-slate-800">
-                    <th className="w-[18%] px-4 py-3 text-left">{renderColumnHeader('name', t('bos_media_col_name', 'Nom'))}</th>
-                    <th className="w-[14%] px-4 py-3 text-left">{renderColumnHeader('mimeType', t('bos_media_col_mime', 'Type MIME'))}</th>
-                    <th className="w-[24%] px-4 py-3 text-left">{renderColumnHeader('source', t('bos_media_col_source', 'Source'))}</th>
-                    <th className="w-[10%] px-4 py-3 text-right">{renderColumnHeader('size', t('bos_media_col_size', 'Taille'), 'right')}</th>
-                    <th className="w-[14%] px-4 py-3 text-left">{renderColumnHeader('agent', t('bos_media_col_agent', 'Agent'))}</th>
-                    <th className="w-[12%] px-4 py-3 text-left">{renderColumnHeader('updatedAt', t('bos_media_col_updated', 'Mise a jour'))}</th>
-                    <th className="w-[18%] px-4 py-3 text-left">
+                    {/* ⭐ Actions en PREMIERE colonne, icônes seules (intitulés en infobulle) */}
+                    <th className="w-[110px] px-3 py-3 text-left">
                       <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">{t('bos_media_col_actions', 'Actions')}</span>
                     </th>
+                    <th className="w-[20%] px-4 py-3 text-left">{renderColumnHeader('name', t('bos_media_col_name', 'Nom'))}</th>
+                    <th className="w-[12%] px-4 py-3 text-left">{renderColumnHeader('mimeType', t('bos_media_col_mime', 'Type MIME'))}</th>
+                    {/* ⭐ Source : largeur fixe, contenu tronqué aux 30 derniers caractères */}
+                    <th className="w-[200px] px-4 py-3 text-left">{renderColumnHeader('source', t('bos_media_col_source', 'Source'))}</th>
+                    <th className="w-[9%] px-4 py-3 text-right">{renderColumnHeader('size', t('bos_media_col_size', 'Taille'), 'right')}</th>
+                    <th className="w-[13%] px-4 py-3 text-left">{renderColumnHeader('agent', t('bos_media_col_agent', 'Agent'))}</th>
+                    <th className="w-[14%] px-4 py-3 text-left">{renderColumnHeader('updatedAt', t('bos_media_col_updated', 'Mise a jour'))}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -623,8 +642,50 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
                     const agentLabel = getAgentLabel(item, t('bos_media_unknown_agent', 'Inconnu'));
                     const sourceLabel = getSourceLabel(item, t);
                     const rowActionLoading = activeAction?.itemId === item.mediaId;
+                    const previewActionLabel = t('bos_media_action_preview', canRenderPreview(item.mimeType) ? 'Apercu' : 'Ouvrir');
+                    const downloadActionLabel = t('bos_media_action_download', 'Telecharger');
+                    const deleteActionLabel = t('bos_media_action_delete', 'Supprimer');
+                    const loadingLabel = t('bos_media_action_loading', 'Traitement...');
                     return (
                       <tr key={item.mediaId} className="border-b border-slate-800/80 align-top last:border-b-0 hover:bg-slate-900/90">
+                        {/* ⭐ Actions en PREMIERE colonne : icônes seules, intitulés en infobulle standard (.info-bubble) */}
+                        <td className="w-[110px] px-3 py-3">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handlePreview(item)}
+                              disabled={rowActionLoading}
+                              aria-label={previewActionLabel}
+                              data-testid={`bos-media-action-preview-${item.mediaId}`}
+                              className="group relative inline-flex h-8 w-8 items-center justify-center rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <EyeIcon width={15} height={15} />
+                              <span className="info-bubble info-bubble-sm">{rowActionLoading && activeAction?.action === 'preview' ? loadingLabel : previewActionLabel}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownload(item)}
+                              disabled={rowActionLoading}
+                              aria-label={downloadActionLabel}
+                              data-testid={`bos-media-action-download-${item.mediaId}`}
+                              className="group relative inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-700 bg-slate-950 text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <DownloadIcon width={15} height={15} />
+                              <span className="info-bubble info-bubble-sm">{rowActionLoading && activeAction?.action === 'download' ? loadingLabel : downloadActionLabel}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(item)}
+                              disabled={rowActionLoading}
+                              aria-label={deleteActionLabel}
+                              data-testid={`bos-media-action-delete-${item.mediaId}`}
+                              className="group relative inline-flex h-8 w-8 items-center justify-center rounded-full border border-rose-500/30 bg-rose-500/10 text-rose-100 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <TrashIcon width={15} height={15} />
+                              <span className="info-bubble info-bubble-sm">{rowActionLoading && activeAction?.action === 'delete' ? loadingLabel : deleteActionLabel}</span>
+                            </button>
+                          </div>
+                        </td>
                         <td className="px-4 py-3">
                           <div className="min-w-0">
                             <p className="truncate font-semibold text-slate-50" title={item.originalName}>{item.originalName}</p>
@@ -638,7 +699,9 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
                         <td className="px-4 py-3">
                           <p className="truncate text-slate-300" title={item.mimeType}>{item.mimeType}</p>
                         </td>
-                        <td className="px-4 py-3">
+                        {/* ⭐ Source : largeur fixe (w-[200px]), contenu tronqué aux 30 derniers caractères ;
+                            clic sur la case = sélection du texte */}
+                        <td className="w-[200px] px-4 py-3">
                           <div className="min-w-0 space-y-1">
                             {sourceLabel ? (
                               <p className="truncate text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200" title={sourceLabel}>{sourceLabel}</p>
@@ -648,7 +711,13 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
                                 {t('bos_media_source_execution', 'Execution')} : {item.sourceExecutionId}
                               </p>
                             ) : null}
-                            <p className="truncate text-slate-300" title={item.canonicalLocator}>{item.canonicalLocator}</p>
+                            <p
+                              className="truncate text-slate-300 cursor-pointer"
+                              onClick={selectTextOnClick}
+                              data-testid={`bos-media-source-${item.mediaId}`}
+                            >
+                              {truncateTail(item.canonicalLocator, 30)}
+                            </p>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-right text-slate-300">{formatBytes(item.size)}</td>
@@ -657,40 +726,6 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
                         </td>
                         <td className="px-4 py-3">
                           <p className="text-slate-300">{formatDate(item.updatedAt)}</p>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handlePreview(item)}
-                              disabled={rowActionLoading}
-                              className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {rowActionLoading && activeAction?.action === 'preview'
-                                ? t('bos_media_action_loading', 'Traitement...')
-                                : t('bos_media_action_preview', canRenderPreview(item.mimeType) ? 'Apercu' : 'Ouvrir')}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDownload(item)}
-                              disabled={rowActionLoading}
-                              className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {rowActionLoading && activeAction?.action === 'download'
-                                ? t('bos_media_action_loading', 'Traitement...')
-                                : t('bos_media_action_download', 'Telecharger')}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(item)}
-                              disabled={rowActionLoading}
-                              className="rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-100 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {rowActionLoading && activeAction?.action === 'delete'
-                                ? t('bos_media_action_loading', 'Traitement...')
-                                : t('bos_media_action_delete', 'Supprimer')}
-                            </button>
-                          </div>
                         </td>
                       </tr>
                     );

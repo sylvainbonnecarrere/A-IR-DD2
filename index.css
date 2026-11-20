@@ -550,3 +550,110 @@ body {
 .run-control-btn:active .neon-icon.tone-green .glyph-under {
   stroke: var(--glyph-accent, #a3e635);
 }
+
+/* Variante compacte de l'infobulle standard (intitulés courts de boutons icônes) */
+.info-bubble.info-bubble-sm {
+  width: auto;
+  white-space: nowrap;
+}
+
+/* === Poignées de connexion des nodes agent : sphères lumineuses violet-bleu (fausse 3D) === */
+/* Le Handle React Flow par défaut fait 6px avec fond sombre et pointer-events:none
+   (cf. reactflow/dist/style.css) : on le remplace par une sphère 20px cliquable. */
+.react-flow__handle.node-handle {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  z-index: 20;
+  pointer-events: all;
+  cursor: crosshair;
+}
+/* IMPORTANT : le contenu SVG de la sphère ne doit PAS intercepter le pointeur.
+   Au mousedown, React Flow fait doc.elementFromPoint(x, y) et exige que l'élément
+   touché porte les classes source/target (posées sur le <Handle>) — sinon la
+   connexion ne démarre jamais et aucun lasso n'apparaît. */
+.node-handle-sphere,
+.node-handle-sphere * {
+  pointer-events: none;
+}
+/* Repos : sphère violet-bleu (indigo Archi) **beaucoup plus sombre**, halo très discret. */
+.node-handle-sphere {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 2px rgba(99, 102, 241, 0.28));
+  transition: transform 0.18s ease, filter 0.3s ease;
+}
+/* Survol : la sphère s'agrandit légèrement et retrouve sa luminosité. */
+.react-flow__handle.node-handle:hover .node-handle-sphere {
+  transform: scale(1.18);
+  filter: drop-shadow(0 0 8px rgba(129, 140, 248, 0.95));
+}
+/* Clic (mousedown, :active) ou classe .connecting posée par React Flow pendant le tracé :
+   la sphère s'illumine IMMÉDIATEMENT et fort (jusqu'à la connexion), même si la souris
+   survole encore la poignée — ces règles sont placées APRÈS le :hover et avec une
+   spécificité supérieure, elles priment donc sur l'état survol. */
+.react-flow__handle.node-handle:active .node-handle-sphere,
+.react-flow__handle.node-handle:active:hover .node-handle-sphere,
+.react-flow__handle.node-handle.connecting .node-handle-sphere,
+.react-flow__handle.node-handle.connecting:hover .node-handle-sphere {
+  transform: scale(1.22);
+  filter:
+    drop-shadow(0 0 12px rgba(199, 210, 254, 1))
+    drop-shadow(0 0 6px rgba(255, 255, 255, 0.9));
+}
+/* Poignée cible atteinte pendant le tracé : React Flow pose .connecting.valid sur le
+   handle survolé -> même illumination forte (la cible "s'allume" au moment du clic). */
+.react-flow__handle.node-handle.valid .node-handle-sphere {
+  filter:
+    drop-shadow(0 0 10px rgba(165, 180, 252, 1))
+    drop-shadow(0 0 4px rgba(255, 255, 255, 0.8));
+}
+
+/* === Lasso de connexion (ligne tirée entre la poignée cliquée et la souris) === */
+/* React Flow rend le lasso dans .react-flow__connectionline (svg) avec un path
+   .react-flow__connection-path gris (#b1b1b7) peu visible sur fond sombre :
+   on le restyle en "laser" cyan lumineux animé (tirets) pendant le drag.
+   Spécificité (0,2,0) > règle par défaut de reactflow/dist/style.css (0,1,0). */
+.react-flow__connectionline {
+  z-index: 1001;
+  pointer-events: none;
+}
+.react-flow__connectionline .react-flow__connection-path {
+  stroke: #22d3ee;
+  stroke-width: 2;
+  fill: none;
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9));
+  stroke-dasharray: 6 4;
+  animation: node-handle-lasso-dash 0.6s linear infinite;
+}
+@keyframes node-handle-lasso-dash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+/* === Lasso du mode "clic" (fil poignée -> curseur, recréé par l'app) === */
+/* React Flow 11.11.4 ne rend pas de ligne de connexion en mode clic (connectOnClick) :
+   WorkflowCanvas trace ce fil lui-même dans un svg overlay (coordonnées conteneur). */
+.workflow-click-lasso {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1002;
+  overflow: visible;
+}
+.workflow-click-lasso-path {
+  fill: none;
+  stroke: #22d3ee;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9));
+  animation: node-handle-lasso-dash 0.6s linear infinite;
+}

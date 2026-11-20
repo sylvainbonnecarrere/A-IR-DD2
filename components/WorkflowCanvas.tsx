@@ -159,6 +159,69 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   const reactFlowInstance = useReactFlow();
   const reactFlowLookup = reactFlowInstance as typeof reactFlowInstance & ReactFlowNodeLookup;
 
+  // ⭐ Lasso du mode "clic" : React Flow 11.11.4 (connectOnClick=true par défaut) ne rend
+  // AUCUNE ligne de connexion en mode clic (ConnectionLineWrapper ne lit que connectionNodeId,
+  // posé uniquement pendant le drag). On trace donc nous-mêmes le fil entre la poignée cliquée
+  // et le curseur, en coordonnées relatives au conteneur du canvas.
+  // Annulation : onClickConnectEnd (2e clic sur une poignée) ou mousedown hors poignée
+  // (clic ailleurs -> on annule via un clic synthétique sur la poignée de départ, que le
+  // onClick de RF 11.11.4 traite comme une annulation : isValidHandle(same handle) = false).
+  const clickLassoStartElRef = useRef<HTMLElement | null>(null);
+  const [clickLasso, setClickLasso] = useState<{
+    x1: number; y1: number; x2: number; y2: number; handleType: 'source' | 'target';
+  } | null>(null);
+
+  const handleClickConnectStart = useCallback((event: any, handle: any) => {
+    const handleEl = event.target as HTMLElement | null;
+    const container = canvasRootRef.current;
+    if (!handleEl || !container) return;
+    clickLassoStartElRef.current = handleEl;
+    const hr = handleEl.getBoundingClientRect();
+    const cr = container.getBoundingClientRect();
+    const x1 = hr.left + hr.width / 2 - cr.left;
+    const y1 = hr.top + hr.height / 2 - cr.top;
+    setClickLasso({ x1, y1, x2: x1, y2: y1, handleType: handle?.handleType === 'target' ? 'target' : 'source' });
+  }, []);
+
+  const handleClickConnectEnd = useCallback(() => {
+    clickLassoStartElRef.current = null;
+    setClickLasso(null);
+  }, []);
+
+  const clickLassoActive = clickLasso !== null;
+  useEffect(() => {
+    if (!clickLassoActive) return;
+    const onMouseMove = (ev: MouseEvent) => {
+      const container = canvasRootRef.current;
+      if (!container) return;
+      const cr = container.getBoundingClientRect();
+      setClickLasso((prev) => (prev ? { ...prev, x2: ev.clientX - cr.left, y2: ev.clientY - cr.top } : prev));
+    };
+    const onMouseDown = (ev: MouseEvent) => {
+      // Clic ailleurs que sur une poignée -> annule la procédure de lien :
+      // le lasso disparaît, la boule s'éteint (onClickConnectEnd -> plus de .connecting).
+      const target = ev.target as HTMLElement | null;
+      if (!target?.closest('.react-flow__handle')) {
+        const startEl = clickLassoStartElRef.current;
+        if (startEl && startEl.isConnected) {
+          // clic synthétique sur la poignée de départ : le onClick de RF voit
+          // connectionClickStartHandle set + même handle -> invalide -> annulation propre
+          startEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        }
+        clickLassoStartElRef.current = null;
+        setClickLasso(null);
+      }
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    // ⭐ capture=true : le mousedown du pane est stoppé en propagation par d3-zoom/RF
+    // avant d'atteindre window en phase bubble ; en capture on le voit toujours.
+    window.addEventListener('mousedown', onMouseDown, true);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mousedown', onMouseDown, true);
+    };
+  }, [clickLassoActive]);
+
   // ISOLATION COMPLÈTE: un seul useState pour éviter les conflits React Flow
   const [internalState, setInternalState] = useState({
     showAgentForm: false,
@@ -1109,6 +1172,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           onConnect={onConnect}
           isValidConnection={isValidWorkflowConnection}
           onPaneClick={handlePaneClick}
+          onClickConnectStart={handleClickConnectStart}
+          onClickConnectEnd={handleClickConnectEnd}
           connectionMode={ConnectionMode.Strict}
           nodeTypes={NODE_TYPES}
           edgeTypes={EDGE_TYPES}
@@ -1219,6 +1284,22 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             />
           </div>
         </ReactFlow>
+
+        {/* ⭐ Lasso du mode clic : fil entre la poignée cliquée et le curseur (recréé par l'app,
+            RF 11.11.4 ne le rend pas en mode clic). Coordonnées relatives à ce conteneur. */}
+        {clickLasso && (
+          <svg className="workflow-click-lasso" aria-hidden="true">
+            <path
+              className="workflow-click-lasso-path"
+              d={(() => {
+                const dx =
+                  Math.max(40, Math.abs(clickLasso.x2 - clickLasso.x1) / 2) *
+                  (clickLasso.handleType === 'source' ? 1 : -1);
+                return `M ${clickLasso.x1} ${clickLasso.y1} C ${clickLasso.x1 + dx} ${clickLasso.y1}, ${clickLasso.x2 - dx} ${clickLasso.y2}, ${clickLasso.x2} ${clickLasso.y2}`;
+              })()}
+            />
+          </svg>
+        )}
 
         {/* Bouton flottant redirection vers prototypage Archi - Style Blur futuriste */}
         {onAddToWorkflow && onNavigate && (

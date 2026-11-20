@@ -243,6 +243,8 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
             <span className="text-gray-500">{t('workflow.current')}:</span>
             <span className="ml-2 font-medium text-yellow-400 truncate" title={workflowName ?? undefined} data-testid="workflow-current-name">{workflowName || t('workflow.noWorkflow')}</span>
           </div>
+          {/* ⭐ 2026-11-20 : bloc de 3 boutons permute AVANT le texte de statut (chargement / X run) */}
+          <RunControls onRun={handleExecute} canRun={runtimeActionPolicy.canLaunch} isLaunching={isLaunching} className="ml-1" />
           <div
             className="flex items-center gap-2 w-32 shrink-0"
             role="status"
@@ -262,7 +264,6 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
               <span className="text-sm text-gray-500">{statusLabel}</span>
             )}
           </div>
-          <RunControls onRun={handleExecute} canRun={runtimeActionPolicy.canLaunch} isLaunching={isLaunching} className="ml-1" />
           {/* Succès/erreur de commande : toasts flottants (voir useRunCommandModals), aucun bandeau inline qui déplacerait la carte. */}
         </div>
 

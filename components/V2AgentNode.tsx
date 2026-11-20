@@ -32,6 +32,7 @@ import { executeAgentToolCall, parseToolCallArguments } from '../services/agentT
 import { normalizePersistedToolTranscriptMessages } from '../services/persistedChatMessages';
 import { shouldSuppressVisualToolResult } from '../utils/toolResultVisibility';
 import { AGENT_NODE_HANDLES } from './workflow/connectionContracts';
+import NodeHandleSphere from './workflow/NodeHandleSphere';
 import { prepareConversationHistoryForAPI } from '../services/historySynthesisService';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
@@ -251,7 +252,8 @@ function buildPendingToolCallMessage(messageId: string, toolName: string, args: 
   };
 }
 
-const cornerHandleClassName = 'w-3 h-3 bg-cyan-400 border-2 border-cyan-300 shadow-lg shadow-cyan-400/50 hover:bg-cyan-300 hover:shadow-cyan-300/70 transition-all duration-200 z-20';
+// ⭐ 2026-11-20 : poignées = sphères lumineuses violettes (NodeHandleSphere), stylées via .node-handle
+// (index.css) : hover = agrandissement, .connecting = plus brillant pendant le tracé de l'edge.
 
 function buildToolResultChatMessage(record: ToolCallRecord): ChatMessage {
   return {
@@ -1714,9 +1716,11 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           id={handle.id}
           type={handle.type}
           position={handle.position}
-          className={cornerHandleClassName}
+          className="node-handle"
           style={handle.style}
-        />
+        >
+          <NodeHandleSphere />
+        </Handle>
       ))}
 
       {/* Header - zone de titre draggable avec classe spéciale */}
