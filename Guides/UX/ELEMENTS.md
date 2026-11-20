@@ -109,6 +109,61 @@ Glyphes supplémentaires (ton **green**, contrôles de run) : `play` = triangle 
   imports natifs à vérifier… ») n'est PAS dans le header mais **descendu sur la barre des onglets,
   collé à droite** (`ml-auto` dans le conteneur des tabs).
 
+### Note technique — poignées de connexion des nodes agent (2026-11-20)
+
+- Rendu : `NodeHandleSphere` (`components/workflow/NodeHandleSphere.tsx`), **SVG inline** rendu
+  en enfant du `<Handle>` React Flow (classe `node-handle`) ; le contrat `AGENT_NODE_HANDLES`
+  (ids/positions) est inchangé.
+- Sphère **20px**, fausse 3D : dégradé radial **violet tirant sur le bleu, sombre au repos**
+  (indigo Archi) `#818cf8 → #6366f1 → #4338ca → #1e1b4b` + reflet spéculaire blanc atténué
+  (0.55) + anneau `#a5b4fc` (0.3).
+- États (CSS `index.css`, `.react-flow__handle.node-handle …`) :
+  repos → sphère **très sombre**, halo à peine visible `2px rgba(99,102,241,.28)` ;
+  **:hover** → `scale(1.18)` + halo `8px rgba(129,140,248,.95)` (luminosité retrouvée) ;
+  **:active** (mousedown) **et** **`.connecting`** (classe posée par React Flow pendant le tracé,
+  y compris en mode clic `clickConnecting`) → `scale(1.22)` + halo fort blanc/indigo clair
+  (`12px rgba(199,210,254,1)` + `6px rgba(255,255,255,.9)`). Le `:active` garantit l'illumination
+  **dès le clic**, même si la souris ne bouge pas (RF ne pose `.connecting` qu'au 1er mousemove
+  en mode drag) ; les règles fortes sont placées après le `:hover` avec sélecteurs
+  `.connecting:hover` / `:active:hover` (spécificité supérieure) pour primer sur le survol.
+  `.valid` (cible atteinte pendant le tracé) → halo fort : la poignée cible s'allume au clic,
+  puis les deux reviennent au repos (transition 0.3 s) quand l'edge est créé.
+- Le `<Handle>` a `pointer-events: all` + `cursor: crosshair` (la feuille de style React Flow
+  met `pointer-events: none` sur `.react-flow__handle` par défaut, sauf `.connectionindicator`).
+- **Le SVG de la sphère a `pointer-events: none`** (`.node-handle-sphere, .node-handle-sphere *`) :
+  au mousedown, React Flow fait `doc.elementFromPoint(x, y)` et exige que l'élément touché porte
+  les classes `source`/`target` (posées sur le `<Handle>`) — si le `<svg>`/`<circle>` intercepte
+  le point, `getHandleType()` renvoie null et **la connexion ne démarre jamais** (pas de lasso).
+- **Lasso de connexion restauré** : `.react-flow__connectionline .react-flow__connection-path`
+  restylé en laser cyan `#22d3ee` (épaisseur 2, glow drop-shadow, tirets animés
+  `stroke-dasharray: 6 4` + keyframes), spécificité (0,2,0) pour battre la règle par défaut
+  gris `#b1b1b7` de `reactflow/dist/style.css`.
+- **Lasso du mode clic recréé par l'app** (`WorkflowCanvas.tsx`) : RF 11.11.4 avec
+  `connectOnClick=true` (défaut) ne rend **aucune** ligne en mode clic (le wrapper ne lit que
+  `connectionNodeId`, posé au drag). Le canvas trace donc lui-même le fil poignée→curseur :
+  `onClickConnectStart` mémorise le centre du handle (coord. conteneur) + `mousemove` window
+  met à jour la souris + svg overlay `.workflow-click-lasso` (bézier horizontale, laser cyan
+  animé, `index.css`). Fin : `onClickConnectEnd` (2e clic sur une poignée).
+  **Annulation** (clic ailleurs qu'une poignée) : écoute `mousedown` window en **capture**
+  (`capture: true` — le mousedown du pane est stoppé en propagation par d3-zoom avant window en
+  bubble) → clic synthétique sur la poignée de départ (que le `onClick` de RF traite comme une
+  annulation : même handle = invalide) + `setClickLasso(null)` → boule éteinte, lasso disparu.
+- Toolbar carte workflow : le bloc **RunControls (3 boutons) est placé AVANT** le texte de statut
+  « chargement / X run » (`workflow-run-status`) ; les deux blocs ont une largeur fixe
+  (`flex-shrink-0` / `w-32`), donc aucun déplacement quand l'état change.
+
+### Note technique — modale « Media du workflow » (BosMediaModal, 2026-11-20)
+
+- Modale **plus large** : `max-w-7xl` (au lieu de `max-w-5xl`), toutes les colonnes tiennent dans
+  le format horizontal (`table-fixed`).
+- **Colonne Actions en PREMIERE colonne** (`w-[110px]`) : boutons **icônes seules** (`EyeIcon` /
+  `DownloadIcon` / `TrashIcon`, 32×32), intitulés dans une **infobulle standard** `.info-bubble`
+  (variante compacte `.info-bubble-sm` : largeur auto, nowrap). `aria-label` = intitulé (pas de
+  `title`, règle infobulle). `data-testid="bos-media-action-{preview|download|delete}-<mediaId>"`.
+- **Colonne Source à largeur fixe** (`w-[200px]`) : le localisateur est tronqué aux **30 derniers
+  caractères** max (`…` + `slice(-30)`, helper `truncateTail`) ; **clic sur la case = sélection du
+  texte** (`selectTextOnClick` via `window.getSelection()` + Range). `data-testid="bos-media-source-<mediaId>"`.
+
 ### Note technique — contrôles de run et infobulles (2026-11-20)
 
 - **Recoloration au survol/clic** : seul le **glyphe central** change de couleur (`.glyph-core` +
