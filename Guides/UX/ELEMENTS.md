@@ -152,6 +152,22 @@ Glyphes supplémentaires (ton **green**, contrôles de run) : `play` = triangle 
   « chargement / X run » (`workflow-run-status`) ; les deux blocs ont une largeur fixe
   (`flex-shrink-0` / `w-32`), donc aucun déplacement quand l'état change.
 
+
+### Note technique — edges (liens) du canvas workflow (2026-11-20)
+
+- Style de base (CSS `index.css`, `.react-flow .react-flow__edge-path`, spécificité > RF) :
+  **cyan lumineux** `#22d3ee`, épaisseur 2, léger glow `drop-shadow(0 0 4px rgba(34,211,238,.55))`.
+- **Survol** (`.react-flow__edge:hover …`) : bleu plus ardent `#38bdf8`, épaisseur 2.5,
+  glow `0 0 9px rgba(56,189,248,.95)`.
+- **Sélectionné** (clic sur l'edge → `.react-flow__edge.selected …`) : bleu encore plus clair
+  `#a5f3fc`, épaisseur 3, glow maximal (double drop-shadow blanc/cyan clair).
+- Sélection : `WorkflowCanvas.tsx` pose `selected: true` sur l'edge cliqué (`onEdgeClick` +
+  `edgesWithSelection`, mémoïsé) ; `elementsSelectable` reste `false` (les nodes ne sont pas
+  sélectionnables, on ne gère que les edges). Clic sur le pane → désélection.
+- **Suppression** : `deleteKeyCode={['Backspace', 'Delete']}` — RF supprime les éléments
+  `selected` du store via `onEdgesChange` (remove) ; `handleEdgesChange` clear alors
+  `selectedEdgeId`. Backspace dans un input/textarea reste sans effet (garde RF
+  `actInsideInputWithModifier: false`).
 ### Note technique — modale « Media du workflow » (BosMediaModal, 2026-11-20)
 
 - Modale **plus large** : `max-w-7xl` (au lieu de `max-w-5xl`), toutes les colonnes tiennent dans
