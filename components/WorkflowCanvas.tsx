@@ -1082,6 +1082,30 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     setEdges((eds) => addEdge(connection, eds));
   }, [setEdges]);
 
+  // ⭐ Sélection d'un edge au clic + suppression via Delete/Suppr :
+  // on pose selected: true sur l'edge (contrôlé) -> classe .selected + glow CSS ;
+  // RF supprime les éléments selected du store via onEdgesChange (deleteKeyCode Backspace/Delete).
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
+  const handleEdgeClick = useCallback((_: unknown, edge: { id: string }) => {
+    setSelectedEdgeId(edge.id);
+  }, []);
+
+  const handleEdgesChange = useCallback(
+    (changes: any[]) => {
+      onEdgesChange(changes);
+      if (selectedEdgeId && changes.some((c: any) => c?.type === 'remove' && c?.id === selectedEdgeId)) {
+        setSelectedEdgeId(null);
+      }
+    },
+    [onEdgesChange, selectedEdgeId],
+  );
+
+  const edgesWithSelection = useMemo(
+    () => edges.map((e) => (e.id === selectedEdgeId ? { ...e, selected: true } : e)),
+    [edges, selectedEdgeId],
+  );
+
   // Handler pour libérer le focus quand on clique sur le canvas
   const handlePaneClick = useCallback((event: any) => {
     // Retirer le focus de tout élément actif (textarea, input, etc.)
@@ -1095,6 +1119,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     }
     // Désélectionner tous les nodes en cliquant sur le canvas vide
     setReactFlowNodes(nodes => nodes.map(node => ({ ...node, selected: false })));
+    // ⭐ et désélectionner l'edge éventuellement sélectionné
+    setSelectedEdgeId(null);
   }, [setReactFlowNodes]);
 
   const handleEditPrototype = useCallback((nodeId: string) => {
@@ -1165,10 +1191,12 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
         <ReactFlow
           nodes={reactFlowNodes}
-          edges={edges}
+          edges={edgesWithSelection}
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}
-          onEdgesChange={onEdgesChange}
+          onEdgesChange={handleEdgesChange}
+          onEdgeClick={handleEdgeClick}
+          deleteKeyCode={['Backspace', 'Delete']}
           onConnect={onConnect}
           isValidConnection={isValidWorkflowConnection}
           onPaneClick={handlePaneClick}

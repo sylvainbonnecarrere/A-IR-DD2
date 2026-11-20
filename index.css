@@ -657,3 +657,26 @@ body {
   filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9));
   animation: node-handle-lasso-dash 0.6s linear infinite;
 }
+
+/* === Edges du workflow : lien cyan lumineux avec léger glow === */
+/* Spécificité (0,2,0)+ > règles par défaut de reactflow (base.css / style.css). */
+.react-flow .react-flow__edge-path {
+  stroke: #22d3ee;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.55));
+  transition: stroke 0.15s ease, stroke-width 0.15s ease, filter 0.15s ease;
+}
+/* Survol de l'edge : bleu plus ardent + glow renforcé */
+.react-flow .react-flow__edge:hover .react-flow__edge-path {
+  stroke: #38bdf8;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 9px rgba(56, 189, 248, 0.95));
+}
+/* Edge sélectionné (clic) : bleu encore plus clair + glow maximal */
+.react-flow .react-flow__edge.selected .react-flow__edge-path {
+  stroke: #a5f3fc;
+  stroke-width: 3;
+  filter:
+    drop-shadow(0 0 14px rgba(165, 243, 252, 1))
+    drop-shadow(0 0 5px rgba(255, 255, 255, 0.9));
+}
