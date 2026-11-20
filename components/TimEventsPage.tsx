@@ -4,6 +4,7 @@ import { useDesignStore } from '../stores/useDesignStore';
 import { useProvisionalPrototypeCollection } from '../hooks/useProvisionalPrototypeCollection';
 import { useLocalization } from '../hooks/useLocalization';
 import { Button, Card } from './UI';
+import { RobotIndicator } from './RobotPageChrome';
 import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
 import { PlusIcon, ClockIcon, SettingsIcon, CloseIcon } from './Icons';
 import { useNotifications } from '../contexts/NotificationContext';
@@ -152,12 +153,8 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
             </div>
           </div>
 
-          {/* Robot Indicator */}
-          <div className="bg-yellow-500/20 border border-yellow-500/30 rounded-lg px-3 py-1.5">
-            <div className="text-xs text-yellow-300 font-medium">{t('current_robot')}</div>
-            <div className="text-sm text-yellow-100 font-bold">{currentRobotId}</div>
-            <div className="text-xs text-yellow-400">{t('temporal_specialist')}</div>
-          </div>
+          {/* Robot Indicator (standard partagé, couleur TIM = rouge) */}
+          <RobotIndicator color="red" robotId={RobotId.Tim} subtitle={t('temporal_specialist')} />
         </div>
       </div>
 
@@ -182,6 +179,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
               onClick={() => setIsCreating(true)}
               className="flex items-center space-x-2"
               variant="primary"
+              tone="red"
             >
               <PlusIcon className="w-4 h-4" />
               <span>{t('tim_new_event')}</span>

@@ -1,0 +1,74 @@
+<svg xmlns="http://w3.org" viewBox="0 0 240 240" width="240" height="240">
+  <defs>
+    <filter id="neon-border-glow-pause" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur1" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur2" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur3" />
+      <feMerge>
+        <feMergeNode in="blur3" />
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="neon-icon-glow-pause" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur1" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <linearGradient id="glass-bg-pause" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a3e635" stop-opacity="0.32" />
+      <stop offset="50%" stop-color="#4d7c0f" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#84cc16" stop-opacity="0.30" />
+    </linearGradient>
+
+    <linearGradient id="glass-highlight-top-pause" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.58" />
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.12" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.0" />
+    </linearGradient>
+
+    <linearGradient id="glass-highlight-bottom-pause" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ecfccb" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#ecfccb" stop-opacity="0.0" />
+    </linearGradient>
+
+    <clipPath id="inner-glass-clip-pause">
+      <rect x="36" y="36" width="168" height="168" rx="34" />
+    </clipPath>
+  </defs>
+
+  <!-- 1. Fond de verre semi-transparent -->
+  <rect x="36" y="36" width="168" height="168" rx="34" fill="url(#glass-bg-pause)" />
+
+  <!-- 2. Reflets spéculaires du verre -->
+  <g clip-path="url(#inner-glass-clip-pause)">
+    <path d="M 30 30 L 210 30 L 210 82 Q 120 105 30 82 Z" fill="url(#glass-highlight-top-pause)" />
+    <path d="M 30 210 L 210 210 L 210 182 Q 120 168 30 182 Z" fill="url(#glass-highlight-bottom-pause)" />
+    <rect x="38" y="38" width="164" height="164" rx="32" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="1.5" />
+  </g>
+
+  <!-- 3. Bordure double néon avec halo -->
+  <g filter="url(#neon-border-glow-pause)">
+    <rect x="32" y="32" width="176" height="176" rx="38" fill="none" stroke="#84cc16" stroke-width="4" />
+    <rect x="32" y="32" width="176" height="176" rx="38" fill="none" stroke="#f7fee7" stroke-width="1.6" />
+    <rect x="38.5" y="38.5" width="163" height="163" rx="32" fill="none" stroke="#a3e635" stroke-width="1.4" stroke-opacity="0.85" />
+  </g>
+
+  <!-- 4. Symbole Pause (2 barres horizontales comme demandé) -->
+  <g filter="url(#neon-icon-glow-pause)" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Barre supérieure -->
+    <rect x="80" y="86" width="80" height="22" rx="6" fill="none" stroke="#a3e635" stroke-width="7" />
+    <rect x="80" y="86" width="80" height="22" rx="6" fill="#1a2e05" fill-opacity="0.45" stroke="#ffffff" stroke-width="2.6" />
+
+    <!-- Barre inférieure -->
+    <rect x="80" y="132" width="80" height="22" rx="6" fill="none" stroke="#a3e635" stroke-width="7" />
+    <rect x="80" y="132" width="80" height="22" rx="6" fill="#1a2e05" fill-opacity="0.45" stroke="#ffffff" stroke-width="2.6" />
+  </g>
+</svg>

@@ -6,6 +6,8 @@ import { publishHydrationComponentReady } from '../utils/hydrationComponentReadi
 import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from '../utils/robotPageRouting';
 
 import { WorkflowToolbar } from './workflow/WorkflowToolbar';
+import { Button } from './UI';
+import { RobotIndicator } from './RobotPageChrome';
 
 const LazyWorkflowCanvas = lazy(() => import('./WorkflowCanvas'));
 const LazyArchiPrototypingPage = lazy(async () => {
@@ -106,6 +108,9 @@ const WorkflowPage: React.FC<{
           <div className="flex items-center gap-3">
             {/* ⭐ Retour graphique 2026-11-19 : plus de nom de workflow dans le header (redondant avec la toolbar) */}
             {headerActions}
+            {/* ⭐ Uniformisation 2026-11-20 : bloc « Robot Actuel » standard TOUJOURS complètement
+                à droite de la ligne (BOS = jaune), comme sur les pages COM/PHIL/TIM/ARCHI. */}
+            <RobotIndicator color="yellow" robotId={RobotId.Bos} />
           </div>
         </div>
 
@@ -234,14 +239,17 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
 
   const bosMediaHeaderAction = (
     <>
-      <button
+      {/* ⭐ Style bouton uniformisé (composant Button, effets communs) ; la couleur jaune BOS est
+          conservée via tone="yellow" (charte : couleur du robot respectée, effets identiques partout). */}
+      <Button
         type="button"
         onClick={() => setShowBosMediaModal(true)}
         disabled={!activeWorkflow}
-        className="rounded-lg border border-yellow-400/50 bg-yellow-500 px-4 py-2 text-sm font-semibold text-black transition-colors hover:bg-yellow-400 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+        variant="primary"
+        tone="yellow"
       >
         {t('bos_media_button', 'Gestion des fichiers')}
-      </button>
+      </Button>
       {showBosMediaModal ? (
         <Suspense fallback={null}>
           <LazyBosMediaModal

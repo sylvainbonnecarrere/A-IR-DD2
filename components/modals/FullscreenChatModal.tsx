@@ -1,6 +1,6 @@
-import React, { Suspense, lazy, useState, useRef, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '../UI';
-import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon, ErrorIcon, HistorySynthesisIcon } from '../Icons';
+import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon, ErrorIcon, HistorySynthesisIcon, ChevronUpIcon, ChevronDownIcon } from '../Icons';
 import { ToolCallBlock } from '../workflow/ToolCallBlock';
 import { RunStatusBadge } from '../workflow/RunStatusBadge';
 import { ShieldAlertIcon } from '../Icons';
@@ -117,6 +117,9 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   const [isSavingWebSearchParams, setIsSavingWebSearchParams] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // ⭐ Nav flèches (haut/bas) dans le contenu des inférences : question précédente / suivante
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const currentQuestionIndexRef = useRef(-1);
 
   const inferredInstanceId = React.useMemo(() => {
     if (fullscreenChatAgentInstance?.id) {
@@ -246,6 +249,28 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // ⭐ Nav inférences : l'index courant part de la dernière question (auto-scroll en bas)
+  useEffect(() => {
+    const questionCount = messages.filter((m) => m.sender === 'user').length;
+    currentQuestionIndexRef.current = questionCount > 0 ? questionCount - 1 : -1;
+  }, [messages]);
+
+  /** Flèche haut = question précédente, flèche bas = question suivante (clampé, scroll smooth centré). */
+  const goToQuestion = useCallback((direction: 'prev' | 'next') => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const questions = Array.from(container.querySelectorAll<HTMLElement>('[data-sender="user"]'));
+    if (questions.length === 0) return;
+    const current = currentQuestionIndexRef.current >= 0 ? currentQuestionIndexRef.current : questions.length - 1;
+    const target = direction === 'prev'
+      ? Math.max(0, current - 1)
+      : Math.min(questions.length - 1, current + 1);
+    currentQuestionIndexRef.current = target;
+    questions[target].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
+
+  const hasUserQuestions = messages.some((m) => m.sender === 'user');
+
   // Si pas de node sélectionné, ne pas afficher la modal (APRÈS tous les hooks)
   if (!fullscreenChatNodeId) return null;
 
@@ -331,7 +356,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     }
 
     return (
-      <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+      <div key={message.id} data-message-id={message.id} data-sender={message.sender} className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
         {isToolCall && message.toolCallRecord && (
           <div className="w-full mr-12">
             <ToolCallBlock toolCall={message.toolCallRecord} defaultExpanded={false} />
@@ -508,8 +533,9 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
           {/* Chat section - Takes full width or flex-1 if panel is open */}
           <div className={`flex flex-col ${activeSidePanel !== 'none' ? 'flex-1' : 'w-full'} border-r ${activeSidePanel !== 'none' ? 'border-cyan-500/30' : 'border-transparent'}`}>
             
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {/* Messages Area (contenu des inférences) — wrapper relatif pour les flèches de nav */}
+            <div className="relative flex-1 min-h-0">
+            <div ref={messagesContainerRef} className="h-full overflow-y-auto p-6 space-y-4" data-testid="inference-content">
               {messages.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-gray-400">
                   <div className="text-center">
@@ -537,6 +563,34 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* ⭐ Flèches futuristes bleu clair (charte cyan) coin bas droite du contenu inférences :
+                ▲ = question précédente, ▼ = question suivante */}
+            {hasUserQuestions ? (
+              <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1.5" data-testid="inference-nav-arrows">
+                <button
+                  type="button"
+                  onClick={() => goToQuestion('prev')}
+                  aria-label={t('chat_inference_nav_prev')}
+                  title={t('chat_inference_nav_prev')}
+                  data-testid="inference-nav-prev"
+                  className="p-2 rounded-lg border-2 border-cyan-400/50 bg-cyan-500/20 text-cyan-300 hover:text-cyan-100 hover:border-cyan-400 hover:bg-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/50 hover:scale-110 active:scale-95 transition-all duration-200"
+                >
+                  <ChevronUpIcon width={18} height={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => goToQuestion('next')}
+                  aria-label={t('chat_inference_nav_next')}
+                  title={t('chat_inference_nav_next')}
+                  data-testid="inference-nav-next"
+                  className="p-2 rounded-lg border-2 border-cyan-400/50 bg-cyan-500/20 text-cyan-300 hover:text-cyan-100 hover:border-cyan-400 hover:bg-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/50 hover:scale-110 active:scale-95 transition-all duration-200"
+                >
+                  <ChevronDownIcon width={18} height={18} />
+                </button>
+              </div>
+            ) : null}
             </div>
 
             {/* Unified Features Toolbar - All functionality buttons above the input */}

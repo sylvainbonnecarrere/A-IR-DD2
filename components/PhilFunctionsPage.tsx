@@ -16,6 +16,8 @@ import { useNotifications } from '../contexts/NotificationContext';
 import { useAuth } from '../hooks/useAuth';
 import { useLocalization } from '../hooks/useLocalization';
 import { SandboxHealthLoader } from './SandboxHealthLoader';
+import { RobotIndicator } from './RobotPageChrome';
+import { RobotId } from '../types';
 import type { UserFunction, FunctionOrigin, FunctionLanguage, RuntimeCompatibilityContext, ToolReadinessStatus } from '../types/function.types';
 
 const LazyFunctionEditorTab = lazy(async () => {
@@ -883,12 +885,12 @@ export const PhilFunctionsPage: React.FC = () => {
                     <h1 className="text-base font-bold text-white leading-tight">{t('philFunctions_header_title', 'Fonctions Personnalisées')}</h1>
                     <p className="text-xs text-gray-400">{t('philFunctions_header_subtitle', 'Phil · Bibliothèque de fonctions pour les agents')}</p>
                 </div>
-                {/* C9.2: Indicateur sandbox Python */}
-                <SandboxHealthLoader />
+                {/* ⭐ Bloc « Robot Actuel » standard, toujours complètement à droite (PHIL = bleu) */}
+                <RobotIndicator color="blue" robotId={RobotId.Phil} />
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-0 border-b border-gray-700/50 flex-shrink-0 px-4 pt-2">
+            <div className="flex gap-0 border-b border-gray-700/50 flex-shrink-0 px-4 pt-2 items-center">
                 {tabs.map(tab => (
                     <button
                         key={tab.id}
@@ -906,6 +908,10 @@ export const PhilFunctionsPage: React.FC = () => {
                         )}
                     </button>
                 ))}
+                {/* ⭐ C9.2: Indicateur sandbox Python — descendu sur le bloc des onglets, collé à droite */}
+                <div className="ml-auto flex items-center pr-2 pb-1">
+                    <SandboxHealthLoader />
+                </div>
             </div>
 
             {/* Content — Split view pour la bibliothèque */}

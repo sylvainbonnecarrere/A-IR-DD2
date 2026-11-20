@@ -3,6 +3,7 @@ import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, AgentDraft, LL
 import { useDesignStore } from '../stores/useDesignStore';
 import { useAuth } from '../contexts/AuthContext';
 import { AgentFormModal } from './modals/AgentFormModal';
+import { RobotIndicator } from './RobotPageChrome';
 import { AgentDeletionConfirmModal } from './modals/AgentDeletionConfirmModal';
 import { WorkflowValidationModal } from './modals/WorkflowValidationModal';
 import { TemplateSelectionModal } from './modals/TemplateSelectionModal';
@@ -497,17 +498,15 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
                 onClick={handleCreateAgent}
                 className="flex items-center space-x-2 text-xs"
                 variant="primary"
+                tone="indigo"
               >
                 <PlusIcon className="w-4 h-4" />
                 <span>Créer</span>
               </Button>
             </div>
 
-            {/* Governance Indicator - Simplified */}
-            <div className="bg-indigo-500/20 border border-indigo-500/30 rounded-lg px-3 py-1.5 whitespace-nowrap">
-              <div className="text-xs text-indigo-300 font-medium">{t('current_robot_label')}</div>
-              <div className="text-sm text-indigo-100 font-bold">ARCHI</div>
-            </div>
+            {/* Governance Indicator (standard partagé, couleur ARCHI = indigo) */}
+            <RobotIndicator color="indigo" robotId={RobotId.Archi} />
           </div>
         </div>
       </div>

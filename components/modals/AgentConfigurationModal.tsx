@@ -22,8 +22,12 @@ import { deriveSelectedToolIds, normalizeToolSelections } from '../../services/t
 import { HISTORY_LIMIT_KEYS } from '../../services/historySynthesisPolicy';
 import { getDisplayableNativeFunctions } from '../../utils/llmNativeFunctionCatalog';
 import { buildCanonicalAgentInstanceConfiguration, createDefaultAgentInstanceConfiguration, type CanonicalAgentInstanceConfiguration } from '../../services/agentContractAdapters';
+import TabIconNeon, { type AgentTabIconName } from '../agent-tabs/TabIconNeon';
 
-type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence' | 'links' | 'tasks' | 'logs' | 'errors';
+type TabId = AgentTabIconName;
+
+// ⭐ Charte UX (Guides/UX/ELEMENTS.md, TabIconBlurNeon) : icônes d'onglets rendues par <TabIconNeon />
+// (SVG inline uniforme, états défaut/hover/sélectionné pilotés par CSS, voir index.css .agent-tab-btn).
 
 const EMPTY_LOCAL_LLM_PROFILES: LocalLLMProfile[] = [];
 const DEFAULT_HISTORY_CONFIG = createDefaultHistoryConfig();
@@ -383,12 +387,14 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                     <TabButton
                         active={activeTab === 'config'}
                         onClick={() => setActiveTab('config')}
+                        tabId="config"
                     >
                         {t('agentConfig_tab_config')}
                     </TabButton>
                     <TabButton
                         active={activeTab === 'historique'}
                         onClick={() => setActiveTab('historique')}
+                        tabId="historique"
                     >
                         {t('agentConfig_tab_history')}
                     </TabButton>
@@ -396,18 +402,21 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                         active={activeTab === 'fonctions'}
                         onClick={() => setActiveTab('fonctions')}
                         badge={functionTabBadgeCount || undefined}
+                        tabId="fonctions"
                     >
                         {t('agentConfig_tab_functions')}
                     </TabButton>
                     <TabButton
                         active={activeTab === 'formatage'}
                         onClick={() => setActiveTab('formatage')}
+                        tabId="formatage"
                     >
                         {t('agentConfig_tab_formatting')}
                     </TabButton>
                     <TabButton
                         active={activeTab === 'persistence'}
                         onClick={() => setActiveTab('persistence')}
+                        tabId="persistence"
                     >
                         {t('agentConfig_tab_persistence')}
                     </TabButton>
@@ -415,6 +424,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                         active={activeTab === 'links'}
                         onClick={() => setActiveTab('links')}
                         badge={editedConfig.links?.length}
+                        tabId="links"
                     >
                         {t('agentConfig_tab_links')}
                     </TabButton>
@@ -422,6 +432,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                         active={activeTab === 'tasks'}
                         onClick={() => setActiveTab('tasks')}
                         badge={editedConfig.tasks?.length}
+                        tabId="tasks"
                     >
                         {t('agentConfig_tab_tasks')}
                     </TabButton>
@@ -429,6 +440,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                         active={activeTab === 'logs'}
                         onClick={() => setActiveTab('logs')}
                         badge={editedConfig.logs?.length}
+                        tabId="logs"
                     >
                         {t('agentConfig_tab_logs')}
                     </TabButton>
@@ -436,6 +448,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                         active={activeTab === 'errors'}
                         onClick={() => setActiveTab('errors')}
                         badge={editedConfig.errors?.length}
+                        tabId="errors"
                     >
                         {t('agentConfig_tab_errors')}
                     </TabButton>
@@ -599,28 +612,38 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
 };
 
 // Tab Button Component
+// ⭐ L'icône TabIconNeon est au-dessus du libellé ; ses états (défaut / hover / actif)
+// sont pilotés par les classes .agent-tab-btn / .tab-active + :hover (voir index.css).
 const TabButton: React.FC<{
     active: boolean;
     onClick: () => void;
     children: React.ReactNode;
     badge?: number;
-}> = ({ active, onClick, children, badge }) => (
+    tabId: TabId;
+}> = ({ active, onClick, children, badge, tabId }) => (
     <button
         onClick={onClick}
         className={`
-      px-6 py-3 font-medium transition-colors relative
+      agent-tab-btn inline-flex flex-col items-center px-4 py-2 font-medium transition-colors relative
       ${active
-                ? 'text-cyan-400 border-b-2 border-cyan-400 bg-gray-800/50'
+                ? 'tab-active text-cyan-400 border-b-2 border-cyan-400 bg-gray-800/50'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/30'
             }
     `}
     >
-        {children}
-        {badge !== undefined && badge > 0 && (
-            <span className="ml-2 px-2 py-0.5 text-xs bg-cyan-600 text-white rounded-full">
-                {badge}
-            </span>
-        )}
+        <TabIconNeon
+            name={tabId}
+            className="w-10 h-10 mb-1 flex-shrink-0"
+            data-testid={`tab-icon-${tabId}`}
+        />
+        <span className="inline-flex items-center">
+            {children}
+            {badge !== undefined && badge > 0 && (
+                <span className="ml-2 px-2 py-0.5 text-xs bg-cyan-600 text-white rounded-full">
+                    {badge}
+                </span>
+            )}
+        </span>
     </button>
 );
 

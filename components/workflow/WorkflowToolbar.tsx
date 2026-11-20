@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
-  PlayIcon,
   StopIcon,
   DownloadIcon,
   CheckCircleIcon,
@@ -27,6 +26,8 @@ import { resolveRuntimeActionPolicy } from '../../services/runtimeActionPolicy';
 import { useWorkflowRunStatus, useWorkflowRunSync } from '../../hooks/useWorkflowRuntimeState';
 
 import { useRunCommandModals } from '../../hooks/useRunCommandModals';
+
+import { RunControls } from './RunControls';
 
 import type { FunctionRunStatus } from '../../types/function.types';
 
@@ -218,9 +219,9 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
       data-testid="workflow-toolbar"
       data-workflow-id={workflowId ?? undefined}
     >
-      <div className="flex items-center justify-between h-12 px-4 gap-4">
-        {/* Left Section - Workflow Info + statut run (role="status") */}
-        <div className="flex items-center gap-4 min-w-0">
+      <div className="flex items-center h-12 px-4 gap-4">
+        {/* Left Section - Info workflow + statut run + contrôles play/pause/stop (bloc fixe) */}
+        <div className="flex items-center gap-3 min-w-0">
           {/* Diode de connexion temps réel + bulle explicative au survol (pas le serveur API) */}
           <span
             className="relative inline-flex items-center group flex-shrink-0"
@@ -232,18 +233,18 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
           >
             <span aria-hidden="true" className={`w-2.5 h-2.5 rounded-full ${ledClass}`} />
             <span
-              className="pointer-events-none absolute left-0 top-full mt-1.5 z-50 hidden w-72 rounded-md border border-gray-700 bg-gray-900/95 px-3 py-2 text-xs leading-snug text-gray-200 shadow-lg group-hover:block group-focus-within:block"
+              className="info-bubble"
               data-testid="workflow-connection-bubble"
             >
               <span className="font-semibold text-gray-100">{t('workflow.connectionLed.title')}</span>{' '}{connectionLabel}. {t('workflow.connectionLed.hint')}
             </span>
           </span>
-          <div className="text-sm truncate">
+          <div className="text-sm truncate w-56 shrink-0">
             <span className="text-gray-500">{t('workflow.current')}:</span>
             <span className="ml-2 font-medium text-yellow-400 truncate" title={workflowName ?? undefined} data-testid="workflow-current-name">{workflowName || t('workflow.noWorkflow')}</span>
           </div>
           <div
-            className="flex items-center gap-2 min-w-0"
+            className="flex items-center gap-2 w-32 shrink-0"
             role="status"
             aria-live="polite"
             data-testid="workflow-run-status"
@@ -261,26 +262,12 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
               <span className="text-sm text-gray-500">{statusLabel}</span>
             )}
           </div>
+          <RunControls onRun={handleExecute} canRun={runtimeActionPolicy.canLaunch} isLaunching={isLaunching} className="ml-1" />
           {/* Succès/erreur de commande : toasts flottants (voir useRunCommandModals), aucun bandeau inline qui déplacerait la carte. */}
         </div>
 
         {/* Center Section - Commandes V2 */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleExecute}
-            disabled={!runtimeActionPolicy.canLaunch || isLaunching}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors duration-200 ${
-              runtimeActionPolicy.canLaunch && !isLaunching
-                ? 'bg-green-600 hover:bg-green-700 text-white'
-                : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-            }`}
-            title={t('workflow.execute')}
-          >
-            <PlayIcon className="w-4 h-4" />
-            {t('workflow.execute')}
-          </button>
-
+        <div className="flex items-center gap-2 ml-auto flex-shrink-0">
           {runtimeActionPolicy.canCancel && activeRunId ? (
             <button
               type="button"
@@ -323,7 +310,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
         </div>
 
         {/* Right Section - Historique + opérations fichier */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
             type="button"
             onClick={commandModals.openRunHistory}
