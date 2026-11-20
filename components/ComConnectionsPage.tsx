@@ -3,6 +3,7 @@ import { ConnectionPrototype, LLMConfig, RobotId } from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useProvisionalPrototypeCollection } from '../hooks/useProvisionalPrototypeCollection';
 import { Button, Card } from './UI';
+import { RobotIndicator } from './RobotPageChrome';
 import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
 import { PlusIcon, AntennaIcon, SettingsIcon, CloseIcon } from './Icons';
 import { useNotifications } from '../contexts/NotificationContext';
@@ -127,12 +128,8 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
             </div>
           </div>
 
-          {/* Robot Indicator */}
-          <div className="bg-blue-500/20 border border-blue-500/30 rounded-lg px-3 py-1.5">
-            <div className="text-xs text-blue-300 font-medium">{t('current_robot')}</div>
-            <div className="text-sm text-blue-100 font-bold">{currentRobotId}</div>
-            <div className="text-xs text-blue-400">{t('com_connection_specialist')}</div>
-          </div>
+          {/* Robot Indicator (standard partagé, couleur COM = vert) */}
+          <RobotIndicator color="green" robotId={RobotId.Com} subtitle={t('com_connection_specialist')} />
         </div>
       </div>
 
@@ -157,6 +154,7 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
               onClick={() => setIsCreating(true)}
               className="flex items-center space-x-2"
               variant="primary"
+              tone="green"
             >
               <PlusIcon className="w-4 h-4" />
               <span>{t('com_new_connection')}</span>

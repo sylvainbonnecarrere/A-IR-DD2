@@ -3,6 +3,9 @@ import { useDesignStore } from '@/stores/useDesignStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocalization } from '@/hooks/useLocalization';
 import WorkflowCard from '@/components/workflow/WorkflowCard';
+import { Button } from '@/components/UI';
+import { RobotIndicator } from '@/components/RobotPageChrome';
+import { RobotId } from '@/types';
 import BosMediaModal from '@/components/modals/BosMediaModal';
 import CreerWorkflowDialog from '@/components/modals/CreerWorkflowDialog';
 import EditWorkflowDialog from '@/components/modals/EditWorkflowDialog';
@@ -241,20 +244,26 @@ const BosWorkflowManagementPage: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button
+          {/* ⭐ Boutons au style commun (composant Button) ; couleur BOS = jaune via tone */}
+          <Button
             type="button"
             onClick={() => setShowMediaModal(true)}
             disabled={!activeWorkflow}
-            className="px-4 py-2 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 font-medium transition-colors disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+            variant="outline"
+            tone="yellow"
           >
             {t('bos_media_button', 'Gestion des fichiers')}
-          </button>
-          <button
+          </Button>
+          <Button
+            type="button"
             onClick={() => setShowCreateDialog(true)}
-            className="px-4 py-2 bg-yellow-500 text-black rounded hover:bg-yellow-400 font-medium transition-colors"
+            variant="primary"
+            tone="yellow"
           >
             {t('nav_create_workflow')}
-          </button>
+          </Button>
+          {/* ⭐ Bloc « Robot Actuel » standard TOUJOURS complètement à droite de la ligne (BOS = jaune) */}
+          <RobotIndicator color="yellow" robotId={RobotId.Bos} />
         </div>
       </div>
       
@@ -297,12 +306,14 @@ const BosWorkflowManagementPage: React.FC = () => {
             ) : workflowLoadError ? (
               <div>
                 <p className="text-red-400 mb-4">❌ {t('error_load_workflows')}: {workflowLoadError}</p>
-                <button
+                <Button
+                  type="button"
                   onClick={handleRetryLoad}
-                  className="px-4 py-2 bg-yellow-500 text-black rounded hover:bg-yellow-400 font-medium transition-colors"
+                  variant="primary"
+                  tone="yellow"
                 >
                   🔄 {t('retry') || 'Réessayer'}
-                </button>
+                </Button>
               </div>
             ) : (
               <>
