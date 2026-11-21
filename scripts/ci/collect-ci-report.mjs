@@ -59,10 +59,13 @@ function parseArgs(argv) {
 }
 
 async function ghJson(args, apiPath, extra = []) {
-    const { stdout } = await execFileAsync('gh', ['api', apiPath, ...extra, '--paginate', '--slurp'], {
+    // Appel gh api simple (1 page) : --paginate --slurp peut renvoyer une
+    // sortie vide selon la version de gh (vu sur un runner ubuntu-latest).
+    const { stdout } = await execFileAsync('gh', ['api', apiPath, ...extra], {
         maxBuffer: 64 * 1024 * 1024,
         env: { ...process.env },
     });
+    if (!stdout.trim()) throw new Error(`gh api a renvoye un corps vide pour ${apiPath}`);
     return JSON.parse(stdout);
 }
 
@@ -101,7 +104,8 @@ async function collect(args) {
             absent.push({ workflow: workflowId, reason: `workflow introuvable ou sans run sur ${args.branch}: ${error.message}` });
             continue;
         }
-        const list = Array.isArray(runs) ? runs.flatMap((page) => page.workflow_runs) : [];
+        const pages = Array.isArray(runs) ? runs : [runs];
+        const list = pages.flatMap((page) => page?.workflow_runs ?? []);
         const filtered = args.sha ? list.filter((run) => run.head_sha?.startsWith(args.sha)) : list;
         if (!filtered.length) {
             absent.push({ workflow: workflowId, reason: args.sha ? `aucun run pour le sha ${args.sha}` : `aucun run récent sur ${args.branch}` });
