@@ -245,7 +245,7 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
         type="button"
         onClick={() => setShowBosMediaModal(true)}
         disabled={!activeWorkflow}
-        variant="primary"
+        variant="outline"
         tone="yellow"
       >
         {t('bos_media_button', 'Gestion des fichiers')}

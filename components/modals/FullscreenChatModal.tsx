@@ -512,18 +512,9 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
               <MinimizeIcon width={16} height={16} />
             </Button>
 
-            {/* Delete button */}
-            <Button
-              variant="ghost"
-              className="p-2 h-8 w-8 text-gray-400 hover:text-red-400 
-                         hover:bg-red-500/20 hover:shadow-lg hover:shadow-red-500/40
-                         transition-all duration-200 rounded-md
-                         hover:scale-110 active:scale-95"
-              onClick={handleDelete}
-              title={t('sidebar_deleteAgent_aria', { agentName })}
-            >
-              <CloseIcon width={16} height={16} />
-            </Button>
+            {/* ⭐ 2026-11-20 : bouton « Supprimer l'agent » RETIRÉ de la fenêtre agrandie
+                (recommandation utilisateur : risque d'erreur, d'autres moyens de supprimer
+                existent — dont le bouton du node sur la carte). */}
           </div>
         </div>
 
