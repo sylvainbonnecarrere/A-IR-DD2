@@ -226,8 +226,19 @@ jobs:
 
           report_file="ci-report-${{ github.sha }}.json"
 
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" --paginate --slurp > .jobs.json
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" --paginate --slurp > .artifacts.json
+          # gh api simple (1 page, per_page=100 suffisant) : --paginate --slurp
+          # peut renvoyer une sortie vide selon la version de gh du runner.
+          fetch_api() {
+            local path="$1" out="$2"
+            gh api "$path" > "$out"
+            if [ ! -s "$out" ]; then
+              echo "gh api a renvoye un corps vide pour $path" >&2
+              exit 1
+            fi
+          }
+
+          fetch_api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" .jobs.json
+          fetch_api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" .artifacts.json
 
           node scripts/ci/build-run-report.cjs "$report_file" .jobs.json .artifacts.json
 
