@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
-import { Agent, ChatMessage, LLMCapability, LLMProvider, Tool, ToolCall, AgentInstance, ToolCallRecord, MapSource, MapsPanelPreloadedResults } from '../types';
+import { Agent, ChatMessage, LLMCapability, LLMProvider, Tool, ToolCall, AgentInstance, ToolCallRecord, MapSource, MapsPanelPreloadedResults, RobotId } from '../types';
 import { Button } from './UI';
 import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon, HistorySynthesisIcon, MaximizeIcon } from './Icons';
 import { ConfirmationModal } from './modals/ConfirmationModal';
@@ -33,6 +33,7 @@ import { normalizePersistedToolTranscriptMessages } from '../services/persistedC
 import { shouldSuppressVisualToolResult } from '../utils/toolResultVisibility';
 import { AGENT_NODE_HANDLES } from './workflow/connectionContracts';
 import NodeHandleSphere from './workflow/NodeHandleSphere';
+import { getRobotColor } from './workflow/BaseWorkflowNode';
 import { prepareConversationHistoryForAPI } from '../services/historySynthesisService';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
@@ -1719,7 +1720,8 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           className="node-handle"
           style={handle.style}
         >
-          <NodeHandleSphere />
+          {/* ⭐ la sphère au repos prend la couleur (assombrie) du robot créateur du node */}
+          <NodeHandleSphere color={data.robotId ? getRobotColor(data.robotId as RobotId).primary : undefined} />
         </Handle>
       ))}
 

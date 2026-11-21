@@ -580,12 +580,13 @@ body {
 .node-handle-sphere * {
   pointer-events: none;
 }
-/* Repos : sphère violet-bleu (indigo Archi) **beaucoup plus sombre**, halo très discret. */
+/* Repos : sphère **très sombre** de la couleur du robot créateur du node (var
+   --sphere-rest-glow posée inline sur le <svg> par NodeHandleSphere), halo très discret. */
 .node-handle-sphere {
   display: block;
   width: 100%;
   height: 100%;
-  filter: drop-shadow(0 0 2px rgba(99, 102, 241, 0.28));
+  filter: drop-shadow(0 0 2px var(--sphere-rest-glow, rgba(99, 102, 241, 0.28)));
   transition: transform 0.18s ease, filter 0.3s ease;
 }
 /* Survol : la sphère s'agrandit légèrement et retrouve sa luminosité. */

@@ -109,65 +109,125 @@ Glyphes supplémentaires (ton **green**, contrôles de run) : `play` = triangle 
   imports natifs à vérifier… ») n'est PAS dans le header mais **descendu sur la barre des onglets,
   collé à droite** (`ml-auto` dans le conteneur des tabs).
 
-### Note technique — poignées de connexion des nodes agent (2026-11-20)
+### Note technique — boutons « Gestion des fichiers » et cartes workflow BOS (2026-11-20)
 
-- Rendu : `NodeHandleSphere` (`components/workflow/NodeHandleSphere.tsx`), **SVG inline** rendu
-  en enfant du `<Handle>` React Flow (classe `node-handle`) ; le contrat `AGENT_NODE_HANDLES`
-  (ids/positions) est inchangé.
-- Sphère **20px**, fausse 3D : dégradé radial **violet tirant sur le bleu, sombre au repos**
-  (indigo Archi) `#818cf8 → #6366f1 → #4338ca → #1e1b4b` + reflet spéculaire blanc atténué
-  (0.55) + anneau `#a5b4fc` (0.3).
-- États (CSS `index.css`, `.react-flow__handle.node-handle …`) :
-  repos → sphère **très sombre**, halo à peine visible `2px rgba(99,102,241,.28)` ;
-  **:hover** → `scale(1.18)` + halo `8px rgba(129,140,248,.95)` (luminosité retrouvée) ;
-  **:active** (mousedown) **et** **`.connecting`** (classe posée par React Flow pendant le tracé,
-  y compris en mode clic `clickConnecting`) → `scale(1.22)` + halo fort blanc/indigo clair
-  (`12px rgba(199,210,254,1)` + `6px rgba(255,255,255,.9)`). Le `:active` garantit l'illumination
-  **dès le clic**, même si la souris ne bouge pas (RF ne pose `.connecting` qu'au 1er mousemove
-  en mode drag) ; les règles fortes sont placées après le `:hover` avec sélecteurs
-  `.connecting:hover` / `:active:hover` (spécificité supérieure) pour primer sur le survol.
-  `.valid` (cible atteinte pendant le tracé) → halo fort : la poignée cible s'allume au clic,
-  puis les deux reviennent au repos (transition 0.3 s) quand l'edge est créé.
-- Le `<Handle>` a `pointer-events: all` + `cursor: crosshair` (la feuille de style React Flow
-  met `pointer-events: none` sur `.react-flow__handle` par défaut, sauf `.connectionindicator`).
-- **Le SVG de la sphère a `pointer-events: none`** (`.node-handle-sphere, .node-handle-sphere *`) :
-  au mousedown, React Flow fait `doc.elementFromPoint(x, y)` et exige que l'élément touché porte
-  les classes `source`/`target` (posées sur le `<Handle>`) — si le `<svg>`/`<circle>` intercepte
-  le point, `getHandleType()` renvoie null et **la connexion ne démarre jamais** (pas de lasso).
-- **Lasso de connexion restauré** : `.react-flow__connectionline .react-flow__connection-path`
-  restylé en laser cyan `#22d3ee` (épaisseur 2, glow drop-shadow, tirets animés
-  `stroke-dasharray: 6 4` + keyframes), spécificité (0,2,0) pour battre la règle par défaut
-  gris `#b1b1b7` de `reactflow/dist/style.css`.
-- **Lasso du mode clic recréé par l'app** (`WorkflowCanvas.tsx`) : RF 11.11.4 avec
-  `connectOnClick=true` (défaut) ne rend **aucune** ligne en mode clic (le wrapper ne lit que
-  `connectionNodeId`, posé au drag). Le canvas trace donc lui-même le fil poignée→curseur :
-  `onClickConnectStart` mémorise le centre du handle (coord. conteneur) + `mousemove` window
-  met à jour la souris + svg overlay `.workflow-click-lasso` (bézier horizontale, laser cyan
-  animé, `index.css`). Fin : `onClickConnectEnd` (2e clic sur une poignée).
-  **Annulation** (clic ailleurs qu'une poignée) : écoute `mousedown` window en **capture**
-  (`capture: true` — le mousedown du pane est stoppé en propagation par d3-zoom avant window en
-  bubble) → clic synthétique sur la poignée de départ (que le `onClick` de RF traite comme une
-  annulation : même handle = invalide) + `setClickLasso(null)` → boule éteinte, lasso disparu.
-- Toolbar carte workflow : le bloc **RunControls (3 boutons) est placé AVANT** le texte de statut
-  « chargement / X run » (`workflow-run-status`) ; les deux blocs ont une largeur fixe
-  (`flex-shrink-0` / `w-32`), donc aucun déplacement quand l'état change.
+- **Bouton « Gestion des fichiers » identique sur les deux pages BOS** : le modèle est celui de
+  « Gérer vos workflows » (`BosWorkflowManagementPage.tsx`) — `<Button variant="outline" tone="yellow">`.
+  La page « Carte du workflow » (header passé via `RobotPageRouter.tsx` → `bosMediaHeaderAction` sur
+  `WorkflowPage`) utilise **le même** `variant="outline" tone="yellow"` (et non plus `primary`).
+- **Carte workflow (liste, `components/workflow/WorkflowCard.tsx`)** : le bouton au **jaune le plus
+  vif est celui du workflow actif**, le **jaune sombre** celui de « Sélectionner par défaut » :
+  actif = `!bg-yellow-400 !text-black hover:!bg-yellow-400 disabled:!opacity-100` + halo
+  `shadow-[0_0_12px_rgba(250,204,21,0.45)]`, `cursor-default`, disabled ; non actif =
+  `!bg-yellow-600 !text-yellow-100 hover:!bg-yellow-500`. Les `!` (important) sont nécessaires :
+  sinon les classes du `variant` (`text-gray-200`, `disabled:opacity-50`…) écrasent le className
+  selon l'ordre CSS de Tailwind — et le `disabled:opacity-50` rendait l'actif plus terne que le
+  « sélectionner » (inversion perçue). Badge « ⭐ Workflow par défaut » : texte `text-yellow-400`.
 
+### Note technique — connexions du canvas workflow : poignées, lasso et edges (2026-11-20)
 
-### Note technique — edges (liens) du canvas workflow (2026-11-20)
+Contexte : React Flow **11.11.4**, `connectionMode={ConnectionMode.Strict}`, `nodesConnectable`,
+`connectOnClick=true` (défaut), `elementsSelectable={false}` (seuls les edges sont sélectionnables,
+via `selected: true` posé par l'app).
 
-- Style de base (CSS `index.css`, `.react-flow .react-flow__edge-path`, spécificité > RF) :
-  **cyan lumineux** `#22d3ee`, épaisseur 2, léger glow `drop-shadow(0 0 4px rgba(34,211,238,.55))`.
-- **Survol** (`.react-flow__edge:hover …`) : bleu plus ardent `#38bdf8`, épaisseur 2.5,
-  glow `0 0 9px rgba(56,189,248,.95)`.
-- **Sélectionné** (clic sur l'edge → `.react-flow__edge.selected …`) : bleu encore plus clair
-  `#a5f3fc`, épaisseur 3, glow maximal (double drop-shadow blanc/cyan clair).
-- Sélection : `WorkflowCanvas.tsx` pose `selected: true` sur l'edge cliqué (`onEdgeClick` +
-  `edgesWithSelection`, mémoïsé) ; `elementsSelectable` reste `false` (les nodes ne sont pas
-  sélectionnables, on ne gère que les edges). Clic sur le pane → désélection.
-- **Suppression** : `deleteKeyCode={['Backspace', 'Delete']}` — RF supprime les éléments
-  `selected` du store via `onEdgesChange` (remove) ; `handleEdgesChange` clear alors
-  `selectedEdgeId`. Backspace dans un input/textarea reste sans effet (garde RF
-  `actInsideInputWithModifier: false`).
+#### Contrat d'interaction
+
+| Action utilisateur | Résultat attendu |
+|---|---|
+| Survol d'une poignée | sphère `scale(1.18)`, halo renforcé (luminosité retrouvée) |
+| Clic / appui sur une poignée | sphère s'illumine **immédiatement** (`:active` + `.connecting`) + **lasso** (fil) entre la poignée et le curseur |
+| Lasso actif, survol d'une poignée cible valide | la cible s'allume aussi (`.valid` / `:hover`) |
+| Clic / relâcher sur la poignée cible | edge créé ; les deux poignées reviennent au repos (transition 0.3 s) |
+| Clic / relâcher ailleurs qu'une poignée | **annulation** : boule éteinte, lasso disparu, aucune edge |
+| Survol d'un edge | bleu plus ardent + glow renforcé |
+| Clic sur un edge | edge **sélectionné** : bleu plus clair + glow maximal |
+| `Suppr` (`Delete`) ou `Backspace` avec un edge sélectionné | edge supprimé |
+
+#### Poignées (sphères lumineuses) — `components/workflow/NodeHandleSphere.tsx` + `index.css`
+
+- Rendu : **SVG inline** enfant du `<Handle className="node-handle">` dans `V2AgentNode.tsx`.
+  Contrat `AGENT_NODE_HANDLES` (`components/workflow/connectionContracts.ts`) inchangé :
+  `target-top-left` (`Position.Left`) et `source-top-right` (`Position.Right`), `style: { top: 0 }`.
+- Sphère **20px**, fausse 3D : au repos elle est **très sombre et de la couleur du robot
+  créateur du node** — prop `color` de `NodeHandleSphere` = `getRobotColor(data.robotId).primary`
+  (helper exporté de `BaseWorkflowNode.tsx` : BOS violet `#8b5cf6`, COM orange `#f97316`,
+  PHIL emerald `#10b981`, TIM amber `#f59e0b`, ARCHI cyan `#06b6d4`). Le dégradé radial est
+  calculé à partir de cette couleur en l'assombrissant (mix noir 0.35/0.6/0.85, reflet blanc
+  0.1) + reflet spéculaire 0.18 + anneau 0.18 ; halo de repos via la var CSS inline
+  `--sphere-rest-glow: rgba(couleur, 0.3)`. `useId` pour l'id du dégradé.
+- États CSS (`.react-flow__handle.node-handle …`, transition `transform .18s ease, filter .3s ease`) :
+
+  | État | Sélecteur | Rendu |
+  |---|---|---|
+  | repos | `.node-handle-sphere` | halo `drop-shadow(0 0 2px var(--sphere-rest-glow, rgba(99,102,241,.28)))` — très sombre, couleur créateur |
+  | survol | `.node-handle:hover .node-handle-sphere` | `scale(1.18)` + `drop-shadow(0 0 8px rgba(129,140,248,.95))` |
+  | clic / tracé | `:active`, `.connecting` (+ variantes `:hover`, placées APRÈS, spécificité sup.) | `scale(1.22)` + double halo `12px rgba(199,210,254,1)` + `6px rgba(255,255,255,.9)` |
+  | cible atteinte | `.valid` | `10px rgba(165,180,252,1)` + `4px rgba(255,255,255,.8)` |
+
+  Le `:active` garantit l'illumination **dès le mousedown** : en mode drag, RF ne pose
+  `.connecting` qu'au premier `mousemove` (ajout impératif dans `onPointerMove`).
+- Règles techniques indispensables (pièges RF 11.11.4) :
+  - `.react-flow__handle.node-handle { pointer-events: all; cursor: crosshair; }` — la feuille
+    RF met `pointer-events: none` sur `.react-flow__handle` par défaut (sauf `.connectionindicator`) ;
+  - `.node-handle-sphere, .node-handle-sphere * { pointer-events: none; }` — au mousedown, RF fait
+    `doc.elementFromPoint(x, y)` et exige que l'élément touché porte `source`/`target` (posés sur le
+    `<Handle>`) ; si le `<svg>`/`<circle>` intercepte le point, `getHandleType()` renvoie `null` et
+    **la connexion ne démarre jamais** (aucun lasso).
+
+#### Lasso (fil poignée → curseur)
+
+- **Mode drag** : lasso natif RF restylé — `.react-flow__connectionline .react-flow__connection-path`
+  = laser cyan `#22d3ee`, épaisseur 2, `stroke-dasharray: 6 4` animé (keyframes
+  `node-handle-lasso-dash`), glow `drop-shadow(0 0 6px rgba(34,211,238,.9))`, spécificité (0,2,0)
+  pour battre la règle par défaut gris `#b1b1b7` de `reactflow/dist/style.css`.
+  `.react-flow__connectionline { z-index: 1001; pointer-events: none; }`.
+- **Mode clic** (`connectOnClick=true`) : RF 11.11.4 ne rend **aucune** ligne dans ce mode
+  (`ConnectionLineWrapper` ne lit que `connectionNodeId`, posé uniquement au drag) → le lasso est
+  **recréé par l'app** dans `components/WorkflowCanvas.tsx` :
+  `onClickConnectStart` mémorise le centre du handle (coordonnées relatives à `canvasRootRef`),
+  un `mousemove` window met à jour le curseur, et le fil est rendu dans un **svg overlay sibling
+  de `<ReactFlow>`** : `.workflow-click-lasso` (absolute inset-0, `pointer-events:none`,
+  `z-index:1002`) + `.workflow-click-lasso-path` (bézier horizontale orientée selon `handleType`
+  source/target, même style laser cyan animé, `index.css`). Fin via `onClickConnectEnd`.
+- **Annulation** (clic hors poignée) : écoute `mousedown` sur `window` en **capture**
+  (`capture: true` — le mousedown du pane est stoppé en propagation par d3-zoom/RF avant d'atteindre
+  window en phase bubble) → clic synthétique (`dispatchEvent(new MouseEvent('click', {bubbles:true}))`)
+  sur la poignée de départ : le `onClick` de RF, avec `connectionClickStartHandle` set et la même
+  poignée, calcule `isValidHandle` = false → annulation propre (`connectionClickStartHandle` cleared
+  + `onClickConnectEnd`) ; l'app fait aussi `setClickLasso(null)` → boule éteinte, lasso disparu.
+
+#### Edges (liens établis entre nodes)
+
+- CSS `index.css`, `.react-flow .react-flow__edge-path` (spécificité (0,2,0)+ > RF),
+  transition `stroke / stroke-width / filter .15s ease` :
+
+  | État | Sélecteur | Couleur | Épaisseur | Glow |
+  |---|---|---|---|---|
+  | repos | `.react-flow .react-flow__edge-path` | `#22d3ee` | 2 | `0 0 4px rgba(34,211,238,.55)` |
+  | survol | `.react-flow__edge:hover .react-flow__edge-path` | `#38bdf8` | 2.5 | `0 0 9px rgba(56,189,248,.95)` |
+  | sélectionné | `.react-flow__edge.selected .react-flow__edge-path` | `#a5f3fc` | 3 | `0 0 14px rgba(165,243,252,1)` + `0 0 5px rgba(255,255,255,.9)` |
+
+- Sélection : `WorkflowCanvas.tsx` — `onEdgeClick` → `setSelectedEdgeId(edge.id)` ;
+  `edgesWithSelection` (`useMemo` sur `[edges, selectedEdgeId]`) pose `selected: true` sur l'edge ;
+  `handlePaneClick` → `setSelectedEdgeId(null)` (désélection au clic pane).
+- Suppression : `deleteKeyCode={['Backspace', 'Delete']}` sur `<ReactFlow>` — le handler global de
+  RF supprime les éléments `selected` du store via `onEdgesChange` (change `remove`) ;
+  `handleEdgesChange` (wrapper de `onEdgesChange`) clear `selectedEdgeId` quand l'edge est removed.
+  Backspace dans un input/textarea reste sans effet (garde RF `actInsideInputWithModifier: false`).
+
+#### Note associée — toolbar de la carte workflow
+
+- Le bloc **RunControls (3 boutons) est placé AVANT** le texte de statut « chargement / X run »
+  (`workflow-run-status`) ; les deux blocs ont une largeur fixe (`flex-shrink-0` / `w-32`),
+  donc aucun déplacement quand l'état du workflow change.
+
+#### Note associée — fenêtre agrandie d'un node agent (FullscreenChatModal)
+
+- Le bouton **« Supprimer l'agent {agentName} »** (haut droite de la fenêtre agrandie,
+  `FullscreenChatModal.tsx`) est **retiré** (recommandation utilisateur : risque d'erreur ;
+  la suppression se fait depuis le node sur la carte). Le modal de confirmation et le handler
+  restent en place mais ne sont plus déclenchés depuis le header.
+
 ### Note technique — modale « Media du workflow » (BosMediaModal, 2026-11-20)
 
 - Modale **plus large** : `max-w-7xl` (au lieu de `max-w-5xl`), toutes les colonnes tiennent dans

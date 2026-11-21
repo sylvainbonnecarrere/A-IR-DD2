@@ -27,7 +27,7 @@ interface BaseWorkflowNodeProps extends NodeProps {
   data: BaseWorkflowNodeData;
 }
 
-const getRobotColor = (robotId: RobotId): { primary: string; secondary: string; accent: string } => {
+export const getRobotColor = (robotId: RobotId): { primary: string; secondary: string; accent: string } => {
   switch (robotId) {
     case RobotId.Archi:
       return { primary: '#06b6d4', secondary: '#0891b2', accent: '#67e8f9' }; // Cyan
