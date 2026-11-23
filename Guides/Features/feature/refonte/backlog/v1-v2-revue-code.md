@@ -131,6 +131,27 @@ Les réserves R1–R4 sont découpées en **trois US à agent unique**, exécut�
 **Impacts codebase et tests :** `services/*`, `hooks/*`, `components/com/*`, `stores/*`, `tests/*` ; `hygiene:update-baseline` après chaque lot.
 **Critères d'acceptation :** `tsc` 0, tests des modules OK, compteur `anyFrontend` en baisse stricte à chaque lot, ratchet OK.
 
+**État d'avancement (2026-11-23, agent `06-frontend`, branche `main`) : TERMINÉE — `anyFrontend` 376 → 0, 14 lots committés, un commit par lot.**
+
+| Lot | Commit | anyFrontend | Fichiers | Contenu |
+|---|---|---|---|---|
+| 1 | `20cf16e` | 376 → 361 | `utils/apiClient.ts`, `types.ts`, `services/agentContractAdapters.ts`, `services/geminiService.ts` | contrats axios (`AxiosRequestConfig`, data `unknown`), `JsonSchema` exporté, DTO Tool/links/tasks |
+| 2 | `1b09687` | 361 → 341 | `services/persistenceService.ts`, `services/templateAPI.ts` | payloads localStorage typés (`PersistedAgentInstancePayload`), DTO templates |
+| 3 | `600e2ce` | 341 → 337 | `services/webSocketService.ts` | `EventCallback = (...args: unknown[]) => void` |
+| 4 | `df7194d` | 337 → 325 | `components/com/jsonTreeUtils.ts` (créé), `ResultExtractor/ResultViewer/DatabaseExplorer` | `JsonValueType` + type-guards |
+| 5 | `d6d0e7e` | 325 → 303 | stores `useFunctionStore/useDesignStore/useRobotManagementStore/useRuntimeStore` | `catch (err: unknown)` + helpers, typages store |
+| 6 | `7e80538` | 303 → 265 | `services/llm/providerApi.types.ts` (créé) + 9 providers | contrats payloads LLM communs |
+| 7 | `5505039` | 265 → 247 | 14 fichiers (bootstrap, AdapterFactory, 4× apiRequest, persistedChatMessages, AuthContext, hooks…) | frontières workspace/apiRequest |
+| 8 | `bc17b2a` | 247 → 221 | 10 composants (WorkflowCanvas, V2AgentNode, JsonTreeViewer, modales…) | handlers React Flow typés (`NodeChange[]`, `OnConnectStartParams`), props `unknown` |
+| 9 | `e1589b3` | 221 → 186 (source = 0) | 21 fichiers services/hooks/modales | `apiRequest<T>` `Promise<T>`, `WorkspaceSnapshot` typé, catch `unknown` + guards |
+| 10 | `fd0810e` | 186 → 102 | 5 gros tests (App.workspaceHydration 46 any, minimize-restore, useFunctionStore, J4.2, WorkflowPersistence.TNR) | mocks lâches `jest.Mock`, fixtures typées |
+| 11 | `ac920f4` | 102 → 71 | 5 tests (drag-collision, workspacePersistenceService, agentloop, bosRunProjection, AgentLoop) | `as unknown as typeof fetch`, fixtures complétées |
+| 12 | `415766e` | 71 → 39 | 6 tests (hydration.integration, J4.4, SettingsModal.TNR, toolRepository, web-search-params, HyperspaceReveal) | props composants mockés typées, `typeof import()` |
+| 13 | `12932c2` | 39 → 18 | 9 petits tests + `tests/utils/builders/WorkflowNodeBuilder.ts` | `RobotId.Archi` enum, catch structurés |
+| 14 | `3bf8aff` | 18 → **0** | 8 derniers tests + 2 commentaires | `Page` playwright, `PendingNodeAttachment` complet, commentaires sans motif compté |
+
+**Validation par lot :** `npx tsc --noEmit` 0 erreur, `npx eslint . --quiet` 0, `node scripts/ci/hygiene-ratchet.mjs` exit 0 (baisse stricte), `prettier --write` + `GITHUB_BASE_REF=main npm run format:changed` exit 0, suites jest des modules touchés vertes, `npm run audit:workflow-architecture:strict` OK. **Validation finale :** `npm test -- --runInBand` (en cours à la rédaction de cette ligne). **Baseline :** `npm run hygiene:update-baseline` exécuté après la baisse constatée (376 → 0). Aucun test affaibli ; une attente corrigée (`workflowNodeReactFlowAdapter` : `robotId: 'archi'` → `RobotId.Archi`, l'adaptateur passe la valeur through) documentée dans le commit du lot 14.
+
 ### US-RC-03 — Campagne `any` backend par boundaries (depuis US-HYG-03)
 
 **Agent responsable :** `03-backend.agent.md`
