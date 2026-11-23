@@ -17,10 +17,7 @@ export const buildWorkflowOwnershipResolver = (workflowRepository: IWorkflowRepo
   };
 };
 
-export const resolveWorkflowOwnership = (
-  workflowRepository: IWorkflowRepository,
-  req: Request,
-): Promise<string | null> => {
+export const resolveWorkflowOwnership = (workflowRepository: IWorkflowRepository, req: Request): Promise<string | null> => {
   const user = req.user as IUser | undefined;
   const userId = user?._id?.toString() ?? user?.id;
   return buildWorkflowOwnershipResolver(workflowRepository)(req.params.id, userId);

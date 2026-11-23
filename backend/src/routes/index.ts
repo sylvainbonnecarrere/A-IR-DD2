@@ -1,6 +1,6 @@
 /**
  * @fileoverview Index des routes API - Export centralisé
- * 
+ *
  * Organisation des routes :
  * - Routes V1 (Legacy) : agent-instances, workflows (ancienne architecture)
  * - Routes V2 (Nouvelle) : instances, workflows/v2/* (architecture Instance/Journal)

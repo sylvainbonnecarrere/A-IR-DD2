@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
-import { AgentPrototype } from '../models/AgentPrototype.model';
+import { AgentPrototype, type IAgentPrototype } from '../models/AgentPrototype.model';
 import { AgentInstance } from '../models/AgentInstance.model';
 import { WorkflowNodeV2 } from '../models/WorkflowNodeV2.model';
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
@@ -10,22 +10,29 @@ import { formatZodValidationDetails, validateRequest } from '../middleware/valid
 import { IUser } from '../models/User.model';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
 import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
-import { extractPersistenceConfigValue, normalizePersistenceConfigForPersistence, normalizePersistenceConfigForProduct } from '../types/persistence';
+import {
+  extractPersistenceConfigValue,
+  normalizePersistenceConfigForPersistence,
+  normalizePersistenceConfigForProduct,
+} from '../types/persistence';
 
 import { RecoveryPolicySchema } from '../domain/execution/recoveryPolicy.contract';
 
 const router = Router();
 
 const toolSelectionSchema = z.object({
-    toolId: z.string(),
-    versionRef: z.object({
-        versionTag: z.string().optional(),
-        versionNumber: z.number().optional(),
-        workspaceId: z.string().nullable().optional()
-    }).optional()
+  toolId: z.string(),
+  versionRef: z
+    .object({
+      versionTag: z.string().optional(),
+      versionNumber: z.number().optional(),
+      workspaceId: z.string().nullable().optional(),
+    })
+    .optional(),
 });
 
-const persistenceConfigSchema = z.object({
+const persistenceConfigSchema = z
+  .object({
     saveChat: z.boolean().optional(),
     saveChatHistory: z.boolean().optional(),
     saveErrors: z.boolean().optional(),
@@ -38,363 +45,395 @@ const persistenceConfigSchema = z.object({
     mediaStorage: z.enum(['db', 'local', 'workspace', 'cloud']).optional(),
     cloudConnectionProfileId: z.string().optional(),
     retentionDays: z.number().int().positive().optional(),
-}).strict().optional();
+  })
+  .strict()
+  .optional();
 
-function buildPrototypeResponse(prototype: any): Record<string, any> {
-    const responseObj: Record<string, any> = prototype.toObject();
-    responseObj.functionIds = (prototype.tools || []).map((id: any) => id.toString());
-    responseObj.toolSelections = prototype.toolSelections || responseObj.functionIds.map((toolId: string) => ({ toolId }));
-    responseObj.tools = Array.isArray(prototype.legacyTools) ? prototype.legacyTools : [];
-    const rawPersistenceConfig = extractPersistenceConfigValue(prototype.persistenceConfig);
-    responseObj.persistenceConfig = normalizePersistenceConfigForProduct(rawPersistenceConfig);
+function buildPrototypeResponse(prototype: IAgentPrototype): Record<string, unknown> {
+  const responseObj: Record<string, any> = prototype.toObject();
+  responseObj.functionIds = (prototype.tools || []).map((id) => id.toString());
+  responseObj.toolSelections = prototype.toolSelections || responseObj.functionIds.map((toolId: string) => ({ toolId }));
+  responseObj.tools = Array.isArray(prototype.legacyTools) ? prototype.legacyTools : [];
+  const rawPersistenceConfig = extractPersistenceConfigValue(prototype.persistenceConfig);
+  responseObj.persistenceConfig = normalizePersistenceConfigForProduct(rawPersistenceConfig);
 
-    return responseObj;
+  return responseObj;
 }
 
 // Schema validation
 // ⭐ J4.5: Robot IDs must match frontend RobotId enum in types.ts
 // ⭐ J4.5: Allow empty strings for role/systemPrompt to match frontend flexibility
 const createAgentPrototypeSchema = z.object({
-    name: z.string().min(1).max(100),
-    role: z.string().max(200).default(''),
-    systemPrompt: z.string().default(''),
-    llmProvider: z.string(),
-    llmModel: z.string(),
-    capabilities: z.array(z.string()).default([]),
-    historyConfig: z.object({}).passthrough().optional(),
-    webSearchParams: WebSearchParamsSchema.optional(),
-    tools: z.array(z.object({}).passthrough()).optional(),       // legacy (rétrocompat)
-    functionIds: z.array(z.string()).optional(),                 // V2 — ids stables de tools, alias frontend vers user_tools
-    toolSelections: z.array(toolSelectionSchema).optional(),     // V2 cible — refs versionnées
-    outputConfig: z.object({}).passthrough().optional(),
-    persistenceConfig: persistenceConfigSchema,
-    robotId: CanonicalRobotIdEnum,
-    workflowId: z.string().optional(), // ⭐ V2: Optional workflow scope
-    localLLMProfileId: z.string().optional(), // ⭐ NEW: Optional local LLM profile reference
-    recoveryPolicy: RecoveryPolicySchema.optional() // ⭐ J7-08: politique de récupération (défaut off), snapshotée sur l'instance
+  name: z.string().min(1).max(100),
+  role: z.string().max(200).default(''),
+  systemPrompt: z.string().default(''),
+  llmProvider: z.string(),
+  llmModel: z.string(),
+  capabilities: z.array(z.string()).default([]),
+  historyConfig: z.object({}).passthrough().optional(),
+  webSearchParams: WebSearchParamsSchema.optional(),
+  tools: z.array(z.object({}).passthrough()).optional(), // legacy (rétrocompat)
+  functionIds: z.array(z.string()).optional(), // V2 — ids stables de tools, alias frontend vers user_tools
+  toolSelections: z.array(toolSelectionSchema).optional(), // V2 cible — refs versionnées
+  outputConfig: z.object({}).passthrough().optional(),
+  persistenceConfig: persistenceConfigSchema,
+  robotId: CanonicalRobotIdEnum,
+  workflowId: z.string().optional(), // ⭐ V2: Optional workflow scope
+  localLLMProfileId: z.string().optional(), // ⭐ NEW: Optional local LLM profile reference
+  recoveryPolicy: RecoveryPolicySchema.optional(), // ⭐ J7-08: politique de récupération (défaut off), snapshotée sur l'instance
 });
 
 const updateAgentPrototypeSchema = createAgentPrototypeSchema.partial();
 
 // ⭐ SECURITY: Query parameter validation schemas
 const queryParamsSchema = z.object({
-    robotId: CanonicalRobotIdEnum.optional(),
-    workflowId: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid ObjectId format').optional()
+  robotId: CanonicalRobotIdEnum.optional(),
+  workflowId: z
+    .string()
+    .regex(/^[a-f\d]{24}$/i, 'Invalid ObjectId format')
+    .optional(),
 });
 
 const prototypeImpactQuerySchema = z.object({
-    workflowId: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid ObjectId format').optional()
+  workflowId: z
+    .string()
+    .regex(/^[a-f\d]{24}$/i, 'Invalid ObjectId format')
+    .optional(),
 });
 
 // GET /api/agent-prototypes - Liste des prototypes (filtrés par workflow si workflowId fourni)
 router.get('/', requireAuth, async (req, res) => {
-    try {
-        const user = req.user as IUser;
-        
-        // ⭐ SECURITY: Validate and sanitize query params
-        const queryValidation = queryParamsSchema.safeParse(req.query);
-        if (!queryValidation.success) {
-            return res.status(400).json({ error: 'Invalid query parameters', details: queryValidation.error.issues });
-        }
-        
-        const { robotId, workflowId } = queryValidation.data;
+  try {
+    const user = req.user as IUser;
 
-        const query: { userId: string; robotId?: string; workflowId?: string } = { userId: user.id };
-        if (robotId) {
-            query.robotId = robotId;
-        }
-        // ⭐ V2: Filter by workflowId if provided
-        if (workflowId) {
-            query.workflowId = workflowId;
-        }
-
-        const prototypes = await AgentPrototype.find(query).sort({ createdAt: -1 });
-        res.json(prototypes.map(buildPrototypeResponse));
-    } catch (error) {
-        console.error('[AgentPrototypes] GET error:', error);
-        res.status(500).json({ error: 'Erreur récupération prototypes' });
+    // ⭐ SECURITY: Validate and sanitize query params
+    const queryValidation = queryParamsSchema.safeParse(req.query);
+    if (!queryValidation.success) {
+      return res.status(400).json({ error: 'Invalid query parameters', details: queryValidation.error.issues });
     }
+
+    const { robotId, workflowId } = queryValidation.data;
+
+    const query: { userId: string; robotId?: string; workflowId?: string } = { userId: user.id };
+    if (robotId) {
+      query.robotId = robotId;
+    }
+    // ⭐ V2: Filter by workflowId if provided
+    if (workflowId) {
+      query.workflowId = workflowId;
+    }
+
+    const prototypes = await AgentPrototype.find(query).sort({ createdAt: -1 });
+    res.json(prototypes.map(buildPrototypeResponse));
+  } catch (error) {
+    console.error('[AgentPrototypes] GET error:', error);
+    res.status(500).json({ error: 'Erreur récupération prototypes' });
+  }
 });
 
 // GET /api/agent-prototypes/:id - Prototype spécifique
-router.get('/:id',
-    requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const prototype = await AgentPrototype.findById(req.params.id);
-        return prototype ? prototype.userId.toString() : null;
-    }),
-    async (req, res) => {
-        try {
-            const prototype = await AgentPrototype.findById(req.params.id);
+router.get(
+  '/:id',
+  requireAuth,
+  requireOwnershipAsync(async (req) => {
+    const prototype = await AgentPrototype.findById(req.params.id);
+    return prototype ? prototype.userId.toString() : null;
+  }),
+  async (req, res) => {
+    try {
+      const prototype = await AgentPrototype.findById(req.params.id);
 
-            if (!prototype) {
-                return res.status(404).json({ error: 'Prototype introuvable' });
-            }
+      if (!prototype) {
+        return res.status(404).json({ error: 'Prototype introuvable' });
+      }
 
-            res.json(buildPrototypeResponse(prototype));
-        } catch (error) {
-            console.error('[AgentPrototypes] GET/:id error:', error);
-            res.status(500).json({ error: 'Erreur récupération prototype' });
-        }
+      res.json(buildPrototypeResponse(prototype));
+    } catch (error) {
+      console.error('[AgentPrototypes] GET/:id error:', error);
+      res.status(500).json({ error: 'Erreur récupération prototype' });
     }
+  },
 );
 
-router.get('/:id/impact',
-    requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const prototype = await AgentPrototype.findById(req.params.id);
-        return prototype ? prototype.userId.toString() : null;
-    }),
-    async (req, res) => {
-        try {
-            const user = req.user as IUser;
+router.get(
+  '/:id/impact',
+  requireAuth,
+  requireOwnershipAsync(async (req) => {
+    const prototype = await AgentPrototype.findById(req.params.id);
+    return prototype ? prototype.userId.toString() : null;
+  }),
+  async (req, res) => {
+    try {
+      const user = req.user as IUser;
 
-            const queryValidation = prototypeImpactQuerySchema.safeParse(req.query);
-            if (!queryValidation.success) {
-                return res.status(400).json({ error: 'Invalid query parameters', details: queryValidation.error.issues });
-            }
+      const queryValidation = prototypeImpactQuerySchema.safeParse(req.query);
+      if (!queryValidation.success) {
+        return res.status(400).json({ error: 'Invalid query parameters', details: queryValidation.error.issues });
+      }
 
-            const prototype = await AgentPrototype.findOne({ _id: req.params.id, userId: user.id }).select('_id workflowId');
-            if (!prototype) {
-                return res.status(404).json({ error: 'Prototype introuvable' });
-            }
+      const prototype = await AgentPrototype.findOne({ _id: req.params.id, userId: user.id }).select('_id workflowId');
+      if (!prototype) {
+        return res.status(404).json({ error: 'Prototype introuvable' });
+      }
 
-            const scopedWorkflowId = queryValidation.data.workflowId ?? prototype.workflowId?.toString();
-            const instanceQuery: Record<string, unknown> = {
-                userId: user.id,
-                prototypeId: prototype._id,
-            };
+      const scopedWorkflowId = queryValidation.data.workflowId ?? prototype.workflowId?.toString();
+      const instanceQuery: Record<string, unknown> = {
+        userId: user.id,
+        prototypeId: prototype._id,
+      };
 
-            if (scopedWorkflowId) {
-                instanceQuery.workflowId = scopedWorkflowId;
-            }
+      if (scopedWorkflowId) {
+        instanceQuery.workflowId = scopedWorkflowId;
+      }
 
-            const instances = await AgentInstance.find(instanceQuery)
-                .select('_id name position workflowId prototypeId')
-                .lean<Array<{
-                    _id: mongoose.Types.ObjectId;
-                    name: string;
-                    position: { x: number; y: number };
-                }>>();
+      const instances = await AgentInstance.find(instanceQuery).select('_id name position workflowId prototypeId').lean<
+        Array<{
+          _id: mongoose.Types.ObjectId;
+          name: string;
+          position: { x: number; y: number };
+        }>
+      >();
 
-            const instanceIds = instances.map((instance) => instance._id);
-            let nodes: Array<{ _id: mongoose.Types.ObjectId; instanceId?: mongoose.Types.ObjectId }> = [];
+      const instanceIds = instances.map((instance) => instance._id);
+      let nodes: Array<{ _id: mongoose.Types.ObjectId; instanceId?: mongoose.Types.ObjectId }> = [];
 
-            if (instanceIds.length > 0) {
-                const nodeQuery: Record<string, unknown> = {
-                    ownerId: user.id,
-                    nodeType: 'agent',
-                    instanceId: { $in: instanceIds },
-                };
+      if (instanceIds.length > 0) {
+        const nodeQuery: Record<string, unknown> = {
+          ownerId: user.id,
+          nodeType: 'agent',
+          instanceId: { $in: instanceIds },
+        };
 
-                if (scopedWorkflowId) {
-                    nodeQuery.workflowId = scopedWorkflowId;
-                }
-
-                nodes = await WorkflowNodeV2.find(nodeQuery)
-                    .select('_id instanceId')
-                    .lean<Array<{ _id: mongoose.Types.ObjectId; instanceId?: mongoose.Types.ObjectId }>>();
-            }
-
-            const liveInstanceIds = new Set(
-                nodes
-                    .map((node) => node.instanceId?.toString())
-                    .filter((instanceId): instanceId is string => typeof instanceId === 'string' && instanceId.length > 0)
-            );
-
-            const liveInstances = instances.filter((instance) => liveInstanceIds.has(instance._id.toString()));
-
-            res.json({
-                instanceCount: liveInstances.length,
-                nodeCount: nodes.length,
-                instances: liveInstances.map((instance) => ({
-                    id: instance._id.toString(),
-                    name: instance.name,
-                    position: {
-                        x: instance.position.x,
-                        y: instance.position.y,
-                    },
-                })),
-                nodeIds: nodes.map((node) => node._id.toString()),
-            });
-        } catch (error) {
-            console.error('[AgentPrototypes] GET/:id/impact error:', error);
-            res.status(500).json({ error: 'Erreur calcul impact prototype' });
+        if (scopedWorkflowId) {
+          nodeQuery.workflowId = scopedWorkflowId;
         }
+
+        nodes = await WorkflowNodeV2.find(nodeQuery)
+          .select('_id instanceId')
+          .lean<Array<{ _id: mongoose.Types.ObjectId; instanceId?: mongoose.Types.ObjectId }>>();
+      }
+
+      const liveInstanceIds = new Set(
+        nodes
+          .map((node) => node.instanceId?.toString())
+          .filter((instanceId): instanceId is string => typeof instanceId === 'string' && instanceId.length > 0),
+      );
+
+      const liveInstances = instances.filter((instance) => liveInstanceIds.has(instance._id.toString()));
+
+      res.json({
+        instanceCount: liveInstances.length,
+        nodeCount: nodes.length,
+        instances: liveInstances.map((instance) => ({
+          id: instance._id.toString(),
+          name: instance.name,
+          position: {
+            x: instance.position.x,
+            y: instance.position.y,
+          },
+        })),
+        nodeIds: nodes.map((node) => node._id.toString()),
+      });
+    } catch (error) {
+      console.error('[AgentPrototypes] GET/:id/impact error:', error);
+      res.status(500).json({ error: 'Erreur calcul impact prototype' });
     }
+  },
 );
 
 // POST /api/agent-prototypes - Créer prototype (gouvernance minimale : ownership-based)
-router.post('/',
-    requireAuth,
-    validateRequest(createAgentPrototypeSchema),
-    requireRobotGovernance({
-        governedType: 'agent',
-        operation: 'create',
-        resolveTargetRobotId: (req) => req.body?.robotId
-    }),
-    async (req, res) => {
-        try {
-            const user = req.user as IUser;
+router.post(
+  '/',
+  requireAuth,
+  validateRequest(createAgentPrototypeSchema),
+  requireRobotGovernance({
+    governedType: 'agent',
+    operation: 'create',
+    resolveTargetRobotId: (req) => req.body?.robotId,
+  }),
+  async (req, res) => {
+    try {
+      const user = req.user as IUser;
 
-            // C3 FIX: Extraire functionIds et mapper vers tools (ObjectId[])
-            const { functionIds, toolSelections, tools, webSearchParams, persistenceConfig, ...rest } = req.body;
-            const prototypeData: Record<string, any> = { userId: user.id, ...rest };
-            if (webSearchParams !== undefined) {
-                prototypeData.webSearchParams = parseWebSearchParams(webSearchParams);
-            }
-            if (persistenceConfig !== undefined) {
-                prototypeData.persistenceConfig = normalizePersistenceConfigForPersistence(persistenceConfig);
-            }
-            const canonicalFunctionIds = Array.isArray(functionIds) && functionIds.length > 0
-                ? functionIds
-                : Array.isArray(toolSelections)
-                    ? toolSelections.map((selection: { toolId: string }) => selection.toolId).filter(Boolean)
-                    : [];
+      // C3 FIX: Extraire functionIds et mapper vers tools (ObjectId[])
+      const { functionIds, toolSelections, tools, webSearchParams, persistenceConfig, ...rest } = req.body;
+      const prototypeData: Record<string, any> = { userId: user.id, ...rest };
+      if (webSearchParams !== undefined) {
+        prototypeData.webSearchParams = parseWebSearchParams(webSearchParams);
+      }
+      if (persistenceConfig !== undefined) {
+        prototypeData.persistenceConfig = normalizePersistenceConfigForPersistence(persistenceConfig);
+      }
+      const canonicalFunctionIds =
+        Array.isArray(functionIds) && functionIds.length > 0
+          ? functionIds
+          : Array.isArray(toolSelections)
+            ? toolSelections.map((selection: { toolId: string }) => selection.toolId).filter(Boolean)
+            : [];
 
-            // V2: functionIds transporte des ids stables de tools compatibles legacy/cible
-            if (canonicalFunctionIds.length > 0) {
-                prototypeData.tools = canonicalFunctionIds.map((id: string) => new mongoose.Types.ObjectId(id));
-                prototypeData.toolSelections = Array.isArray(toolSelections) && toolSelections.length > 0
-                    ? toolSelections
-                    : canonicalFunctionIds.map((toolId: string) => ({ toolId }));
-            } else if (!functionIds && !toolSelections && tools && Array.isArray(tools)) {
-                // Rétrocompat: si tools contient des objets legacy (non-ObjectId), les mettre en legacyTools
-                prototypeData.legacyTools = tools;
-            }
+      // V2: functionIds transporte des ids stables de tools compatibles legacy/cible
+      if (canonicalFunctionIds.length > 0) {
+        prototypeData.tools = canonicalFunctionIds.map((id: string) => new mongoose.Types.ObjectId(id));
+        prototypeData.toolSelections =
+          Array.isArray(toolSelections) && toolSelections.length > 0
+            ? toolSelections
+            : canonicalFunctionIds.map((toolId: string) => ({ toolId }));
+      } else if (!functionIds && !toolSelections && tools && Array.isArray(tools)) {
+        // Rétrocompat: si tools contient des objets legacy (non-ObjectId), les mettre en legacyTools
+        prototypeData.legacyTools = tools;
+      }
 
-            const prototype = new AgentPrototype(prototypeData);
+      const prototype = new AgentPrototype(prototypeData);
 
-            await prototype.save();
+      await prototype.save();
 
-            // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
-            res.status(201).json(buildPrototypeResponse(prototype));
-        } catch (error) {
-            console.error('[AgentPrototypes] POST error:', error);
-            if (error instanceof z.ZodError) {
-                return res.status(400).json({
-                    error: 'Validation échouée',
-                    details: formatZodValidationDetails(error),
-                });
-            }
-            res.status(500).json({ error: 'Erreur création prototype' });
-        }
+      // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
+      res.status(201).json(buildPrototypeResponse(prototype));
+    } catch (error) {
+      console.error('[AgentPrototypes] POST error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Validation échouée',
+          details: formatZodValidationDetails(error),
+        });
+      }
+      res.status(500).json({ error: 'Erreur création prototype' });
     }
+  },
 );
 
 // PUT /api/agent-prototypes/:id - Mettre à jour prototype
-router.put('/:id',
-    requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const prototype = await AgentPrototype.findById(req.params.id);
-        return prototype ? prototype.userId.toString() : null;
-    }),
-    validateRequest(updateAgentPrototypeSchema),
-    requireRobotGovernance({
-        governedType: 'agent',
-        operation: 'modify',
-        resolveTargetRobotId: async (req) => {
-            if (typeof req.body?.robotId === 'string') {
-                return req.body.robotId;
-            }
+router.put(
+  '/:id',
+  requireAuth,
+  requireOwnershipAsync(async (req) => {
+    const prototype = await AgentPrototype.findById(req.params.id);
+    return prototype ? prototype.userId.toString() : null;
+  }),
+  validateRequest(updateAgentPrototypeSchema),
+  requireRobotGovernance({
+    governedType: 'agent',
+    operation: 'modify',
+    resolveTargetRobotId: async (req) => {
+      if (typeof req.body?.robotId === 'string') {
+        return req.body.robotId;
+      }
 
-            const prototype = await AgentPrototype.findById(req.params.id).select('robotId');
-            return prototype?.robotId;
-        }
-    }),
-    async (req, res) => {
-        try {
-            const user = req.user as IUser;
-            const prototype = await AgentPrototype.findOne({ _id: req.params.id, userId: user.id });
+      const prototype = await AgentPrototype.findById(req.params.id).select('robotId');
+      return prototype?.robotId;
+    },
+  }),
+  async (req, res) => {
+    try {
+      const user = req.user as IUser;
+      const prototype = await AgentPrototype.findOne({ _id: req.params.id, userId: user.id });
 
-            if (!prototype) {
-                return res.status(404).json({ error: 'Prototype introuvable' });
-            }
+      if (!prototype) {
+        return res.status(404).json({ error: 'Prototype introuvable' });
+      }
 
-            // ⭐ SECURITY FIX: Whitelist allowed fields to prevent mass assignment
-            const { name, role, systemPrompt, llmProvider, llmModel, capabilities, historyConfig, webSearchParams, tools, functionIds, toolSelections, outputConfig, persistenceConfig, robotId, workflowId, localLLMProfileId } = req.body;
+      // ⭐ SECURITY FIX: Whitelist allowed fields to prevent mass assignment
+      const {
+        name,
+        role,
+        systemPrompt,
+        llmProvider,
+        llmModel,
+        capabilities,
+        historyConfig,
+        webSearchParams,
+        tools,
+        functionIds,
+        toolSelections,
+        outputConfig,
+        persistenceConfig,
+        robotId,
+        workflowId,
+        localLLMProfileId,
+      } = req.body;
 
-            // Update only whitelisted fields (userId never modifiable)
-            if (name !== undefined) prototype.name = name;
-            if (role !== undefined) prototype.role = role;
-            if (systemPrompt !== undefined) prototype.systemPrompt = systemPrompt;
-            if (llmProvider !== undefined) prototype.llmProvider = llmProvider;
-            if (llmModel !== undefined) prototype.llmModel = llmModel;
-            if (capabilities !== undefined) prototype.capabilities = capabilities;
-            if (historyConfig !== undefined) prototype.historyConfig = historyConfig;
-            if (webSearchParams !== undefined) prototype.webSearchParams = parseWebSearchParams(webSearchParams);
-            // C3 FIX: functionIds (V2) prend la priorité sur tools (legacy) et reste l'alias frontend canonique
-            if (functionIds !== undefined || toolSelections !== undefined) {
-                const canonicalFunctionIds = Array.isArray(functionIds)
-                    ? functionIds
-                    : Array.isArray(toolSelections)
-                        ? toolSelections.map((selection: { toolId: string }) => selection.toolId).filter(Boolean)
-                        : [];
+      // Update only whitelisted fields (userId never modifiable)
+      if (name !== undefined) prototype.name = name;
+      if (role !== undefined) prototype.role = role;
+      if (systemPrompt !== undefined) prototype.systemPrompt = systemPrompt;
+      if (llmProvider !== undefined) prototype.llmProvider = llmProvider;
+      if (llmModel !== undefined) prototype.llmModel = llmModel;
+      if (capabilities !== undefined) prototype.capabilities = capabilities;
+      if (historyConfig !== undefined) prototype.historyConfig = historyConfig;
+      if (webSearchParams !== undefined) prototype.webSearchParams = parseWebSearchParams(webSearchParams);
+      // C3 FIX: functionIds (V2) prend la priorité sur tools (legacy) et reste l'alias frontend canonique
+      if (functionIds !== undefined || toolSelections !== undefined) {
+        const canonicalFunctionIds = Array.isArray(functionIds)
+          ? functionIds
+          : Array.isArray(toolSelections)
+            ? toolSelections.map((selection: { toolId: string }) => selection.toolId).filter(Boolean)
+            : [];
 
-                prototype.tools = canonicalFunctionIds.map((id: string) => new mongoose.Types.ObjectId(id));
-                prototype.toolSelections = Array.isArray(toolSelections)
-                    ? toolSelections
-                    : canonicalFunctionIds.map((toolId: string) => ({ toolId }));
-            } else if (tools !== undefined) {
-                // Rétrocompat: stocker en legacyTools si ce sont des objets (pas des ObjectId strings)
-                prototype.legacyTools = tools;
-            }
-            if (outputConfig !== undefined) prototype.outputConfig = outputConfig;
-            if (persistenceConfig !== undefined) prototype.persistenceConfig = normalizePersistenceConfigForPersistence(persistenceConfig);
-            if (robotId !== undefined) prototype.robotId = robotId;
-            if (workflowId !== undefined) prototype.workflowId = workflowId;
-            if (localLLMProfileId !== undefined) prototype.localLLMProfileId = localLLMProfileId;
+        prototype.tools = canonicalFunctionIds.map((id: string) => new mongoose.Types.ObjectId(id));
+        prototype.toolSelections = Array.isArray(toolSelections)
+          ? toolSelections
+          : canonicalFunctionIds.map((toolId: string) => ({ toolId }));
+      } else if (tools !== undefined) {
+        // Rétrocompat: stocker en legacyTools si ce sont des objets (pas des ObjectId strings)
+        prototype.legacyTools = tools;
+      }
+      if (outputConfig !== undefined) prototype.outputConfig = outputConfig;
+      if (persistenceConfig !== undefined) prototype.persistenceConfig = normalizePersistenceConfigForPersistence(persistenceConfig);
+      if (robotId !== undefined) prototype.robotId = robotId;
+      if (workflowId !== undefined) prototype.workflowId = workflowId;
+      if (localLLMProfileId !== undefined) prototype.localLLMProfileId = localLLMProfileId;
 
-            await prototype.save();
+      await prototype.save();
 
-            // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
-            res.json(buildPrototypeResponse(prototype));
-        } catch (error) {
-            console.error('[AgentPrototypes] PUT error:', error);
-            if (error instanceof z.ZodError) {
-                return res.status(400).json({
-                    error: 'Validation échouée',
-                    details: formatZodValidationDetails(error),
-                });
-            }
-            res.status(500).json({ error: 'Erreur mise à jour prototype' });
-        }
+      // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
+      res.json(buildPrototypeResponse(prototype));
+    } catch (error) {
+      console.error('[AgentPrototypes] PUT error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Validation échouée',
+          details: formatZodValidationDetails(error),
+        });
+      }
+      res.status(500).json({ error: 'Erreur mise à jour prototype' });
     }
+  },
 );
 
 // DELETE /api/agent-prototypes/:id - Supprimer prototype
 // Note: Les AgentInstances gardent leur snapshot, pas de cascade delete
-router.delete('/:id',
-    requireAuth,
-    requireOwnershipAsync(async (req) => {
-        const prototype = await AgentPrototype.findById(req.params.id);
-        return prototype ? prototype.userId.toString() : null;
-    }),
-    requireRobotGovernance({
-        governedType: 'agent',
-        operation: 'delete',
-        resolveTargetRobotId: async (req) => {
-            const prototype = await AgentPrototype.findById(req.params.id).select('robotId');
-            return prototype?.robotId;
-        }
-    }),
-    async (req, res) => {
-        try {
-            const user = req.user as IUser;
-            const prototype = await AgentPrototype.findOne({ _id: req.params.id, userId: user.id });
+router.delete(
+  '/:id',
+  requireAuth,
+  requireOwnershipAsync(async (req) => {
+    const prototype = await AgentPrototype.findById(req.params.id);
+    return prototype ? prototype.userId.toString() : null;
+  }),
+  requireRobotGovernance({
+    governedType: 'agent',
+    operation: 'delete',
+    resolveTargetRobotId: async (req) => {
+      const prototype = await AgentPrototype.findById(req.params.id).select('robotId');
+      return prototype?.robotId;
+    },
+  }),
+  async (req, res) => {
+    try {
+      const user = req.user as IUser;
+      const prototype = await AgentPrototype.findOne({ _id: req.params.id, userId: user.id });
 
-            if (!prototype) {
-                return res.status(404).json({ error: 'Prototype introuvable' });
-            }
+      if (!prototype) {
+        return res.status(404).json({ error: 'Prototype introuvable' });
+      }
 
-            await prototype.deleteOne();
+      await prototype.deleteOne();
 
-            res.json({ message: 'Prototype supprimé' });
-        } catch (error) {
-            console.error('[AgentPrototypes] DELETE error:', error);
-            res.status(500).json({ error: 'Erreur suppression prototype' });
-        }
+      res.json({ message: 'Prototype supprimé' });
+    } catch (error) {
+      console.error('[AgentPrototypes] DELETE error:', error);
+      res.status(500).json({ error: 'Erreur suppression prototype' });
     }
+  },
 );
 
 export default router;

@@ -1,6 +1,6 @@
 /**
  * 🎯 ROUTES: Local LLM Detection
- * 
+ *
  * Route Unique: GET /api/local-llm/detect-capabilities
  * Responsabilité: Orchestre la détection intelligente des capacités
  * Architecture: Une seule route proxy (SRP)
@@ -23,12 +23,12 @@ router.use(optionalAuth);
 
 /**
  * GET /api/local-llm/detect-capabilities
- * 
+ *
  * Détecte les capacités d'un LLM local via endpoint
- * 
+ *
  * Query Parameters:
  *   - endpoint (required): URL du LLM local (ex: http://localhost:11434)
- * 
+ *
  * Response:
  * {
  *   healthy: boolean,
@@ -41,53 +41,52 @@ router.use(optionalAuth);
  * }
  */
 router.get('/detect-capabilities', async (req: Request, res: Response) => {
-    try {
-        const endpoint = req.query.endpoint as string;
+  try {
+    const endpoint = req.query.endpoint as string;
 
-        if (!endpoint) {
-            return res.status(400).json({
-                error: 'Missing required parameter: endpoint',
-                example: '/api/local-llm/detect-capabilities?endpoint=http://localhost:11434'
-            });
-        }
-
-        // Validation basique de l'endpoint
-        try {
-            new URL(endpoint);
-        } catch {
-            return res.status(400).json({
-                error: 'Invalid endpoint URL format',
-                received: endpoint
-            });
-        }
-
-        const userId = (req.user as { id?: string } | undefined)?.id;
-        if (!(await isEndpointAccessibleForUser(endpoint, userId))) {
-            return res.status(403).json({
-                healthy: false,
-                capabilities: [],
-                detectedAt: new Date().toISOString(),
-                error: LOCAL_ENDPOINT_POLICY_ERROR
-            });
-        }
-
-        console.debug(`[Local-LLM-Routes] Detecting capabilities for endpoint: ${endpoint}`);
-
-        // Appeler le service de détection
-        const result = await detectLocalLLMCapabilities(endpoint);
-
-        // Status 200 même si unhealthy (utile pour afficher erreur au frontend)
-        res.json(result);
-
-    } catch (error) {
-        console.error('[Local-LLM-Routes] Unexpected error:', error);
-        res.status(500).json({
-            healthy: false,
-            capabilities: [],
-            detectedAt: new Date().toISOString(),
-            error: 'Internal server error during capability detection'
-        });
+    if (!endpoint) {
+      return res.status(400).json({
+        error: 'Missing required parameter: endpoint',
+        example: '/api/local-llm/detect-capabilities?endpoint=http://localhost:11434',
+      });
     }
+
+    // Validation basique de l'endpoint
+    try {
+      new URL(endpoint);
+    } catch {
+      return res.status(400).json({
+        error: 'Invalid endpoint URL format',
+        received: endpoint,
+      });
+    }
+
+    const userId = (req.user as { id?: string } | undefined)?.id;
+    if (!(await isEndpointAccessibleForUser(endpoint, userId))) {
+      return res.status(403).json({
+        healthy: false,
+        capabilities: [],
+        detectedAt: new Date().toISOString(),
+        error: LOCAL_ENDPOINT_POLICY_ERROR,
+      });
+    }
+
+    console.debug(`[Local-LLM-Routes] Detecting capabilities for endpoint: ${endpoint}`);
+
+    // Appeler le service de détection
+    const result = await detectLocalLLMCapabilities(endpoint);
+
+    // Status 200 même si unhealthy (utile pour afficher erreur au frontend)
+    res.json(result);
+  } catch (error) {
+    console.error('[Local-LLM-Routes] Unexpected error:', error);
+    res.status(500).json({
+      healthy: false,
+      capabilities: [],
+      detectedAt: new Date().toISOString(),
+      error: 'Internal server error during capability detection',
+    });
+  }
 });
 
 export default router;

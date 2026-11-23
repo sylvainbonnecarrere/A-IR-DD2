@@ -33,8 +33,8 @@ const createAgentTemplateSchema = z.object({
     capabilities: z.array(z.string()),
     tools: z.array(z.any()).optional(),
     outputConfig: z.any().optional(),
-    historyConfig: z.any().optional()
-  })
+    historyConfig: z.any().optional(),
+  }),
 });
 
 /**
@@ -54,18 +54,10 @@ const updateAgentTemplateSchema = createAgentTemplateSchema.partial();
 router.get('/', requireAuth, async (req, res) => {
   try {
     const user = req.user as IUser;
-    const {
-      category,
-      isStarred,
-      search,
-      limit = '10',
-      skip = '0',
-      sortBy = 'createdAt',
-      sortOrder = 'desc'
-    } = req.query;
+    const { category, isStarred, search, limit = '10', skip = '0', sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
 
     // Build MongoDB query
-    const query: any = { userId: user.id };
+    const query: Record<string, unknown> = { userId: user.id };
 
     // Filter: category
     if (category && typeof category === 'string') {
@@ -82,7 +74,7 @@ router.get('/', requireAuth, async (req, res) => {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
         { description: { $regex: search, $options: 'i' } },
-        { tags: { $in: [new RegExp(search, 'i')] } }
+        { tags: { $in: [new RegExp(search, 'i')] } },
       ];
     }
 
@@ -91,18 +83,14 @@ router.get('/', requireAuth, async (req, res) => {
     const offset = Math.max(0, parseInt(skip as string) || 0);
 
     // Build sort object
-    const sort: any = {};
+    const sort: Record<string, 1 | -1> = {};
     const sortField = (sortBy as string) || 'createdAt';
     const sortDir = sortOrder === 'asc' ? 1 : -1;
     sort[sortField] = sortDir;
 
     // Execute query
     const total = await AgentTemplate.countDocuments(query);
-    const templates = await AgentTemplate.find(query)
-      .sort(sort)
-      .limit(pageSize)
-      .skip(offset)
-      .lean();
+    const templates = await AgentTemplate.find(query).sort(sort).limit(pageSize).skip(offset).lean();
 
     res.json({
       success: true,
@@ -110,8 +98,8 @@ router.get('/', requireAuth, async (req, res) => {
       meta: {
         total,
         limit: pageSize,
-        skip: offset
-      }
+        skip: offset,
+      },
     });
   } catch (error) {
     console.error('[AgentTemplates] GET error:', error);
@@ -125,7 +113,8 @@ router.get('/', requireAuth, async (req, res) => {
 /**
  * Récupère UN template spécifique (ownership validé)
  */
-router.get('/:id',
+router.get(
+  '/:id',
   requireAuth,
   requireOwnershipAsync(async (req) => {
     const template = await AgentTemplate.findById(req.params.id);
@@ -144,7 +133,7 @@ router.get('/:id',
       console.error('[AgentTemplates] GET/:id error:', error);
       res.status(500).json({ success: false, error: 'Erreur récupération template' });
     }
-  }
+  },
 );
 
 // ============================================
@@ -154,29 +143,25 @@ router.get('/:id',
  * Crée un nouveau template pour l'utilisateur connecté
  * Assigne automatiquement userId, usageCount (0), isStarred (false)
  */
-router.post('/',
-  requireAuth,
-  validateRequest(createAgentTemplateSchema),
-  async (req, res) => {
-    try {
-      const user = req.user as IUser;
+router.post('/', requireAuth, validateRequest(createAgentTemplateSchema), async (req, res) => {
+  try {
+    const user = req.user as IUser;
 
-      const template = new AgentTemplate({
-        userId: user.id,
-        usageCount: 0,
-        isStarred: false,
-        ...req.body
-      });
+    const template = new AgentTemplate({
+      userId: user.id,
+      usageCount: 0,
+      isStarred: false,
+      ...req.body,
+    });
 
-      await template.save();
+    await template.save();
 
-      res.status(201).json({ success: true, data: template });
-    } catch (error) {
-      console.error('[AgentTemplates] POST error:', error);
-      res.status(500).json({ success: false, error: 'Erreur création template' });
-    }
+    res.status(201).json({ success: true, data: template });
+  } catch (error) {
+    console.error('[AgentTemplates] POST error:', error);
+    res.status(500).json({ success: false, error: 'Erreur création template' });
   }
-);
+});
 
 // ============================================
 // 4️⃣ PUT /api/agent-templates/:id - Update Template
@@ -186,7 +171,8 @@ router.post('/',
  * Empêche modification userId (sécurité)
  * Permet partial updates (tous les champs optionnels)
  */
-router.put('/:id',
+router.put(
+  '/:id',
   requireAuth,
   requireOwnershipAsync(async (req) => {
     const template = await AgentTemplate.findById(req.params.id);
@@ -200,11 +186,7 @@ router.put('/:id',
       // Sécurité: empêcher modification userId
       delete req.body.userId;
 
-      const template = await AgentTemplate.findOneAndUpdate(
-        { _id: req.params.id, userId: user.id },
-        { $set: req.body },
-        { new: true }
-      );
+      const template = await AgentTemplate.findOneAndUpdate({ _id: req.params.id, userId: user.id }, { $set: req.body }, { new: true });
 
       if (!template) {
         return res.status(404).json({ success: false, error: 'Template not found' });
@@ -215,7 +197,7 @@ router.put('/:id',
       console.error('[AgentTemplates] PUT error:', error);
       res.status(500).json({ success: false, error: 'Erreur mise à jour template' });
     }
-  }
+  },
 );
 
 // ============================================
@@ -225,7 +207,8 @@ router.put('/:id',
  * Supprime UN template (ownership validé)
  * Hard delete - pas de soft delete, pas de cascades
  */
-router.delete('/:id',
+router.delete(
+  '/:id',
   requireAuth,
   requireOwnershipAsync(async (req) => {
     const template = await AgentTemplate.findById(req.params.id);
@@ -237,7 +220,7 @@ router.delete('/:id',
 
       const template = await AgentTemplate.findOneAndDelete({
         _id: req.params.id,
-        userId: user.id
+        userId: user.id,
       });
 
       if (!template) {
@@ -249,7 +232,7 @@ router.delete('/:id',
       console.error('[AgentTemplates] DELETE error:', error);
       res.status(500).json({ success: false, error: 'Erreur suppression template' });
     }
-  }
+  },
 );
 
 // ============================================
@@ -259,7 +242,8 @@ router.delete('/:id',
  * Toggle isStarred (true <-> false) sur un template
  * Utilise atomicité MongoDB (findOneAndUpdate avec $set)
  */
-router.patch('/:id/star',
+router.patch(
+  '/:id/star',
   requireAuth,
   requireOwnershipAsync(async (req) => {
     const template = await AgentTemplate.findById(req.params.id);
@@ -272,7 +256,7 @@ router.patch('/:id/star',
       // Fetch current state
       const template = await AgentTemplate.findOne({
         _id: req.params.id,
-        userId: user.id
+        userId: user.id,
       });
 
       if (!template) {
@@ -288,7 +272,7 @@ router.patch('/:id/star',
       console.error('[AgentTemplates] STAR error:', error);
       res.status(500).json({ success: false, error: 'Erreur star/unstar template' });
     }
-  }
+  },
 );
 
 // ============================================
@@ -298,7 +282,8 @@ router.patch('/:id/star',
  * Incrémenter usageCount atomiquement quand un template est utilisé
  * Utilise MongoDB $inc operator pour atomicité
  */
-router.patch('/:id/usage',
+router.patch(
+  '/:id/usage',
   requireAuth,
   requireOwnershipAsync(async (req) => {
     const template = await AgentTemplate.findById(req.params.id);
@@ -311,7 +296,7 @@ router.patch('/:id/usage',
       const template = await AgentTemplate.findOneAndUpdate(
         { _id: req.params.id, userId: user.id },
         { $inc: { usageCount: 1 } },
-        { new: true }
+        { new: true },
       );
 
       if (!template) {
@@ -323,7 +308,7 @@ router.patch('/:id/usage',
       console.error('[AgentTemplates] USAGE error:', error);
       res.status(500).json({ success: false, error: 'Erreur update usage count' });
     }
-  }
+  },
 );
 
 // ============================================
