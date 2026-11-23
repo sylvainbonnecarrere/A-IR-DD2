@@ -7,6 +7,7 @@
  */
 
 import { getBackendUrl } from '../config/api.config';
+import type { HistoryConfig, OutputConfig, Tool } from '../types';
 
 const API_BASE = `${getBackendUrl()}/api/agent-templates`;
 
@@ -33,9 +34,9 @@ export interface AgentTemplateDTO {
     llmProvider: string;
     llmModel: string;
     capabilities: string[];
-    tools?: any[];
-    outputConfig?: any;
-    historyConfig?: any;
+    tools?: Tool[];
+    outputConfig?: OutputConfig;
+    historyConfig?: HistoryConfig;
   };
   sourcePrototypeId?: string;
   usageCount: number;
@@ -48,10 +49,7 @@ export interface AgentTemplateDTO {
 /**
  * Payload pour créer un template (sans _id, createdAt, updatedAt, usageCount)
  */
-export type CreateTemplatePayload = Omit<
-  AgentTemplateDTO,
-  '_id' | 'userId' | 'createdAt' | 'updatedAt' | 'usageCount'
->;
+export type CreateTemplatePayload = Omit<AgentTemplateDTO, '_id' | 'userId' | 'createdAt' | 'updatedAt' | 'usageCount'>;
 
 /**
  * Payload pour mettre à jour un template (tous les champs optionnels)
@@ -65,7 +63,7 @@ interface APIResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
-  details?: any[];
+  details?: unknown[];
   meta?: {
     total?: number;
     limit?: number;
@@ -97,7 +95,7 @@ export class TemplateAPIError extends Error {
   constructor(
     message: string,
     public statusCode?: number,
-    public details?: any
+    public details?: unknown,
   ) {
     super(message);
     this.name = 'TemplateAPIError';
@@ -110,7 +108,7 @@ export class TemplateAPIError extends Error {
 
 /**
  * Récupérer tous les templates de l'utilisateur avec filtering optionnel
- * 
+ *
  * @param accessToken JWT token d'authentification
  * @param options Filtering et pagination options
  * @returns Array of templates
@@ -126,7 +124,7 @@ export async function fetchTemplates(
     skip?: number;
     sortBy?: 'createdAt' | 'usageCount' | 'name';
     sortOrder?: 'asc' | 'desc';
-  }
+  },
 ): Promise<AgentTemplateDTO[]> {
   try {
     // Build query string
@@ -144,9 +142,9 @@ export async function fetchTemplates(
     const response = await fetch(url, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      }
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
     });
 
     if (response.status === 401) {
@@ -154,12 +152,8 @@ export async function fetchTemplates(
     }
 
     if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as APIResponse<any>;
-      throw new TemplateAPIError(
-        errorData.error || `HTTP ${response.status}`,
-        response.status,
-        errorData.details
-      );
+      const errorData = (await response.json().catch(() => ({}))) as APIResponse<unknown>;
+      throw new TemplateAPIError(errorData.error || `HTTP ${response.status}`, response.status, errorData.details);
     }
 
     const data = (await response.json()) as APIResponse<AgentTemplateDTO[]>;
@@ -176,23 +170,20 @@ export async function fetchTemplates(
 
 /**
  * Récupérer UN template spécifique
- * 
+ *
  * @param templateId MongoDB ObjectId du template
  * @param accessToken JWT token
  * @returns Template object
  * @throws TemplateAPIError (404 if not found or not owned)
  */
-export async function fetchTemplate(
-  templateId: string,
-  accessToken: string
-): Promise<AgentTemplateDTO> {
+export async function fetchTemplate(templateId: string, accessToken: string): Promise<AgentTemplateDTO> {
   try {
     const response = await fetch(`${API_BASE}/${templateId}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      }
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
     });
 
     if (response.status === 401) {
@@ -204,12 +195,8 @@ export async function fetchTemplate(
     }
 
     if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as APIResponse<any>;
-      throw new TemplateAPIError(
-        errorData.error || `HTTP ${response.status}`,
-        response.status,
-        errorData.details
-      );
+      const errorData = (await response.json().catch(() => ({}))) as APIResponse<unknown>;
+      throw new TemplateAPIError(errorData.error || `HTTP ${response.status}`, response.status, errorData.details);
     }
 
     const data = (await response.json()) as APIResponse<AgentTemplateDTO>;
@@ -229,24 +216,21 @@ export async function fetchTemplate(
 
 /**
  * Créer un nouveau template
- * 
+ *
  * @param template Template data (without _id, createdAt, updatedAt, usageCount)
  * @param accessToken JWT token
  * @returns Newly created template with _id
  * @throws TemplateAPIError
  */
-export async function createTemplate(
-  template: CreateTemplatePayload,
-  accessToken: string
-): Promise<AgentTemplateDTO> {
+export async function createTemplate(template: CreateTemplatePayload, accessToken: string): Promise<AgentTemplateDTO> {
   try {
     const response = await fetch(API_BASE, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify(template)
+      body: JSON.stringify(template),
     });
 
     if (response.status === 401) {
@@ -254,20 +238,13 @@ export async function createTemplate(
     }
 
     if (response.status === 400) {
-      const errorData = (await response.json().catch(() => ({}))) as APIResponse<any>;
-      throw new TemplateAPIError(
-        errorData.error || 'Validation failed',
-        400,
-        errorData.details
-      );
+      const errorData = (await response.json().catch(() => ({}))) as APIResponse<unknown>;
+      throw new TemplateAPIError(errorData.error || 'Validation failed', 400, errorData.details);
     }
 
     if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as APIResponse<any>;
-      throw new TemplateAPIError(
-        errorData.error || `HTTP ${response.status}`,
-        response.status
-      );
+      const errorData = (await response.json().catch(() => ({}))) as APIResponse<unknown>;
+      throw new TemplateAPIError(errorData.error || `HTTP ${response.status}`, response.status);
     }
 
     const data = (await response.json()) as APIResponse<AgentTemplateDTO>;
@@ -287,26 +264,22 @@ export async function createTemplate(
 
 /**
  * Mettre à jour un template existant (partial update)
- * 
+ *
  * @param templateId MongoDB ObjectId
  * @param updates Partial template updates
  * @param accessToken JWT token
  * @returns Updated template
  * @throws TemplateAPIError
  */
-export async function updateTemplate(
-  templateId: string,
-  updates: UpdateTemplatePayload,
-  accessToken: string
-): Promise<AgentTemplateDTO> {
+export async function updateTemplate(templateId: string, updates: UpdateTemplatePayload, accessToken: string): Promise<AgentTemplateDTO> {
   try {
     const response = await fetch(`${API_BASE}/${templateId}`, {
       method: 'PUT',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify(updates)
+      body: JSON.stringify(updates),
     });
 
     if (response.status === 401) {
@@ -318,20 +291,13 @@ export async function updateTemplate(
     }
 
     if (response.status === 400) {
-      const errorData = (await response.json().catch(() => ({}))) as APIResponse<any>;
-      throw new TemplateAPIError(
-        errorData.error || 'Validation failed',
-        400,
-        errorData.details
-      );
+      const errorData = (await response.json().catch(() => ({}))) as APIResponse<unknown>;
+      throw new TemplateAPIError(errorData.error || 'Validation failed', 400, errorData.details);
     }
 
     if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as APIResponse<any>;
-      throw new TemplateAPIError(
-        errorData.error || `HTTP ${response.status}`,
-        response.status
-      );
+      const errorData = (await response.json().catch(() => ({}))) as APIResponse<unknown>;
+      throw new TemplateAPIError(errorData.error || `HTTP ${response.status}`, response.status);
     }
 
     const data = (await response.json()) as APIResponse<AgentTemplateDTO>;
@@ -351,22 +317,19 @@ export async function updateTemplate(
 
 /**
  * Supprimer un template
- * 
+ *
  * @param templateId MongoDB ObjectId
  * @param accessToken JWT token
  * @throws TemplateAPIError
  */
-export async function deleteTemplate(
-  templateId: string,
-  accessToken: string
-): Promise<void> {
+export async function deleteTemplate(templateId: string, accessToken: string): Promise<void> {
   try {
     const response = await fetch(`${API_BASE}/${templateId}`, {
       method: 'DELETE',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      }
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
     });
 
     if (response.status === 401) {
@@ -378,11 +341,8 @@ export async function deleteTemplate(
     }
 
     if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as APIResponse<any>;
-      throw new TemplateAPIError(
-        errorData.error || `HTTP ${response.status}`,
-        response.status
-      );
+      const errorData = (await response.json().catch(() => ({}))) as APIResponse<unknown>;
+      throw new TemplateAPIError(errorData.error || `HTTP ${response.status}`, response.status);
     }
   } catch (error) {
     console.error('[templateAPI] deleteTemplate error:', error);
@@ -396,23 +356,20 @@ export async function deleteTemplate(
 
 /**
  * Toggle isStarred flag d'un template (true <-> false)
- * 
+ *
  * @param templateId MongoDB ObjectId
  * @param accessToken JWT token
  * @returns Updated template with toggled isStarred
  * @throws TemplateAPIError
  */
-export async function toggleTemplateStar(
-  templateId: string,
-  accessToken: string
-): Promise<AgentTemplateDTO> {
+export async function toggleTemplateStar(templateId: string, accessToken: string): Promise<AgentTemplateDTO> {
   try {
     const response = await fetch(`${API_BASE}/${templateId}/star`, {
       method: 'PATCH',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      }
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
     });
 
     if (response.status === 401) {
@@ -424,11 +381,8 @@ export async function toggleTemplateStar(
     }
 
     if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as APIResponse<any>;
-      throw new TemplateAPIError(
-        errorData.error || `HTTP ${response.status}`,
-        response.status
-      );
+      const errorData = (await response.json().catch(() => ({}))) as APIResponse<unknown>;
+      throw new TemplateAPIError(errorData.error || `HTTP ${response.status}`, response.status);
     }
 
     const data = (await response.json()) as APIResponse<AgentTemplateDTO>;
@@ -449,23 +403,20 @@ export async function toggleTemplateStar(
 /**
  * Incrémenter le usage count d'un template de manière atomique
  * Appelé quand un template est utilisé pour créer un prototype
- * 
+ *
  * @param templateId MongoDB ObjectId
  * @param accessToken JWT token
  * @returns Updated template with incremented usageCount
  * @throws TemplateAPIError
  */
-export async function recordTemplateUsage(
-  templateId: string,
-  accessToken: string
-): Promise<AgentTemplateDTO> {
+export async function recordTemplateUsage(templateId: string, accessToken: string): Promise<AgentTemplateDTO> {
   try {
     const response = await fetch(`${API_BASE}/${templateId}/usage`, {
       method: 'PATCH',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      }
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
     });
 
     if (response.status === 401) {
@@ -477,11 +428,8 @@ export async function recordTemplateUsage(
     }
 
     if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as APIResponse<any>;
-      throw new TemplateAPIError(
-        errorData.error || `HTTP ${response.status}`,
-        response.status
-      );
+      const errorData = (await response.json().catch(() => ({}))) as APIResponse<unknown>;
+      throw new TemplateAPIError(errorData.error || `HTTP ${response.status}`, response.status);
     }
 
     const data = (await response.json()) as APIResponse<AgentTemplateDTO>;
@@ -507,5 +455,5 @@ export default {
   deleteTemplate,
   toggleTemplateStar,
   recordTemplateUsage,
-  TemplateAPIError
+  TemplateAPIError,
 };
