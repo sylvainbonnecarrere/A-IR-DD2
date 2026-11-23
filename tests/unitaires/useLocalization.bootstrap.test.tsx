@@ -15,7 +15,7 @@ jest.mock('../../services/localizationService', () => ({
   updateLocalization: jest.fn(),
 }));
 
-const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
+const mockUseAuth = useAuth as unknown as jest.Mock;
 const mockGetLocalization = localizationService.getLocalization as jest.MockedFunction<typeof localizationService.getLocalization>;
 
 function LocalizationProbe({ label }: { label: string }) {
@@ -33,8 +33,8 @@ describe('useLocalization bootstrap', () => {
       isAuthenticated: false,
       accessToken: null,
       isLoading: false,
-      sessionStatus: 'guest',
-    } as any);
+      sessionStatus: 'ready',
+    });
 
     mockGetLocalization.mockResolvedValue('en');
   });

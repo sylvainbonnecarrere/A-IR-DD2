@@ -252,7 +252,11 @@ describe('WorkflowCanvas drag anti-collision', () => {
     };
 
     const { rerender } = render(
-      <WorkflowCanvas workflowName="QA Workflow" nodes={passiveNodes as any} onUpdateNodePosition={onUpdateNodePosition} />,
+      <WorkflowCanvas
+        workflowName="QA Workflow"
+        nodes={passiveNodes as unknown as React.ComponentProps<typeof WorkflowCanvas>['nodes']}
+        onUpdateNodePosition={onUpdateNodePosition}
+      />,
     );
 
     act(() => {
@@ -272,7 +276,7 @@ describe('WorkflowCanvas drag anti-collision', () => {
                   },
                 },
               },
-            ] as any
+            ] as unknown as React.ComponentProps<typeof WorkflowCanvas>['nodes']
           }
           onUpdateNodePosition={onUpdateNodePosition}
         />,

@@ -27,7 +27,7 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [queryMode, setQueryMode] = useState<'sql' | 'json'>('sql');
   const [query, setQuery] = useState('SELECT * FROM users LIMIT 10;');
-  // ⭐ US-RC-02 lot 4 : lignes de résultat SQL en Record<string, unknown> (plus de any[])
+  // ⭐ US-RC-02 lot 4 : lignes de résultat SQL en Record<string, unknown> (typage strict, sans type flottant)
   const [queryResult, setQueryResult] = useState<Record<string, unknown>[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
 

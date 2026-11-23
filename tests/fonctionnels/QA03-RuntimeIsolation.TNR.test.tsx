@@ -3,22 +3,11 @@ import { act, render, renderHook, screen, waitFor } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { useAgentChat } from '../../hooks/useAgentChat';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
-import {
-    Agent,
-    ChatMessage,
-    LLMCapability,
-    LLMConfig,
-    LLMProvider,
-    LocalLLMProfile,
-} from '../../types';
+import { Agent, ChatMessage, LLMCapability, LLMConfig, LLMProvider, LocalLLMProfile } from '../../types';
 import { ImageGenerationPanel } from '../../components/panels/ImageGenerationPanel';
 import { ImageModificationPanel } from '../../components/panels/ImageModificationPanel';
 import { MapsGroundingConfigPanel } from '../../components/panels/MapsGroundingConfigPanel';
-import {
-    createTestAgent,
-    createTestAgentInstance,
-    createTestCanvasNode,
-} from '../builders/domainBuilders';
+import { createTestAgent, createTestAgentInstance, createTestCanvasNode } from '../builders/domainBuilders';
 import { resetUseAgentChatHarness } from '../harnesses/useAgentChatHarness';
 
 const mockCreateAdapter = jest.fn();
@@ -26,81 +15,81 @@ const mockRunAgentLoop = jest.fn();
 let useAgentChatHarness = resetUseAgentChatHarness();
 
 jest.mock('../../services/llmService', () => ({
-    generateContentStream: jest.fn(),
-    generateContent: jest.fn(),
-    generateImage: jest.fn(),
-    editImage: jest.fn(),
-    generateContentWithMaps: jest.fn(),
+  generateContentStream: jest.fn(),
+  generateContent: jest.fn(),
+  generateImage: jest.fn(),
+  editImage: jest.fn(),
+  generateContentWithMaps: jest.fn(),
 }));
 
 jest.mock('../../utils/toolExecutor', () => ({
-    executeTool: jest.fn(),
+  executeTool: jest.fn(),
 }));
 
 jest.mock('../../services/adapters/AdapterFactory', () => ({
-    createAdapter: (...args: unknown[]) => mockCreateAdapter(...args),
+  createAdapter: (...args: unknown[]) => mockCreateAdapter(...args),
 }));
 
 jest.mock('../../services/llm/AgentLoop', () => ({
-    runAgentLoop: (...args: unknown[]) => mockRunAgentLoop(...args),
+  runAgentLoop: (...args: unknown[]) => mockRunAgentLoop(...args),
 }));
 
 jest.mock('../../hooks/useLocalization', () => ({
-    useLocalization: () => ({
-        t: (key: string) => key,
-    }),
+  useLocalization: () => ({
+    t: (key: string) => key,
+  }),
 }));
 
 jest.mock('../../contexts/AuthContext', () => ({
-    useAuth: jest.fn(() => {
-        const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
-        return getUseAgentChatHarness().authState;
-    }),
+  useAuth: jest.fn(() => {
+    const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+    return getUseAgentChatHarness().authState;
+  }),
 }));
 
 jest.mock('../../stores/useDesignStore', () => {
-    const actual = jest.requireActual('../../stores/useDesignStore');
+  const actual = jest.requireActual('../../stores/useDesignStore');
 
-    return {
-        ...actual,
-        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-            const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
-            const state = getUseAgentChatHarness().designStore;
-            return selector ? selector(state) : state;
-        }),
-    };
+  return {
+    ...actual,
+    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+      const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+      const state = getUseAgentChatHarness().designStore;
+      return selector ? selector(state) : state;
+    }),
+  };
 });
 
 jest.mock('../../stores/useRuntimeStore', () => ({
-    useRuntimeStore: Object.assign(
-        jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-            const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
-            const state = getUseAgentChatHarness().runtimeStore;
-            return selector ? selector(state) : state;
-        }),
-        {
-            getState: () => {
-                const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
-                return getUseAgentChatHarness().runtimeStore;
-            },
-        }
-    ),
+  useRuntimeStore: Object.assign(
+    jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+      const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+      const state = getUseAgentChatHarness().runtimeStore;
+      return selector ? selector(state) : state;
+    }),
+    {
+      getState: () => {
+        const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+        return getUseAgentChatHarness().runtimeStore;
+      },
+    },
+  ),
 }));
 
 jest.mock('../../stores/useFunctionStore', () => ({
-    useFunctionStore: Object.assign(
-        jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-            const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
-            const state = getUseAgentChatHarness().functionStore;
-            return selector ? selector(state) : state;
-        }),
-        {
-            getState: () => {
-                const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
-                return getUseAgentChatHarness().functionStore;
-            },
-        }
-    ),
+  useFunctionStore: Object.assign(
+    jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+      const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+      const state = getUseAgentChatHarness().functionStore;
+      return selector ? selector(state) : state;
+    }),
+    {
+      getState: () => {
+        const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
+        return getUseAgentChatHarness().functionStore;
+      },
+    },
+  ),
 }));
 
 import * as llmService from '../../services/llmService';
@@ -114,417 +103,424 @@ const mockedGenerateContentWithMaps = llmService.generateContentWithMaps as jest
 const mockedExecuteTool = executeTool as jest.Mock;
 
 const LOCAL_RUNTIME_CONFIG: LLMConfig = {
-    provider: LLMProvider.LMStudio,
-    enabled: true,
-    localEndpoint: 'http://shared-default:3928',
-    capabilities: {
-        [LLMCapability.Chat]: true,
-        [LLMCapability.FunctionCalling]: true,
-        [LLMCapability.ImageGeneration]: true,
-        [LLMCapability.ImageModification]: true,
-    },
+  provider: LLMProvider.LMStudio,
+  enabled: true,
+  localEndpoint: 'http://shared-default:3928',
+  capabilities: {
+    [LLMCapability.Chat]: true,
+    [LLMCapability.FunctionCalling]: true,
+    [LLMCapability.ImageGeneration]: true,
+    [LLMCapability.ImageModification]: true,
+  },
 };
 
 const CLOUD_RUNTIME_CONFIG: LLMConfig = {
-    provider: LLMProvider.Gemini,
-    enabled: true,
-    apiKey: 'gemini-test-key-placeholder',
-    capabilities: {
-        [LLMCapability.Chat]: true,
-        [LLMCapability.MapsGrounding]: true,
-    },
+  provider: LLMProvider.Gemini,
+  enabled: true,
+  apiKey: 'gemini-test-key-placeholder',
+  capabilities: {
+    [LLMCapability.Chat]: true,
+    [LLMCapability.MapsGrounding]: true,
+  },
 };
 
 const LOCAL_PROFILES: LocalLLMProfile[] = [
-    {
-        id: 'profile-alpha',
-        name: 'Alpha',
-        endpoint: 'http://localhost:11434',
-        enabled: true,
-        capabilities: { [LLMCapability.Chat]: true },
-    },
-    {
-        id: 'profile-beta',
-        name: 'Beta',
-        endpoint: 'http://localhost:1234',
-        enabled: true,
-        capabilities: { [LLMCapability.Chat]: true },
-    },
+  {
+    id: 'profile-alpha',
+    name: 'Alpha',
+    endpoint: 'http://localhost:11434',
+    enabled: true,
+    capabilities: { [LLMCapability.Chat]: true },
+  },
+  {
+    id: 'profile-beta',
+    name: 'Beta',
+    endpoint: 'http://localhost:1234',
+    enabled: true,
+    capabilities: { [LLMCapability.Chat]: true },
+  },
 ];
 
 function createAgent(overrides: Partial<Agent> = {}): Agent {
-    return createTestAgent({
-        id: overrides.id || 'agent-1',
-        name: overrides.name || 'Runtime Agent',
-        role: 'assistant',
-        systemPrompt: 'System prompt',
-        llmProvider: overrides.llmProvider || LLMProvider.LMStudio,
-        model: overrides.model || 'local-model',
-        capabilities: overrides.capabilities || [LLMCapability.Chat],
-        tools: overrides.tools || [],
-        toolSelections: overrides.toolSelections || [],
-        ...overrides,
-    });
+  return createTestAgent({
+    id: overrides.id || 'agent-1',
+    name: overrides.name || 'Runtime Agent',
+    role: 'assistant',
+    systemPrompt: 'System prompt',
+    llmProvider: overrides.llmProvider || LLMProvider.LMStudio,
+    model: overrides.model || 'local-model',
+    capabilities: overrides.capabilities || [LLMCapability.Chat],
+    tools: overrides.tools || [],
+    toolSelections: overrides.toolSelections || [],
+    ...overrides,
+  });
 }
 
-function createStream(chunks: any[]) {
-    return (async function* () {
-        for (const chunk of chunks) {
-            yield chunk;
-        }
-    })();
+function createStream(chunks: unknown[]) {
+  return (async function* () {
+    for (const chunk of chunks) {
+      yield chunk;
+    }
+  })();
 }
 
 describe('QA-03 TNR - Runtime isolation multi-agents et panels', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        useAgentChatHarness = resetUseAgentChatHarness({
-            designStore: {
-                agents: [],
-                nodes: [],
-                agentInstances: [
-                    createTestAgentInstance({ id: 'instance-alpha', workflowId: 'wf-1', configuration_json: null }),
-                    createTestAgentInstance({ id: 'instance-beta', workflowId: 'wf-1', configuration_json: null }),
-                    createTestAgentInstance({ id: 'instance-multi-turn', workflowId: 'wf-1', configuration_json: null }),
-                    createTestAgentInstance({ id: 'instance-follow-up', workflowId: 'wf-1', configuration_json: null }),
-                ],
-            },
-            runtimeStore: {
-                llmConfigs: [LOCAL_RUNTIME_CONFIG, CLOUD_RUNTIME_CONFIG],
-                localLLMProfiles: LOCAL_PROFILES,
-                nodeMessages: {},
-                getNodeMessages: jest.fn((nodeId: string) => useAgentChatHarness.runtimeStore.nodeMessages[nodeId] || []),
-                getNodeInvisibleHistorySummary: jest.fn(() => null),
-                setNodeInvisibleHistorySummary: jest.fn(),
-                setNodeExecuting: jest.fn(),
-            },
-        });
-        mockCreateAdapter.mockImplementation((_provider, config, model, authToken) => ({
-            provider: (config as LLMConfig | null)?.provider,
-            endpoint: (config as LLMConfig | null)?.localEndpoint,
-            model,
-            authToken,
-        }));
-        mockRunAgentLoop.mockResolvedValue({
-            finalResponse: 'local response',
-            toolCallLog: [],
-            iterations: 1,
-            finishReason: 'stop',
-        });
+  beforeEach(() => {
+    jest.clearAllMocks();
+    useAgentChatHarness = resetUseAgentChatHarness({
+      designStore: {
+        agents: [],
+        nodes: [],
+        agentInstances: [
+          createTestAgentInstance({ id: 'instance-alpha', workflowId: 'wf-1', configuration_json: null }),
+          createTestAgentInstance({ id: 'instance-beta', workflowId: 'wf-1', configuration_json: null }),
+          createTestAgentInstance({ id: 'instance-multi-turn', workflowId: 'wf-1', configuration_json: null }),
+          createTestAgentInstance({ id: 'instance-follow-up', workflowId: 'wf-1', configuration_json: null }),
+        ],
+      },
+      runtimeStore: {
+        llmConfigs: [LOCAL_RUNTIME_CONFIG, CLOUD_RUNTIME_CONFIG],
+        localLLMProfiles: LOCAL_PROFILES,
+        nodeMessages: {},
+        getNodeMessages: jest.fn((nodeId: string) => useAgentChatHarness.runtimeStore.nodeMessages[nodeId] || []),
+        getNodeInvisibleHistorySummary: jest.fn(() => null),
+        setNodeInvisibleHistorySummary: jest.fn(),
+        setNodeExecuting: jest.fn(),
+      },
+    });
+    mockCreateAdapter.mockImplementation((_provider, config, model, authToken) => ({
+      provider: (config as LLMConfig | null)?.provider,
+      endpoint: (config as LLMConfig | null)?.localEndpoint,
+      model,
+      authToken,
+    }));
+    mockRunAgentLoop.mockResolvedValue({
+      finalResponse: 'local response',
+      toolCallLog: [],
+      iterations: 1,
+      finishReason: 'stop',
+    });
+  });
+
+  it('isole deux agents locaux du meme provider avec des endpoints differents', async () => {
+    const firstAgent = createAgent({
+      id: 'agent-alpha',
+      name: 'Alpha Agent',
+      localLLMProfileId: 'profile-alpha',
+    });
+    const secondAgent = createAgent({
+      id: 'agent-beta',
+      name: 'Beta Agent',
+      localLLMProfileId: 'profile-beta',
     });
 
-    it('isole deux agents locaux du meme provider avec des endpoints differents', async () => {
-        const firstAgent = createAgent({
-            id: 'agent-alpha',
-            name: 'Alpha Agent',
-            localLLMProfileId: 'profile-alpha',
-        });
-        const secondAgent = createAgent({
-            id: 'agent-beta',
-            name: 'Beta Agent',
-            localLLMProfileId: 'profile-beta',
-        });
+    const firstHook = renderHook(() =>
+      useAgentChat({
+        nodeId: 'node-alpha',
+        agent: firstAgent,
+        llmConfigs: [LOCAL_RUNTIME_CONFIG],
+        t: (key: string) => key,
+        instanceId: 'instance-alpha',
+      }),
+    );
 
-        const firstHook = renderHook(() => useAgentChat({
-            nodeId: 'node-alpha',
-            agent: firstAgent,
-            llmConfigs: [LOCAL_RUNTIME_CONFIG],
-            t: (key: string) => key,
-            instanceId: 'instance-alpha',
-        }));
-
-        await act(async () => {
-            await firstHook.result.current.handleSendMessage('hello alpha', null);
-        });
-
-        const secondHook = renderHook(() => useAgentChat({
-            nodeId: 'node-beta',
-            agent: secondAgent,
-            llmConfigs: [LOCAL_RUNTIME_CONFIG],
-            t: (key: string) => key,
-            instanceId: 'instance-beta',
-        }));
-
-        await act(async () => {
-            await secondHook.result.current.handleSendMessage('hello beta', null);
-        });
-
-        expect(mockCreateAdapter).toHaveBeenCalledTimes(2);
-        expect(mockCreateAdapter.mock.calls[0][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:11434' }));
-        expect(mockCreateAdapter.mock.calls[1][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:1234' }));
-        expect(mockRunAgentLoop).toHaveBeenCalledTimes(2);
-        expect(mockRunAgentLoop.mock.calls[0][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:11434' }));
-        expect(mockRunAgentLoop.mock.calls[1][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:1234' }));
+    await act(async () => {
+      await firstHook.result.current.handleSendMessage('hello alpha', null);
     });
 
-    it('conserve la meme identite runtime sur plusieurs tours consecutifs', async () => {
-        const agent = createAgent({
-            id: 'agent-multi-turn',
-            localLLMProfileId: 'profile-beta',
-            historyConfig: {
-                enabled: true,
-                llmProvider: LLMProvider.LMStudio,
-                model: 'local-model',
-                role: 'summarizer',
-                systemPrompt: 'Keep context',
-                limits: {
-                    char: 10000,
-                    word: 10000,
-                    token: 10000,
-                    sentence: 10000,
-                    message: 10000,
-                },
-                enabledLimits: {
-                    char: true,
-                    word: true,
-                    token: true,
-                    sentence: true,
-                    message: true,
-                },
-            },
-        });
+    const secondHook = renderHook(() =>
+      useAgentChat({
+        nodeId: 'node-beta',
+        agent: secondAgent,
+        llmConfigs: [LOCAL_RUNTIME_CONFIG],
+        t: (key: string) => key,
+        instanceId: 'instance-beta',
+      }),
+    );
 
-        const { result } = renderHook(() => useAgentChat({
-            nodeId: 'node-multi-turn',
-            agent,
-            llmConfigs: [LOCAL_RUNTIME_CONFIG],
-            t: (key: string) => key,
-            instanceId: 'instance-multi-turn',
-        }));
-
-        await act(async () => {
-            await result.current.handleSendMessage('first turn', null);
-        });
-
-        await act(async () => {
-            await result.current.handleSendMessage('second turn', null);
-        });
-
-        expect(mockCreateAdapter).toHaveBeenCalledTimes(2);
-        expect(mockCreateAdapter.mock.calls[0][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:1234' }));
-        expect(mockCreateAdapter.mock.calls[1][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:1234' }));
-        expect(mockRunAgentLoop).toHaveBeenCalledTimes(2);
-        expect(mockRunAgentLoop.mock.calls[0][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:1234' }));
-        expect(mockRunAgentLoop.mock.calls[1][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:1234' }));
-
-        const firstHistory = mockRunAgentLoop.mock.calls[0][1] as ChatMessage[];
-        const secondHistory = mockRunAgentLoop.mock.calls[1][1] as ChatMessage[];
-
-        expect(secondHistory.length).toBeGreaterThan(firstHistory.length);
+    await act(async () => {
+      await secondHook.result.current.handleSendMessage('hello beta', null);
     });
 
-    it('reutilise la meme identite pour le follow-up apres execution de tool', async () => {
-        mockRunAgentLoop.mockResolvedValueOnce({
-            finalResponse: 'follow-up analysis',
-            toolCallLog: [
-                {
-                    id: 'tool-1',
-                    functionName: 'lookupWeather',
-                    arguments: {},
-                    result: { city: 'Paris', temperature: 21 },
-                    status: 'success',
-                    durationMs: 8,
-                    timestamp: new Date('2026-01-01T00:00:00.000Z'),
-                    executionId: 'exec-1',
-                },
-            ],
-            iterations: 1,
-            finishReason: 'stop',
-        });
+    expect(mockCreateAdapter).toHaveBeenCalledTimes(2);
+    expect(mockCreateAdapter.mock.calls[0][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:11434' }));
+    expect(mockCreateAdapter.mock.calls[1][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:1234' }));
+    expect(mockRunAgentLoop).toHaveBeenCalledTimes(2);
+    expect(mockRunAgentLoop.mock.calls[0][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:11434' }));
+    expect(mockRunAgentLoop.mock.calls[1][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:1234' }));
+  });
 
-        const agent = createAgent({
-            id: 'agent-follow-up',
-            localLLMProfileId: 'profile-alpha',
-            tools: [{ name: 'lookupWeather', description: 'weather', parameters: {} }],
-            capabilities: [LLMCapability.Chat],
-        });
-
-        const { result } = renderHook(() => useAgentChat({
-            nodeId: 'node-follow-up',
-            agent,
-            llmConfigs: [LOCAL_RUNTIME_CONFIG],
-            t: (key: string) => key,
-            instanceId: 'instance-follow-up',
-        }));
-
-        await act(async () => {
-            await result.current.handleSendMessage('need tool', null);
-        });
-
-        expect(mockCreateAdapter).toHaveBeenCalledTimes(1);
-        expect(mockCreateAdapter.mock.calls[0][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:11434' }));
-        expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
-        expect(mockRunAgentLoop.mock.calls[0][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:11434' }));
-        expect(useRuntimeStore.getState().getNodeMessages('node-follow-up')).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    sender: 'tool',
-                    toolName: 'lookupWeather',
-                }),
-            ])
-        );
+  it('conserve la meme identite runtime sur plusieurs tours consecutifs', async () => {
+    const agent = createAgent({
+      id: 'agent-multi-turn',
+      localLLMProfileId: 'profile-beta',
+      historyConfig: {
+        enabled: true,
+        llmProvider: LLMProvider.LMStudio,
+        model: 'local-model',
+        role: 'summarizer',
+        systemPrompt: 'Keep context',
+        limits: {
+          char: 10000,
+          word: 10000,
+          token: 10000,
+          sentence: 10000,
+          message: 10000,
+        },
+        enabledLimits: {
+          char: true,
+          word: true,
+          token: true,
+          sentence: true,
+          message: true,
+        },
+      },
     });
 
-    it('le panel image utilise le credential resolu du profil local actif', async () => {
-        mockedGenerateImage.mockResolvedValue({ image: 'generated-image' });
+    const { result } = renderHook(() =>
+      useAgentChat({
+        nodeId: 'node-multi-turn',
+        agent,
+        llmConfigs: [LOCAL_RUNTIME_CONFIG],
+        t: (key: string) => key,
+        instanceId: 'instance-multi-turn',
+      }),
+    );
 
-        const imageAgent = createAgent({
-            id: 'agent-image',
-            localLLMProfileId: 'profile-alpha',
-            capabilities: [LLMCapability.ImageGeneration],
-        });
-        useAgentChatHarness.designStore.agents = [imageAgent];
-        useAgentChatHarness.designStore.nodes = [createTestCanvasNode({
-            id: 'node-image',
+    await act(async () => {
+      await result.current.handleSendMessage('first turn', null);
+    });
+
+    await act(async () => {
+      await result.current.handleSendMessage('second turn', null);
+    });
+
+    expect(mockCreateAdapter).toHaveBeenCalledTimes(2);
+    expect(mockCreateAdapter.mock.calls[0][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:1234' }));
+    expect(mockCreateAdapter.mock.calls[1][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:1234' }));
+    expect(mockRunAgentLoop).toHaveBeenCalledTimes(2);
+    expect(mockRunAgentLoop.mock.calls[0][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:1234' }));
+    expect(mockRunAgentLoop.mock.calls[1][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:1234' }));
+
+    const firstHistory = mockRunAgentLoop.mock.calls[0][1] as ChatMessage[];
+    const secondHistory = mockRunAgentLoop.mock.calls[1][1] as ChatMessage[];
+
+    expect(secondHistory.length).toBeGreaterThan(firstHistory.length);
+  });
+
+  it('reutilise la meme identite pour le follow-up apres execution de tool', async () => {
+    mockRunAgentLoop.mockResolvedValueOnce({
+      finalResponse: 'follow-up analysis',
+      toolCallLog: [
+        {
+          id: 'tool-1',
+          functionName: 'lookupWeather',
+          arguments: {},
+          result: { city: 'Paris', temperature: 21 },
+          status: 'success',
+          durationMs: 8,
+          timestamp: new Date('2026-01-01T00:00:00.000Z'),
+          executionId: 'exec-1',
+        },
+      ],
+      iterations: 1,
+      finishReason: 'stop',
+    });
+
+    const agent = createAgent({
+      id: 'agent-follow-up',
+      localLLMProfileId: 'profile-alpha',
+      tools: [{ name: 'lookupWeather', description: 'weather', parameters: {} }],
+      capabilities: [LLMCapability.Chat],
+    });
+
+    const { result } = renderHook(() =>
+      useAgentChat({
+        nodeId: 'node-follow-up',
+        agent,
+        llmConfigs: [LOCAL_RUNTIME_CONFIG],
+        t: (key: string) => key,
+        instanceId: 'instance-follow-up',
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleSendMessage('need tool', null);
+    });
+
+    expect(mockCreateAdapter).toHaveBeenCalledTimes(1);
+    expect(mockCreateAdapter.mock.calls[0][1]).toEqual(expect.objectContaining({ localEndpoint: 'http://localhost:11434' }));
+    expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
+    expect(mockRunAgentLoop.mock.calls[0][0]).toEqual(expect.objectContaining({ endpoint: 'http://localhost:11434' }));
+    expect(useRuntimeStore.getState().getNodeMessages('node-follow-up')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sender: 'tool',
+          toolName: 'lookupWeather',
+        }),
+      ]),
+    );
+  });
+
+  it('le panel image utilise le credential resolu du profil local actif', async () => {
+    mockedGenerateImage.mockResolvedValue({ image: 'generated-image' });
+
+    const imageAgent = createAgent({
+      id: 'agent-image',
+      localLLMProfileId: 'profile-alpha',
+      capabilities: [LLMCapability.ImageGeneration],
+    });
+    useAgentChatHarness.designStore.agents = [imageAgent];
+    useAgentChatHarness.designStore.nodes = [
+      createTestCanvasNode({
+        id: 'node-image',
+        position: { x: 0, y: 0 },
+        data: {
+          robotId: imageAgent.creator_id,
+          label: imageAgent.name,
+          agent: imageAgent,
+          agentInstance: createTestAgentInstance({
+            id: 'instance-alpha',
+            prototypeId: imageAgent.id,
+            name: imageAgent.name,
             position: { x: 0, y: 0 },
-            data: {
-                robotId: imageAgent.creator_id,
-                label: imageAgent.name,
-                agent: imageAgent,
-                agentInstance: createTestAgentInstance({
-                    id: 'instance-alpha',
-                    prototypeId: imageAgent.id,
-                    name: imageAgent.name,
-                    position: { x: 0, y: 0 },
-                    workflowId: 'wf-1',
-                    configuration_json: null,
-                }),
-            },
-        })];
+            workflowId: 'wf-1',
+            configuration_json: null,
+          }),
+        },
+      }),
+    ];
 
-        render(
-            <ImageGenerationPanel
-                isOpen={true}
-                hideSlideOver={true}
-                nodeId="node-image"
-                llmConfigs={[LOCAL_RUNTIME_CONFIG]}
-                onClose={jest.fn()}
-                onImageGenerated={jest.fn()}
-                onOpenImageModificationPanel={jest.fn()}
-            />
-        );
+    render(
+      <ImageGenerationPanel
+        isOpen={true}
+        hideSlideOver={true}
+        nodeId="node-image"
+        llmConfigs={[LOCAL_RUNTIME_CONFIG]}
+        onClose={jest.fn()}
+        onImageGenerated={jest.fn()}
+        onOpenImageModificationPanel={jest.fn()}
+      />,
+    );
 
-        await userEvent.type(screen.getByPlaceholderText('imageGen_promptPlaceholder'), 'draw a skyline');
-        await userEvent.click(screen.getByRole('button', { name: 'imageGen_generate' }));
+    await userEvent.type(screen.getByPlaceholderText('imageGen_promptPlaceholder'), 'draw a skyline');
+    await userEvent.click(screen.getByRole('button', { name: 'imageGen_generate' }));
 
-        await waitFor(() => {
-            expect(mockedGenerateImage).toHaveBeenCalledWith(
-                LLMProvider.LMStudio,
-                'http://localhost:11434',
-                'draw a skyline',
-                'local-model'
-            );
-        });
+    await waitFor(() => {
+      expect(mockedGenerateImage).toHaveBeenCalledWith(LLMProvider.LMStudio, 'http://localhost:11434', 'draw a skyline', 'local-model');
     });
+  });
 
-    it('le panel de modification d image reutilise le meme profil local pour edition et description', async () => {
-        mockedEditImage.mockResolvedValue({ image: 'modified-image' });
-        mockedGenerateContent.mockResolvedValue({ text: 'Image modifiee avec succes' });
+  it('le panel de modification d image reutilise le meme profil local pour edition et description', async () => {
+    mockedEditImage.mockResolvedValue({ image: 'modified-image' });
+    mockedGenerateContent.mockResolvedValue({ text: 'Image modifiee avec succes' });
 
-        const imageEditAgent = createAgent({
-            id: 'agent-edit',
-            localLLMProfileId: 'profile-beta',
-            capabilities: [LLMCapability.ImageModification],
-        });
-        useAgentChatHarness.designStore.agents = [imageEditAgent];
-        useAgentChatHarness.designStore.nodes = [createTestCanvasNode({
-            id: 'node-edit',
+    const imageEditAgent = createAgent({
+      id: 'agent-edit',
+      localLLMProfileId: 'profile-beta',
+      capabilities: [LLMCapability.ImageModification],
+    });
+    useAgentChatHarness.designStore.agents = [imageEditAgent];
+    useAgentChatHarness.designStore.nodes = [
+      createTestCanvasNode({
+        id: 'node-edit',
+        position: { x: 0, y: 0 },
+        data: {
+          robotId: imageEditAgent.creator_id,
+          label: imageEditAgent.name,
+          agent: imageEditAgent,
+          agentInstance: createTestAgentInstance({
+            id: 'instance-beta',
+            prototypeId: imageEditAgent.id,
+            name: imageEditAgent.name,
             position: { x: 0, y: 0 },
-            data: {
-                robotId: imageEditAgent.creator_id,
-                label: imageEditAgent.name,
-                agent: imageEditAgent,
-                agentInstance: createTestAgentInstance({
-                    id: 'instance-beta',
-                    prototypeId: imageEditAgent.id,
-                    name: imageEditAgent.name,
-                    position: { x: 0, y: 0 },
-                    workflowId: 'wf-1',
-                    configuration_json: null,
-                }),
-            },
-        })];
+            workflowId: 'wf-1',
+            configuration_json: null,
+          }),
+        },
+      }),
+    ];
 
-        render(
-            <ImageModificationPanel
-                isOpen={true}
-                editingImageInfo={{
-                    nodeId: 'node-edit',
-                    sourceImage: 'source-image',
-                    mimeType: 'image/png',
-                }}
-                llmConfigs={[LOCAL_RUNTIME_CONFIG]}
-                onClose={jest.fn()}
-                onImageModified={jest.fn()}
-            />
-        );
+    render(
+      <ImageModificationPanel
+        isOpen={true}
+        editingImageInfo={{
+          nodeId: 'node-edit',
+          sourceImage: 'source-image',
+          mimeType: 'image/png',
+        }}
+        llmConfigs={[LOCAL_RUNTIME_CONFIG]}
+        onClose={jest.fn()}
+        onImageModified={jest.fn()}
+      />,
+    );
 
-        await userEvent.type(screen.getByPlaceholderText('imageMod_promptPlaceholder'), 'remove the background');
-        await userEvent.click(screen.getByRole('button', { name: 'imageMod_modify' }));
+    await userEvent.type(screen.getByPlaceholderText('imageMod_promptPlaceholder'), 'remove the background');
+    await userEvent.click(screen.getByRole('button', { name: 'imageMod_modify' }));
 
-        await waitFor(() => {
-            expect(mockedEditImage).toHaveBeenCalledWith(
-                LLMProvider.LMStudio,
-                'http://localhost:1234',
-                'remove the background',
-                { mimeType: 'image/png', data: 'source-image' }
-            );
-        });
+    await waitFor(() => {
+      expect(mockedEditImage).toHaveBeenCalledWith(LLMProvider.LMStudio, 'http://localhost:1234', 'remove the background', {
+        mimeType: 'image/png',
+        data: 'source-image',
+      });
     });
+  });
 
-    it('le panel maps conserve le credential cloud courant sans derive locale', async () => {
-        mockedGenerateContentWithMaps.mockResolvedValue({ text: 'maps result', mapSources: [] });
+  it('le panel maps conserve le credential cloud courant sans derive locale', async () => {
+    mockedGenerateContentWithMaps.mockResolvedValue({ text: 'maps result', mapSources: [] });
 
-        const cloudAgent = createAgent({
-            id: 'agent-maps',
-            llmProvider: LLMProvider.Gemini,
-            model: 'gemini-2.5-pro',
-            capabilities: [LLMCapability.MapsGrounding],
-        });
-        useAgentChatHarness.designStore.agents = [cloudAgent];
-        useAgentChatHarness.designStore.nodes = [createTestCanvasNode({
-            id: 'node-maps',
+    const cloudAgent = createAgent({
+      id: 'agent-maps',
+      llmProvider: LLMProvider.Gemini,
+      model: 'gemini-2.5-pro',
+      capabilities: [LLMCapability.MapsGrounding],
+    });
+    useAgentChatHarness.designStore.agents = [cloudAgent];
+    useAgentChatHarness.designStore.nodes = [
+      createTestCanvasNode({
+        id: 'node-maps',
+        position: { x: 0, y: 0 },
+        data: {
+          robotId: cloudAgent.creator_id,
+          label: cloudAgent.name,
+          agent: cloudAgent,
+          agentInstance: createTestAgentInstance({
+            id: 'instance-maps',
+            prototypeId: cloudAgent.id,
+            name: cloudAgent.name,
             position: { x: 0, y: 0 },
-            data: {
-                robotId: cloudAgent.creator_id,
-                label: cloudAgent.name,
-                agent: cloudAgent,
-                agentInstance: createTestAgentInstance({
-                    id: 'instance-maps',
-                    prototypeId: cloudAgent.id,
-                    name: cloudAgent.name,
-                    position: { x: 0, y: 0 },
-                    workflowId: 'wf-1',
-                    configuration_json: null,
-                }),
-            },
-        })];
+            workflowId: 'wf-1',
+            configuration_json: null,
+          }),
+        },
+      }),
+    ];
 
-        render(
-            <MapsGroundingConfigPanel
-                isOpen={true}
-                hideSlideOver={true}
-                nodeId="node-maps"
-                llmConfigs={[CLOUD_RUNTIME_CONFIG]}
-                onClose={jest.fn()}
-            />
-        );
+    render(
+      <MapsGroundingConfigPanel
+        isOpen={true}
+        hideSlideOver={true}
+        nodeId="node-maps"
+        llmConfigs={[CLOUD_RUNTIME_CONFIG]}
+        onClose={jest.fn()}
+      />,
+    );
 
-        await userEvent.type(
-            screen.getByPlaceholderText('Ex: Restaurants japonais à Paris, Hôtels 5 étoiles à New York...'),
-            'restaurants in Paris'
-        );
-        await userEvent.click(screen.getByRole('button', { name: '🔍 Rechercher' }));
+    await userEvent.type(
+      screen.getByPlaceholderText('Ex: Restaurants japonais à Paris, Hôtels 5 étoiles à New York...'),
+      'restaurants in Paris',
+    );
+    await userEvent.click(screen.getByRole('button', { name: '🔍 Rechercher' }));
 
-        await waitFor(() => {
-            expect(mockedGenerateContentWithMaps).toHaveBeenCalledWith(
-                LLMProvider.Gemini,
-                'gemini-test-key-placeholder',
-                'gemini-2.5-pro',
-                'restaurants in Paris',
-                'System prompt',
-                undefined
-            );
-        });
+    await waitFor(() => {
+      expect(mockedGenerateContentWithMaps).toHaveBeenCalledWith(
+        LLMProvider.Gemini,
+        'gemini-test-key-placeholder',
+        'gemini-2.5-pro',
+        'restaurants in Paris',
+        'System prompt',
+        undefined,
+      );
     });
+  });
 });

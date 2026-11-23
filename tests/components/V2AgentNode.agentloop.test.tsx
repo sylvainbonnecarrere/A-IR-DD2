@@ -503,7 +503,7 @@ describe('V2AgentNode AgentLoop integration', () => {
   });
 
   it('continues the native provider flow after a tool result even when Chat is not explicitly enabled', async () => {
-    const nodeMessages: Record<string, any[]> = {};
+    const nodeMessages: Record<string, unknown[]> = {};
 
     runtimeStoreState = {
       ...runtimeStoreState,
@@ -875,7 +875,7 @@ describe('V2AgentNode AgentLoop integration', () => {
   });
 
   it('shows a tool message immediately on local tool_call_start before the final response is added', async () => {
-    const nodeMessages: Record<string, any[]> = { 'node-1': [] };
+    const nodeMessages: Record<string, unknown[]> = { 'node-1': [] };
 
     runtimeStoreState.getNodeMessages = jest.fn((nodeId: string) => nodeMessages[nodeId] ?? []);
     runtimeStoreState.addNodeMessage = jest.fn((nodeId: string, message: unknown) => {

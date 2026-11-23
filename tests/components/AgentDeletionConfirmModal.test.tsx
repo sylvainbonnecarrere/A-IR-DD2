@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentDeletionConfirmModal } from '../../components/modals/AgentDeletionConfirmModal';
 import { useDesignStore } from '../../stores/useDesignStore';
 import { useNotifications } from '../../contexts/NotificationContext';
+import type { Agent } from '../../types';
 import { useAuth } from '../../hooks/useAuth';
 
 jest.mock('../../stores/useDesignStore');
@@ -28,7 +29,7 @@ describe('AgentDeletionConfirmModal', () => {
     id: 'agent-1',
     name: 'Agent Alpha',
     description: 'Prototype test',
-  } as any;
+  } as unknown as Agent;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -70,16 +71,18 @@ describe('AgentDeletionConfirmModal', () => {
     });
     expect(mockDeleteAgent).toHaveBeenCalledWith('agent-1', { deleteInstances: true });
     expect(onConfirm).toHaveBeenCalled();
-    expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'success',
-    }));
+    expect(mockAddNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'success',
+      }),
+    );
   });
 
   it('falls back to prototype-only local deletion when instance deletion policy fails', async () => {
     const onDeleteNodes = jest.fn().mockResolvedValue({
       success: false,
       failedInstanceIds: ['instance-2'],
-      error: '1 instance(s) n\'ont pas pu etre supprimees avec la politique media demandee.',
+      error: "1 instance(s) n'ont pas pu etre supprimees avec la politique media demandee.",
     });
     const onConfirm = jest.fn();
 
@@ -101,8 +104,10 @@ describe('AgentDeletionConfirmModal', () => {
     });
     expect(mockDeleteAgent).toHaveBeenCalledWith('agent-1', { deleteInstances: false });
     expect(onConfirm).toHaveBeenCalled();
-    expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'warning',
-    }));
+    expect(mockAddNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'warning',
+      }),
+    );
   });
 });

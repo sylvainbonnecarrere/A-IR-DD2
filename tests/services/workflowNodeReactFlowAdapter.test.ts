@@ -1,15 +1,5 @@
-import {
-  LLMProvider,
-  RobotId,
-  type Agent,
-  type AgentInstance,
-  type WorkflowNode,
-  type V2WorkflowNode,
-} from '../../types';
-import {
-  projectWorkflowNodeToReactFlowNode,
-  projectWorkflowNodesToReactFlowNodes,
-} from '../../services/workflowNodeReactFlowAdapter';
+import { LLMProvider, RobotId, type Agent, type AgentInstance, type WorkflowNode, type V2WorkflowNode } from '../../types';
+import { projectWorkflowNodeToReactFlowNode, projectWorkflowNodesToReactFlowNodes } from '../../services/workflowNodeReactFlowAdapter';
 
 const buildAgent = (overrides: Partial<Agent> = {}): Agent => ({
   id: 'prototype-1',
@@ -46,7 +36,7 @@ describe('workflowNodeReactFlowAdapter', () => {
       type: 'agent',
       position: { x: 20, y: 40 },
       data: {
-        robotId: 'archi' as any,
+        robotId: RobotId.Archi,
         label: 'stale-label',
         agentInstance: instance,
         workflowId: 'wf-v2',
@@ -60,21 +50,23 @@ describe('workflowNodeReactFlowAdapter', () => {
       agents: [prototype],
     });
 
-    expect(projected).toEqual(expect.objectContaining({
-      id: 'node-instance-1',
-      type: 'customAgent',
-      position: { x: 20, y: 40 },
-      data: expect.objectContaining({
-        robotId: 'archi',
-        label: 'Projected Instance',
-        workflowId: 'wf-v2',
-        agent: prototype,
-        agentInstance: expect.objectContaining({
-          id: 'instance-1',
+    expect(projected).toEqual(
+      expect.objectContaining({
+        id: 'node-instance-1',
+        type: 'customAgent',
+        position: { x: 20, y: 40 },
+        data: expect.objectContaining({
+          robotId: RobotId.Archi,
+          label: 'Projected Instance',
           workflowId: 'wf-v2',
+          agent: prototype,
+          agentInstance: expect.objectContaining({
+            id: 'instance-1',
+            workflowId: 'wf-v2',
+          }),
         }),
       }),
-    }));
+    );
   });
 
   it('projects a legacy workflow node from the resolved instance/prototype lookup', () => {
@@ -106,15 +98,17 @@ describe('workflowNodeReactFlowAdapter', () => {
     });
 
     expect(resolveInstance).toHaveBeenCalledWith('instance-resolved');
-    expect(projected.data).toEqual(expect.objectContaining({
-      label: 'Resolved Instance',
-      workflowId: 'wf-resolved',
-      agent: prototype,
-      agentInstance: expect.objectContaining({
-        id: 'instance-resolved',
+    expect(projected.data).toEqual(
+      expect.objectContaining({
+        label: 'Resolved Instance',
         workflowId: 'wf-resolved',
+        agent: prototype,
+        agentInstance: expect.objectContaining({
+          id: 'instance-resolved',
+          workflowId: 'wf-resolved',
+        }),
       }),
-    }));
+    );
   });
 
   it('falls back to direct agent instance and prototype catalogs when the resolver misses', () => {
@@ -141,14 +135,16 @@ describe('workflowNodeReactFlowAdapter', () => {
       resolveInstance: jest.fn(() => null),
     });
 
-    expect(projected.data).toEqual(expect.objectContaining({
-      label: 'Direct Instance',
-      workflowId: 'wf-direct',
-      agent: prototype,
-      agentInstance: expect.objectContaining({
-        id: 'instance-direct',
+    expect(projected.data).toEqual(
+      expect.objectContaining({
+        label: 'Direct Instance',
         workflowId: 'wf-direct',
+        agent: prototype,
+        agentInstance: expect.objectContaining({
+          id: 'instance-direct',
+          workflowId: 'wf-direct',
+        }),
       }),
-    }));
+    );
   });
 });

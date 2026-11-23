@@ -1,10 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const REGISTER_BUTTON_RE = /Inscription|Register|Registrieren|Registrarse|Registrar-se|Зареєструватися/i;
 const LOGIN_BUTTON_RE = /Connexion|Sign In|Anmelden|Iniciar Sesión|Fazer Login|Увійти/i;
 const SETTINGS_BUTTON_RE = /Paramètres|Settings|Einstellungen|Configuración|Configurações|Налаштування/i;
 
-async function describeTopElement(page: Parameters<typeof test>[1] extends never ? never : any, locatorText: string) {
+async function describeTopElement(page: Page, locatorText: string) {
   return page.evaluate((text) => {
     const candidates = Array.from(document.querySelectorAll('button, [role="button"]')) as HTMLElement[];
     const target = candidates.find((element) => (element.innerText || '').trim().includes(text));
@@ -13,8 +13,8 @@ async function describeTopElement(page: Parameters<typeof test>[1] extends never
     }
 
     const rect = target.getBoundingClientRect();
-    const x = rect.left + (rect.width / 2);
-    const y = rect.top + (rect.height / 2);
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
     const topElement = document.elementFromPoint(x, y) as HTMLElement | null;
 
     const formatElement = (element: HTMLElement | null) => {

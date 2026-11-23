@@ -208,7 +208,7 @@ describe('V2AgentNode web search params entrypoint', () => {
         dragging={false}
         zIndex={1}
         isConnectable={true}
-        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] as any }}
+        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] }}
       />,
     );
 
@@ -267,7 +267,7 @@ describe('V2AgentNode web search params entrypoint', () => {
         dragging={false}
         zIndex={1}
         isConnectable={true}
-        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] as any }}
+        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] }}
       />,
     );
 
@@ -285,7 +285,7 @@ describe('V2AgentNode web search params entrypoint', () => {
         dragging={false}
         zIndex={1}
         isConnectable={true}
-        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] as any }}
+        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] }}
       />,
     );
 

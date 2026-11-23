@@ -1,6 +1,6 @@
 // ⭐ US-RC-02 lot 4 : contrat commun des visionneuses JSON (components/com/*).
 // Toute valeur JSON arbitraire est manipulée en `unknown` côté frontières,
-// et classifiée ici par un type-guard (plus de `any` / `typeof x as any`).
+// et classifiée ici par un type-guard (sans type flottant).
 export type JsonValueType = 'object' | 'array' | 'string' | 'number' | 'boolean' | 'null';
 
 export const jsonTypeOf = (value: unknown): JsonValueType => {
