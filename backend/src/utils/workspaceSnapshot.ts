@@ -182,7 +182,7 @@ interface BuildWorkspaceSnapshotOptions {
   includeLegacyPrototypes?: boolean;
 }
 
-function sanitizeLegacyWorkflowGraphFields(workflow: SnapshotWorkflowLike | null): SnapshotWorkflowLike | null {
+export function sanitizeLegacyWorkflowGraphFields(workflow: SnapshotWorkflowLike | null): SnapshotWorkflowLike | null {
   if (!workflow || typeof workflow !== 'object') {
     return workflow;
   }

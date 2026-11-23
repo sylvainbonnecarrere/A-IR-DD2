@@ -22,6 +22,7 @@ import {
   normalizePersistenceConfigForPersistence,
   normalizePersistenceConfigForProduct,
   summarizePersistenceConfigBoundary,
+  type PersistenceConfig,
 } from '../types/persistence';
 import { DEFAULT_RECOVERY_POLICY, RecoveryPolicySchema, normalizeRecoveryPolicy } from '../domain/execution/recoveryPolicy.contract';
 import { AgentInstanceDeletionPolicyService } from '../services/agentInstanceDeletionPolicy.service';
@@ -46,14 +47,15 @@ const toolSelectionSchema = z.object({
     .optional(),
 });
 
-function normalizeIncomingPersistenceConfig<T extends { persistenceConfig?: any }>(payload: T): T {
+function normalizeIncomingPersistenceConfig<T extends { persistenceConfig?: unknown }>(payload: T): T {
   if (!payload?.persistenceConfig) {
     return payload;
   }
 
   return {
     ...payload,
-    persistenceConfig: normalizePersistenceConfigForPersistence(payload.persistenceConfig),
+    // champ validé par le schéma Zod de la route en amont
+    persistenceConfig: normalizePersistenceConfigForPersistence(payload.persistenceConfig as Partial<PersistenceConfig>),
   };
 }
 
@@ -359,12 +361,12 @@ router.post(
       const finalTools = Array.isArray(prototype.tools) ? prototype.tools : [];
       const finalLegacyTools = Array.isArray(configuration_json?.tools)
         ? configuration_json.tools
-        : Array.isArray((prototype as any).legacyTools)
-          ? (prototype as any).legacyTools
+        : Array.isArray(prototype.legacyTools)
+          ? prototype.legacyTools
           : [];
       const finalToolSelections =
-        Array.isArray((prototype as any).toolSelections) && (prototype as any).toolSelections.length > 0
-          ? (prototype as any).toolSelections
+        Array.isArray(prototype.toolSelections) && prototype.toolSelections.length > 0
+          ? prototype.toolSelections
           : finalTools.map((toolId: mongoose.Types.ObjectId) => ({ toolId: toolId.toString() }));
 
       // 4. PHASE 2 - HistoryConfig: Use frontend config if provided
@@ -373,9 +375,9 @@ router.post(
       const finalWebSearchParams =
         configuration_json?.webSearchParams !== undefined
           ? parseWebSearchParams(configuration_json.webSearchParams)
-          : (prototype as any).webSearchParams || undefined;
+          : prototype.webSearchParams || undefined;
       // ⭐ LOCAL LLM: Resolve localLLMProfileId (frontend takes precedence over prototype)
-      const finalLocalLLMProfileId = configuration_json?.localLLMProfileId ?? (prototype as any).localLLMProfileId ?? null;
+      const finalLocalLLMProfileId = configuration_json?.localLLMProfileId ?? prototype.localLLMProfileId ?? null;
 
       // 5. PersistenceConfig: merge prototype config avec overrides
       const prototypePersistenceConfig = normalizePersistenceConfigForPersistence(
@@ -396,9 +398,14 @@ router.post(
         : prototypePersistenceConfig;
 
       // ⭐ J7-08: snapshot de la recoveryPolicy (override frontend > prototype > défaut off)
-      const prototypeRecoveryPolicy = (prototype as any).recoveryPolicy;
+      // le sous-document Mongoose recoveryPolicy n'est pas un objet plain : guard toObject avant Zod strict
+      const prototypeRecoveryPolicy: unknown = prototype.recoveryPolicy;
       const plainPrototypeRecoveryPolicy =
-        typeof prototypeRecoveryPolicy?.toObject === 'function' ? prototypeRecoveryPolicy.toObject() : prototypeRecoveryPolicy;
+        prototypeRecoveryPolicy !== null &&
+        typeof prototypeRecoveryPolicy === 'object' &&
+        typeof (prototypeRecoveryPolicy as { toObject?: unknown }).toObject === 'function'
+          ? (prototypeRecoveryPolicy as { toObject: () => unknown }).toObject()
+          : prototypeRecoveryPolicy;
       const finalRecoveryPolicy = normalizeRecoveryPolicy(
         configuration_json?.recoveryPolicy ?? plainPrototypeRecoveryPolicy ?? DEFAULT_RECOVERY_POLICY,
       );
@@ -524,33 +531,39 @@ router.post(
           uiConfig: node.uiConfig,
         },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       // ⭐ LOGGING AMÉLIORÉ: afficher les détails de l'erreur de validation
+      const err = error as {
+        message?: string;
+        name?: string;
+        stack?: string;
+        errors?: Record<string, { message: string; value?: unknown }>;
+      };
       console.error('[AgentInstances] ❌ POST/from-prototype error:', {
-        message: error.message,
-        name: error.name,
+        message: err.message,
+        name: err.name,
         // Si c'est une ValidationError Mongoose, afficher les champs en erreur
-        validationErrors: error.errors
-          ? Object.keys(error.errors).map((key) => ({
+        validationErrors: err.errors
+          ? Object.keys(err.errors).map((key) => ({
               field: key,
-              message: error.errors[key].message,
-              value: error.errors[key].value,
+              message: err.errors?.[key].message,
+              value: err.errors?.[key].value,
             }))
           : undefined,
-        stack: error.stack?.split('\n').slice(0, 5).join('\n'),
+        stack: err.stack?.split('\n').slice(0, 5).join('\n'),
       });
 
       // Réponse avec plus de détails (en dev uniquement)
-      const errorResponse: any = {
+      const errorResponse: Record<string, unknown> = {
         error: 'Erreur création instance depuis prototype',
-        message: error.message,
+        message: err.message,
       };
 
       // Ajouter les détails de validation si disponibles
-      if (error.name === 'ValidationError' && error.errors) {
-        errorResponse.validationErrors = Object.keys(error.errors).map((key) => ({
+      if (err.name === 'ValidationError' && err.errors) {
+        errorResponse.validationErrors = Object.keys(err.errors).map((key) => ({
           field: key,
-          message: error.errors[key].message,
+          message: err.errors?.[key].message,
         }));
       }
 
@@ -697,8 +710,8 @@ router.put(
             const inheritedToolIds = Array.isArray(prototype?.tools) ? prototype.tools : [];
             instance.tools = inheritedToolIds;
             instance.toolSelections =
-              Array.isArray((prototype as any)?.toolSelections) && (prototype as any).toolSelections.length > 0
-                ? (prototype as any).toolSelections
+              Array.isArray(prototype?.toolSelections) && prototype.toolSelections.length > 0
+                ? prototype.toolSelections
                 : inheritedToolIds.map((toolId: mongoose.Types.ObjectId) => ({ toolId: toolId.toString() }));
           }
         }
@@ -750,8 +763,9 @@ router.put(
       }
 
       // ⭐ CRITICAL: Log saved state for debugging (BREAK #2 fix)
-      const historyConfigObj = (instance.historyConfig as any) || {};
-      const persistenceConfigObj = (instance.persistenceConfig as any) || {};
+      // historyConfig est un champ Mixed : cast structurel vers Record (champ connu, typé object côté modèle)
+      const historyConfigObj: Record<string, unknown> = (instance.historyConfig as Record<string, unknown> | undefined) || {};
+      const persistenceConfigObj = instance.persistenceConfig || {};
       const persistenceSummary = summarizePersistenceConfigBoundary(persistenceConfigObj);
       console.debug('[AgentInstances] ✅ PUT endpoint saved:', {
         instanceId: instance._id?.toString(),
