@@ -1,5 +1,21 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Agent, AgentBatchDeleteResult, AgentDeletionMediaPolicy, LLMConfig, LLMProvider, WorkflowNode, LLMCapability, ChatMessage, HistoryConfig, RobotId, V2WorkflowNode, AgentInstance, NodePositionUpdateOptions, MapsPanelPreloadedResults, normalizePersistenceConfig } from './types';
+import {
+  Agent,
+  AgentBatchDeleteResult,
+  AgentDeletionMediaPolicy,
+  LLMConfig,
+  LLMProvider,
+  WorkflowNode,
+  LLMCapability,
+  ChatMessage,
+  HistoryConfig,
+  RobotId,
+  V2WorkflowNode,
+  AgentInstance,
+  NodePositionUpdateOptions,
+  MapsPanelPreloadedResults,
+  normalizePersistenceConfig,
+} from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
 import { Header } from './components/Header';
@@ -82,7 +98,18 @@ function isRobotId(robotId: string): robotId is RobotId {
  * Must be wrapped by AuthProvider to access useAuth()
  */
 export function AppContent() {
-  const { isAuthenticated, accessToken, runtimeLLMConfigs: authRuntimeLLMConfigs, localLLMProfiles: authLocalLLMProfiles, user, logout, refreshRuntimeConfigState, sessionStatus, isLoading: authLoading, error: authError } = useAuth();
+  const {
+    isAuthenticated,
+    accessToken,
+    runtimeLLMConfigs: authRuntimeLLMConfigs,
+    localLLMProfiles: authLocalLLMProfiles,
+    user,
+    logout,
+    refreshRuntimeConfigState,
+    sessionStatus,
+    isLoading: authLoading,
+    error: authError,
+  } = useAuth();
   const isSettingsModalOpen = useAppShellStore((state) => state.isSettingsModalOpen);
   const isLoginModalOpen = useAppShellStore((state) => state.isLoginModalOpen);
   const isRegisterModalOpen = useAppShellStore((state) => state.isRegisterModalOpen);
@@ -130,8 +157,8 @@ export function AppContent() {
 
   // Robot Navigation State
   const currentResolvedRoute = useMemo(() => resolveRobotPageRoute(currentPath), [currentPath]);
-  const currentRouteUsesWorkflowCanvas = currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosDashboard
-    || currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosSupervision;
+  const currentRouteUsesWorkflowCanvas =
+    currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosDashboard || currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosSupervision;
 
   const handleRobotNavigation = useCallback((robotId: RobotId, path: string) => {
     setCurrentPath(path);
@@ -139,20 +166,23 @@ export function AppContent() {
     console.debug(`Navigating to robot ${robotId} at path ${path}`);
   }, []);
 
-  const handleRuntimeNavigation = useCallback((robotId: string, path: string) => {
-    if (!isRobotId(robotId)) {
-      console.warn('[App] Ignoring navigation request with unknown robotId:', robotId);
-      return;
-    }
+  const handleRuntimeNavigation = useCallback(
+    (robotId: string, path: string) => {
+      if (!isRobotId(robotId)) {
+        console.warn('[App] Ignoring navigation request with unknown robotId:', robotId);
+        return;
+      }
 
-    handleRobotNavigation(robotId, path);
-  }, [handleRobotNavigation]);
+      handleRobotNavigation(robotId, path);
+    },
+    [handleRobotNavigation],
+  );
 
   // Shows only after an authenticated session drops back to guest mode.
   // Avoid mounting the heavy entry animation on cold guest boot because it can
   // monopolize the main thread before the canvas becomes interactive.
   const wasAuthenticatedRef = React.useRef(isAuthenticated);
-  
+
   // ⭐ UX: Trigger hyperspace on logout (auth → guest transition)
   useEffect(() => {
     const wasAuth = wasAuthenticatedRef.current;
@@ -224,7 +254,7 @@ export function AppContent() {
     };
   }, [recordRuntimeEvent, setRuntimeConnectionState]);
 
-  // Design Store access for integrity validation  
+  // Design Store access for integrity validation
   const designAgents = useDesignStore((state) => state.agents);
   const validateWorkflowIntegrity = useDesignStore((state) => state.validateWorkflowIntegrity);
   const cleanupOrphanedInstances = useDesignStore((state) => state.cleanupOrphanedInstances);
@@ -247,10 +277,14 @@ export function AppContent() {
   // ⭐ FIX QA: Journal queue for persisting generated images
   const { enqueueEntry: enqueueJournalEntry } = useJournalQueue();
 
-  const resolveCurrentWorkflowId = useCallback(() => resolveActiveWorkflowId({
-    designWorkflowId: designCurrentWorkflowId,
-    designWorkflows,
-  }), [designCurrentWorkflowId, designWorkflows]);
+  const resolveCurrentWorkflowId = useCallback(
+    () =>
+      resolveActiveWorkflowId({
+        designWorkflowId: designCurrentWorkflowId,
+        designWorkflows,
+      }),
+    [designCurrentWorkflowId, designWorkflows],
+  );
 
   const {
     switchToWorkflow,
@@ -280,8 +314,6 @@ export function AppContent() {
   const resetGuestShellState = useCallback(() => {
     useAppShellStore.getState().resetGuestShellState();
   }, []);
-
-
 
   /**
    * ⭐ CRITICAL J4.4: Strong-clean state on auth change (login/logout)
@@ -357,27 +389,27 @@ export function AppContent() {
         sessionStatus,
         runtimeLLMConfigs: llmConfigs,
         localLLMProfiles,
-        login: async () => { },
-        register: async () => { },
+        login: async () => {},
+        register: async () => {},
         logout,
-        refreshAccessToken: async () => { },
-        clearError: () => { },
-        refreshLLMApiKeys: async () => { },
+        refreshAccessToken: async () => {},
+        clearError: () => {},
+        refreshLLMApiKeys: async () => {},
         llmApiKeys: null,
         refreshRuntimeConfigState,
         isLoading: authLoading,
-        error: authError
+        error: authError,
       });
 
       // NOTE J4.4: LLMConfigs are now managed separately via useLLMConfigs hook
       // We only save PREFERENCES here (language, theme)
       // LLMConfigs should be saved via LLMConfigModal -> useLLMConfigs -> updateConfig()
-      
+
       // Save preferences only
       await storage.saveSettings({
-        preferences: { language: 'fr' }
+        preferences: { language: 'fr' },
       });
-      
+
       await refreshRuntimeConfigState();
     } catch (error) {
       console.error('[App] handleSaveSettings error:', error);
@@ -386,287 +418,301 @@ export function AppContent() {
 
   /**
    * ⭐ AUTO-SAVE: Add agent to workflow with immediate API persistence
-   * 
+   *
    * Per Dev_rules.md: Agent instances are ALWAYS auto-saved (independent of workflow save mode)
    * This ensures the agent_instances collection is populated immediately on creation.
    */
-  const addAgentToWorkflow = useCallback(async (agent: Agent) => {
-    // Use instanceName if provided, otherwise use agent name
-    const instanceName = agent.instanceName || agent.name;
+  const addAgentToWorkflow = useCallback(
+    async (agent: Agent) => {
+      // Use instanceName if provided, otherwise use agent name
+      const instanceName = agent.instanceName || agent.name;
 
-    // ⭐ Get workflowId BEFORE creating instance
-    const workflowId = resolveCurrentWorkflowId();
-    const designState = useDesignStore.getState();
-    const position = findAvailableWorkflowNodePosition({
-      workflowId,
-      nodes: designState.nodes,
-      agentInstances: designState.agentInstances,
-    });
-
-    // Add agent instance to DesignStore with custom instance name and workflowId
-    const instanceId = addAgentInstance(agent.id, position, instanceName, workflowId || undefined);
-
-    // ⭐ AUTO-SAVE: Immediately persist to backend (if authenticated)
-    if (isAuthenticated && accessToken && workflowId) {
-      console.debug('[App] 📤 Auto-saving new agent instance to backend:', {
-        instanceId,
-        prototypeId: agent.id,
-        workflowId
-      });
-      
-      const result = await PersistenceService.createAgentInstance(
-        {
-          id: instanceId,
-          prototypeId: agent.id,
-          name: instanceName,
-          position,
-          configuration_json: {
-            role: agent.role,
-            model: agent.model,
-            llmProvider: agent.llmProvider,
-            systemPrompt: agent.systemPrompt,
-            tools: agent.tools || [],
-            outputConfig: agent.outputConfig,
-            // ⭐ PHASE 2: Include capabilities + historyConfig for complete persistence
-            // Ensures reconnection loads same capabilities as template
-            // Chat is ALWAYS included as the minimum capability
-            capabilities: agent.capabilities && agent.capabilities.length > 0 
-              ? agent.capabilities 
-              : [LLMCapability.Chat],  // Fallback: minimum Chat capability
-            // Include history config if template defined it
-            historyConfig: agent.historyConfig || undefined
-          },
-          // ⭐ Pass persistenceConfig override if provided from WorkflowValidationModal
-          persistenceConfig: agent.persistenceConfig
-        },
+      // ⭐ Get workflowId BEFORE creating instance
+      const workflowId = resolveCurrentWorkflowId();
+      const designState = useDesignStore.getState();
+      const position = findAvailableWorkflowNodePosition({
         workflowId,
-        { isAuthenticated, accessToken }
-      );
-      
-      // ⭐ FIX: Utiliser le backendId comme ID final, sinon le tempId
-      let finalInstanceId = instanceId;
-      
-      if (result.success) {
-        console.debug('[App] ✅ Agent instance persisted to DB with backendId:', result.backendId);
-        
-        // ✅ ÉTAPE 2: Synchroniser l'instance complète du backend avec Zustand
-        // Le backend retourne l'instance avec configuration_json enrichie
-        const backendId = result.backendId;
-        if (backendId && result.instance) {
-          const persistedBackendId: string = backendId;
-          
-          // ✅ Remplacer l'instance temporaire par l'instance backend complète
-          // Incluant la configuration_json qui sera utilisée dans AgentConfigurationModal
-          const backendInstance: AgentInstance = {
-            id: persistedBackendId,
+        nodes: designState.nodes,
+        agentInstances: designState.agentInstances,
+      });
+
+      // Add agent instance to DesignStore with custom instance name and workflowId
+      const instanceId = addAgentInstance(agent.id, position, instanceName, workflowId || undefined);
+
+      // ⭐ AUTO-SAVE: Immediately persist to backend (if authenticated)
+      if (isAuthenticated && accessToken && workflowId) {
+        console.debug('[App] 📤 Auto-saving new agent instance to backend:', {
+          instanceId,
+          prototypeId: agent.id,
+          workflowId,
+        });
+
+        const result = await PersistenceService.createAgentInstance(
+          {
+            id: instanceId,
             prototypeId: agent.id,
             name: instanceName,
             position,
-            workflowId,
-            isMinimized: false,
-            isMaximized: false,
-            // ⭐ FIX QA: Récupérer persistenceConfig du backend ou du prototype
-            persistenceConfig: normalizePersistenceConfig(
-              result.instance.persistenceConfig || agent.persistenceConfig
-            ),
-            // ✅ configuration_json contient TOUS les détails de config (role, model, llmProvider, etc.)
-            configuration_json: result.instance.configuration_json || {
+            configuration_json: {
               role: agent.role,
               model: agent.model,
               llmProvider: agent.llmProvider,
               systemPrompt: agent.systemPrompt,
               tools: agent.tools || [],
               outputConfig: agent.outputConfig,
-              capabilities: agent.capabilities || [],
-              historyConfig: agent.historyConfig,
-              position
-            }
-          };
-          
-          // ✅ CRITICAL: Update instance ID AND content in Zustand store
-          if (persistedBackendId !== instanceId) {
-            const fromNodeId = `node-${instanceId}`;
-            const toNodeId = `node-${persistedBackendId}`;
+              // ⭐ PHASE 2: Include capabilities + historyConfig for complete persistence
+              // Ensures reconnection loads same capabilities as template
+              // Chat is ALWAYS included as the minimum capability
+              capabilities: agent.capabilities && agent.capabilities.length > 0 ? agent.capabilities : [LLMCapability.Chat], // Fallback: minimum Chat capability
+              // Include history config if template defined it
+              historyConfig: agent.historyConfig || undefined,
+            },
+            // ⭐ Pass persistenceConfig override if provided from WorkflowValidationModal
+            persistenceConfig: agent.persistenceConfig,
+          },
+          workflowId,
+          { isAuthenticated, accessToken },
+        );
 
-            updateInstanceId(instanceId, persistedBackendId);
-            useRuntimeStore.getState().renameNodeRuntimeState(fromNodeId, toNodeId);
+        // ⭐ FIX: Utiliser le backendId comme ID final, sinon le tempId
+        let finalInstanceId = instanceId;
 
-            setCurrentImageNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
-            // ⭐ hygiène tsc : le setter du store prend une VALEUR (pas un updater React)
-            setCurrentImageAgentInstance(remapAgentInstanceReference(currentImageAgentInstance, instanceId, persistedBackendId, workflowId));
-            setCurrentVideoNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
-            setCurrentVideoAgentInstance(remapAgentInstanceReference(currentVideoAgentInstance, instanceId, persistedBackendId, workflowId));
-            setCurrentMapsNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
-            setEditingImageInfo((imageInfo) => remapEditingImageInfo(imageInfo, fromNodeId, toNodeId, instanceId, persistedBackendId, workflowId));
-          }
-          // ✅ Ensuite mettre à jour la configuration complète
-          // Use getState() for stable reference (avoid dependency on updateAgentInstance)
-          useDesignStore.getState().updateAgentInstance(persistedBackendId, backendInstance);
-          finalInstanceId = persistedBackendId;
-        } else if (!backendId) {
-          console.error('[App] ❌ Persisted agent instance is missing backendId:', result.instance);
-        }
-      } else {
-        console.error('[App] ❌ Failed to persist agent instance:', result.error);
-        // Don't block UI - instance exists locally, will sync later
-      }
-      
-      // ⭐ CRITICAL: Create V2WorkflowNode in Zustand store AFTER ID resolution
-      // ⭐ FIX: Utiliser getState() pour obtenir la valeur actuelle du store (pas la closure stale)
-      const currentAgentInstances = useDesignStore.getState().agentInstances;
-      
-      const updatedInstance = currentAgentInstances.find(inst => 
-        inst.id === finalInstanceId || inst.id === instanceId
-      );
-      
-      if (updatedInstance) {
-        // ⭐ FIX: Ensure workflowId is set on the instance
-        const instanceWithWorkflowId: AgentInstance = {
-          ...updatedInstance,
-          id: finalInstanceId, // ⭐ Forcer l'utilisation de l'ID final
-          workflowId: updatedInstance.workflowId || workflowId
-        };
-        
-        addNode({
-          type: 'agent',
-          position,
-          data: {
-            robotId: RobotId.Archi,
-            label: instanceName,
-            agent,
-            agentInstance: instanceWithWorkflowId,
-            workflowId,
-            isMinimized: false,
-            isMaximized: false
-          }
-        });
-      } else {
-        console.warn('[App] ⚠️ Instance not found after creation, creating node anyway');
-        // Créer le node avec les données disponibles
-        addNode({
-          type: 'agent',
-          position,
-          data: {
-            robotId: RobotId.Archi,
-            label: instanceName,
-            agent,
-            agentInstance: {
-              id: finalInstanceId,
+        if (result.success) {
+          console.debug('[App] ✅ Agent instance persisted to DB with backendId:', result.backendId);
+
+          // ✅ ÉTAPE 2: Synchroniser l'instance complète du backend avec Zustand
+          // Le backend retourne l'instance avec configuration_json enrichie
+          const backendId = result.backendId;
+          if (backendId && result.instance) {
+            const persistedBackendId: string = backendId;
+
+            // ✅ Remplacer l'instance temporaire par l'instance backend complète
+            // Incluant la configuration_json qui sera utilisée dans AgentConfigurationModal
+            const backendInstance: AgentInstance = {
+              id: persistedBackendId,
               prototypeId: agent.id,
               name: instanceName,
               position,
+              workflowId,
               isMinimized: false,
               isMaximized: false,
+              // ⭐ FIX QA: Récupérer persistenceConfig du backend ou du prototype
+              persistenceConfig: normalizePersistenceConfig(result.instance.persistenceConfig || agent.persistenceConfig),
+              // ✅ configuration_json contient TOUS les détails de config (role, model, llmProvider, etc.)
+              configuration_json: result.instance.configuration_json || {
+                role: agent.role,
+                model: agent.model,
+                llmProvider: agent.llmProvider,
+                systemPrompt: agent.systemPrompt,
+                tools: agent.tools || [],
+                outputConfig: agent.outputConfig,
+                capabilities: agent.capabilities || [],
+                historyConfig: agent.historyConfig,
+                position,
+              },
+            };
+
+            // ✅ CRITICAL: Update instance ID AND content in Zustand store
+            if (persistedBackendId !== instanceId) {
+              const fromNodeId = `node-${instanceId}`;
+              const toNodeId = `node-${persistedBackendId}`;
+
+              updateInstanceId(instanceId, persistedBackendId);
+              useRuntimeStore.getState().renameNodeRuntimeState(fromNodeId, toNodeId);
+
+              setCurrentImageNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
+              // ⭐ US-RC-00a (R1, stale closure) : lire l'état COURANT via getState() — pattern déjà
+              // présent dans ce fichier (clearTransientUiState/resetGuestShellState, l.277-281).
+              // Les sélecteurs l.95/98 hors deps array donnaient une closure périmée : le remap
+              // s'appliquait à une mauvaise instance (ou null) si l'agent image/vidéo changeait
+              // entre deux ajouts. Aucun ajout au deps array (getState est stable).
+              const shellState = useAppShellStore.getState();
+              setCurrentImageAgentInstance(
+                remapAgentInstanceReference(shellState.currentImageAgentInstance, instanceId, persistedBackendId, workflowId),
+              );
+              setCurrentVideoNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
+              setCurrentVideoAgentInstance(
+                remapAgentInstanceReference(shellState.currentVideoAgentInstance, instanceId, persistedBackendId, workflowId),
+              );
+              setCurrentMapsNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
+              setEditingImageInfo((imageInfo) =>
+                remapEditingImageInfo(imageInfo, fromNodeId, toNodeId, instanceId, persistedBackendId, workflowId),
+              );
+            }
+            // ✅ Ensuite mettre à jour la configuration complète
+            // Use getState() for stable reference (avoid dependency on updateAgentInstance)
+            useDesignStore.getState().updateAgentInstance(persistedBackendId, backendInstance);
+            finalInstanceId = persistedBackendId;
+          } else if (!backendId) {
+            console.error('[App] ❌ Persisted agent instance is missing backendId:', result.instance);
+          }
+        } else {
+          console.error('[App] ❌ Failed to persist agent instance:', result.error);
+          // Don't block UI - instance exists locally, will sync later
+        }
+
+        // ⭐ CRITICAL: Create V2WorkflowNode in Zustand store AFTER ID resolution
+        // ⭐ FIX: Utiliser getState() pour obtenir la valeur actuelle du store (pas la closure stale)
+        const currentAgentInstances = useDesignStore.getState().agentInstances;
+
+        const updatedInstance = currentAgentInstances.find((inst) => inst.id === finalInstanceId || inst.id === instanceId);
+
+        if (updatedInstance) {
+          // ⭐ FIX: Ensure workflowId is set on the instance
+          const instanceWithWorkflowId: AgentInstance = {
+            ...updatedInstance,
+            id: finalInstanceId, // ⭐ Forcer l'utilisation de l'ID final
+            workflowId: updatedInstance.workflowId || workflowId,
+          };
+
+          addNode({
+            type: 'agent',
+            position,
+            data: {
+              robotId: RobotId.Archi,
+              label: instanceName,
+              agent,
+              agentInstance: instanceWithWorkflowId,
               workflowId,
-              configuration_json: null
+              isMinimized: false,
+              isMaximized: false,
             },
-            workflowId,
-            isMinimized: false,
-            isMaximized: false
-          }
-        });
+          });
+        } else {
+          console.warn('[App] ⚠️ Instance not found after creation, creating node anyway');
+          // Créer le node avec les données disponibles
+          addNode({
+            type: 'agent',
+            position,
+            data: {
+              robotId: RobotId.Archi,
+              label: instanceName,
+              agent,
+              agentInstance: {
+                id: finalInstanceId,
+                prototypeId: agent.id,
+                name: instanceName,
+                position,
+                isMinimized: false,
+                isMaximized: false,
+                workflowId,
+                configuration_json: null,
+              },
+              workflowId,
+              isMinimized: false,
+              isMaximized: false,
+            },
+          });
+        }
+      } else {
+        console.debug('[App] Guest mode - agent instance saved to localStorage via store');
+
+        // Guest mode: créer le node avec l'ID local
+        // ⭐ FIX: Utiliser getState() pour obtenir la valeur actuelle du store
+        const guestAgentInstances = useDesignStore.getState().agentInstances;
+        const localInstance = guestAgentInstances.find((inst) => inst.id === instanceId);
+        if (localInstance) {
+          addNode({
+            type: 'agent',
+            position,
+            data: {
+              robotId: RobotId.Archi,
+              label: instanceName,
+              agent,
+              agentInstance: { ...localInstance, workflowId: localInstance.workflowId || 'guest-workflow' },
+              workflowId: 'guest-workflow',
+              isMinimized: false,
+              isMaximized: false,
+            },
+          });
+        }
       }
-      
-    } else {
-      console.debug('[App] Guest mode - agent instance saved to localStorage via store');
-      
-      // Guest mode: créer le node avec l'ID local
-      // ⭐ FIX: Utiliser getState() pour obtenir la valeur actuelle du store
-      const guestAgentInstances = useDesignStore.getState().agentInstances;
-      const localInstance = guestAgentInstances.find(inst => inst.id === instanceId);
-      if (localInstance) {
-        addNode({
-          type: 'agent',
-          position,
-          data: {
-            robotId: RobotId.Archi,
-            label: instanceName,
-            agent,
-            agentInstance: { ...localInstance, workflowId: localInstance.workflowId || 'guest-workflow' },
-            workflowId: 'guest-workflow',
-            isMinimized: false,
-            isMaximized: false
-          }
-        });
-      }
-      
-    }
-  }, [addAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId, updateInstanceId, addNode]);
+    },
+    [addAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId, updateInstanceId, addNode],
+  );
 
   /**
    * ⭐ FIX: Suppression robuste d'un node avec persistance backend
    * Gère les deux formats d'ID (legacy et V2)
    */
-  const handleDeleteNode = useCallback(async (nodeId: string) => {
-    console.debug('[App] handleDeleteNode called with:', nodeId);
+  const handleDeleteNode = useCallback(
+    async (nodeId: string) => {
+      console.debug('[App] handleDeleteNode called with:', nodeId);
 
-    const v2Node = storeNodes.find((node) => node.id === nodeId);
-    const finalInstanceId = v2Node?.data?.agentInstance?.id
-      || (nodeId.startsWith('node-') ? nodeId.replace(/^node-/, '') : undefined);
+      const v2Node = storeNodes.find((node) => node.id === nodeId);
+      const finalInstanceId = v2Node?.data?.agentInstance?.id || (nodeId.startsWith('node-') ? nodeId.replace(/^node-/, '') : undefined);
 
-    console.debug('[App] Delete node resolution:', {
-      nodeId,
-      storeInstanceId: v2Node?.data?.agentInstance?.id,
-      finalInstanceId,
-    });
-
-    deleteNode(nodeId);
-
-    if (finalInstanceId) {
-      deleteAgentInstance(finalInstanceId);
-      const workflowId = resolveCurrentWorkflowId();
-      const deleted = await deleteWorkflowInstance({
-        workflowId,
-        instanceId: finalInstanceId,
-        isAuthenticated,
-        accessToken,
+      console.debug('[App] Delete node resolution:', {
+        nodeId,
+        storeInstanceId: v2Node?.data?.agentInstance?.id,
+        finalInstanceId,
       });
 
-      if (deleted) {
-        console.debug('[App] ✅ Agent instance deleted from backend:', finalInstanceId);
+      deleteNode(nodeId);
+
+      if (finalInstanceId) {
+        deleteAgentInstance(finalInstanceId);
+        const workflowId = resolveCurrentWorkflowId();
+        const deleted = await deleteWorkflowInstance({
+          workflowId,
+          instanceId: finalInstanceId,
+          isAuthenticated,
+          accessToken,
+        });
+
+        if (deleted) {
+          console.debug('[App] ✅ Agent instance deleted from backend:', finalInstanceId);
+        }
       }
-    }
-  }, [storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId]);
+    },
+    [storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId],
+  );
 
-  const handleDeleteNodes = useCallback(async (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy = 'delete_media'): Promise<AgentBatchDeleteResult> => {
-    console.debug('[App] handleDeleteNodes called with:', instanceIds, 'policy:', mediaPolicy);
+  const handleDeleteNodes = useCallback(
+    async (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy = 'delete_media'): Promise<AgentBatchDeleteResult> => {
+      console.debug('[App] handleDeleteNodes called with:', instanceIds, 'policy:', mediaPolicy);
 
-    const workflowId = resolveCurrentWorkflowId();
-    return deleteWorkflowInstances({
-      workflowId,
-      instanceIds,
-      mediaPolicy,
-      isAuthenticated,
-      accessToken,
-      onDeleteLocalNode: (nodeId) => deleteNode(nodeId),
-      onDeleteLocalInstance: (instanceId) => deleteAgentInstance(instanceId),
-    });
-  }, [deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId]);
+      const workflowId = resolveCurrentWorkflowId();
+      return deleteWorkflowInstances({
+        workflowId,
+        instanceIds,
+        mediaPolicy,
+        isAuthenticated,
+        accessToken,
+        onDeleteLocalNode: (nodeId) => deleteNode(nodeId),
+        onDeleteLocalInstance: (instanceId) => deleteAgentInstance(instanceId),
+      });
+    },
+    [deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId],
+  );
 
-  const handleUpdateNodePosition = useCallback((nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => {
-    const designState = useDesignStore.getState();
-    const movedNode = designState.nodes.find((node) => node.id === nodeId);
-    const instanceId = movedNode?.data.agentInstance?.id;
-    updateNode(nodeId, { position });
+  const handleUpdateNodePosition = useCallback(
+    (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => {
+      const designState = useDesignStore.getState();
+      const movedNode = designState.nodes.find((node) => node.id === nodeId);
+      const instanceId = movedNode?.data.agentInstance?.id;
+      updateNode(nodeId, { position });
 
-    if (instanceId) {
-      updateAgentInstance(instanceId, { position });
-    }
+      if (instanceId) {
+        updateAgentInstance(instanceId, { position });
+      }
 
-    if (!options?.persist || !instanceId) {
-      return;
-    }
+      if (!options?.persist || !instanceId) {
+        return;
+      }
 
-    void persistNodePosition({
-      nodeId,
-      position,
-      instanceId,
-      isAuthenticated,
-      accessToken,
-      updateNode,
-      updateAgentInstance,
-    });
-  }, [accessToken, isAuthenticated, updateAgentInstance, updateNode]);
+      void persistNodePosition({
+        nodeId,
+        position,
+        instanceId,
+        isAuthenticated,
+        accessToken,
+        updateNode,
+        updateAgentInstance,
+      });
+    },
+    [accessToken, isAuthenticated, updateAgentInstance, updateNode],
+  );
 
   const handleOpenImagePanel = (nodeId: string, agent: Agent, agentInstance: AgentInstance) => {
     setCurrentImageNodeId(nodeId);
@@ -682,10 +728,10 @@ export function AppContent() {
       text: t('app_generatedImageText'),
       image: imageBase64,
       mimeType: 'image/png',
-      timestamp: new Date()
+      timestamp: new Date(),
     };
     addNodeMessage(nodeId, imageMessage);
-    
+
     // ⭐ FIX QA: Persist generated image to journal
     const instanceId = nodeId.replace('node-', '');
     const workflowId = resolveCurrentWorkflowId();
@@ -695,12 +741,18 @@ export function AppContent() {
         role: 'agent',
         content: t('app_generatedImageText'),
         imageBase64: imageBase64,
-        mimeType: 'image/png'
+        mimeType: 'image/png',
       });
     }
   };
 
-  const handleOpenImageModificationPanel = (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType: string = 'image/png') => {
+  const handleOpenImageModificationPanel = (
+    nodeId: string,
+    sourceImage: string,
+    agent?: Agent,
+    agentInstance?: AgentInstance,
+    mimeType: string = 'image/png',
+  ) => {
     setEditingImageInfo({ nodeId, sourceImage, mimeType, agent, agentInstance });
     setImageModificationPanelOpen(true);
   };
@@ -725,10 +777,10 @@ export function AppContent() {
       text: text,
       image: newImage,
       mimeType: 'image/png',
-      timestamp: new Date()
+      timestamp: new Date(),
     };
     addNodeMessage(nodeId, message);
-    
+
     // ⭐ FIX QA: Persist modified image to journal
     const instanceId = nodeId.replace('node-', '');
     const workflowId = resolveCurrentWorkflowId();
@@ -738,7 +790,7 @@ export function AppContent() {
         role: 'agent',
         content: text,
         imageBase64: newImage,
-        mimeType: 'image/png'
+        mimeType: 'image/png',
       });
     }
   };
@@ -754,10 +806,7 @@ export function AppContent() {
   const handleUpdateNodeMessages = (nodeId: string, messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     const runtimeStore = useRuntimeStore.getState();
     const previousMessages = runtimeStore.getNodeMessages(nodeId);
-    runtimeStore.setNodeMessages(
-      nodeId,
-      typeof messages === 'function' ? messages(previousMessages) : messages,
-    );
+    runtimeStore.setNodeMessages(nodeId, typeof messages === 'function' ? messages(previousMessages) : messages);
   };
 
   const handleOpenFullscreen = (src: string, mimeType: string) => {
@@ -780,39 +829,22 @@ export function AppContent() {
         {/* ⭐ UX Polish: Hyperspace Entry Animation for Guests */}
         {showHyperspace && !isAuthenticated && (
           <Suspense fallback={<DeferredUiFallback />}>
-            <LazyHyperspaceReveal
-              isActive={hyperspaceActive}
-              onComplete={handleHyperspaceComplete}
-              className="fixed inset-0 z-[100]"
-            >
+            <LazyHyperspaceReveal isActive={hyperspaceActive} onComplete={handleHyperspaceComplete} className="fixed inset-0 z-[100]">
               <div className="w-full h-full" />
             </LazyHyperspaceReveal>
           </Suspense>
         )}
 
         {/* ⭐ V2: Overlay dédié au switch workflow (jaune Bos) */}
-        <WorkflowSwitchOverlay
-          isLoading={isSwitchingWorkflow}
-          workflowName={switchWorkflowName}
-          progress={switchProgress}
-        />
+        <WorkflowSwitchOverlay isLoading={isSwitchingWorkflow} workflowName={switchWorkflowName} progress={switchProgress} />
 
         {/* ⭐ ÉTAPE 5: Hydration Overlay - transitions lourdes uniquement */}
-        <HydrationOverlay 
-          isLoading={shouldShowHydrationOverlay}
-          progress={hydrationOverlayProgress}
-          message={hydrationOverlayMessage}
-        />
+        <HydrationOverlay isLoading={shouldShowHydrationOverlay} progress={hydrationOverlayProgress} message={hydrationOverlayMessage} />
 
         <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
-          <Header
-            onOpenSettings={() => setSettingsModalOpen(true)}
-          />
+          <Header onOpenSettings={() => setSettingsModalOpen(true)} />
           <div className="flex flex-1 overflow-hidden">
-            <NavigationLayout
-              currentPath={currentPath}
-              onNavigate={handleRobotNavigation}
-            />
+            <NavigationLayout currentPath={currentPath} onNavigate={handleRobotNavigation} />
             <main className="flex-1 bg-gray-800/50 overflow-hidden">
               <RobotPageRouter
                 currentPath={currentPath}
@@ -837,29 +869,19 @@ export function AppContent() {
 
           {isSettingsModalOpen && (
             <Suspense fallback={<DeferredUiFallback />}>
-              <LazySettingsModal
-                llmConfigs={llmConfigs}
-                onClose={() => setSettingsModalOpen(false)}
-                onSave={handleSaveSettings}
-              />
+              <LazySettingsModal llmConfigs={llmConfigs} onClose={() => setSettingsModalOpen(false)} onSave={handleSaveSettings} />
             </Suspense>
           )}
 
           {isLoginModalOpen && (
             <Suspense fallback={<DeferredUiFallback />}>
-              <LazyLoginModal
-                isOpen={isLoginModalOpen}
-                onClose={() => setLoginModalOpen(false)}
-              />
+              <LazyLoginModal isOpen={isLoginModalOpen} onClose={() => setLoginModalOpen(false)} />
             </Suspense>
           )}
 
           {isRegisterModalOpen && (
             <Suspense fallback={<DeferredUiFallback />}>
-              <LazyRegisterModal
-                isOpen={isRegisterModalOpen}
-                onClose={() => setRegisterModalOpen(false)}
-              />
+              <LazyRegisterModal isOpen={isRegisterModalOpen} onClose={() => setRegisterModalOpen(false)} />
             </Suspense>
           )}
 
@@ -892,10 +914,7 @@ export function AppContent() {
 
           {isVideoPanelOpen && (
             <Suspense fallback={<DeferredUiFallback />}>
-              <LazyVideoGenerationConfigPanel
-                isOpen={isVideoPanelOpen}
-                onClose={() => setVideoPanelOpen(false)}
-              />
+              <LazyVideoGenerationConfigPanel isOpen={isVideoPanelOpen} onClose={() => setVideoPanelOpen(false)} />
             </Suspense>
           )}
 

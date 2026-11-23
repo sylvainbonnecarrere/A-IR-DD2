@@ -19,7 +19,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "format:changed": "prettier --check $(git diff --name-only --diff-filter=ACM origin/main...HEAD 2>/dev/null || git diff --name-only --diff-filter=ACM main...HEAD) --ignore-unknown 2>/dev/null || true",
+    "format:changed": "node scripts/ci/format-changed.mjs",
     "hygiene": "node scripts/ci/hygiene-ratchet.mjs",
     "hygiene:update-baseline": "node scripts/ci/hygiene-ratchet.mjs --update",
     "test:integration:hydration": "jest tests/fonctionnels/App.workspaceHydration.integration.test.tsx --runInBand",
