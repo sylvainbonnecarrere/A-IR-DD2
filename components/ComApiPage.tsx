@@ -55,7 +55,7 @@ interface ApiResponse {
   statusText: string;
   time: number;
   size: string;
-  data: any;
+  data: unknown;
 }
 
 // ============== SUB-COMPONENTS ==============
@@ -70,7 +70,7 @@ const MethodDropdown: React.FC<{
     PUT: { bg: 'from-orange-700 to-orange-600', text: 'text-orange-200' },
     DELETE: { bg: 'from-red-700 to-red-600', text: 'text-red-200' },
     PATCH: { bg: 'from-purple-700 to-purple-600', text: 'text-purple-200' },
-    HEAD: { bg: 'from-cyan-700 to-cyan-600', text: 'text-cyan-200' }
+    HEAD: { bg: 'from-cyan-700 to-cyan-600', text: 'text-cyan-200' },
   };
 
   const color = methodColors[value];
@@ -94,8 +94,10 @@ const MethodDropdown: React.FC<{
         onChange={(e) => onChange(e.target.value as HttpMethod)}
         className={`px-4 py-2 rounded-lg font-bold text-sm transition-all bg-gradient-to-r ${color.bg} ${color.text} border-2 border-${value === 'GET' ? 'blue' : value === 'POST' ? 'green' : value === 'PUT' ? 'orange' : value === 'DELETE' ? 'red' : value === 'PATCH' ? 'purple' : 'green'}-500/50 cursor-pointer hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-green-400/50`}
       >
-        {['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'].map(method => (
-          <option key={method} value={method}>{method}</option>
+        {['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'].map((method) => (
+          <option key={method} value={method}>
+            {method}
+          </option>
         ))}
       </select>
     </>
@@ -114,52 +116,48 @@ const KeyValueList: React.FC<{
   const { t } = useLocalization();
   const finalKeyPlaceholder = keyPlaceholder || t('com_api_key_placeholder');
   const finalValuePlaceholder = valuePlaceholder || t('com_api_value_placeholder');
-  
-  return (
-  <div className="space-y-3">
-    <div className="flex items-center justify-between">
-      <label className="text-sm font-semibold text-gray-300">{label}</label>
-      <button
-        type="button"
-        onClick={onAdd}
-        className="text-xs px-2 py-1 bg-green-600/50 hover:bg-green-600 text-green-200 rounded transition-all"
-      >
-        + Ajouter
-      </button>
-    </div>
 
-    <div className="space-y-2 max-h-40 overflow-y-auto">
-      {items.length === 0 ? (
-        <p className="text-xs text-gray-500 italic">Aucun élément</p>
-      ) : (
-        items.map(item => (
-          <div key={item.id} className="flex gap-2 flex-wrap">
-            <input
-              type="text"
-              placeholder={finalKeyPlaceholder}
-              value={item.key}
-              onChange={(e) => onChange(item.id, 'key', e.target.value)}
-              className="flex-1 min-w-[80px] px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
-            />
-            <input
-              type="text"
-              placeholder={finalValuePlaceholder}
-              value={item.value}
-              onChange={(e) => onChange(item.id, 'value', e.target.value)}
-              className="flex-1 min-w-[80px] px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
-            />
-            <button
-              type="button"
-              onClick={() => onRemove(item.id)}
-              className="p-1 text-gray-400 hover:text-red-400 transition-colors"
-            >
-              <CloseIcon className="w-4 h-4" />
-            </button>
-          </div>
-        ))
-      )}
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-semibold text-gray-300">{label}</label>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="text-xs px-2 py-1 bg-green-600/50 hover:bg-green-600 text-green-200 rounded transition-all"
+        >
+          + Ajouter
+        </button>
+      </div>
+
+      <div className="space-y-2 max-h-40 overflow-y-auto">
+        {items.length === 0 ? (
+          <p className="text-xs text-gray-500 italic">Aucun élément</p>
+        ) : (
+          items.map((item) => (
+            <div key={item.id} className="flex gap-2 flex-wrap">
+              <input
+                type="text"
+                placeholder={finalKeyPlaceholder}
+                value={item.key}
+                onChange={(e) => onChange(item.id, 'key', e.target.value)}
+                className="flex-1 min-w-[80px] px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
+              />
+              <input
+                type="text"
+                placeholder={finalValuePlaceholder}
+                value={item.value}
+                onChange={(e) => onChange(item.id, 'value', e.target.value)}
+                className="flex-1 min-w-[80px] px-3 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500"
+              />
+              <button type="button" onClick={() => onRemove(item.id)} className="p-1 text-gray-400 hover:text-red-400 transition-colors">
+                <CloseIcon className="w-4 h-4" />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
     </div>
-  </div>
   );
 };
 
@@ -172,10 +170,7 @@ const TabButton: React.FC<{
     onClick={onClick}
     className={`
       px-3 py-2 text-sm font-medium rounded-t-lg transition-all
-      ${active 
-        ? 'bg-green-600 text-white border-b-2 border-green-400' 
-        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-      }
+      ${active ? 'bg-green-600 text-white border-b-2 border-green-400' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}
     `}
   >
     {children}
@@ -192,14 +187,7 @@ interface ConnectionListProps {
   onAddToWorkflow: (id: string) => void;
 }
 
-const ConnectionList: React.FC<ConnectionListProps> = ({
-  connections,
-  selectedId,
-  onSelect,
-  onEdit,
-  onDelete,
-  onAddToWorkflow
-}) => {
+const ConnectionList: React.FC<ConnectionListProps> = ({ connections, selectedId, onSelect, onEdit, onDelete, onAddToWorkflow }) => {
   const { t } = useLocalization();
 
   if (connections.length === 0) {
@@ -224,7 +212,7 @@ const ConnectionList: React.FC<ConnectionListProps> = ({
             url: conn.url,
             format: conn.format,
             status: conn.status || 'disconnected',
-            lastTestDate: conn.lastTestDate
+            lastTestDate: conn.lastTestDate,
           }}
           isSelected={selectedId === conn.id}
           onSelect={() => onSelect(conn.id)}
@@ -255,7 +243,7 @@ export const ComApiPage: React.FC = () => {
       authType: 'bearer',
       createdAt: new Date(Date.now() - 86400000).toISOString(),
       status: 'tested',
-      lastTestDate: new Date(Date.now() - 3600000).toISOString()
+      lastTestDate: new Date(Date.now() - 3600000).toISOString(),
     },
     {
       id: '2',
@@ -266,7 +254,7 @@ export const ComApiPage: React.FC = () => {
       authType: 'bearer',
       createdAt: new Date(Date.now() - 3600000).toISOString(),
       status: 'tested',
-      lastTestDate: new Date(Date.now() - 1800000).toISOString()
+      lastTestDate: new Date(Date.now() - 1800000).toISOString(),
     },
     {
       id: '3',
@@ -276,8 +264,8 @@ export const ComApiPage: React.FC = () => {
       format: 'CSV',
       authType: 'bearer',
       createdAt: new Date(Date.now() - 7200000).toISOString(),
-      status: 'error'
-    }
+      status: 'error',
+    },
   ]);
 
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
@@ -294,14 +282,14 @@ export const ComApiPage: React.FC = () => {
     queryParams: [],
     headers: [{ id: '1', key: 'Content-Type', value: 'application/json' }],
     bodyType: 'json',
-    bodyContent: '{}'
+    bodyContent: '{}',
   });
 
   const [response, setResponse] = useState<ApiResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body'>('params');
   const [responseView, setResponseView] = useState<ResponseView>('json');
-  const [extractedResult, setExtractedResult] = useState<{ path: string; value: any } | null>(null);
+  const [extractedResult, setExtractedResult] = useState<{ path: string; value: unknown } | null>(null);
 
   // ============== HANDLERS ==============
 
@@ -311,13 +299,13 @@ export const ComApiPage: React.FC = () => {
         type: 'error',
         title: '❌ Erreur',
         message: 'Veuillez entrer une URL valide',
-        duration: 3000
+        duration: 3000,
       });
       return;
     }
 
     setIsLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     setIsLoading(false);
 
     const mockResponse: ApiResponse = {
@@ -326,9 +314,15 @@ export const ComApiPage: React.FC = () => {
       time: 245,
       size: '1.2',
       data: [
-        { id: 101, user: 'Agent_Smith', roles: ['admin', 'system'], metadata: { created_at: '2024-01-01', ip: '192.168.1.1' }, active: true },
-        { id: 102, user: 'Neo_User', roles: ['user'], metadata: { created_at: '2024-01-02', ip: '10.0.0.42' }, active: false }
-      ]
+        {
+          id: 101,
+          user: 'Agent_Smith',
+          roles: ['admin', 'system'],
+          metadata: { created_at: '2024-01-01', ip: '192.168.1.1' },
+          active: true,
+        },
+        { id: 102, user: 'Neo_User', roles: ['user'], metadata: { created_at: '2024-01-02', ip: '10.0.0.42' }, active: false },
+      ],
     };
 
     setResponse(mockResponse);
@@ -336,37 +330,37 @@ export const ComApiPage: React.FC = () => {
       type: 'success',
       title: '✅ Réponse reçue',
       message: `${mockResponse.status} ${mockResponse.statusText} - ${mockResponse.time}ms`,
-      duration: 3000
+      duration: 3000,
     });
   };
 
   const addKeyValuePair = (type: 'params' | 'headers') => {
     const newPair: KeyValuePair = { id: Date.now().toString(), key: '', value: '' };
     if (type === 'params') {
-      setRequest(prev => ({ ...prev, queryParams: [...prev.queryParams, newPair] }));
+      setRequest((prev) => ({ ...prev, queryParams: [...prev.queryParams, newPair] }));
     } else {
-      setRequest(prev => ({ ...prev, headers: [...prev.headers, newPair] }));
+      setRequest((prev) => ({ ...prev, headers: [...prev.headers, newPair] }));
     }
   };
 
   const removeKeyValuePair = (type: 'params' | 'headers', id: string) => {
     if (type === 'params') {
-      setRequest(prev => ({ ...prev, queryParams: prev.queryParams.filter(p => p.id !== id) }));
+      setRequest((prev) => ({ ...prev, queryParams: prev.queryParams.filter((p) => p.id !== id) }));
     } else {
-      setRequest(prev => ({ ...prev, headers: prev.headers.filter(h => h.id !== id) }));
+      setRequest((prev) => ({ ...prev, headers: prev.headers.filter((h) => h.id !== id) }));
     }
   };
 
   const updateKeyValuePair = (type: 'params' | 'headers', id: string, field: 'key' | 'value', value: string) => {
     if (type === 'params') {
-      setRequest(prev => ({
+      setRequest((prev) => ({
         ...prev,
-        queryParams: prev.queryParams.map(p => p.id === id ? { ...p, [field]: value } : p)
+        queryParams: prev.queryParams.map((p) => (p.id === id ? { ...p, [field]: value } : p)),
       }));
     } else {
-      setRequest(prev => ({
+      setRequest((prev) => ({
         ...prev,
-        headers: prev.headers.map(h => h.id === id ? { ...h, [field]: value } : h)
+        headers: prev.headers.map((h) => (h.id === id ? { ...h, [field]: value } : h)),
       }));
     }
   };
@@ -376,8 +370,8 @@ export const ComApiPage: React.FC = () => {
       addNotification({
         type: 'error',
         title: '❌ Erreur',
-        message: 'L\'URL ne peut pas être vide',
-        duration: 3000
+        message: "L'URL ne peut pas être vide",
+        duration: 3000,
       });
       return;
     }
@@ -387,7 +381,7 @@ export const ComApiPage: React.FC = () => {
         type: 'error',
         title: '❌ Erreur',
         message: 'Le nom de la connexion ne peut pas être vide',
-        duration: 3000
+        duration: 3000,
       });
       return;
     }
@@ -398,7 +392,7 @@ export const ComApiPage: React.FC = () => {
       method: request.method,
       url: request.url,
       authType: request.authType,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     setConnections([newConnection, ...connections]);
@@ -411,19 +405,19 @@ export const ComApiPage: React.FC = () => {
       queryParams: [],
       headers: [{ id: '1', key: 'Content-Type', value: 'application/json' }],
       bodyType: 'json',
-      bodyContent: '{}'
+      bodyContent: '{}',
     });
 
     addNotification({
       type: 'success',
       title: '✅ Connexion créée',
       message: 'Votre nouvelle connexion a été sauvegardée',
-      duration: 3000
+      duration: 3000,
     });
   };
 
   const handleDeleteConnection = (id: string) => {
-    setConnections(connections.filter(c => c.id !== id));
+    setConnections(connections.filter((c) => c.id !== id));
     if (selectedConnectionId === id) {
       setSelectedConnectionId(null);
     }
@@ -431,12 +425,12 @@ export const ComApiPage: React.FC = () => {
       type: 'success',
       title: '🗑️ Connexion supprimée',
       message: 'La connexion a été supprimée avec succès',
-      duration: 3000
+      duration: 3000,
     });
   };
 
   const handleEditConnection = (id: string) => {
-    const conn = connections.find(c => c.id === id);
+    const conn = connections.find((c) => c.id === id);
     if (conn) {
       setRequest({
         connectionName: conn.name,
@@ -446,14 +440,14 @@ export const ComApiPage: React.FC = () => {
         queryParams: [],
         headers: [{ id: '1', key: 'Content-Type', value: 'application/json' }],
         bodyType: 'json',
-        bodyContent: '{}'
+        bodyContent: '{}',
       });
       setShowForm(true);
     }
   };
 
   const handleAddToWorkflow = (id: string) => {
-    const conn = connections.find(c => c.id === id);
+    const conn = connections.find((c) => c.id === id);
     if (conn) {
       setWorkflowNodeName(conn.name);
       setShowWorkflowModal(true);
@@ -466,18 +460,18 @@ export const ComApiPage: React.FC = () => {
         type: 'error',
         title: '❌ Erreur',
         message: 'Le nom du nœud ne peut pas être vide',
-        duration: 3000
+        duration: 3000,
       });
       return;
     }
 
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     addNotification({
       type: 'success',
       title: '✨ Nœud ajouté',
       message: `Nœud "${workflowNodeName}" ajouté au workflow (Simulation)`,
-      duration: 3000
+      duration: 3000,
     });
 
     setShowWorkflowModal(false);
@@ -544,7 +538,7 @@ export const ComApiPage: React.FC = () => {
             <ProvisionalSurfaceNotice
               description={t(
                 'com_api_provisional_notice',
-                'Cette surface COM fonctionne encore comme un atelier local de demonstration. Les connexions initiales, les executions et les resultats affiches restent provisoires tant qu un backend canonique n est pas branche.'
+                'Cette surface COM fonctionne encore comme un atelier local de demonstration. Les connexions initiales, les executions et les resultats affiches restent provisoires tant qu un backend canonique n est pas branche.',
               )}
             />
           </div>
@@ -561,36 +555,32 @@ export const ComApiPage: React.FC = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-white">🔗 Configuration</h2>
-                <button
-                  onClick={() => setShowForm(false)}
-                  className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200"
-                >
+                <button onClick={() => setShowForm(false)} className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200">
                   <XIcon className="w-5 h-5" />
                 </button>
               </div>
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-300 mb-2">📝 Nom de la connexion <span className="text-green-400">*</span></label>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">
+                    📝 Nom de la connexion <span className="text-green-400">*</span>
+                  </label>
                   <input
                     type="text"
                     placeholder="ex: API Utilisateurs"
                     value={request.connectionName}
-                    onChange={(e) => setRequest(prev => ({ ...prev, connectionName: e.target.value }))}
+                    onChange={(e) => setRequest((prev) => ({ ...prev, connectionName: e.target.value }))}
                     className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-green-500"
                   />
                 </div>
 
                 <div className="flex gap-3">
-                  <MethodDropdown
-                    value={request.method}
-                    onChange={(method) => setRequest(prev => ({ ...prev, method }))}
-                  />
+                  <MethodDropdown value={request.method} onChange={(method) => setRequest((prev) => ({ ...prev, method }))} />
                   <input
                     type="text"
                     placeholder="https://api.example.com/v1/resource"
                     value={request.url}
-                    onChange={(e) => setRequest(prev => ({ ...prev, url: e.target.value }))}
+                    onChange={(e) => setRequest((prev) => ({ ...prev, url: e.target.value }))}
                     className="flex-1 px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-green-500"
                   />
                 </div>
@@ -600,7 +590,7 @@ export const ComApiPage: React.FC = () => {
                   <label className="text-sm font-semibold text-gray-300">🔐 Authentification</label>
                   <select
                     value={request.authType}
-                    onChange={(e) => setRequest(prev => ({ ...prev, authType: e.target.value as AuthType }))}
+                    onChange={(e) => setRequest((prev) => ({ ...prev, authType: e.target.value as AuthType }))}
                     className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 text-sm transition-all focus:outline-none focus:border-green-500"
                   >
                     <option value="none">Aucune</option>
@@ -614,7 +604,7 @@ export const ComApiPage: React.FC = () => {
                       type="password"
                       placeholder="Token Bearer"
                       value={request.bearerToken || ''}
-                      onChange={(e) => setRequest(prev => ({ ...prev, bearerToken: e.target.value }))}
+                      onChange={(e) => setRequest((prev) => ({ ...prev, bearerToken: e.target.value }))}
                       className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 text-sm transition-all focus:outline-none focus:border-green-500"
                     />
                   )}
@@ -658,7 +648,7 @@ export const ComApiPage: React.FC = () => {
                   {activeTab === 'body' && (
                     <TabbedDataEditor
                       value={request.bodyContent}
-                      onChange={(value) => setRequest(prev => ({ ...prev, bodyContent: value }))}
+                      onChange={(value) => setRequest((prev) => ({ ...prev, bodyContent: value }))}
                       placeholder='{"key": "value"}'
                     />
                   )}
@@ -677,9 +667,7 @@ export const ComApiPage: React.FC = () => {
                   onClick={handleExecuteRequest}
                   disabled={isLoading}
                   className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 ${
-                    isLoading
-                      ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                      : 'bg-blue-600 text-white hover:bg-blue-500'
+                    isLoading ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-500'
                   }`}
                 >
                   {isLoading ? <LoaderIcon className="w-4 h-4 animate-spin" /> : '▶'}
@@ -698,7 +686,7 @@ export const ComApiPage: React.FC = () => {
           {selectedConnectionId && !showForm && (
             <div className="space-y-4">
               {(() => {
-                const conn = connections.find(c => c.id === selectedConnectionId);
+                const conn = connections.find((c) => c.id === selectedConnectionId);
                 return conn ? (
                   <>
                     <div className="flex items-center justify-between mb-4">
@@ -718,11 +706,17 @@ export const ComApiPage: React.FC = () => {
                       </div>
                       <div>
                         <p className="text-xs text-gray-400 uppercase">Méthode</p>
-                        <p className={`font-bold text-sm inline-block px-2 py-1 rounded ${
-                          conn.method === 'GET' ? 'bg-blue-600 text-blue-200' :
-                          conn.method === 'POST' ? 'bg-green-600 text-green-200' :
-                          'bg-gray-600 text-gray-200'
-                        }`}>{conn.method}</p>
+                        <p
+                          className={`font-bold text-sm inline-block px-2 py-1 rounded ${
+                            conn.method === 'GET'
+                              ? 'bg-blue-600 text-blue-200'
+                              : conn.method === 'POST'
+                                ? 'bg-green-600 text-green-200'
+                                : 'bg-gray-600 text-gray-200'
+                          }`}
+                        >
+                          {conn.method}
+                        </p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-400 uppercase">URL</p>

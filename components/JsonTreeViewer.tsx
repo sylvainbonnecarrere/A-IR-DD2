@@ -3,12 +3,12 @@ import { ChevronDownIcon } from './Icons';
 
 interface JsonTreeNode {
   key: string;
-  value: any;
+  value: unknown;
   type: string;
 }
 
 interface JsonTreeViewerProps {
-  data: any;
+  data: unknown;
   defaultExpanded?: boolean;
 }
 
@@ -17,7 +17,11 @@ const TreeNode: React.FC<{ node: JsonTreeNode; level: number }> = ({ node, level
 
   const isExpandable = ['object', 'array'].includes(node.type);
   const isArray = Array.isArray(node.value);
-  const entries = isExpandable ? (isArray ? node.value.map((v, i) => ({ key: `[${i}]`, value: v, type: typeof v })) : Object.entries(node.value).map(([k, v]) => ({ key: k, value: v, type: typeof v }))) : [];
+  const entries = isExpandable
+    ? isArray
+      ? (node.value as unknown[]).map((v, i) => ({ key: `[${i}]`, value: v, type: typeof v }))
+      : Object.entries(node.value as Record<string, unknown>).map(([k, v]) => ({ key: k, value: v, type: typeof v }))
+    : [];
 
   const getValueColor = (type: string): string => {
     switch (type) {
@@ -34,11 +38,11 @@ const TreeNode: React.FC<{ node: JsonTreeNode; level: number }> = ({ node, level
     }
   };
 
-  const getDisplayValue = (type: string, value: any): string => {
+  const getDisplayValue = (type: string, value: unknown): string => {
     if (type === 'string') return `"${value}"`;
     if (type === 'boolean') return value ? 'true' : 'false';
     if (value === null) return 'null';
-    if (type === 'object' || type === 'array') return isArray ? `Array(${value.length})` : 'Object';
+    if (type === 'object' || type === 'array') return isArray ? `Array(${(value as unknown[]).length})` : 'Object';
     return String(value);
   };
 
@@ -46,10 +50,7 @@ const TreeNode: React.FC<{ node: JsonTreeNode; level: number }> = ({ node, level
 
   return (
     <div>
-      <div
-        style={{ paddingLeft }}
-        className="flex items-center gap-2 py-1 hover:bg-gray-800/50 text-sm"
-      >
+      <div style={{ paddingLeft }} className="flex items-center gap-2 py-1 hover:bg-gray-800/50 text-sm">
         {isExpandable && (
           <button
             onClick={() => setIsExpanded(!isExpanded)}
@@ -61,9 +62,7 @@ const TreeNode: React.FC<{ node: JsonTreeNode; level: number }> = ({ node, level
         {!isExpandable && <div className="w-4" />}
 
         <span className="text-gray-400">{node.key}:</span>
-        <span className={getValueColor(node.type)}>
-          {getDisplayValue(node.type, node.value)}
-        </span>
+        <span className={getValueColor(node.type)}>{getDisplayValue(node.type, node.value)}</span>
       </div>
 
       {isExpandable && isExpanded && (
@@ -87,11 +86,7 @@ export const JsonTreeViewer: React.FC<JsonTreeViewerProps> = ({ data, defaultExp
       rootNode = { key: 'root', value: data, type: typeof data };
     }
   } catch (error) {
-    return (
-      <div className="text-red-400 text-sm p-4">
-        ❌ Erreur JSON: {(error as Error).message}
-      </div>
-    );
+    return <div className="text-red-400 text-sm p-4">❌ Erreur JSON: {(error as Error).message}</div>;
   }
 
   return (

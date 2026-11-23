@@ -1,10 +1,10 @@
 import React, { useMemo } from 'react';
 
 interface JsonSchemaViewerProps {
-  data: any;
+  data: unknown;
 }
 
-const inferType = (value: any): string => {
+const inferType = (value: unknown): string => {
   if (value === null) return 'null';
   if (Array.isArray(value)) {
     if (value.length === 0) return 'Array';
@@ -36,9 +36,7 @@ const SchemaObject: React.FC<{ data: Record<string, any>; level: number }> = ({ 
         return (
           <div key={key}>
             <SchemaField name={key} type={type} level={level} />
-            {typeof value === 'object' && value !== null && !Array.isArray(value) && (
-              <SchemaObject data={value} level={level + 1} />
-            )}
+            {typeof value === 'object' && value !== null && !Array.isArray(value) && <SchemaObject data={value} level={level + 1} />}
           </div>
         );
       })}
@@ -57,11 +55,7 @@ export const JsonSchemaViewer: React.FC<JsonSchemaViewerProps> = ({ data }) => {
   }, [data]);
 
   if (!schema) {
-    return (
-      <div className="text-red-400 text-sm p-4">
-        ❌ Erreur: JSON invalide
-      </div>
-    );
+    return <div className="text-red-400 text-sm p-4">❌ Erreur: JSON invalide</div>;
   }
 
   if (typeof schema !== 'object' || schema === null) {
@@ -75,11 +69,7 @@ export const JsonSchemaViewer: React.FC<JsonSchemaViewerProps> = ({ data }) => {
   return (
     <div className="bg-gray-800/50 rounded p-4 max-h-96 overflow-y-auto">
       <div className="text-xs text-gray-500 mb-4">📋 Structure des types:</div>
-      {Array.isArray(schema) ? (
-        <SchemaField name="root" type={inferType(schema)} level={0} />
-      ) : (
-        <SchemaObject data={schema} level={0} />
-      )}
+      {Array.isArray(schema) ? <SchemaField name="root" type={inferType(schema)} level={0} /> : <SchemaObject data={schema} level={0} />}
     </div>
   );
 };

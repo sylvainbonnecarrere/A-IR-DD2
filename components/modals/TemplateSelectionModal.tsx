@@ -1,6 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { AgentTemplate, AGENT_TEMPLATES, getTemplatesByRobot, getCompatibleTemplates, getCompatibleTemplatesByCategory, createAgentFromTemplate } from '../../data/agentTemplates';
-import { RobotId, LLMConfig } from '../../types';
+import {
+  AgentTemplate,
+  AGENT_TEMPLATES,
+  getTemplatesByRobot,
+  getCompatibleTemplates,
+  getCompatibleTemplatesByCategory,
+  createAgentFromTemplate,
+} from '../../data/agentTemplates';
+import { RobotId, LLMConfig, LLMCapability } from '../../types';
 import { Button } from '../UI';
 import { CloseIcon } from '../Icons';
 import { loadAllTemplatesHybrid, deleteTemplateHybrid, CustomTemplate } from '../../services/templateService';
@@ -20,14 +27,14 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
   robotId,
   llmConfigs,
   onSelectTemplate,
-  onCancel
+  onCancel,
 }) => {
   const { accessToken } = useAuth();
-  
+
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplate | null>(null);
-  
+
   // State pour charger les templates hybrides
   const [allTemplates, setAllTemplates] = useState<AgentTemplate[]>(AGENT_TEMPLATES);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
@@ -65,16 +72,14 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
 
   // Local helper functions using props instead of localStorage
   const getLocalCompatibleTemplates = (): AgentTemplate[] => {
-    const enabledProviders = llmConfigs
-      .filter(c => c.enabled)
-      .map(c => c.provider);
+    const enabledProviders = llmConfigs.filter((c) => c.enabled).map((c) => c.provider);
 
     // Si aucun provider n'est activé, afficher tous les templates
     if (enabledProviders.length === 0) {
       return allTemplates;
     }
 
-    return allTemplates.filter(template => {
+    return allTemplates.filter((template) => {
       // Si le template n'a pas de capabilities, l'accepter (compatible)
       if (!template.template.capabilities || template.template.capabilities.length === 0) {
         return true;
@@ -88,68 +93,71 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
       }
 
       // Fallback: Check if ANY enabled provider can support the template's capabilities
-      return enabledProviders.some(provider => {
-        const config = llmConfigs.find(c => c.provider === provider);
+      return enabledProviders.some((provider) => {
+        const config = llmConfigs.find((c) => c.provider === provider);
         if (!config) return false;
 
         const providerCapabilities = Object.keys(config.capabilities)
-          .filter(cap => config.capabilities[cap as any])
-          .map(cap => cap as any);
+          .filter((cap) => config.capabilities[cap as LLMCapability])
+          .map((cap) => cap as LLMCapability);
 
         // Template is compatible if it has no capabilities or all its capabilities are supported
-        return template.template.capabilities.every(cap =>
-          providerCapabilities.includes(cap)
-        );
+        return template.template.capabilities.every((cap) => providerCapabilities.includes(cap));
       });
     });
   };
 
   // Filtrer les templates selon le robot sélectionné ET la compatibilité LLM
   let availableTemplates = robotId
-    ? getLocalCompatibleTemplates().filter(template => template.robotId === robotId)
+    ? getLocalCompatibleTemplates().filter((template) => template.robotId === robotId)
     : getLocalCompatibleTemplates(); // Only show compatible templates
 
   // Filtrer par catégorie
   if (selectedCategory !== 'all') {
-    availableTemplates = availableTemplates.filter(template => template.category === selectedCategory);
+    availableTemplates = availableTemplates.filter((template) => template.category === selectedCategory);
   }
 
   // Filtrer par recherche
   if (searchQuery.trim()) {
     const query = searchQuery.toLowerCase();
-    availableTemplates = availableTemplates.filter(template =>
-      template.name.toLowerCase().includes(query) ||
-      template.description.toLowerCase().includes(query)
+    availableTemplates = availableTemplates.filter(
+      (template) => template.name.toLowerCase().includes(query) || template.description.toLowerCase().includes(query),
     );
   }
 
   const baseTemplates = robotId
-    ? getLocalCompatibleTemplates().filter(template => template.robotId === robotId)
+    ? getLocalCompatibleTemplates().filter((template) => template.robotId === robotId)
     : getLocalCompatibleTemplates();
 
   const categories = [
     { key: 'all', label: 'Tous', count: baseTemplates.length },
-    { key: 'assistant', label: 'Assistants', count: baseTemplates.filter(t => t.category === 'assistant').length },
-    { key: 'specialist', label: 'Spécialistes', count: baseTemplates.filter(t => t.category === 'specialist').length },
-    { key: 'automation', label: 'Automatisation', count: baseTemplates.filter(t => t.category === 'automation').length },
-    { key: 'analysis', label: 'Analyse', count: baseTemplates.filter(t => t.category === 'analysis').length }
-  ].filter(cat => cat.count > 0);
+    { key: 'assistant', label: 'Assistants', count: baseTemplates.filter((t) => t.category === 'assistant').length },
+    { key: 'specialist', label: 'Spécialistes', count: baseTemplates.filter((t) => t.category === 'specialist').length },
+    { key: 'automation', label: 'Automatisation', count: baseTemplates.filter((t) => t.category === 'automation').length },
+    { key: 'analysis', label: 'Analyse', count: baseTemplates.filter((t) => t.category === 'analysis').length },
+  ].filter((cat) => cat.count > 0);
 
   const getRobotColor = (robotId: RobotId) => {
     switch (robotId) {
-      case RobotId.Archi: return 'text-purple-400 bg-purple-900/30 border-purple-500';
-      case RobotId.Bos: return 'text-blue-400 bg-blue-900/30 border-blue-500';
-      case RobotId.Com: return 'text-green-400 bg-green-900/30 border-green-500';
-      case RobotId.Phil: return 'text-yellow-400 bg-yellow-900/30 border-yellow-500';
-      case RobotId.Tim: return 'text-red-400 bg-red-900/30 border-red-500';
-      default: return 'text-gray-400 bg-gray-900/30 border-gray-500';
+      case RobotId.Archi:
+        return 'text-purple-400 bg-purple-900/30 border-purple-500';
+      case RobotId.Bos:
+        return 'text-blue-400 bg-blue-900/30 border-blue-500';
+      case RobotId.Com:
+        return 'text-green-400 bg-green-900/30 border-green-500';
+      case RobotId.Phil:
+        return 'text-yellow-400 bg-yellow-900/30 border-yellow-500';
+      case RobotId.Tim:
+        return 'text-red-400 bg-red-900/30 border-red-500';
+      default:
+        return 'text-gray-400 bg-gray-900/30 border-gray-500';
     }
   };
 
   const handleDeleteTemplate = (e: React.MouseEvent, templateId: string) => {
     e.stopPropagation();
 
-    const template = allTemplates.find(t => t.id === templateId);
+    const template = allTemplates.find((t) => t.id === templateId);
     const templateName = template?.name || 'ce template';
 
     // Ouvrir la modale de confirmation
@@ -234,7 +242,9 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
               Choisir un template de prototype
             </h2>
             {robotId && (
-              <p className="text-gray-400 mt-1 text-sm">Catalogue pour le robot <span className="text-indigo-400 font-semibold">{robotId}</span></p>
+              <p className="text-gray-400 mt-1 text-sm">
+                Catalogue pour le robot <span className="text-indigo-400 font-semibold">{robotId}</span>
+              </p>
             )}
           </div>
           <button
@@ -249,9 +259,7 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
         {/* Search and Filters */}
         <div className="flex flex-col sm:flex-row gap-4 mb-4">
           <div className="flex-1 relative">
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-              🔍
-            </div>
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</div>
             <input
               type="text"
               placeholder="Rechercher par nom ou description..."
@@ -266,10 +274,11 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
               <button
                 key={category.key}
                 onClick={() => setSelectedCategory(category.key)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${selectedCategory === category.key
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
-                  : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600 hover:text-white'
-                  }`}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  selectedCategory === category.key
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
+                    : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600 hover:text-white'
+                }`}
               >
                 {category.label} <span className="text-xs opacity-75">({category.count})</span>
               </button>
@@ -279,7 +288,7 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
 
         {/* Compatibility Info */}
         {(() => {
-          const totalTemplates = robotId ? allTemplates.filter(t => t.robotId === robotId).length : allTemplates.length;
+          const totalTemplates = robotId ? allTemplates.filter((t) => t.robotId === robotId).length : allTemplates.length;
           const compatibleCount = baseTemplates.length;
           const filteredCount = totalTemplates - compatibleCount;
 
@@ -314,10 +323,11 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                 return (
                   <div
                     key={template.id}
-                    className={`relative bg-gray-700 rounded-lg p-4 border-2 transition-all cursor-pointer group ${isSelected
-                      ? 'border-indigo-500 shadow-lg shadow-indigo-500/50 ring-2 ring-indigo-400/30'
-                      : 'border-gray-600 hover:border-indigo-400/50'
-                      }`}
+                    className={`relative bg-gray-700 rounded-lg p-4 border-2 transition-all cursor-pointer group ${
+                      isSelected
+                        ? 'border-indigo-500 shadow-lg shadow-indigo-500/50 ring-2 ring-indigo-400/30'
+                        : 'border-gray-600 hover:border-indigo-400/50'
+                    }`}
                     onClick={() => handleTemplateClick(template)}
                   >
                     {/* Delete Button - Only for custom templates */}
@@ -343,8 +353,11 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                         <span className="text-3xl flex-shrink-0">{template.icon}</span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className={`font-semibold transition-colors truncate ${isSelected ? 'text-indigo-300' : 'text-white group-hover:text-indigo-400'
-                              }`}>
+                            <h3
+                              className={`font-semibold transition-colors truncate ${
+                                isSelected ? 'text-indigo-300' : 'text-white group-hover:text-indigo-400'
+                              }`}
+                            >
                               {template.name}
                             </h3>
                             {isCustom && (
@@ -353,27 +366,36 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                               </span>
                             )}
                           </div>
-                          <div className={`inline-flex items-center px-2 py-0.5 mt-1 rounded-full text-xs font-medium border ${getRobotColor(template.robotId)}`}>
+                          <div
+                            className={`inline-flex items-center px-2 py-0.5 mt-1 rounded-full text-xs font-medium border ${getRobotColor(template.robotId)}`}
+                          >
                             {template.robotId}
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    <p className="text-gray-300 text-sm mb-4 line-clamp-2 leading-relaxed">
-                      {template.description}
-                    </p>
+                    <p className="text-gray-300 text-sm mb-4 line-clamp-2 leading-relaxed">{template.description}</p>
 
                     <div className="flex items-center justify-between pt-3 border-t border-gray-600/50">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${template.category === 'assistant' ? 'bg-blue-900/40 text-blue-300 border border-blue-500/30' :
-                        template.category === 'specialist' ? 'bg-purple-900/40 text-purple-300 border border-purple-500/30' :
-                          template.category === 'automation' ? 'bg-orange-900/40 text-orange-300 border border-orange-500/30' :
-                            'bg-green-900/40 text-green-300 border border-green-500/30'
-                        }`}>
-                        {template.category === 'assistant' ? '🤝 Assistant' :
-                          template.category === 'specialist' ? '🎯 Spécialiste' :
-                            template.category === 'automation' ? '⚙️ Automatisation' :
-                              '📊 Analyse'}
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                          template.category === 'assistant'
+                            ? 'bg-blue-900/40 text-blue-300 border border-blue-500/30'
+                            : template.category === 'specialist'
+                              ? 'bg-purple-900/40 text-purple-300 border border-purple-500/30'
+                              : template.category === 'automation'
+                                ? 'bg-orange-900/40 text-orange-300 border border-orange-500/30'
+                                : 'bg-green-900/40 text-green-300 border border-green-500/30'
+                        }`}
+                      >
+                        {template.category === 'assistant'
+                          ? '🤝 Assistant'
+                          : template.category === 'specialist'
+                            ? '🎯 Spécialiste'
+                            : template.category === 'automation'
+                              ? '⚙️ Automatisation'
+                              : '📊 Analyse'}
                       </span>
 
                       <div className="flex items-center gap-2">
@@ -412,20 +434,17 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
 
           {/* Actions */}
           <div className="flex gap-3">
-            <Button
-              onClick={handleCancel}
-              variant="secondary"
-              className="hover:scale-105 transition-transform"
-            >
+            <Button onClick={handleCancel} variant="secondary" className="hover:scale-105 transition-transform">
               Annuler
             </Button>
             <Button
               onClick={handleConfirmSelection}
               disabled={!selectedTemplate}
-              className={`transition-all duration-200 ${selectedTemplate
-                ? 'bg-indigo-600 hover:bg-indigo-700 text-white hover:scale-105 hover:shadow-lg hover:shadow-indigo-500/30'
-                : 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50'
-                }`}
+              className={`transition-all duration-200 ${
+                selectedTemplate
+                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white hover:scale-105 hover:shadow-lg hover:shadow-indigo-500/30'
+                  : 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50'
+              }`}
             >
               <span className="flex items-center gap-2">
                 {selectedTemplate && '✨'}

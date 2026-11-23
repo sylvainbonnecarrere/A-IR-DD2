@@ -11,6 +11,9 @@ import ReactFlow, {
   Node,
   NodeTypes,
   Viewport,
+  NodeChange,
+  EdgeChange,
+  OnConnectStartParams,
   useReactFlow,
   ReactFlowProvider,
 } from 'reactflow';
@@ -24,7 +27,17 @@ import { AgentFormModal } from './modals/AgentFormModal';
 import { SavePrototypeButton } from './SavePrototypeButton';
 import { AutoSaveIndicator } from './AutoSaveIndicator';
 import { useAutoSave } from '../hooks/useAutoSave';
-import { Agent, AgentDraft, WorkflowNode, LLMConfig, AgentInstance, NodePositionUpdateOptions, RobotId, ChatMessage, MapsPanelPreloadedResults } from '../types';
+import {
+  Agent,
+  AgentDraft,
+  WorkflowNode,
+  LLMConfig,
+  AgentInstance,
+  NodePositionUpdateOptions,
+  RobotId,
+  ChatMessage,
+  MapsPanelPreloadedResults,
+} from '../types';
 import { useDesignStore } from '../stores/useDesignStore';
 import { useAuth } from '../contexts/AuthContext';
 import { isValidWorkflowConnection } from './workflow/connectionContracts';
@@ -42,7 +55,13 @@ interface WorkflowCanvasProps {
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
-  onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
+  onOpenImageModificationPanel?: (
+    nodeId: string,
+    sourceImage: string,
+    agent?: Agent,
+    agentInstance?: AgentInstance,
+    mimeType?: string,
+  ) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
@@ -83,9 +102,8 @@ type ReactFlowNodeLookup = {
   getNodesBounds?: (nodes: readonly unknown[]) => { x: number; y: number; width: number; height: number };
 };
 
-const normalizeOptionalDimension = (value: number | null | undefined): number | undefined => (
-  typeof value === 'number' ? value : undefined
-);
+const normalizeOptionalDimension = (value: number | null | undefined): number | undefined =>
+  typeof value === 'number' ? value : undefined;
 
 const buildCollisionRect = (params: {
   nodeId: string;
@@ -124,7 +142,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     // ⭐ ÉTAPE 2: Persistence props
     workflowId: workflowIdProp,
     workflowName,
-    onSaveComplete
+    onSaveComplete,
   } = props;
 
   const { isAuthenticated } = useAuth();
@@ -171,10 +189,14 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   // onClick de RF 11.11.4 traite comme une annulation : isValidHandle(same handle) = false).
   const clickLassoStartElRef = useRef<HTMLElement | null>(null);
   const [clickLasso, setClickLasso] = useState<{
-    x1: number; y1: number; x2: number; y2: number; handleType: 'source' | 'target';
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    handleType: 'source' | 'target';
   } | null>(null);
 
-  const handleClickConnectStart = useCallback((event: any, handle: any) => {
+  const handleClickConnectStart = useCallback((event: React.MouseEvent | React.TouchEvent, handle: OnConnectStartParams) => {
     const handleEl = event.target as HTMLElement | null;
     const container = canvasRootRef.current;
     if (!handleEl || !container) return;
@@ -233,22 +255,25 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     minimapReady: false, // Ajout pour contrôler le rendu de la MiniMap
   });
 
-  const markInitialViewportSettled = useCallback((note: string) => {
-    if (!isCanvasMountedRef.current) {
-      return;
-    }
+  const markInitialViewportSettled = useCallback(
+    (note: string) => {
+      if (!isCanvasMountedRef.current) {
+        return;
+      }
 
-    initialViewportSettledRef.current = true;
-    setInitialViewportSettledRevision((currentRevision) => currentRevision + 1);
-    recordHydrationLayoutMark({
-      source: 'workflow-canvas:viewport-settled',
-      workflowId,
-      note,
-      count: layoutShiftCountRef.current,
-      width: canvasRootRef.current?.clientWidth,
-      height: canvasRootRef.current?.clientHeight,
-    });
-  }, [workflowId]);
+      initialViewportSettledRef.current = true;
+      setInitialViewportSettledRevision((currentRevision) => currentRevision + 1);
+      recordHydrationLayoutMark({
+        source: 'workflow-canvas:viewport-settled',
+        workflowId,
+        note,
+        count: layoutShiftCountRef.current,
+        width: canvasRootRef.current?.clientWidth,
+        height: canvasRootRef.current?.clientHeight,
+      });
+    },
+    [workflowId],
+  );
 
   const requestInitialViewportFit = useCallback(() => {
     if (!isCanvasMountedRef.current || !reactFlowInstance || viewportCenterRequestRef.current || initialViewportSettledRef.current) {
@@ -267,12 +292,12 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         viewportFitTimerRef.current = null;
       }
 
-      const fallbackRoot = typeof document !== 'undefined'
-        ? document.querySelector('[data-testid="workflow-canvas-root"]') as HTMLDivElement | null
-        : null;
-      const rootEl = (canvasRootRef.current && (canvasRootRef.current.clientWidth > 0 || canvasRootRef.current.clientHeight > 0))
-        ? canvasRootRef.current
-        : fallbackRoot ?? canvasRootRef.current;
+      const fallbackRoot =
+        typeof document !== 'undefined' ? (document.querySelector('[data-testid="workflow-canvas-root"]') as HTMLDivElement | null) : null;
+      const rootEl =
+        canvasRootRef.current && (canvasRootRef.current.clientWidth > 0 || canvasRootRef.current.clientHeight > 0)
+          ? canvasRootRef.current
+          : (fallbackRoot ?? canvasRootRef.current);
 
       if (!reactFlowInstance) {
         if (attempt < 10) {
@@ -290,9 +315,12 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         return;
       }
 
-      const candidateNodes = stableRefs.current.actualNodes.length > 0
-        ? stableRefs.current.actualNodes
-        : (typeof reactFlowInstance.getNodes === 'function' ? reactFlowInstance.getNodes() : stableRefs.current.reactFlowNodes);
+      const candidateNodes =
+        stableRefs.current.actualNodes.length > 0
+          ? stableRefs.current.actualNodes
+          : typeof reactFlowInstance.getNodes === 'function'
+            ? reactFlowInstance.getNodes()
+            : stableRefs.current.reactFlowNodes;
       if (!candidateNodes || candidateNodes.length === 0) {
         if (attempt < 10) {
           viewportFitTimerRef.current = window.setTimeout(() => applyViewportFit(attempt + 1), 120);
@@ -306,26 +334,34 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       if (typeof reactFlowLookup.getNodesBounds === 'function') {
         bounds = reactFlowLookup.getNodesBounds(candidateNodes);
       } else {
-        const reduced = candidateNodes.reduce((acc, node) => {
-          const nodePosition = 'position' in node && node.position ? node.position : { x: 0, y: 0 };
-          const measured = 'measured' in node ? node.measured as { width?: number; height?: number } | undefined : undefined;
-          const nodeWidth = 'width' in node && typeof node.width === 'number' ? node.width : measured?.width ?? 220;
-          const nodeHeight = 'height' in node && typeof node.height === 'number' ? node.height : measured?.height ?? 140;
-          const nodeX = nodePosition?.x ?? 0;
-          const nodeY = nodePosition?.y ?? 0;
-          const minX = Math.min(acc.minX, nodeX);
-          const minY = Math.min(acc.minY, nodeY);
-          const maxX = Math.max(acc.maxX, nodeX + nodeWidth);
-          const maxY = Math.max(acc.maxY, nodeY + nodeHeight);
-          return { minX, minY, maxX, maxY };
-        }, {
-          minX: Number.POSITIVE_INFINITY,
-          minY: Number.POSITIVE_INFINITY,
-          maxX: Number.NEGATIVE_INFINITY,
-          maxY: Number.NEGATIVE_INFINITY,
-        });
+        const reduced = candidateNodes.reduce(
+          (acc, node) => {
+            const nodePosition = 'position' in node && node.position ? node.position : { x: 0, y: 0 };
+            const measured = 'measured' in node ? (node.measured as { width?: number; height?: number } | undefined) : undefined;
+            const nodeWidth = 'width' in node && typeof node.width === 'number' ? node.width : (measured?.width ?? 220);
+            const nodeHeight = 'height' in node && typeof node.height === 'number' ? node.height : (measured?.height ?? 140);
+            const nodeX = nodePosition?.x ?? 0;
+            const nodeY = nodePosition?.y ?? 0;
+            const minX = Math.min(acc.minX, nodeX);
+            const minY = Math.min(acc.minY, nodeY);
+            const maxX = Math.max(acc.maxX, nodeX + nodeWidth);
+            const maxY = Math.max(acc.maxY, nodeY + nodeHeight);
+            return { minX, minY, maxX, maxY };
+          },
+          {
+            minX: Number.POSITIVE_INFINITY,
+            minY: Number.POSITIVE_INFINITY,
+            maxX: Number.NEGATIVE_INFINITY,
+            maxY: Number.NEGATIVE_INFINITY,
+          },
+        );
 
-        if (!Number.isFinite(reduced.minX) || !Number.isFinite(reduced.minY) || !Number.isFinite(reduced.maxX) || !Number.isFinite(reduced.maxY)) {
+        if (
+          !Number.isFinite(reduced.minX) ||
+          !Number.isFinite(reduced.minY) ||
+          !Number.isFinite(reduced.maxX) ||
+          !Number.isFinite(reduced.maxY)
+        ) {
           if (attempt < 10) {
             viewportFitTimerRef.current = window.setTimeout(() => applyViewportFit(attempt + 1), 120);
             return;
@@ -342,7 +378,13 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         };
       }
 
-      if (!bounds || !Number.isFinite(bounds.x) || !Number.isFinite(bounds.y) || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height)) {
+      if (
+        !bounds ||
+        !Number.isFinite(bounds.x) ||
+        !Number.isFinite(bounds.y) ||
+        !Number.isFinite(bounds.width) ||
+        !Number.isFinite(bounds.height)
+      ) {
         if (attempt < 10) {
           viewportFitTimerRef.current = window.setTimeout(() => applyViewportFit(attempt + 1), 120);
           return;
@@ -367,7 +409,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
       const fitted = typeof reactFlowInstance.getViewport === 'function' ? reactFlowInstance.getViewport() : null;
       // The pane may not be initialised yet: setCenter is then a silent no-op and getViewport returns the store default.
-      const fitApplied = !fitted || (Number.isFinite(fitted.x) && Number.isFinite(fitted.y) && Math.abs(fitted.zoom - DEFAULT_VIEWPORT.zoom) < 0.01);
+      const fitApplied =
+        !fitted || (Number.isFinite(fitted.x) && Number.isFinite(fitted.y) && Math.abs(fitted.zoom - DEFAULT_VIEWPORT.zoom) < 0.01);
 
       if (!fitApplied) {
         if (attempt < 10) {
@@ -395,17 +438,17 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   // useRef pour TOUT stocker sans déclencher de re-render
   const stableRefs = useRef({
     callbacks: {
-      onDeleteNode: onDeleteNode || (() => { }),
-      onUpdateNodeMessages: onUpdateNodeMessages || (() => { }),
-      onUpdateNodePosition: onUpdateNodePosition || (() => { }),
-      onToggleNodeMinimize: onToggleNodeMinimize || (() => { }),
-      onOpenImagePanel: onOpenImagePanel || (() => { }),
-      onOpenImageModificationPanel: onOpenImageModificationPanel || (() => { }),
-      onOpenFullscreen: onOpenFullscreen || (() => { })
+      onDeleteNode: onDeleteNode || (() => {}),
+      onUpdateNodeMessages: onUpdateNodeMessages || (() => {}),
+      onUpdateNodePosition: onUpdateNodePosition || (() => {}),
+      onToggleNodeMinimize: onToggleNodeMinimize || (() => {}),
+      onOpenImagePanel: onOpenImagePanel || (() => {}),
+      onOpenImageModificationPanel: onOpenImageModificationPanel || (() => {}),
+      onOpenFullscreen: onOpenFullscreen || (() => {}),
     },
     actualNodes: [] as CanvasWorkflowNode[],
     agents: [] as Agent[],
-    reactFlowNodes: [] as Node[]
+    reactFlowNodes: [] as Node[],
   });
 
   // Hooks React Flow - avec gestion d'erreur pour éviter les crashes
@@ -468,29 +511,36 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   const lastNodePositionChangesRef = useRef(new Map<string, { x: number; y: number }>());
 
   // Wrapper sécurisé pour onNodesChange avec logging d'erreurs
-  const onNodesChange = useCallback((changes: any) => {
-    try {
-      if (Array.isArray(changes)) {
-        for (const change of changes) {
-          if (change?.type === 'position' && change.position
-            && Number.isFinite(change.position.x) && Number.isFinite(change.position.y)) {
-            lastNodePositionChangesRef.current.set(change.id, { x: change.position.x, y: change.position.y });
-          } else if (change?.type === 'remove' && change.id) {
-            lastNodePositionChangesRef.current.delete(change.id);
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      try {
+        if (Array.isArray(changes)) {
+          for (const change of changes) {
+            if (
+              change?.type === 'position' &&
+              change.position &&
+              Number.isFinite(change.position.x) &&
+              Number.isFinite(change.position.y)
+            ) {
+              lastNodePositionChangesRef.current.set(change.id, { x: change.position.x, y: change.position.y });
+            } else if (change?.type === 'remove' && change.id) {
+              lastNodePositionChangesRef.current.delete(change.id);
+            }
           }
         }
+        onNodesChangeInternal(changes);
+      } catch (error) {
+        console.error('[WorkflowCanvas] Error in onNodesChange:', error);
+        // Ne pas propager l'erreur pour éviter de casser l'UI
       }
-      onNodesChangeInternal(changes);
-    } catch (error) {
-      console.error('[WorkflowCanvas] Error in onNodesChange:', error);
-      // Ne pas propager l'erreur pour éviter de casser l'UI
-    }
-  }, [onNodesChangeInternal]);
+    },
+    [onNodesChangeInternal],
+  );
 
   // ⭐ FIX SOLID: Utiliser la source unique de vérité pour les nodes.
   // Le chemin actif du runtime lit désormais le store, avec `nodes` comme compatibilité explicite.
   const storeNodes = useDesignStore((state) => state.nodes);
-  
+
   // Calculer actualNodes de manière stable
   const actualNodes = useMemo<CanvasWorkflowNode[]>(() => {
     if (storeNodes && storeNodes.length > 0) {
@@ -544,129 +594,143 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     return undefined;
   }, [actualNodes, clearWorkflowViewportFit, requestInitialViewportFit, viewportFitHistory, workflowId]);
 
-  const resolveDroppedNodePosition = useCallback((
-    nodeId: string,
-    desiredPosition: { x: number; y: number },
-    draggedNodeSize?: { width?: number; height?: number },
-  ) => {
-    const designState = useDesignStore.getState();
-    const movedNode = designState.nodes.find((candidate) => candidate.id === nodeId);
-    const instanceId = movedNode?.data?.agentInstance?.id;
-    const nodeWorkflowId = movedNode?.data?.workflowId
-      || movedNode?.data?.agentInstance?.workflowId
-      || workflowId;
-    const liveNodes: ReactFlowNodeWithMeasuredSize[] = typeof (reactFlowInstance as typeof reactFlowInstance & { getNodes?: () => ReactFlowNodeWithMeasuredSize[] }).getNodes === 'function'
-      ? (reactFlowInstance as typeof reactFlowInstance & { getNodes: () => ReactFlowNodeWithMeasuredSize[] }).getNodes()
-      : stableRefs.current.reactFlowNodes as ReactFlowNodeWithMeasuredSize[];
-    const getNodeWidth = (candidate?: ReactFlowNodeWithMeasuredSize) => normalizeOptionalDimension(candidate?.measured?.width ?? candidate?.width);
-    const getNodeHeight = (candidate?: ReactFlowNodeWithMeasuredSize) => normalizeOptionalDimension(candidate?.measured?.height ?? candidate?.height);
-    const movedLiveNode = liveNodes.find((candidate) => candidate.id === nodeId);
-    const occupiedNodeRects: WorkflowNodeCollisionRect[] = [];
-    for (const candidate of liveNodes) {
-      if (!Number.isFinite(candidate.position?.x) || !Number.isFinite(candidate.position?.y)) {
-        continue;
+  const resolveDroppedNodePosition = useCallback(
+    (nodeId: string, desiredPosition: { x: number; y: number }, draggedNodeSize?: { width?: number; height?: number }) => {
+      const designState = useDesignStore.getState();
+      const movedNode = designState.nodes.find((candidate) => candidate.id === nodeId);
+      const instanceId = movedNode?.data?.agentInstance?.id;
+      const nodeWorkflowId = movedNode?.data?.workflowId || movedNode?.data?.agentInstance?.workflowId || workflowId;
+      const liveNodes: ReactFlowNodeWithMeasuredSize[] =
+        typeof (reactFlowInstance as typeof reactFlowInstance & { getNodes?: () => ReactFlowNodeWithMeasuredSize[] }).getNodes ===
+        'function'
+          ? (reactFlowInstance as typeof reactFlowInstance & { getNodes: () => ReactFlowNodeWithMeasuredSize[] }).getNodes()
+          : (stableRefs.current.reactFlowNodes as ReactFlowNodeWithMeasuredSize[]);
+      const getNodeWidth = (candidate?: ReactFlowNodeWithMeasuredSize) =>
+        normalizeOptionalDimension(candidate?.measured?.width ?? candidate?.width);
+      const getNodeHeight = (candidate?: ReactFlowNodeWithMeasuredSize) =>
+        normalizeOptionalDimension(candidate?.measured?.height ?? candidate?.height);
+      const movedLiveNode = liveNodes.find((candidate) => candidate.id === nodeId);
+      const occupiedNodeRects: WorkflowNodeCollisionRect[] = [];
+      for (const candidate of liveNodes) {
+        if (!Number.isFinite(candidate.position?.x) || !Number.isFinite(candidate.position?.y)) {
+          continue;
+        }
+
+        const width = getNodeWidth(candidate);
+        const height = getNodeHeight(candidate);
+
+        occupiedNodeRects.push(
+          buildCollisionRect({
+            nodeId: candidate.id,
+            instanceId: candidate.data?.agentInstance?.id,
+            position: candidate.position,
+            workflowId: candidate.data?.workflowId ?? candidate.data?.agentInstance?.workflowId ?? nodeWorkflowId ?? null,
+            width,
+            height,
+          }),
+        );
       }
 
-      const width = getNodeWidth(candidate);
-      const height = getNodeHeight(candidate);
+      const subjectWidth = normalizeOptionalDimension(draggedNodeSize?.width) ?? getNodeWidth(movedLiveNode);
+      const subjectHeight = normalizeOptionalDimension(draggedNodeSize?.height) ?? getNodeHeight(movedLiveNode);
 
-      occupiedNodeRects.push(buildCollisionRect({
-        nodeId: candidate.id,
-        instanceId: candidate.data?.agentInstance?.id,
-        position: candidate.position,
-        workflowId: candidate.data?.workflowId ?? candidate.data?.agentInstance?.workflowId ?? nodeWorkflowId ?? null,
-        width,
-        height,
-      }));
-    }
+      const gestureVector =
+        movedNode?.position && desiredPosition
+          ? { x: desiredPosition.x - movedNode.position.x, y: desiredPosition.y - movedNode.position.y }
+          : undefined;
 
-    const subjectWidth = normalizeOptionalDimension(draggedNodeSize?.width) ?? getNodeWidth(movedLiveNode);
-    const subjectHeight = normalizeOptionalDimension(draggedNodeSize?.height) ?? getNodeHeight(movedLiveNode);
-
-    const gestureVector = movedNode?.position && desiredPosition
-      ? { x: desiredPosition.x - movedNode.position.x, y: desiredPosition.y - movedNode.position.y }
-      : undefined;
-
-    return findCollisionFreeWorkflowNodePosition({
-      nodeId,
-      instanceId,
-      currentPosition: movedNode?.position,
-      desiredPosition,
-      workflowId: nodeWorkflowId,
-      nodes: designState.nodes,
-      agentInstances: designState.agentInstances,
-      occupiedNodeRects,
-      subjectSize: {
-        width: subjectWidth,
-        height: subjectHeight,
-      },
-      gestureVector,
-    });
-  }, [reactFlowInstance, workflowId]);
-
-  const onNodeDragStop = useCallback((_: unknown, node: ReactFlowNodeWithMeasuredSize) => {
-    try {
-      // En mode contrôlé, le `node` de l'événement provient du store interne de React Flow,
-      // resynchronisé seulement au commit du rendu suivant : lors d'un second drag immédiat
-      // après un drop résolu par collision, node.position peut être la position d'avant le
-      // drag, ce qui ferait reculer le nœud au lieu de le laisser à son point de lâcher.
-      // La dernière position appliquée via onNodesChange est la source de vérité.
-      const stateNode = stableRefs.current.reactFlowNodes.find((candidate) => candidate.id === node.id) as ReactFlowNodeWithMeasuredSize | undefined;
-      const droppedPosition = lastNodePositionChangesRef.current.get(node.id)
-        ?? (stateNode && Number.isFinite(stateNode.position?.x) && Number.isFinite(stateNode.position?.y) ? stateNode.position : undefined)
-        ?? node.position;
-
-      // measured peut être périmé après un changement de taille (ex. minimize) :
-      // la taille DOM réelle au lâcher est la source de vérité pour la résolution de collision.
-      const nodeElement = typeof document !== 'undefined'
-        ? document.querySelector(`[data-id="${node.id}"]`) as HTMLElement | null
-        : null;
-      const liveWidth = normalizeOptionalDimension(nodeElement?.offsetWidth);
-      const liveHeight = normalizeOptionalDimension(nodeElement?.offsetHeight);
-      const resolvedPosition = resolveDroppedNodePosition(node.id, droppedPosition, {
-        width: liveWidth ?? normalizeOptionalDimension(node.measured?.width ?? node.width),
-        height: liveHeight ?? normalizeOptionalDimension(node.measured?.height ?? node.height),
+      return findCollisionFreeWorkflowNodePosition({
+        nodeId,
+        instanceId,
+        currentPosition: movedNode?.position,
+        desiredPosition,
+        workflowId: nodeWorkflowId,
+        nodes: designState.nodes,
+        agentInstances: designState.agentInstances,
+        occupiedNodeRects,
+        subjectSize: {
+          width: subjectWidth,
+          height: subjectHeight,
+        },
+        gestureVector,
       });
-      lastNodePositionChangesRef.current.set(node.id, resolvedPosition);
+    },
+    [reactFlowInstance, workflowId],
+  );
 
-      setReactFlowNodes((currentNodes) => currentNodes.map((currentNode) => {
-        if (currentNode.id !== node.id) {
-          return currentNode;
-        }
+  const onNodeDragStop = useCallback(
+    (_: unknown, node: ReactFlowNodeWithMeasuredSize) => {
+      try {
+        // En mode contrôlé, le `node` de l'événement provient du store interne de React Flow,
+        // resynchronisé seulement au commit du rendu suivant : lors d'un second drag immédiat
+        // après un drop résolu par collision, node.position peut être la position d'avant le
+        // drag, ce qui ferait reculer le nœud au lieu de le laisser à son point de lâcher.
+        // La dernière position appliquée via onNodesChange est la source de vérité.
+        const stateNode = stableRefs.current.reactFlowNodes.find((candidate) => candidate.id === node.id) as
+          ReactFlowNodeWithMeasuredSize | undefined;
+        const droppedPosition =
+          lastNodePositionChangesRef.current.get(node.id) ??
+          (stateNode && Number.isFinite(stateNode.position?.x) && Number.isFinite(stateNode.position?.y)
+            ? stateNode.position
+            : undefined) ??
+          node.position;
 
-        if (currentNode.position.x === resolvedPosition.x && currentNode.position.y === resolvedPosition.y) {
-          return currentNode;
-        }
+        // measured peut être périmé après un changement de taille (ex. minimize) :
+        // la taille DOM réelle au lâcher est la source de vérité pour la résolution de collision.
+        const nodeElement =
+          typeof document !== 'undefined' ? (document.querySelector(`[data-id="${node.id}"]`) as HTMLElement | null) : null;
+        const liveWidth = normalizeOptionalDimension(nodeElement?.offsetWidth);
+        const liveHeight = normalizeOptionalDimension(nodeElement?.offsetHeight);
+        const resolvedPosition = resolveDroppedNodePosition(node.id, droppedPosition, {
+          width: liveWidth ?? normalizeOptionalDimension(node.measured?.width ?? node.width),
+          height: liveHeight ?? normalizeOptionalDimension(node.measured?.height ?? node.height),
+        });
+        lastNodePositionChangesRef.current.set(node.id, resolvedPosition);
 
-        return {
-          ...currentNode,
-          position: resolvedPosition,
-        };
-      }));
+        setReactFlowNodes((currentNodes) =>
+          currentNodes.map((currentNode) => {
+            if (currentNode.id !== node.id) {
+              return currentNode;
+            }
 
-      stableRefs.current.callbacks.onUpdateNodePosition(node.id, resolvedPosition, { persist: true });
-    } catch (error) {
-      console.error('[WorkflowCanvas] Error in onNodeDragStop:', error);
-    }
-  }, [resolveDroppedNodePosition, setReactFlowNodes]);
+            if (currentNode.position.x === resolvedPosition.x && currentNode.position.y === resolvedPosition.y) {
+              return currentNode;
+            }
+
+            return {
+              ...currentNode,
+              position: resolvedPosition,
+            };
+          }),
+        );
+
+        stableRefs.current.callbacks.onUpdateNodePosition(node.id, resolvedPosition, { persist: true });
+      } catch (error) {
+        console.error('[WorkflowCanvas] Error in onNodeDragStop:', error);
+      }
+    },
+    [resolveDroppedNodePosition, setReactFlowNodes],
+  );
 
   // ⭐ PLAN_DE_PERSISTENCE: Hook de sauvegarde automatique
   const autoSave = useAutoSave({
     workflowId,
     workflowName,
-    canvasState: reactFlowInstance ? {
-      zoom: reactFlowInstance.getZoom(),
-      panX: reactFlowInstance.getViewport().x,
-      panY: reactFlowInstance.getViewport().y
-    } : undefined,
-    onSaveComplete
+    canvasState: reactFlowInstance
+      ? {
+          zoom: reactFlowInstance.getZoom(),
+          panX: reactFlowInstance.getViewport().x,
+          panY: reactFlowInstance.getViewport().y,
+        }
+      : undefined,
+    onSaveComplete,
   });
 
   // Mettre à jour les références SANS déclencher de re-render
   stableRefs.current.callbacks = {
-    onDeleteNode: onDeleteNode || (() => { }),
-    onUpdateNodeMessages: onUpdateNodeMessages || (() => { }),
-    onUpdateNodePosition: onUpdateNodePosition || (() => { }),
+    onDeleteNode: onDeleteNode || (() => {}),
+    onUpdateNodeMessages: onUpdateNodeMessages || (() => {}),
+    onUpdateNodePosition: onUpdateNodePosition || (() => {}),
     // Wrapper: when toggle minimize/restore, re-evaluate collisions once the DOM node size has
     // settled (CSS transition) — never write `measured` from a mid-transition offsetWidth.
     // Important: moves caused by restore are applied locally (no persist) to avoid accidental DB writes for UI-only actions.
@@ -680,13 +744,14 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             const designState = useDesignStore.getState();
             const movedNode = designState.nodes.find((candidate) => candidate.id === nodeId);
 
-            const liveNode = typeof reactFlowLookup.getNode === 'function'
-              ? reactFlowLookup.getNode(nodeId)
-              : stableRefs.current.reactFlowNodes.find((n) => n.id === nodeId);
+            const liveNode =
+              typeof reactFlowLookup.getNode === 'function'
+                ? reactFlowLookup.getNode(nodeId)
+                : stableRefs.current.reactFlowNodes.find((n) => n.id === nodeId);
 
             const hasValidLivePosition = liveNode && Number.isFinite(liveNode.position?.x) && Number.isFinite(liveNode.position?.y);
             const designPositionValid = movedNode && Number.isFinite(movedNode.position?.x) && Number.isFinite(movedNode.position?.y);
-            const desiredPosition = hasValidLivePosition ? liveNode.position : (designPositionValid ? movedNode.position : undefined);
+            const desiredPosition = hasValidLivePosition ? liveNode.position : designPositionValid ? movedNode.position : undefined;
             if (!desiredPosition) return;
 
             // On n'écrit plus `measured` ici : React Flow maintient width/height via son
@@ -697,12 +762,15 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             const liveSubjectNode = liveNode as ReactFlowNodeWithMeasuredSize | undefined;
             const liveSubjectWidth = normalizeOptionalDimension(liveSubjectNode?.measured?.width ?? liveSubjectNode?.width);
             const liveSubjectHeight = normalizeOptionalDimension(liveSubjectNode?.measured?.height ?? liveSubjectNode?.height);
-            const subjectWidth = (typeof measuredWidth === 'number' && measuredWidth > 0) ? measuredWidth : (liveSubjectWidth ?? expandedFallback.width);
-            const subjectHeight = (typeof measuredHeight === 'number' && measuredHeight > 0) ? measuredHeight : (liveSubjectHeight ?? expandedFallback.height);
+            const subjectWidth =
+              typeof measuredWidth === 'number' && measuredWidth > 0 ? measuredWidth : (liveSubjectWidth ?? expandedFallback.width);
+            const subjectHeight =
+              typeof measuredHeight === 'number' && measuredHeight > 0 ? measuredHeight : (liveSubjectHeight ?? expandedFallback.height);
 
-            const liveNodes: ReactFlowNodeWithMeasuredSize[] = typeof reactFlowLookup.getNodes === 'function'
-              ? reactFlowLookup.getNodes()
-              : (stableRefs.current.reactFlowNodes as ReactFlowNodeWithMeasuredSize[]);
+            const liveNodes: ReactFlowNodeWithMeasuredSize[] =
+              typeof reactFlowLookup.getNodes === 'function'
+                ? reactFlowLookup.getNodes()
+                : (stableRefs.current.reactFlowNodes as ReactFlowNodeWithMeasuredSize[]);
 
             const occupiedNodeRects: WorkflowNodeCollisionRect[] = [];
             for (const candidate of liveNodes) {
@@ -713,14 +781,16 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               const width = normalizeOptionalDimension(candidate.measured?.width ?? candidate.width);
               const height = normalizeOptionalDimension(candidate.measured?.height ?? candidate.height);
 
-              occupiedNodeRects.push(buildCollisionRect({
-                nodeId: candidate.id,
-                instanceId: candidate.data?.agentInstance?.id,
-                position: candidate.position,
-                workflowId: candidate.data?.workflowId ?? candidate.data?.agentInstance?.workflowId ?? workflowId ?? null,
-                width,
-                height,
-              }));
+              occupiedNodeRects.push(
+                buildCollisionRect({
+                  nodeId: candidate.id,
+                  instanceId: candidate.data?.agentInstance?.id,
+                  position: candidate.position,
+                  workflowId: candidate.data?.workflowId ?? candidate.data?.agentInstance?.workflowId ?? workflowId ?? null,
+                  width,
+                  height,
+                }),
+              );
             }
 
             const resolved = findCollisionFreeWorkflowNodePosition({
@@ -736,12 +806,10 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               maxSearchRadius: 24,
             });
 
-            const shouldCorrectForOverlap = Boolean(
-              resolved && (resolved.x !== desiredPosition.x || resolved.y !== desiredPosition.y)
-            );
+            const shouldCorrectForOverlap = Boolean(resolved && (resolved.x !== desiredPosition.x || resolved.y !== desiredPosition.y));
 
             if (shouldCorrectForOverlap) {
-              setReactFlowNodes((current) => current.map((n) => n.id === nodeId ? { ...n, position: resolved } : n));
+              setReactFlowNodes((current) => current.map((n) => (n.id === nodeId ? { ...n, position: resolved } : n)));
               (onUpdateNodePosition || (() => {}))(nodeId, resolved, { persist: false });
             }
           } catch (err) {
@@ -750,7 +818,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           }
         };
 
-        const nodeEl = typeof document !== 'undefined' ? document.querySelector(`[data-id="${nodeId}"]`) as HTMLElement | null : null;
+        const nodeEl = typeof document !== 'undefined' ? (document.querySelector(`[data-id="${nodeId}"]`) as HTMLElement | null) : null;
         // La taille du nœud évolue via une transition CSS (transition-all duration-300,
         // w-96 <-> w-64) : lire offsetWidth à ce moment donnerait une valeur transitoire.
         // On observe donc le nœud jusqu'à la fin de la transition et on ne corrige la
@@ -783,15 +851,16 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
           }, 120);
         };
 
-        const resizeObserver = typeof ResizeObserver !== 'undefined'
-          ? new ResizeObserver((entries) => {
-            const entry = entries[entries.length - 1];
-            if (!entry || finished) {
-              return;
-            }
-            scheduleSettledCorrection(entry.contentRect.width, entry.contentRect.height);
-          })
-          : null;
+        const resizeObserver =
+          typeof ResizeObserver !== 'undefined'
+            ? new ResizeObserver((entries) => {
+                const entry = entries[entries.length - 1];
+                if (!entry || finished) {
+                  return;
+                }
+                scheduleSettledCorrection(entry.contentRect.width, entry.contentRect.height);
+              })
+            : null;
 
         const finish = () => {
           if (finished) {
@@ -831,9 +900,9 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         console.error('[WorkflowCanvas] onToggleNodeMinimize wrapper error:', err);
       }
     },
-    onOpenImagePanel: onOpenImagePanel || (() => { }),
-    onOpenImageModificationPanel: onOpenImageModificationPanel || (() => { }),
-    onOpenFullscreen: onOpenFullscreen || (() => { })
+    onOpenImagePanel: onOpenImagePanel || (() => {}),
+    onOpenImageModificationPanel: onOpenImageModificationPanel || (() => {}),
+    onOpenFullscreen: onOpenFullscreen || (() => {}),
   };
 
   // Ref stable pour agents (évite les dépendances cycliques)
@@ -925,7 +994,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       });
 
       // Comparaison intelligente pour éviter les mises à jour inutiles
-      setReactFlowNodes(currentNodes => {
+      setReactFlowNodes((currentNodes) => {
         // Vérifier si les nodes ont réellement changé
         if (currentNodes.length !== newReactFlowNodes.length) {
           return newReactFlowNodes;
@@ -933,7 +1002,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
         const hasChanged = newReactFlowNodes.some((newNode, index) => {
           const currentNode = currentNodes[index];
-          return !currentNode ||
+          return (
+            !currentNode ||
             currentNode.id !== newNode.id ||
             currentNode.position.x !== newNode.position.x ||
             currentNode.position.y !== newNode.position.y ||
@@ -946,14 +1016,17 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             // ⭐ REMOVED: isMinimized, isMaximized checks - managed by useRuntimeStore
             // Détecter les changements dans l'instance (nom, config)
             currentNode.data.agentInstance?.name !== newNode.data.agentInstance?.name ||
-            (currentNode.data.agentInstance?.configuration_json && newNode.data.agentInstance?.configuration_json &&
-              JSON.stringify(currentNode.data.agentInstance.configuration_json) !== JSON.stringify(newNode.data.agentInstance.configuration_json));
+            (currentNode.data.agentInstance?.configuration_json &&
+              newNode.data.agentInstance?.configuration_json &&
+              JSON.stringify(currentNode.data.agentInstance.configuration_json) !==
+                JSON.stringify(newNode.data.agentInstance.configuration_json))
+          );
         });
 
         return hasChanged ? newReactFlowNodes : currentNodes;
       });
     } else if (stableRefs.current.reactFlowNodes.length > 0) {
-      setReactFlowNodes(currentNodes => currentNodes.length > 0 ? [] : currentNodes);
+      setReactFlowNodes((currentNodes) => (currentNodes.length > 0 ? [] : currentNodes));
     }
   }, [actualNodes, agentInstances, agents, getResolvedInstance, reactFlowInstance, workflowId]);
 
@@ -985,8 +1058,11 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     const lockedElements = [root, root.parentElement];
     const resetScroll = (event: Event) => {
       const target = event.target as HTMLElement | null;
-      if (target && (lockedElements.includes(target) || target.classList?.contains('react-flow'))
-        && (target.scrollTop !== 0 || target.scrollLeft !== 0)) {
+      if (
+        target &&
+        (lockedElements.includes(target) || target.classList?.contains('react-flow')) &&
+        (target.scrollTop !== 0 || target.scrollLeft !== 0)
+      ) {
         target.scrollTop = 0;
         target.scrollLeft = 0;
       }
@@ -1015,7 +1091,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   // useEffect pour initialiser la MiniMap immédiatement (pas de délai pour éviter desync)
   useEffect(() => {
     // Initialiser immédiatement pour éviter la désynchronisation
-    setInternalState(prev => ({ ...prev, minimapReady: true }));
+    setInternalState((prev) => ({ ...prev, minimapReady: true }));
   }, []);
 
   // Emit hydration readiness when the floating prototyping button is present
@@ -1026,15 +1102,17 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     floatingPrototypeSignalSentRef.current = true;
 
     try {
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        try {
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event('hydration:components:ready'));
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          try {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new Event('hydration:components:ready'));
+            }
+          } catch (e) {
+            // ignore
           }
-        } catch (e) {
-          // ignore
-        }
-      }));
+        }),
+      );
     } catch (e) {
       // ignore
     }
@@ -1045,8 +1123,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       return undefined;
     }
 
-    const visualNodesAreReady = actualNodes.length === reactFlowNodes.length
-      && reactFlowNodes.every((node) => Boolean(node.data?.label));
+    const visualNodesAreReady = actualNodes.length === reactFlowNodes.length && reactFlowNodes.every((node) => Boolean(node.data?.label));
     const domNodesAreReady = isCanvasDomReady();
     const layoutIsStable = layoutStabilityRevision > 0;
     const viewportIsSettled = initialViewportSettledRef.current;
@@ -1077,13 +1154,16 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   }, [actualNodes, initialViewportSettledRevision, isCanvasDomReady, layoutStabilityRevision, onCanvasReady, reactFlowNodes, workflowId]);
 
   // Handlers stables avec useCallback
-  const onConnect = useCallback((connection: Connection) => {
-    if (!isValidWorkflowConnection(connection)) {
-      return;
-    }
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      if (!isValidWorkflowConnection(connection)) {
+        return;
+      }
 
-    setEdges((eds) => addEdge(connection, eds));
-  }, [setEdges]);
+      setEdges((eds) => addEdge(connection, eds));
+    },
+    [setEdges],
+  );
 
   // ⭐ Sélection d'un edge au clic + suppression via Delete/Suppr :
   // on pose selected: true sur l'edge (contrôlé) -> classe .selected + glow CSS ;
@@ -1095,9 +1175,9 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   }, []);
 
   const handleEdgesChange = useCallback(
-    (changes: any[]) => {
+    (changes: EdgeChange[]) => {
       onEdgesChange(changes);
-      if (selectedEdgeId && changes.some((c: any) => c?.type === 'remove' && c?.id === selectedEdgeId)) {
+      if (selectedEdgeId && changes.some((c: EdgeChange) => c?.type === 'remove' && c?.id === selectedEdgeId)) {
         setSelectedEdgeId(null);
       }
     },
@@ -1110,27 +1190,30 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   );
 
   // Handler pour libérer le focus quand on clique sur le canvas
-  const handlePaneClick = useCallback((event: any) => {
-    // Retirer le focus de tout élément actif (textarea, input, etc.)
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
-    // Forcer le focus sur le pane React Flow pour restaurer le curseur
-    const pane = event.target.closest('.react-flow__pane');
-    if (pane) {
-      pane.focus({ preventScroll: true });
-    }
-    // Désélectionner tous les nodes en cliquant sur le canvas vide
-    setReactFlowNodes(nodes => nodes.map(node => ({ ...node, selected: false })));
-    // ⭐ et désélectionner l'edge éventuellement sélectionné
-    setSelectedEdgeId(null);
-  }, [setReactFlowNodes]);
+  const handlePaneClick = useCallback(
+    (event: React.MouseEvent) => {
+      // Retirer le focus de tout élément actif (textarea, input, etc.)
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      // Forcer le focus sur le pane React Flow pour restaurer le curseur
+      const pane = (event.target as HTMLElement).closest<HTMLElement>('.react-flow__pane');
+      if (pane) {
+        pane.focus({ preventScroll: true });
+      }
+      // Désélectionner tous les nodes en cliquant sur le canvas vide
+      setReactFlowNodes((nodes) => nodes.map((node) => ({ ...node, selected: false })));
+      // ⭐ et désélectionner l'edge éventuellement sélectionné
+      setSelectedEdgeId(null);
+    },
+    [setReactFlowNodes],
+  );
 
   const handleEditPrototype = useCallback((nodeId: string) => {
-    setInternalState(prev => ({
+    setInternalState((prev) => ({
       ...prev,
       selectedAgentForEdit: nodeId,
-      showPrototypeConfirm: true
+      showPrototypeConfirm: true,
     }));
   }, []);
 
@@ -1139,20 +1222,17 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     if (selectedAgentForEdit) {
       const currentActualNodes = stableRefs.current.actualNodes;
       const currentAgents = stableRefs.current.agents;
-      const workflowNode = currentActualNodes.find(wf => wf && wf.id === selectedAgentForEdit);
+      const workflowNode = currentActualNodes.find((wf) => wf && wf.id === selectedAgentForEdit);
       if (workflowNode) {
-        const prototypeId = 'data' in workflowNode
-          ? workflowNode.data.agent?.id ?? workflowNode.data.agentInstance?.prototypeId
-          : workflowNode.agent?.id;
-        const agent = prototypeId && Array.isArray(currentAgents)
-          ? currentAgents.find(a => a && a.id === prototypeId)
-          : null;
+        const prototypeId =
+          'data' in workflowNode ? (workflowNode.data.agent?.id ?? workflowNode.data.agentInstance?.prototypeId) : workflowNode.agent?.id;
+        const agent = prototypeId && Array.isArray(currentAgents) ? currentAgents.find((a) => a && a.id === prototypeId) : null;
         if (agent) {
-          setInternalState(prev => ({
+          setInternalState((prev) => ({
             ...prev,
             showAgentForm: true,
             showPrototypeConfirm: false,
-            selectedAgentForEdit: null
+            selectedAgentForEdit: null,
           }));
         }
       }
@@ -1160,15 +1240,16 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   }, [internalState]);
 
   const handleCancelPrototypeEdit = useCallback(() => {
-    setInternalState(prev => ({
+    setInternalState((prev) => ({
       ...prev,
       showPrototypeConfirm: false,
-      selectedAgentForEdit: null
+      selectedAgentForEdit: null,
     }));
   }, []);
 
   // Valeur du contexte - stable et mémorisée
-  const contextValue = useMemo(() => ({
+  const contextValue = useMemo(
+    () => ({
       onEditPrototype: handleEditPrototype,
       navigationHandler: onNavigate,
       onDeleteNode,
@@ -1180,7 +1261,20 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       onOpenVideoPanel,
       onOpenMapsPanel,
       onOpenFullscreen,
-    }), [handleEditPrototype, onNavigate, onDeleteNode, onToggleNodeMinimize, onUpdateNodePosition, onOpenImagePanel, onOpenImageModificationPanel, onOpenVideoPanel, onOpenMapsPanel, onOpenFullscreen]);
+    }),
+    [
+      handleEditPrototype,
+      onNavigate,
+      onDeleteNode,
+      onToggleNodeMinimize,
+      onUpdateNodePosition,
+      onOpenImagePanel,
+      onOpenImageModificationPanel,
+      onOpenVideoPanel,
+      onOpenMapsPanel,
+      onOpenFullscreen,
+    ],
+  );
 
   // Note: test helpers removed post-QA to reduce dev-only surface.
 
@@ -1233,7 +1327,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
                 0 8px 25px rgba(0, 0, 0, 0.7),
                 inset 0 1px 0 ${theme.particleColors[0]}20
               `,
-              backdropFilter: 'blur(12px)'
+              backdropFilter: 'blur(12px)',
             }}
           />
 
@@ -1285,7 +1379,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
                 border: `2px solid ${theme.particleColors[0]}`,
                 borderRadius: '12px',
                 opacity: 0.95,
-                boxShadow: `0 0 20px ${theme.primaryColor}, 0 8px 25px rgba(0, 0, 0, 0.7)`
+                boxShadow: `0 0 20px ${theme.primaryColor}, 0 8px 25px rgba(0, 0, 0, 0.7)`,
               }}
             />
           )}
@@ -1299,7 +1393,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               canvasState={{
                 zoom: reactFlowInstance.getZoom(),
                 panX: reactFlowInstance.getViewport().x,
-                panY: reactFlowInstance.getViewport().y
+                panY: reactFlowInstance.getViewport().y,
               }}
               onSaveComplete={onSaveComplete}
             />
@@ -1323,9 +1417,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             <path
               className="workflow-click-lasso-path"
               d={(() => {
-                const dx =
-                  Math.max(40, Math.abs(clickLasso.x2 - clickLasso.x1) / 2) *
-                  (clickLasso.handleType === 'source' ? 1 : -1);
+                const dx = Math.max(40, Math.abs(clickLasso.x2 - clickLasso.x1) / 2) * (clickLasso.handleType === 'source' ? 1 : -1);
                 return `M ${clickLasso.x1} ${clickLasso.y1} C ${clickLasso.x1 + dx} ${clickLasso.y1}, ${clickLasso.x2 - dx} ${clickLasso.y2}, ${clickLasso.x2} ${clickLasso.y2}`;
               })()}
             />
@@ -1354,7 +1446,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               color: '#00ffff',
               textShadow: '0 0 10px rgba(0, 255, 255, 0.5)',
               transition: 'all 0.3s ease',
-              cursor: 'pointer'
+              cursor: 'pointer',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.boxShadow = `
@@ -1386,11 +1478,12 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         {/* Modal de confirmation d'édition de prototype */}
         <PrototypeEditConfirmationModal
           isOpen={internalState.showPrototypeConfirm}
-          agentName={internalState.selectedAgentForEdit ?
-            reactFlowNodes.find(n => n.id === internalState.selectedAgentForEdit)?.data?.agentInstance?.name ||
-            reactFlowNodes.find(n => n.id === internalState.selectedAgentForEdit)?.data?.agent?.name ||
-            'Agent'
-            : 'Agent'
+          agentName={
+            internalState.selectedAgentForEdit
+              ? reactFlowNodes.find((n) => n.id === internalState.selectedAgentForEdit)?.data?.agentInstance?.name ||
+                reactFlowNodes.find((n) => n.id === internalState.selectedAgentForEdit)?.data?.agent?.name ||
+                'Agent'
+              : 'Agent'
           }
           onConfirm={handleConfirmPrototypeEdit}
           onCancel={handleCancelPrototypeEdit}
@@ -1399,7 +1492,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         {/* Modal de formulaire d'agent */}
         {internalState.showAgentForm && (
           <AgentFormModal
-            onClose={() => setInternalState(prev => ({ ...prev, showAgentForm: false }))}
+            onClose={() => setInternalState((prev) => ({ ...prev, showAgentForm: false }))}
             onSave={(agentData: AgentDraft) => {
               // Générer un ID pour l'agent si pas fourni
               const now = new Date().toISOString();
@@ -1411,7 +1504,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
                 updated_at: now,
               };
               if (onAddToWorkflow) onAddToWorkflow(agentWithId);
-              setInternalState(prev => ({ ...prev, showAgentForm: false }));
+              setInternalState((prev) => ({ ...prev, showAgentForm: false }));
             }}
             llmConfigs={llmConfigs}
             existingAgent={null}
