@@ -15,6 +15,7 @@
 2. **`gh api --paginate --slurp` sur un runner `ubuntu-latest`** : sortie vide avec exit 0 selon la version de gh du runner (push `b2f937a`, run #44899771800, « unexpected end of JSON input »). Correctif : appel `gh api` simple 1 page (`per_page=100` suffisant) + garde `[ ! -s file ]` qui échoue lisiblement. Ne pas dépendre de `--slurp` dans les workflows.
 3. **Job de test avec service manquant** : le `beforeAll` global de `setup.ts` exige un Mongo loopback (`MONGODB_URI` ou `localhost:27017`) ; le job opt-in `mongo-replica-journal` sans service Mongo a timeout à 30 s (dispatch #44593799575). Correctif : service `mongo:6.0` + `MONGODB_URI=mongodb://127.0.0.1:27018/...` (loopback exigé par `buildTestMongoUri`).
 4. **Collecte de rapports** : `ci-report-7329931….md` collecté localement en échec partiel ne doit pas servir de preuve — toujours sourcer le rapport consigné sur un fichier de collecte complet (`ci-report-ef19500….md`).
+5. **Gate de formatage sur diff de PR (`format:changed`, US-RC-01)** : sans `fetch-depth: 0` sur `actions/checkout`, `origin/<base_ref>` n'existe pas en checkout shallow → diff vide → check faussement vert. Toujours `fetch-depth: 0` + poser `GITHUB_BASE_REF` dans l'env du step (les `${{ }}` ne sont pas évaluées dans `package.json`). Ne pas juger le gate depuis un checkout Windows CRLF (`core.autocrlf=true`) : les blobs commités sont LF, seuls les fichiers du working tree sont CRLF — valider au niveau blob (worktree `core.autocrlf=false`).
 
 ## Règles qui ont tenu bon (à garder)
 
@@ -22,6 +23,7 @@
 - Backend prod : socket gateway uniquement (`DOCKER_GATEWAY_REQUIRED=true`), jamais d'accès Docker direct.
 - Pas de smoke destructif sur base partagée ; tests live sur base de test disposable ; environnements CI isolés.
 - Unités systemd : `ConditionPathExists` env files, `ExecStartPre` sur les sorties `dist/`, `RequiresMountsFor` du stockage, env files root-owned 0640.
+- Tout gate CI embarque son self-test dans le job (`hygiene:self-test`, `audit:gate:self-test`) : le gate se prouve lui-même à chaque run, pas seulement en local.
 
 ## Ouvert / reporté
 

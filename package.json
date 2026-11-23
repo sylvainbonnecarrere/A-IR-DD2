@@ -22,6 +22,7 @@
     "format:changed": "node scripts/ci/format-changed.mjs",
     "hygiene": "node scripts/ci/hygiene-ratchet.mjs",
     "hygiene:update-baseline": "node scripts/ci/hygiene-ratchet.mjs --update",
+    "hygiene:self-test": "node scripts/ci/hygiene-ratchet.mjs --self-test",
     "test:integration:hydration": "jest tests/fonctionnels/App.workspaceHydration.integration.test.tsx --runInBand",
     "test:components:ci": "jest tests/components --runInBand",
     "test:canvas:non-regression": "jest tests/components/WorkflowCanvas.render.test.tsx tests/components/WorkflowCanvas.drag-collision.test.tsx tests/components/WorkflowCanvas.minimize-restore.test.tsx --runInBand",

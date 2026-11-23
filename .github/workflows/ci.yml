@@ -197,6 +197,46 @@ jobs:
       - name: Run backend Jest suite
         run: npm --prefix backend test -- --runInBand
 
+  hygiene-gate:
+    name: Hygiene Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # fetch-depth: 0 indispensable (R4) : format:changed fait un diff vs
+      # origin/<base_ref>...HEAD — en checkout shallow (fetch-depth: 1 par défaut),
+      # origin/<base> n'existe pas et le diff serait vide donc faussement vert.
+      - name: Checkout repository (full history)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.22.1
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (errors are blocking)
+        run: npm run lint
+
+      - name: Hygiene ratchet (tracked + untracked files, R2)
+        run: npm run hygiene
+
+      - name: Hygiene ratchet self-test
+        run: npm run hygiene:self-test
+
+      - name: Prettier check on changed files (blocking, R4)
+        env:
+          # github.base_ref n'existe que sur pull_request ; fallback 'main' sinon.
+          # format-changed.mjs lit cette variable (les ${{ }} ne sont pas évaluées
+          # dans package.json).
+          GITHUB_BASE_REF: ${{ github.base_ref || 'main' }}
+        run: npm run format:changed
+
   report:
     name: CI Run Report
     needs:
@@ -206,6 +246,7 @@ jobs:
       - frontend-canvas-non-regression
       - backend-build
       - backend-tests-mongo
+      - hygiene-gate
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
