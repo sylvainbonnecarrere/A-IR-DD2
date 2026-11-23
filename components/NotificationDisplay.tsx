@@ -70,6 +70,9 @@ export const NotificationDisplay: React.FC = () => {
         return (
           <div
             key={notification.id}
+            role="alert"
+            data-testid="notification-toast"
+            data-type={notification.type}
             className={`
               ${styles.container}
               border rounded-lg p-4 shadow-lg
@@ -83,7 +86,7 @@ export const NotificationDisplay: React.FC = () => {
               </div>
               <div className="flex-1 min-w-0">
                 <h4 className="font-semibold text-sm">{notification.title}</h4>
-                <p className="text-sm opacity-90 mt-1">{notification.message}</p>
+                <p className="text-sm opacity-90 mt-1 whitespace-pre-line">{notification.message}</p>
               </div>
               <button
                 onClick={() => removeNotification(notification.id)}

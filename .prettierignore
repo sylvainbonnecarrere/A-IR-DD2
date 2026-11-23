@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+__rf/
+backend/node_modules/
+backend/dist/
+backend/python/
+public/icons/
+package-lock.json
+backend/package-lock.json
+**/*.md

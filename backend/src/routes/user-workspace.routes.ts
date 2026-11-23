@@ -67,7 +67,7 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
         
         // Production-safe logging: only log healing events (important for debugging)
         if (wasCreated && process.env.NODE_ENV === 'development') {
-            console.log('[Workspace] Self-healing triggered:', healingActions);
+            console.debug('[Workspace] Self-healing triggered:', healingActions);
         }
 
         const agentPrototypes = await AgentPrototype.find({
@@ -89,7 +89,7 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
                     { userId, $or: [{ workflowId: { $exists: false } }, { workflowId: null }] },
                     { workflowId: defaultWorkflow._id }
                 );
-                console.log(`[Workspace] Self-healing: Assigned ${orphanedPrototypes.length} orphaned prototypes to workflow ${defaultWorkflow._id}`);
+                console.debug(`[Workspace] Self-healing: Assigned ${orphanedPrototypes.length} orphaned prototypes to workflow ${defaultWorkflow._id}`);
             }
         }
 
@@ -112,7 +112,7 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
             includeLegacyPrototypes: true
         });
 
-        console.log('[Workspace] GET - response summary:', {
+        console.debug('[Workspace] GET - response summary:', {
             hasWorkflow: !!defaultWorkflow,
             hasWorkspace: !!workspaceProvisioning,
             workflowId: defaultWorkflow?.id,
@@ -182,7 +182,7 @@ router.get('/workspace/default', requireAuth, async (req: Request, res: Response
             await workflow.save();
             isNewlyCreated = true;
 
-            console.log('[Workspace] Created default workflow for user:', userId);
+            console.debug('[Workspace] Created default workflow for user:', userId);
         }
 
         res.json({

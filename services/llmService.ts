@@ -13,7 +13,33 @@ import * as kimiService from './kimiService';
 import * as deepSeekService from './deepSeekService';
 import * as lmStudioService from './lmStudioService';
 import * as arcLLMService from './arcLLMService';
-import type { VideoGenerationOptions, VideoGenerationStatus, MapsGroundingResponse, WebSearchGroundingResponse } from '../types';
+import type { VideoGenerationOptions, VideoGenerationStatus, MapsGroundingResponse, WebSearchGroundingResponse, ToolCall, MapSource, WebSearchSource } from '../types';
+
+/** Forme des chunks émis par les streams des providers (consommés via chunk.response / chunk.error). */
+export interface LLMStreamChunk {
+    response?: {
+        text?: string;
+        toolCalls?: ToolCall[];
+        thinking?: string;
+    };
+    error?: string;
+}
+
+/**
+ * Contrat commun (méthodes optionnelles) des modules providers dispatchés ici.
+ * Les signatures réelles varient par provider ; on ne type que ce que le dispatcher invoque.
+ */
+interface ProviderServiceDispatch {
+    generateContentStream?: (...args: unknown[]) => AsyncIterable<LLMStreamChunk>;
+    generateContent?: (...args: unknown[]) => Promise<{ text: string }>;
+    generateContentWithSearch?: (...args: unknown[]) => Promise<{ text: string; citations: { title: string; uri: string }[] }>;
+    generateImage?: (...args: unknown[]) => Promise<{ image: string; error?: undefined } | { error: string; image?: undefined }>;
+    generateVideo?: (...args: unknown[]) => Promise<VideoGenerationStatus>;
+    pollVideoOperation?: (...args: unknown[]) => Promise<VideoGenerationStatus>;
+    editImage?: (...args: unknown[]) => Promise<{ image?: string; text?: string; error?: string }>;
+}
+
+const asDispatchableService = (service: unknown): ProviderServiceDispatch => service as ProviderServiceDispatch;
 
 
 const getServiceProvider = (provider: LLMProvider) => {
@@ -46,14 +72,14 @@ export const generateContentStream = async function* (
         throw new Error('ArcLLM does not support generateContentStream. Use generateVideo, generateContentWithMaps, or generateContentWithWebSearch.');
     }
 
-    const service = getServiceProvider(provider);
+    const service = asDispatchableService(getServiceProvider(provider));
 
     // Handle LMStudio special case with endpoint parameter
     if (provider === LLMProvider.LMStudio) {
-        yield* (service as any).generateContentStream(endpoint || 'http://localhost:3928', model, systemInstruction, history, tools, outputConfig, apiKey, authToken);
+        yield* service.generateContentStream(endpoint || 'http://localhost:3928', model, systemInstruction, history, tools, outputConfig, apiKey, authToken);
     } else if (provider === LLMProvider.Anthropic && nativeToolsConfig) {
         // Pass native tools config to Anthropic service
-        yield* (service as any).generateContentStream(apiKey, model, systemInstruction, history, tools, outputConfig, nativeToolsConfig);
+        yield* service.generateContentStream(apiKey, model, systemInstruction, history, tools, outputConfig, nativeToolsConfig);
     } else {
         yield* service.generateContentStream(apiKey, model, systemInstruction, history, tools, outputConfig);
     }
@@ -69,11 +95,11 @@ export const generateContent = (
         throw new Error('ArcLLM does not support generateContent. Use generateVideo, generateContentWithMaps, or generateContentWithWebSearch.');
     }
 
-    const service = getServiceProvider(provider);
+    const service = asDispatchableService(getServiceProvider(provider));
 
-    // Handle LMStudio special case with endpoint parameter  
+    // Handle LMStudio special case with endpoint parameter
     if (provider === LLMProvider.LMStudio) {
-        return (service as any).generateContent(endpoint || 'http://localhost:3928', model, systemInstruction, history, tools, outputConfig, apiKey, authToken);
+        return service.generateContent(endpoint || 'http://localhost:3928', model, systemInstruction, history, tools, outputConfig, apiKey, authToken);
     } else {
         return service.generateContent(apiKey, model, systemInstruction, history, tools, outputConfig);
     }
@@ -86,21 +112,21 @@ export const generateContentWithSearch = (
         throw new Error('ArcLLM does not support generateContentWithSearch. Use generateContentWithWebSearch instead.');
     }
 
-    const service = getServiceProvider(provider);
-    if (!(service as any).generateContentWithSearch) {
+    const service = asDispatchableService(getServiceProvider(provider));
+    if (!service.generateContentWithSearch) {
         return Promise.resolve({ text: `Error: ${provider} does not support Web Search.`, citations: [] });
     }
-    return (service as any).generateContentWithSearch(apiKey, model, prompt, systemInstruction);
+    return service.generateContentWithSearch(apiKey, model, prompt, systemInstruction);
 };
 
 export const generateImage = (
     provider: LLMProvider, apiKey: string, prompt: string, model?: string
 ): Promise<{ image: string; error?: undefined } | { error: string; image?: undefined }> => {
-    const service = getServiceProvider(provider);
-    if (!(service as any).generateImage) {
+    const service = asDispatchableService(getServiceProvider(provider));
+    if (!service.generateImage) {
         return Promise.resolve({ error: `Image generation is not supported by ${provider}.` });
     }
-    return (service as any).generateImage(apiKey, prompt, model);
+    return service.generateImage(apiKey, prompt, model);
 };
 
 // ===========================
@@ -120,15 +146,15 @@ export const generateVideo = (
     options: VideoGenerationOptions,
     model?: string
 ): Promise<VideoGenerationStatus> => {
-    const service = getServiceProvider(provider);
-    if (!(service as any).generateVideo) {
+    const service = asDispatchableService(getServiceProvider(provider));
+    if (!service.generateVideo) {
         return Promise.resolve({
             operationId: '',
             status: 'FAILED',
             error: `Video generation is not supported by ${provider}.`
         });
     }
-    return (service as any).generateVideo(apiKey, options, model);
+    return service.generateVideo(apiKey, options, model);
 };
 
 /**
@@ -143,15 +169,15 @@ export const pollVideoOperation = (
     apiKey: string,
     operationId: string
 ): Promise<VideoGenerationStatus> => {
-    const service = getServiceProvider(provider);
-    if (!(service as any).pollVideoOperation) {
+    const service = asDispatchableService(getServiceProvider(provider));
+    if (!service.pollVideoOperation) {
         return Promise.resolve({
             operationId,
             status: 'FAILED',
             error: `Video polling not supported by ${provider}.`
         });
     }
-    return (service as any).pollVideoOperation(apiKey, operationId);
+    return service.pollVideoOperation(apiKey, operationId);
 };
 
 /**
@@ -181,7 +207,7 @@ export const generateContentWithMaps = async (
             const result = await geminiService.generateContentWithSearch(apiKey, model, prompt, systemInstruction);
 
             // Mapper citations vers mapSources
-            const mapSources: any[] = result.citations.slice(0, 5).map((citation, index) => ({
+            const mapSources: MapSource[] = result.citations.slice(0, 5).map((citation, index) => ({
                 uri: citation.uri,
                 placeTitle: citation.title,
                 placeId: `place-${index}`,
@@ -238,7 +264,7 @@ export const generateContentWithWebSearchGrounding = async (
             const result = await geminiService.generateContentWithSearch(apiKey, model, prompt, systemInstruction);
 
             // Mapper citations vers webSources
-            const webSources: any[] = result.citations.map(citation => ({
+            const webSources: WebSearchSource[] = result.citations.map(citation => ({
                 uri: citation.uri,
                 webTitle: citation.title,
                 snippet: '' // Gemini ne retourne pas de snippet dans citations
@@ -279,9 +305,9 @@ export const getUserLocation = (): Promise<{ lat: number; lng: number }> => {
 export const editImage = (
     provider: LLMProvider, apiKey: string, prompt: string, image: { mimeType: string; data: string }
 ): Promise<{ image?: string; text?: string; error?: string }> => {
-    const service = getServiceProvider(provider);
-    if (!(service as any).editImage) {
+    const service = asDispatchableService(getServiceProvider(provider));
+    if (!service.editImage) {
         return Promise.resolve({ error: `Image modification is not supported by ${provider}.` });
     }
-    return (service as any).editImage(apiKey, prompt, image);
+    return service.editImage(apiKey, prompt, image);
 };

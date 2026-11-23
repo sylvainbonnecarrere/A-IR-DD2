@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <defs>
+    <filter id="softGlowhistorique" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="b1"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b2"/>
+      <feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glyphGlowhistorique" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="g1"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="g2"/>
+      <feMerge><feMergeNode in="g2"/><feMergeNode in="g1"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="glasshistorique" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a5f3fc" stop-opacity="0.32"/>
+      <stop offset="50%" stop-color="#0e7490" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#22d3ee" stop-opacity="0.30"/>
+    </linearGradient>
+    <linearGradient id="tophistorique" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.58"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="bottomhistorique" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#cffafe" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#cffafe" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="sheenhistorique" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="cliphistorique"><rect x="36" y="36" width="168" height="168" rx="34"/></clipPath>
+  </defs>
+  <rect x="36" y="36" width="168" height="168" rx="34" fill="url(#glasshistorique)"/>
+  <g clip-path="url(#cliphistorique)">
+    <path d="M 30 30 L 210 30 L 210 82 Q 120 105 30 82 Z" fill="url(#tophistorique)"/>
+    <path d="M 30 210 L 210 210 L 210 182 Q 120 168 30 182 Z" fill="url(#bottomhistorique)"/>
+    <rect x="38" y="38" width="164" height="164" rx="32" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="1.5"/>
+    <rect class="neon-sheen" x="36" y="36" width="168" height="168" rx="34" fill="url(#sheenhistorique)" opacity="0"/>
+  </g>
+  <g class="neon-border" filter="url(#softGlowhistorique)">
+    <rect class="neon-tube" x="32" y="32" width="176" height="176" rx="38" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="4"/>
+    <rect class="neon-core" x="32" y="32" width="176" height="176" rx="38" fill="none" stroke="rgba(255,255,255,0.32)" stroke-width="1.6"/>
+    <rect class="neon-inner" x="38.5" y="38.5" width="163" height="163" rx="32" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.4"/>
+  </g>
+  <g class="neon-glyph" filter="url(#glyphGlowhistorique)" stroke-linecap="round" stroke-linejoin="round">
+    <g class="glyph-under" transform="translate(120 120) scale(0.92) translate(-120 -120)" stroke-width="6"stroke="rgba(34,211,238,0.35)">
+    <path d="M 120 86 C 101 73 79 73 66 81 L 66 160 C 79 152 101 152 120 165 C 139 152 161 152 174 160 L 174 81 C 161 73 139 73 120 86 Z" fill="#082f49" fill-opacity="0.4"/>
+    <path d="M 120 86 L 120 165" fill="none"/>
+    </g>
+    <g class="glyph-core" transform="translate(120 120) scale(0.92) translate(-120 -120)" stroke-width="2.4"stroke="rgba(255,255,255,0.5)">
+    <path d="M 120 86 C 101 73 79 73 66 81 L 66 160 C 79 152 101 152 120 165 C 139 152 161 152 174 160 L 174 81 C 161 73 139 73 120 86 Z" fill="#082f49" fill-opacity="0.4"/>
+    <path d="M 120 86 L 120 165" fill="none"/>
+    </g>
+  </g>
+</svg>

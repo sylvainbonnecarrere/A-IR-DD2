@@ -158,14 +158,14 @@ router.get('/', requireAuth, async (req, res) => {
         const user = req.user as IUser;
         const userId = user._id.toString();
 
-        console.log(`[Workflows GET] User: ${userId}`);
+        console.debug(`[Workflows GET] User: ${userId}`);
 
         const result = await listUserWorkflowsUseCase.execute({
             userId,
             currentDefaultWorkflowId: user.defaultWorkflowId?.toString() || null,
         });
 
-        console.log(`[Workflows] Returning ${result.workflows.length} workflows`, {
+        console.debug(`[Workflows] Returning ${result.workflows.length} workflows`, {
             repairAction: result.repairAction,
             userId,
         });
@@ -216,7 +216,7 @@ router.post('/', requireAuth, validateRequest(createWorkflowSchema), async (req,
         const user = req.user as IUser;
         const userId = user._id.toString();
 
-        console.log(`[Workflows POST] Creating workflow for user: ${userId}`);
+        console.debug(`[Workflows POST] Creating workflow for user: ${userId}`);
 
         const newWorkflow = await createWorkflowUseCase.execute({
             userId,
@@ -224,7 +224,7 @@ router.post('/', requireAuth, validateRequest(createWorkflowSchema), async (req,
             description: req.body.description,
         });
 
-        console.log(`[Workflows POST] Created workflow: ${newWorkflow._id}`);
+        console.debug(`[Workflows POST] Created workflow: ${newWorkflow._id}`);
 
         res.status(201).json(newWorkflow);
         
@@ -367,7 +367,7 @@ router.post('/:id/select',
             
             // ⭐ Production-safe: Only log in development
             if (process.env.NODE_ENV === 'development') {
-              console.log('[Workflows] SELECT - Workflow activated:', {
+              console.debug('[Workflows] SELECT - Workflow activated:', {
                 workflowId: workflowId,
                 agentsCount: workspaceSnapshot.agentInstances.length
               });
@@ -521,7 +521,7 @@ router.patch('/:id/patch',
                 });
             }
 
-            console.log('[Workflows] PATCH atomic update:', {
+            console.debug('[Workflows] PATCH atomic update:', {
                 id: req.params.id,
                 fields: Object.keys($set),
                 newVersion: result.workflow.__v

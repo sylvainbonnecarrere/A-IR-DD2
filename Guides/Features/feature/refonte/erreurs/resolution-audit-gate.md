@@ -16,7 +16,7 @@ mais le registry npm continue de le servir via `/-/npm/v1/security/advisories/bu
 (vérifié : id 1247710, `<=4.0.7`, high). picomatch est déjà à sa dernière version (4.0.7) ;
 les « fixes » proposées par npm sont des changements majeurs cassants (jest@30.2.0,
 ts-jest@26.5.6 en downgrade, tailwindcss@4.3.5, vite@6.2.7), déjà refusés par le projet
-(voir `j6-validation-report.md`).
+(voir `Guides/Features/feature/suivi/j6-validation-report.md`).
 
 ## Correctif (agent 04-cicd-installation)
 

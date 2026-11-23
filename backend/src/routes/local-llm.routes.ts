@@ -71,7 +71,7 @@ router.get('/detect-capabilities', async (req: Request, res: Response) => {
             });
         }
 
-        console.log(`[Local-LLM-Routes] Detecting capabilities for endpoint: ${endpoint}`);
+        console.debug(`[Local-LLM-Routes] Detecting capabilities for endpoint: ${endpoint}`);
 
         // Appeler le service de détection
         const result = await detectLocalLLMCapabilities(endpoint);

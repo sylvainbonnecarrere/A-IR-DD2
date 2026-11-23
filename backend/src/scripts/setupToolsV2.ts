@@ -16,14 +16,14 @@ function parseOptions(argv: string[]): SetupOptions {
 async function run(): Promise<void> {
     const options = parseOptions(process.argv.slice(2));
 
-    console.log('[Setup Tools V2] Initialisation du catalogue canonique user_tools...');
+    console.debug('[Setup Tools V2] Initialisation du catalogue canonique user_tools...');
     await connectDatabase();
 
     try {
         await initializeDatabase();
 
         if (!options.cleanupLegacy) {
-            console.log('[Setup Tools V2] Seed-only termine.');
+            console.debug('[Setup Tools V2] Seed-only termine.');
             return;
         }
 
@@ -33,7 +33,7 @@ async function run(): Promise<void> {
         }
 
         const summary = await migrateLegacyUserFunctionsToUserToolsAndDropCollection(db);
-        console.log(
+        console.debug(
             `[Setup Tools V2] Nettoyage legacy: found=${summary.collectionFound} scanned=${summary.scanned} created=${summary.created} skippedExistingById=${summary.skippedExistingById} blocked=${summary.blockedByLogicalConflict} dropped=${summary.dropped}`
         );
 
@@ -46,7 +46,7 @@ async function run(): Promise<void> {
         await disconnectDatabase();
     }
 
-    console.log('[Setup Tools V2] Terminé.');
+    console.debug('[Setup Tools V2] Terminé.');
 }
 
 run().catch((err) => {

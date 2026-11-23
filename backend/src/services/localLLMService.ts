@@ -49,7 +49,7 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
  */
 async function testEndpointHealth(endpoint: string): Promise<{ healthy: boolean; error?: string }> {
     try {
-        console.log(`[LocalLLM] Testing endpoint health: ${endpoint}`);
+        console.debug(`[LocalLLM] Testing endpoint health: ${endpoint}`);
 
         const response = await fetchWithTimeout(`${endpoint}/v1/models`, { method: 'GET' }, 5000);
 
@@ -68,7 +68,7 @@ async function testEndpointHealth(endpoint: string): Promise<{ healthy: boolean;
             };
         }
 
-        console.log(`[LocalLLM] Endpoint healthy, found ${data.data.length} model(s)`);
+        console.debug(`[LocalLLM] Endpoint healthy, found ${data.data.length} model(s)`);
         return { healthy: true };
 
     } catch (error) {
@@ -100,7 +100,7 @@ async function detectFirstModel(endpoint: string): Promise<{ id: string; name: s
         }
 
         const firstModel = data.data[0];
-        console.log(`[LocalLLM] First model detected: ${firstModel.id}`);
+        console.debug(`[LocalLLM] First model detected: ${firstModel.id}`);
 
         return {
             id: firstModel.id,
@@ -136,7 +136,7 @@ async function probeCapabilities(endpoint: string, modelId: string): Promise<Loc
 
     await Promise.allSettled(probes);
 
-    console.log(`[LocalLLM] Capabilities detected:`, {
+    console.debug(`[LocalLLM] Capabilities detected:`, {
         chat: capabilities.chat,
         functionCalling: capabilities.functionCalling,
         streaming: capabilities.streaming,
@@ -283,7 +283,7 @@ function capabilitiesToStringArray(caps: LocalLLMCapabilities): string[] {
  */
 export async function detectLocalLLMCapabilities(endpoint: string): Promise<DetectionResult> {
     try {
-        console.log(`[LocalLLM] Starting capability detection for endpoint: ${endpoint}`);
+        console.debug(`[LocalLLM] Starting capability detection for endpoint: ${endpoint}`);
 
         // Étape 1: Health check
         const healthCheck = await testEndpointHealth(endpoint);
@@ -320,7 +320,7 @@ export async function detectLocalLLMCapabilities(endpoint: string): Promise<Dete
         // NOTE: Les valeurs doivent correspondre aux valeurs de l'enum LLMCapability (avec espaces)
         const finalCapabilities = [...new Set(['Chat', 'Function Calling', ...capabilities])];
 
-        console.log(`[LocalLLM] Detection complete for ${endpoint}:`, {
+        console.debug(`[LocalLLM] Detection complete for ${endpoint}:`, {
             modelId: model.id,
             capabilitiesCount: finalCapabilities.length,
             capabilities: finalCapabilities

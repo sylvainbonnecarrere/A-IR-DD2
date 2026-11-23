@@ -193,3 +193,9 @@ TODO.md
 NOTES.md
 *.todo.md
 Guides/TODO/
+
+# Artefacts de provisioning Python generes en local (ne pas versionner)
+backend/python/.provisioned/
+# ⭐ hygiène : bytecode Python jamais versionné (30 .pyc désindexés le 2026-11-21)
+__pycache__/
+*.pyc

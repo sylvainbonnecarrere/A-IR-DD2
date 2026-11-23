@@ -30,6 +30,17 @@ interface UseWorkflowDataState {
   error: string | null;
 }
 
+/**
+ * Extrait `err.message` si présent (préserve le comportement historique `err.message || fallback`).
+ */
+const errorMessageOf = (err: unknown): string | undefined => {
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const message = (err as { message: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return undefined;
+};
+
 interface UseWorkflowDataActions {
   loadWorkflows: () => Promise<void>;
   loadWorkflow: (workflowId: string) => Promise<void>;
@@ -37,7 +48,7 @@ interface UseWorkflowDataActions {
   updateWorkflow: (workflowId: string, updates: Partial<Workflow>) => Promise<void>;
   deleteWorkflow: (workflowId: string) => Promise<void>;
   setActiveWorkflow: (workflowId: string) => Promise<void>;
-  addNode: (workflowId: string, data: any) => Promise<V2WorkflowNode>;
+  addNode: (workflowId: string, data: Partial<V2WorkflowNode> & Record<string, unknown>) => Promise<V2WorkflowNode>;
   updateNode: (nodeId: string, updates: Partial<V2WorkflowNode>) => Promise<void>;
   deleteNode: (nodeId: string) => Promise<void>;
   addEdge: (source: string, target: string, workflowId: string) => Promise<V2WorkflowEdge>;
@@ -74,10 +85,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
     try {
       const workflows = await WorkflowService.getAllWorkflows(persistenceOptions);
       setState(s => ({ ...s, workflows, loading: false }));
-    } catch (err: any) {
+    } catch (err: unknown) {
       setState(s => ({
         ...s,
-        error: err.message || 'Failed to load workflows',
+        error: errorMessageOf(err) || 'Failed to load workflows',
         loading: false
       }));
     }
@@ -104,10 +115,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
         edges,
         loading: false
       }));
-    } catch (err: any) {
+    } catch (err: unknown) {
       setState(s => ({
         ...s,
-        error: err.message || 'Failed to load workflow',
+        error: errorMessageOf(err) || 'Failed to load workflow',
         loading: false
       }));
     }
@@ -130,10 +141,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
           loading: false
         }));
         return workflow;
-      } catch (err: any) {
+      } catch (err: unknown) {
         setState(s => ({
           ...s,
-          error: err.message || 'Failed to create workflow',
+          error: errorMessageOf(err) || 'Failed to create workflow',
           loading: false
         }));
         throw err;
@@ -159,10 +170,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
           workflows: s.workflows.map(w => w._id === workflowId ? updated : w),
           currentWorkflow: s.currentWorkflow?._id === workflowId ? updated : s.currentWorkflow
         }));
-      } catch (err: any) {
+      } catch (err: unknown) {
         setState(s => ({
           ...s,
-          error: err.message || 'Failed to update workflow'
+          error: errorMessageOf(err) || 'Failed to update workflow'
         }));
         throw err;
       }
@@ -183,10 +194,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
           workflows: s.workflows.filter(w => w._id !== workflowId),
           currentWorkflow: s.currentWorkflow?._id === workflowId ? null : s.currentWorkflow
         }));
-      } catch (err: any) {
+      } catch (err: unknown) {
         setState(s => ({
           ...s,
-          error: err.message || 'Failed to delete workflow'
+          error: errorMessageOf(err) || 'Failed to delete workflow'
         }));
         throw err;
       }
@@ -214,10 +225,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
           })),
           currentWorkflow: s.currentWorkflow?._id === workflowId ? updated : s.currentWorkflow
         }));
-      } catch (err: any) {
+      } catch (err: unknown) {
         setState(s => ({
           ...s,
-          error: err.message || 'Failed to set active workflow'
+          error: errorMessageOf(err) || 'Failed to set active workflow'
         }));
         throw err;
       }
@@ -229,7 +240,7 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
    * Ajouter un nœud au workflow courant
    */
   const addNode = useCallback(
-    async (workflowId: string, data: any): Promise<V2WorkflowNode> => {
+    async (workflowId: string, data: Partial<V2WorkflowNode> & Record<string, unknown>): Promise<V2WorkflowNode> => {
       setState(s => ({ ...s, error: null }));
       try {
         // Adapter les données au format V2WorkflowNode
@@ -246,10 +257,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
           nodes: [...s.nodes, node]
         }));
         return node;
-      } catch (err: any) {
+      } catch (err: unknown) {
         setState(s => ({
           ...s,
-          error: err.message || 'Failed to add node'
+          error: errorMessageOf(err) || 'Failed to add node'
         }));
         throw err;
       }
@@ -273,10 +284,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
           ...s,
           nodes: s.nodes.map(n => n.id === nodeId ? updated : n)
         }));
-      } catch (err: any) {
+      } catch (err: unknown) {
         setState(s => ({
           ...s,
-          error: err.message || 'Failed to update node'
+          error: errorMessageOf(err) || 'Failed to update node'
         }));
         throw err;
       }
@@ -296,10 +307,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
           ...s,
           nodes: s.nodes.filter(n => n.id !== nodeId)
         }));
-      } catch (err: any) {
+      } catch (err: unknown) {
         setState(s => ({
           ...s,
-          error: err.message || 'Failed to delete node'
+          error: errorMessageOf(err) || 'Failed to delete node'
         }));
         throw err;
       }
@@ -323,10 +334,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
           edges: [...s.edges, edge]
         }));
         return edge;
-      } catch (err: any) {
+      } catch (err: unknown) {
         setState(s => ({
           ...s,
-          error: err.message || 'Failed to add edge'
+          error: errorMessageOf(err) || 'Failed to add edge'
         }));
         throw err;
       }
@@ -346,10 +357,10 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
           ...s,
           edges: s.edges.filter(e => e.id !== edgeId)
         }));
-      } catch (err: any) {
+      } catch (err: unknown) {
         setState(s => ({
           ...s,
-          error: err.message || 'Failed to delete edge'
+          error: errorMessageOf(err) || 'Failed to delete edge'
         }));
         throw err;
       }

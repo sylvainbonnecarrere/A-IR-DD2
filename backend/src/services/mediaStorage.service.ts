@@ -42,7 +42,7 @@ import { GCSStorageStrategy } from './gcsStorage.service';
 
 const DEBUG = process.env.DEBUG_MEDIA_STORAGE === 'true' || process.env.NODE_ENV === 'development';
 const debugLog = (message: string) => {
-    if (DEBUG) console.log(message);
+    if (DEBUG) console.debug(message);
 };
 
 // ============================================

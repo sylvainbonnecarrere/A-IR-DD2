@@ -172,7 +172,7 @@ export class WorkflowSelfHealingService {
             { new: true }
         );
         
-        console.log(`[WorkflowSelfHealing] Created default workflow for user ${userId}:`, {
+        console.debug(`[WorkflowSelfHealing] Created default workflow for user ${userId}:`, {
             workflowId: workflow.id,
             healingActions
         });
@@ -262,7 +262,7 @@ export class WorkflowSelfHealingService {
             { new: true }
         );
         
-        console.log(`[WorkflowSelfHealing] Created default workflow for new user ${userId}:`, workflow.id);
+        console.debug(`[WorkflowSelfHealing] Created default workflow for new user ${userId}:`, workflow.id);
         
         return workflow;
     }

@@ -85,7 +85,7 @@ function secureLog(action: string, details: Record<string, unknown>) {
         safeDetails.path = safeDetails.path.replace(/^.*users\//, 'users/');
     }
     
-    console.log(`[MediaRoutes] ${action}:`, safeDetails);
+    console.debug(`[MediaRoutes] ${action}:`, safeDetails);
 }
 
 async function resolveLegacyDeleteWarnings(mediaRef: IMediaReference): Promise<DeleteMediaWarning[]> {

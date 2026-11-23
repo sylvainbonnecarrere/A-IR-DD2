@@ -351,3 +351,338 @@ body {
     opacity: 0;
   }
 }
+/* === TabIconBlurNeon — icônes d'onglets modale de configuration agent (charte Guides/UX/ELEMENTS.md) === */
+/* États pilotés par le bouton parent .agent-tab-btn : défaut (bordure blanche, glow réduit),
+   :hover (glow blanc renforcé + fin dégradé de transparence), .tab-active (bleu cyan des libellés). */
+.neon-icon {
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.14)) drop-shadow(0 0 10px rgba(255, 255, 255, 0.14));
+  transition: filter 0.25s ease;
+}
+.neon-icon .neon-tube {
+  stroke: rgba(255, 255, 255, 0.4);
+  transition: stroke 0.25s ease;
+}
+.neon-icon .neon-core {
+  stroke: rgba(255, 255, 255, 0.32);
+  transition: stroke 0.25s ease;
+}
+.neon-icon .neon-inner {
+  stroke: rgba(255, 255, 255, 0.25);
+  transition: stroke 0.25s ease;
+}
+.neon-icon .neon-glyph {
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.2));
+  transition: filter 0.25s ease;
+}
+.neon-icon .glyph-under {
+  stroke: rgba(34, 211, 238, 0.35);
+  stroke-width: 6;
+  transition: stroke 0.25s ease;
+}
+.neon-icon .glyph-core {
+  stroke: rgba(255, 255, 255, 0.5);
+  stroke-width: 2.4;
+  transition: stroke 0.25s ease;
+}
+.neon-icon .neon-sheen {
+  transition: opacity 0.25s ease;
+}
+
+/* Survol : glow blanc qui augmente + fin dégradé de transparence + luminosité restaurée */
+.agent-tab-btn:hover .neon-icon {
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.85)) drop-shadow(0 0 16px rgba(255, 255, 255, 0.5));
+}
+.agent-tab-btn:hover .neon-icon .neon-tube {
+  stroke: #ffffff;
+}
+.agent-tab-btn:hover .neon-icon .neon-core {
+  stroke: rgba(255, 255, 255, 0.95);
+}
+.agent-tab-btn:hover .neon-icon .neon-inner {
+  stroke: rgba(255, 255, 255, 0.8);
+}
+.agent-tab-btn:hover .neon-icon .neon-glyph {
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.55));
+}
+.agent-tab-btn:hover .neon-icon .glyph-under {
+  stroke: #22d3ee;
+}
+.agent-tab-btn:hover .neon-icon .glyph-core {
+  stroke: #ffffff;
+}
+.agent-tab-btn:hover .neon-icon .neon-sheen {
+  opacity: 0.16;
+}
+
+/* Onglet sélectionné : même bleu que les libellés (text-cyan-400), glow fort */
+.agent-tab-btn.tab-active .neon-icon {
+  filter:
+    drop-shadow(0 0 6px rgba(34, 211, 238, 0.95))
+    drop-shadow(0 0 18px rgba(34, 211, 238, 0.55))
+    drop-shadow(0 0 32px rgba(34, 211, 238, 0.3));
+}
+.agent-tab-btn.tab-active .neon-icon .neon-tube {
+  stroke: #22d3ee;
+}
+.agent-tab-btn.tab-active .neon-icon .neon-core {
+  stroke: #a5f3fc;
+}
+.agent-tab-btn.tab-active .neon-icon .neon-inner {
+  stroke: rgba(103, 232, 249, 0.9);
+}
+.agent-tab-btn.tab-active .neon-icon .neon-glyph {
+  filter: drop-shadow(0 0 5px rgba(165, 243, 252, 0.8));
+}
+.agent-tab-btn.tab-active .neon-icon .glyph-under {
+  stroke: #22d3ee;
+}
+.agent-tab-btn.tab-active .neon-icon .glyph-core {
+  stroke: #ffffff;
+}
+
+/* Désactivé (prévu par la charte) */
+.agent-tab-btn:disabled .neon-icon {
+  filter: grayscale(0.6) drop-shadow(0 0 3px rgba(255, 255, 255, 0.15));
+  opacity: 0.55;
+}
+
+/* === Tons néon (NeonIcon) === */
+/* Ton vert (contrôles de run play/pause/stop) : accent lime #a3e635/#84cc16 à la place du cyan */
+.neon-icon.tone-green .glyph-under {
+  stroke: rgba(163, 230, 53, 0.35);
+}
+.agent-tab-btn:hover .neon-icon.tone-green .glyph-under,
+.run-control-btn:hover .neon-icon.tone-green .glyph-under {
+  stroke: #a3e635;
+}
+.agent-tab-btn.tab-active .neon-icon.tone-green .glyph-under {
+  stroke: #a3e635;
+}
+.agent-tab-btn.tab-active .neon-icon.tone-green .neon-tube {
+  stroke: #84cc16;
+}
+.agent-tab-btn.tab-active .neon-icon.tone-green .neon-core {
+  stroke: #f7fee7;
+}
+.agent-tab-btn.tab-active .neon-icon.tone-green .neon-inner {
+  stroke: rgba(163, 230, 53, 0.9);
+}
+.agent-tab-btn.tab-active .neon-icon.tone-green {
+  filter:
+    drop-shadow(0 0 6px rgba(132, 204, 22, 0.95))
+    drop-shadow(0 0 18px rgba(132, 204, 22, 0.55))
+    drop-shadow(0 0 32px rgba(132, 204, 22, 0.3));
+}
+
+/* === Boutons de contrôle de run (play/pause/stop) — bloc de largeur fixe, collé à gauche === */
+.run-control-btn {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.run-control-btn:hover .neon-icon {
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.85)) drop-shadow(0 0 16px rgba(255, 255, 255, 0.5));
+}
+.run-control-btn:hover .neon-icon .neon-tube {
+  stroke: #ffffff;
+}
+.run-control-btn:hover .neon-icon .neon-core {
+  stroke: rgba(255, 255, 255, 0.95);
+}
+.run-control-btn:hover .neon-icon .neon-inner {
+  stroke: rgba(255, 255, 255, 0.8);
+}
+.run-control-btn:hover .neon-icon .neon-glyph {
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.55));
+}
+.run-control-btn:hover .neon-icon .glyph-core {
+  stroke: #ffffff;
+}
+.run-control-btn:hover .neon-icon .neon-sheen {
+  opacity: 0.16;
+}
+.run-control-btn:disabled {
+  cursor: not-allowed;
+}
+.run-control-btn:disabled .neon-icon {
+  filter: grayscale(0.6) drop-shadow(0 0 3px rgba(255, 255, 255, 0.15));
+  opacity: 0.55;
+}
+
+/* === Infobulle standard (style diode « canal temps réel ») — à utiliser pour TOUTES les infobulles === */
+.info-bubble {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 0.375rem;
+  z-index: 50;
+  display: none;
+  width: 14rem;
+  border-radius: 0.375rem;
+  border: 1px solid #374151;
+  background: rgba(17, 24, 39, 0.95);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #e5e7eb;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
+}
+.group:hover .info-bubble,
+.group:focus-within .info-bubble {
+  display: block;
+}
+
+/* === Contrôles run : au survol ET au clic, seul le glyphe central change de couleur
+   (bordure et reflets inchangés) — couleur via --glyph-accent posé sur le bouton === */
+.run-control-btn:hover .neon-icon .glyph-core,
+.run-control-btn:active .neon-icon .glyph-core {
+  stroke: var(--glyph-accent, #ffffff);
+}
+.run-control-btn:hover .neon-icon .neon-glyph,
+.run-control-btn:active .neon-icon .neon-glyph {
+  filter: drop-shadow(0 0 5px var(--glyph-accent, rgba(255, 255, 255, 0.55)));
+}
+.run-control-btn:hover .neon-icon.tone-green .glyph-under,
+.run-control-btn:active .neon-icon.tone-green .glyph-under {
+  stroke: var(--glyph-accent, #a3e635);
+}
+
+/* Variante compacte de l'infobulle standard (intitulés courts de boutons icônes) */
+.info-bubble.info-bubble-sm {
+  width: auto;
+  white-space: nowrap;
+}
+
+/* === Poignées de connexion des nodes agent : sphères lumineuses violet-bleu (fausse 3D) === */
+/* Le Handle React Flow par défaut fait 6px avec fond sombre et pointer-events:none
+   (cf. reactflow/dist/style.css) : on le remplace par une sphère 20px cliquable. */
+.react-flow__handle.node-handle {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  z-index: 20;
+  pointer-events: all;
+  cursor: crosshair;
+}
+/* IMPORTANT : le contenu SVG de la sphère ne doit PAS intercepter le pointeur.
+   Au mousedown, React Flow fait doc.elementFromPoint(x, y) et exige que l'élément
+   touché porte les classes source/target (posées sur le <Handle>) — sinon la
+   connexion ne démarre jamais et aucun lasso n'apparaît. */
+.node-handle-sphere,
+.node-handle-sphere * {
+  pointer-events: none;
+}
+/* Repos : sphère **extrêmement sombre** de la couleur du robot créateur du node (var
+   --sphere-rest-glow posée inline sur le <svg> par NodeHandleSphere), halo minimal.
+   ⭐ 2026-11-21 : halo réduit à 1px (au lieu de 2px) pour un contraste net avec le survol. */
+.node-handle-sphere {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 1px var(--sphere-rest-glow, rgba(99, 102, 241, 0.2)));
+  transition: transform 0.18s ease, filter 0.3s ease;
+}
+/* Survol : la sphère s'agrandit et s'illumine FORTEMENT — double halo en couleur du robot
+   créateur (var --sphere-hover-glow @0.95) + cœur blanc, bien plus lumineux que le repos.
+   ⭐ 2026-11-21 : contraste repos/survol renforcé (halo 8px indigo fixe -> 10px couleur + blanc). */
+.react-flow__handle.node-handle:hover .node-handle-sphere {
+  transform: scale(1.18);
+  filter:
+    drop-shadow(0 0 10px var(--sphere-hover-glow, rgba(129, 140, 248, 0.95)))
+    drop-shadow(0 0 4px rgba(255, 255, 255, 0.55));
+}
+/* Clic (mousedown, :active) ou classe .connecting posée par React Flow pendant le tracé :
+   la sphère s'illumine IMMÉDIATEMENT et fort (jusqu'à la connexion), même si la souris
+   survole encore la poignée — ces règles sont placées APRÈS le :hover et avec une
+   spécificité supérieure, elles priment donc sur l'état survol. */
+.react-flow__handle.node-handle:active .node-handle-sphere,
+.react-flow__handle.node-handle:active:hover .node-handle-sphere,
+.react-flow__handle.node-handle.connecting .node-handle-sphere,
+.react-flow__handle.node-handle.connecting:hover .node-handle-sphere {
+  transform: scale(1.22);
+  filter:
+    drop-shadow(0 0 12px rgba(199, 210, 254, 1))
+    drop-shadow(0 0 6px rgba(255, 255, 255, 0.9));
+}
+/* Poignée cible atteinte pendant le tracé : React Flow pose .connecting.valid sur le
+   handle survolé -> même illumination forte (la cible "s'allume" au moment du clic). */
+.react-flow__handle.node-handle.valid .node-handle-sphere {
+  filter:
+    drop-shadow(0 0 10px rgba(165, 180, 252, 1))
+    drop-shadow(0 0 4px rgba(255, 255, 255, 0.8));
+}
+
+/* === Lasso de connexion (ligne tirée entre la poignée cliquée et la souris) === */
+/* React Flow rend le lasso dans .react-flow__connectionline (svg) avec un path
+   .react-flow__connection-path gris (#b1b1b7) peu visible sur fond sombre :
+   on le restyle en "laser" cyan lumineux animé (tirets) pendant le drag.
+   Spécificité (0,2,0) > règle par défaut de reactflow/dist/style.css (0,1,0). */
+.react-flow__connectionline {
+  z-index: 1001;
+  pointer-events: none;
+}
+.react-flow__connectionline .react-flow__connection-path {
+  stroke: #22d3ee;
+  stroke-width: 2;
+  fill: none;
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9));
+  stroke-dasharray: 6 4;
+  animation: node-handle-lasso-dash 0.6s linear infinite;
+}
+@keyframes node-handle-lasso-dash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+/* === Lasso du mode "clic" (fil poignée -> curseur, recréé par l'app) === */
+/* React Flow 11.11.4 ne rend pas de ligne de connexion en mode clic (connectOnClick) :
+   WorkflowCanvas trace ce fil lui-même dans un svg overlay (coordonnées conteneur). */
+.workflow-click-lasso {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1002;
+  overflow: visible;
+}
+.workflow-click-lasso-path {
+  fill: none;
+  stroke: #22d3ee;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9));
+  animation: node-handle-lasso-dash 0.6s linear infinite;
+}
+
+/* === Edges du workflow : lien cyan lumineux avec léger glow === */
+/* Spécificité (0,2,0)+ > règles par défaut de reactflow (base.css / style.css). */
+.react-flow .react-flow__edge-path {
+  stroke: #22d3ee;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.55));
+  transition: stroke 0.15s ease, stroke-width 0.15s ease, filter 0.15s ease;
+}
+/* Survol de l'edge : bleu plus ardent + glow renforcé */
+.react-flow .react-flow__edge:hover .react-flow__edge-path {
+  stroke: #38bdf8;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 9px rgba(56, 189, 248, 0.95));
+}
+/* Edge sélectionné (clic) : bleu encore plus clair + glow maximal */
+.react-flow .react-flow__edge.selected .react-flow__edge-path {
+  stroke: #a5f3fc;
+  stroke-width: 3;
+  filter:
+    drop-shadow(0 0 14px rgba(165, 243, 252, 1))
+    drop-shadow(0 0 5px rgba(255, 255, 255, 0.9));
+}

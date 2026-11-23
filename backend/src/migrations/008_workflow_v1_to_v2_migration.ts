@@ -260,7 +260,7 @@ async function runUp(): Promise<void> {
         }
 
         const summary = await migrateLegacyWorkflowGraphsToV2(db);
-        console.log(
+        console.debug(
             `[Migration 008] workflow V1 -> V2 migration: scanned=${summary.workflowsScanned} migrated=${summary.workflowsMigrated} nodesCreated=${summary.nodesCreated} edgesCreated=${summary.edgesCreated} duplicatesPrevented=${summary.duplicatesPrevented}`
         );
     } finally {

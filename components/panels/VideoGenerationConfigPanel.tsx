@@ -50,7 +50,7 @@ export const VideoGenerationConfigPanel: React.FC<VideoGenerationConfigPanelProp
           <VideoGenerationContent
             onClose={onClose}
             onSubmit={(config) => {
-              console.log('Video generation config:', config);
+              console.debug('Video generation config:', config);
               // TODO: Implementer l'envoi au LLM
             }}
           />
@@ -65,7 +65,7 @@ export const VideoGenerationConfigPanel: React.FC<VideoGenerationConfigPanelProp
       <VideoGenerationContent
         onClose={onClose}
         onSubmit={(config) => {
-          console.log('Video generation config:', config);
+          console.debug('Video generation config:', config);
           // TODO: Implementer l'envoi au LLM
         }}
       />

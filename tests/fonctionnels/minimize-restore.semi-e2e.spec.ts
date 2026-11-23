@@ -1,4 +1,4 @@
-import { expect, test, type Route } from '@playwright/test';
+import { expect, test, type Locator, type Route } from '@playwright/test';
 
 const workflowId = '64f000000000000000000001';
 const now = '2026-03-29T12:00:00.000Z';
@@ -79,17 +79,37 @@ test('minimize, move and restore avoids overlap with another node', async ({ pag
   await second.getByRole('button', { name: 'Réduire' }).click();
   await expect(second.getByRole('button', { name: 'Taille normale' })).toBeVisible();
 
-  const before = await second.boundingBox();
-  const neighbour = await first.boundingBox();
+  // Attendre que la géométrie du nœud minimisé soit stabilisée (transition CSS) avant de mesurer.
+  const settleBox = async (locator: Locator) => {
+    let previous = await locator.boundingBox();
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const current = await locator.boundingBox();
+      if (current && previous
+        && current.x === previous.x && current.y === previous.y
+        && current.width === previous.width && current.height === previous.height) {
+        return current;
+      }
+      previous = current;
+      await page.waitForTimeout(100);
+    }
+    return previous;
+  };
+
+  const before = await settleBox(second);
+  const neighbour = await settleBox(first);
   expect(before).not.toBeNull();
   expect(neighbour).not.toBeNull();
   if (!before || !neighbour) throw new Error('Node geometry unavailable');
-  await page.mouse.move(before.x + before.width / 2, before.y + 20);
+  // Cible : bord droit du nœud minimisé à 10 px à gauche du voisin, calculée depuis la boîte stabilisée.
+  const desiredX = neighbour.x - before.width - 10;
+  const grabX = before.x + 30;
+  const grabY = before.y + 18;
+  await page.mouse.move(grabX, grabY);
   await page.mouse.down();
-  await page.mouse.move(neighbour.x - before.width / 2 - 10, neighbour.y + 20, { steps: 15 });
+  await page.mouse.move(desiredX + 30, grabY, { steps: 15 });
   await page.mouse.up();
   await expect.poll(async () => (await second.boundingBox())?.x).not.toBe(before.x);
-  const minimized = await second.boundingBox();
+  const minimized = await settleBox(second);
   const stationary = await first.boundingBox();
   expect(minimized).not.toBeNull();
   expect(stationary).not.toBeNull();

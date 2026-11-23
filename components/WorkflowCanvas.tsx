@@ -78,6 +78,9 @@ type ReactFlowNodeWithMeasuredSize = Node & { measured?: { height?: number; widt
 type ReactFlowNodeLookup = {
   getNode?: (nodeId: string) => ReactFlowNodeWithMeasuredSize | undefined;
   getNodes?: () => ReactFlowNodeWithMeasuredSize[];
+  // ⭐ hygiène tsc : getNodesBounds existe au runtime (store RF) mais pas dans le type
+  // ReactFlowInstance<any, any> de RF 11.11.4 -> déclaré ici, params volontairement larges.
+  getNodesBounds?: (nodes: readonly unknown[]) => { x: number; y: number; width: number; height: number };
 };
 
 const normalizeOptionalDimension = (value: number | null | undefined): number | undefined => (
@@ -159,6 +162,69 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
   const reactFlowInstance = useReactFlow();
   const reactFlowLookup = reactFlowInstance as typeof reactFlowInstance & ReactFlowNodeLookup;
 
+  // ⭐ Lasso du mode "clic" : React Flow 11.11.4 (connectOnClick=true par défaut) ne rend
+  // AUCUNE ligne de connexion en mode clic (ConnectionLineWrapper ne lit que connectionNodeId,
+  // posé uniquement pendant le drag). On trace donc nous-mêmes le fil entre la poignée cliquée
+  // et le curseur, en coordonnées relatives au conteneur du canvas.
+  // Annulation : onClickConnectEnd (2e clic sur une poignée) ou mousedown hors poignée
+  // (clic ailleurs -> on annule via un clic synthétique sur la poignée de départ, que le
+  // onClick de RF 11.11.4 traite comme une annulation : isValidHandle(same handle) = false).
+  const clickLassoStartElRef = useRef<HTMLElement | null>(null);
+  const [clickLasso, setClickLasso] = useState<{
+    x1: number; y1: number; x2: number; y2: number; handleType: 'source' | 'target';
+  } | null>(null);
+
+  const handleClickConnectStart = useCallback((event: any, handle: any) => {
+    const handleEl = event.target as HTMLElement | null;
+    const container = canvasRootRef.current;
+    if (!handleEl || !container) return;
+    clickLassoStartElRef.current = handleEl;
+    const hr = handleEl.getBoundingClientRect();
+    const cr = container.getBoundingClientRect();
+    const x1 = hr.left + hr.width / 2 - cr.left;
+    const y1 = hr.top + hr.height / 2 - cr.top;
+    setClickLasso({ x1, y1, x2: x1, y2: y1, handleType: handle?.handleType === 'target' ? 'target' : 'source' });
+  }, []);
+
+  const handleClickConnectEnd = useCallback(() => {
+    clickLassoStartElRef.current = null;
+    setClickLasso(null);
+  }, []);
+
+  const clickLassoActive = clickLasso !== null;
+  useEffect(() => {
+    if (!clickLassoActive) return;
+    const onMouseMove = (ev: MouseEvent) => {
+      const container = canvasRootRef.current;
+      if (!container) return;
+      const cr = container.getBoundingClientRect();
+      setClickLasso((prev) => (prev ? { ...prev, x2: ev.clientX - cr.left, y2: ev.clientY - cr.top } : prev));
+    };
+    const onMouseDown = (ev: MouseEvent) => {
+      // Clic ailleurs que sur une poignée -> annule la procédure de lien :
+      // le lasso disparaît, la boule s'éteint (onClickConnectEnd -> plus de .connecting).
+      const target = ev.target as HTMLElement | null;
+      if (!target?.closest('.react-flow__handle')) {
+        const startEl = clickLassoStartElRef.current;
+        if (startEl && startEl.isConnected) {
+          // clic synthétique sur la poignée de départ : le onClick de RF voit
+          // connectionClickStartHandle set + même handle -> invalide -> annulation propre
+          startEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        }
+        clickLassoStartElRef.current = null;
+        setClickLasso(null);
+      }
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    // ⭐ capture=true : le mousedown du pane est stoppé en propagation par d3-zoom/RF
+    // avant d'atteindre window en phase bubble ; en capture on le voit toujours.
+    window.addEventListener('mousedown', onMouseDown, true);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mousedown', onMouseDown, true);
+    };
+  }, [clickLassoActive]);
+
   // ISOLATION COMPLÈTE: un seul useState pour éviter les conflits React Flow
   const [internalState, setInternalState] = useState({
     showAgentForm: false,
@@ -237,8 +303,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       }
 
       let bounds: { x: number; y: number; width: number; height: number } | null = null;
-      if (typeof reactFlowInstance.getNodesBounds === 'function') {
-        bounds = reactFlowInstance.getNodesBounds(candidateNodes as any);
+      if (typeof reactFlowLookup.getNodesBounds === 'function') {
+        bounds = reactFlowLookup.getNodesBounds(candidateNodes);
       } else {
         const reduced = candidateNodes.reduce((acc, node) => {
           const nodePosition = 'position' in node && node.position ? node.position : { x: 0, y: 0 };
@@ -394,9 +460,26 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     return registerReactFlowWarningProbe(() => reactFlowWarningSnapshotRef.current);
   }, []);
 
+  // Dernière position connue par nœud, alimentée à chaque changement 'position' appliqué via
+  // onNodesChange. En mode contrôlé, le `node` passé à onNodeDragStop est lu dans le store
+  // interne de React Flow, qui n'est resynchronisé qu'au commit du rendu suivant : lors d'un
+  // second drag immédiat après un drop résolu par collision, ce node.position peut être en
+  // retard d'un rendu. Cette ref est donc la source de vérité pour le point de lâcher.
+  const lastNodePositionChangesRef = useRef(new Map<string, { x: number; y: number }>());
+
   // Wrapper sécurisé pour onNodesChange avec logging d'erreurs
   const onNodesChange = useCallback((changes: any) => {
     try {
+      if (Array.isArray(changes)) {
+        for (const change of changes) {
+          if (change?.type === 'position' && change.position
+            && Number.isFinite(change.position.x) && Number.isFinite(change.position.y)) {
+            lastNodePositionChangesRef.current.set(change.id, { x: change.position.x, y: change.position.y });
+          } else if (change?.type === 'remove' && change.id) {
+            lastNodePositionChangesRef.current.delete(change.id);
+          }
+        }
+      }
       onNodesChangeInternal(changes);
     } catch (error) {
       console.error('[WorkflowCanvas] Error in onNodesChange:', error);
@@ -523,10 +606,28 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
   const onNodeDragStop = useCallback((_: unknown, node: ReactFlowNodeWithMeasuredSize) => {
     try {
-      const resolvedPosition = resolveDroppedNodePosition(node.id, node.position, {
-        width: normalizeOptionalDimension(node.measured?.width ?? node.width),
-        height: normalizeOptionalDimension(node.measured?.height ?? node.height),
+      // En mode contrôlé, le `node` de l'événement provient du store interne de React Flow,
+      // resynchronisé seulement au commit du rendu suivant : lors d'un second drag immédiat
+      // après un drop résolu par collision, node.position peut être la position d'avant le
+      // drag, ce qui ferait reculer le nœud au lieu de le laisser à son point de lâcher.
+      // La dernière position appliquée via onNodesChange est la source de vérité.
+      const stateNode = stableRefs.current.reactFlowNodes.find((candidate) => candidate.id === node.id) as ReactFlowNodeWithMeasuredSize | undefined;
+      const droppedPosition = lastNodePositionChangesRef.current.get(node.id)
+        ?? (stateNode && Number.isFinite(stateNode.position?.x) && Number.isFinite(stateNode.position?.y) ? stateNode.position : undefined)
+        ?? node.position;
+
+      // measured peut être périmé après un changement de taille (ex. minimize) :
+      // la taille DOM réelle au lâcher est la source de vérité pour la résolution de collision.
+      const nodeElement = typeof document !== 'undefined'
+        ? document.querySelector(`[data-id="${node.id}"]`) as HTMLElement | null
+        : null;
+      const liveWidth = normalizeOptionalDimension(nodeElement?.offsetWidth);
+      const liveHeight = normalizeOptionalDimension(nodeElement?.offsetHeight);
+      const resolvedPosition = resolveDroppedNodePosition(node.id, droppedPosition, {
+        width: liveWidth ?? normalizeOptionalDimension(node.measured?.width ?? node.width),
+        height: liveHeight ?? normalizeOptionalDimension(node.measured?.height ?? node.height),
       });
+      lastNodePositionChangesRef.current.set(node.id, resolvedPosition);
 
       setReactFlowNodes((currentNodes) => currentNodes.map((currentNode) => {
         if (currentNode.id !== node.id) {
@@ -566,7 +667,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     onDeleteNode: onDeleteNode || (() => { }),
     onUpdateNodeMessages: onUpdateNodeMessages || (() => { }),
     onUpdateNodePosition: onUpdateNodePosition || (() => { }),
-    // Wrapper: when toggle minimize/restore, re-measure DOM node size and re-evaluate collisions.
+    // Wrapper: when toggle minimize/restore, re-evaluate collisions once the DOM node size has
+    // settled (CSS transition) — never write `measured` from a mid-transition offsetWidth.
     // Important: moves caused by restore are applied locally (no persist) to avoid accidental DB writes for UI-only actions.
     onToggleNodeMinimize: (nodeId: string) => {
       try {
@@ -587,23 +689,16 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             const desiredPosition = hasValidLivePosition ? liveNode.position : (designPositionValid ? movedNode.position : undefined);
             if (!desiredPosition) return;
 
-            if (typeof measuredWidth === 'number' || typeof measuredHeight === 'number') {
-              setReactFlowNodes((current) => current.map((n) => {
-                if (n.id !== nodeId) return n;
-                const measuredNode = n as ReactFlowNodeWithMeasuredSize;
-                return {
-                  ...measuredNode,
-                  measured: {
-                    width: measuredWidth ?? measuredNode.measured?.width ?? measuredNode.width,
-                    height: measuredHeight ?? measuredNode.measured?.height ?? measuredNode.height,
-                  },
-                };
-              }));
-            }
-
+            // On n'écrit plus `measured` ici : React Flow maintient width/height via son
+            // propre ResizeObserver (changements 'dimensions'), et écrire un offsetWidth lu
+            // pendant la transition CSS propagerait une taille périmée qui masque ensuite
+            // la vraie taille (measured?.width ?? width).
             const expandedFallback = { width: 384, height: 550 };
-            const subjectWidth = (typeof measuredWidth === 'number' && measuredWidth > 300) ? measuredWidth : expandedFallback.width;
-            const subjectHeight = (typeof measuredHeight === 'number' && measuredHeight > 300) ? measuredHeight : expandedFallback.height;
+            const liveSubjectNode = liveNode as ReactFlowNodeWithMeasuredSize | undefined;
+            const liveSubjectWidth = normalizeOptionalDimension(liveSubjectNode?.measured?.width ?? liveSubjectNode?.width);
+            const liveSubjectHeight = normalizeOptionalDimension(liveSubjectNode?.measured?.height ?? liveSubjectNode?.height);
+            const subjectWidth = (typeof measuredWidth === 'number' && measuredWidth > 0) ? measuredWidth : (liveSubjectWidth ?? expandedFallback.width);
+            const subjectHeight = (typeof measuredHeight === 'number' && measuredHeight > 0) ? measuredHeight : (liveSubjectHeight ?? expandedFallback.height);
 
             const liveNodes: ReactFlowNodeWithMeasuredSize[] = typeof reactFlowLookup.getNodes === 'function'
               ? reactFlowLookup.getNodes()
@@ -656,37 +751,81 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         };
 
         const nodeEl = typeof document !== 'undefined' ? document.querySelector(`[data-id="${nodeId}"]`) as HTMLElement | null : null;
-        const measuredWidth = nodeEl?.offsetWidth ?? undefined;
-        const measuredHeight = nodeEl?.offsetHeight ?? undefined;
+        // La taille du nœud évolue via une transition CSS (transition-all duration-300,
+        // w-96 <-> w-64) : lire offsetWidth à ce moment donnerait une valeur transitoire.
+        // On observe donc le nœud jusqu'à la fin de la transition et on ne corrige la
+        // collision qu'avec la taille stabilisée (source de vérité : ResizeObserver +
+        // transitionend, jamais un offsetWidth lu en pleine transition).
+        if (!nodeEl || typeof window === 'undefined') {
+          applyRestoreOverlapCorrection();
+          return;
+        }
 
-        applyRestoreOverlapCorrection(measuredWidth, measuredHeight);
+        let finished = false;
+        let correctionTimer: number | null = null;
+        let fallbackTimer: number | null = null;
+        let latestWidth: number | undefined;
+        let latestHeight: number | undefined;
 
-        const schedulePostRenderCorrection = () => {
-          if (typeof window === 'undefined') {
-            return;
+        const scheduleSettledCorrection = (width?: number, height?: number) => {
+          latestWidth = width;
+          latestHeight = height;
+          if (correctionTimer !== null) {
+            window.clearTimeout(correctionTimer);
           }
-
-          const existingNodeEl = document.querySelector(`[data-id="${nodeId}"]`) as HTMLElement | null;
-          if (!existingNodeEl) {
-            return;
-          }
-
-          const run = () => {
-            const laterNodeEl = document.querySelector(`[data-id="${nodeId}"]`) as HTMLElement | null;
-            applyRestoreOverlapCorrection(laterNodeEl?.offsetWidth ?? measuredWidth, laterNodeEl?.offsetHeight ?? measuredHeight);
-          };
-
-          if (typeof window.requestAnimationFrame === 'function') {
-            window.requestAnimationFrame(() => {
-              window.setTimeout(run, 0);
-            });
-            return;
-          }
-
-          window.setTimeout(run, 0);
+          // Debounce : la transition émet un ResizeObserver par frame, on attend que la
+          // taille se stabilise avant de corriger.
+          correctionTimer = window.setTimeout(() => {
+            correctionTimer = null;
+            if (!finished) {
+              applyRestoreOverlapCorrection(latestWidth, latestHeight);
+            }
+          }, 120);
         };
 
-        schedulePostRenderCorrection();
+        const resizeObserver = typeof ResizeObserver !== 'undefined'
+          ? new ResizeObserver((entries) => {
+            const entry = entries[entries.length - 1];
+            if (!entry || finished) {
+              return;
+            }
+            scheduleSettledCorrection(entry.contentRect.width, entry.contentRect.height);
+          })
+          : null;
+
+        const finish = () => {
+          if (finished) {
+            return;
+          }
+          finished = true;
+          resizeObserver?.disconnect();
+          nodeEl.removeEventListener('transitionend', onTransitionEnd);
+          if (correctionTimer !== null) {
+            window.clearTimeout(correctionTimer);
+          }
+          if (fallbackTimer !== null) {
+            window.clearTimeout(fallbackTimer);
+          }
+          const settledEl = document.querySelector(`[data-id=\"${nodeId}\"]`) as HTMLElement | null;
+          applyRestoreOverlapCorrection(settledEl?.offsetWidth ?? latestWidth, settledEl?.offsetHeight ?? latestHeight);
+        };
+
+        const onTransitionEnd = (event: TransitionEvent) => {
+          if (event.target !== nodeEl) {
+            return;
+          }
+          // Laisser le ResizeObserver livrer la taille finale, puis corriger une dernière fois.
+          if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(() => finish());
+          } else {
+            finish();
+          }
+        };
+
+        resizeObserver?.observe(nodeEl);
+        nodeEl.addEventListener('transitionend', onTransitionEnd);
+        // Secours si transitionend ne se déclenche pas (transitions désactivées, onglet caché, etc.)
+        fallbackTimer = window.setTimeout(finish, 600);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[WorkflowCanvas] onToggleNodeMinimize wrapper error:', err);
@@ -946,6 +1085,30 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     setEdges((eds) => addEdge(connection, eds));
   }, [setEdges]);
 
+  // ⭐ Sélection d'un edge au clic + suppression via Delete/Suppr :
+  // on pose selected: true sur l'edge (contrôlé) -> classe .selected + glow CSS ;
+  // RF supprime les éléments selected du store via onEdgesChange (deleteKeyCode Backspace/Delete).
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
+  const handleEdgeClick = useCallback((_: unknown, edge: { id: string }) => {
+    setSelectedEdgeId(edge.id);
+  }, []);
+
+  const handleEdgesChange = useCallback(
+    (changes: any[]) => {
+      onEdgesChange(changes);
+      if (selectedEdgeId && changes.some((c: any) => c?.type === 'remove' && c?.id === selectedEdgeId)) {
+        setSelectedEdgeId(null);
+      }
+    },
+    [onEdgesChange, selectedEdgeId],
+  );
+
+  const edgesWithSelection = useMemo(
+    () => edges.map((e) => (e.id === selectedEdgeId ? { ...e, selected: true } : e)),
+    [edges, selectedEdgeId],
+  );
+
   // Handler pour libérer le focus quand on clique sur le canvas
   const handlePaneClick = useCallback((event: any) => {
     // Retirer le focus de tout élément actif (textarea, input, etc.)
@@ -959,6 +1122,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     }
     // Désélectionner tous les nodes en cliquant sur le canvas vide
     setReactFlowNodes(nodes => nodes.map(node => ({ ...node, selected: false })));
+    // ⭐ et désélectionner l'edge éventuellement sélectionné
+    setSelectedEdgeId(null);
   }, [setReactFlowNodes]);
 
   const handleEditPrototype = useCallback((nodeId: string) => {
@@ -1029,13 +1194,17 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
         <ReactFlow
           nodes={reactFlowNodes}
-          edges={edges}
+          edges={edgesWithSelection}
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}
-          onEdgesChange={onEdgesChange}
+          onEdgesChange={handleEdgesChange}
+          onEdgeClick={handleEdgeClick}
+          deleteKeyCode={['Backspace', 'Delete']}
           onConnect={onConnect}
           isValidConnection={isValidWorkflowConnection}
           onPaneClick={handlePaneClick}
+          onClickConnectStart={handleClickConnectStart}
+          onClickConnectEnd={handleClickConnectEnd}
           connectionMode={ConnectionMode.Strict}
           nodeTypes={NODE_TYPES}
           edgeTypes={EDGE_TYPES}
@@ -1146,6 +1315,22 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             />
           </div>
         </ReactFlow>
+
+        {/* ⭐ Lasso du mode clic : fil entre la poignée cliquée et le curseur (recréé par l'app,
+            RF 11.11.4 ne le rend pas en mode clic). Coordonnées relatives à ce conteneur. */}
+        {clickLasso && (
+          <svg className="workflow-click-lasso" aria-hidden="true">
+            <path
+              className="workflow-click-lasso-path"
+              d={(() => {
+                const dx =
+                  Math.max(40, Math.abs(clickLasso.x2 - clickLasso.x1) / 2) *
+                  (clickLasso.handleType === 'source' ? 1 : -1);
+                return `M ${clickLasso.x1} ${clickLasso.y1} C ${clickLasso.x1 + dx} ${clickLasso.y1}, ${clickLasso.x2 - dx} ${clickLasso.y2}, ${clickLasso.x2} ${clickLasso.y2}`;
+              })()}
+            />
+          </svg>
+        )}
 
         {/* Bouton flottant redirection vers prototypage Archi - Style Blur futuriste */}
         {onAddToWorkflow && onNavigate && (

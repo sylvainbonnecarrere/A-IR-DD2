@@ -22,8 +22,15 @@ import { deriveSelectedToolIds, normalizeToolSelections } from '../../services/t
 import { HISTORY_LIMIT_KEYS } from '../../services/historySynthesisPolicy';
 import { getDisplayableNativeFunctions } from '../../utils/llmNativeFunctionCatalog';
 import { buildCanonicalAgentInstanceConfiguration, createDefaultAgentInstanceConfiguration, type CanonicalAgentInstanceConfiguration } from '../../services/agentContractAdapters';
+import TabIconNeon, { type AgentTabIconName } from '../agent-tabs/TabIconNeon';
 
-type TabId = 'config' | 'historique' | 'fonctions' | 'formatage' | 'persistence' | 'links' | 'tasks' | 'logs' | 'errors';
+type TabId = AgentTabIconName;
+
+/** Option de modèle dans les <select> : id/name/isDynamic (statique ou détecté LMStudio), ou id brut. */
+type ModelOption = string | { id: string; name?: string; isDynamic?: boolean };
+
+// ⭐ Charte UX (Guides/UX/ELEMENTS.md, TabIconBlurNeon) : icônes d'onglets rendues par <TabIconNeon />
+// (SVG inline uniforme, états défaut/hover/sélectionné pilotés par CSS, voir index.css .agent-tab-btn).
 
 const EMPTY_LOCAL_LLM_PROFILES: LocalLLMProfile[] = [];
 const DEFAULT_HISTORY_CONFIG = createDefaultHistoryConfig();
@@ -254,7 +261,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         // Prepare configuration to save (preserve runtime data and validate history settings)
         const enabledProvidersList = llmConfigs
           .filter(c => c.enabled)
-          .map(c => c.provider) as any[];
+          .map(c => c.provider);
         const normalizedSelectedApplicationToolSelections = normalizeToolSelections(selectedApplicationToolSelections, undefined, availableFunctions);
         const inheritsPrototypeApplicationFunctions = areToolSelectionListsEquivalent(
             normalizedSelectedApplicationToolSelections,
@@ -348,7 +355,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
         setShowCancelConfirm(false);
     };
 
-    const handleConfigChange = (field: string, value: any) => {
+    const handleConfigChange = (field: string, value: unknown) => {
         setEditedConfig(prev => ({ ...prev, [field]: value }));
         setHasChanges(true);
     };
@@ -383,12 +390,14 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                     <TabButton
                         active={activeTab === 'config'}
                         onClick={() => setActiveTab('config')}
+                        tabId="config"
                     >
                         {t('agentConfig_tab_config')}
                     </TabButton>
                     <TabButton
                         active={activeTab === 'historique'}
                         onClick={() => setActiveTab('historique')}
+                        tabId="historique"
                     >
                         {t('agentConfig_tab_history')}
                     </TabButton>
@@ -396,18 +405,21 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                         active={activeTab === 'fonctions'}
                         onClick={() => setActiveTab('fonctions')}
                         badge={functionTabBadgeCount || undefined}
+                        tabId="fonctions"
                     >
                         {t('agentConfig_tab_functions')}
                     </TabButton>
                     <TabButton
                         active={activeTab === 'formatage'}
                         onClick={() => setActiveTab('formatage')}
+                        tabId="formatage"
                     >
                         {t('agentConfig_tab_formatting')}
                     </TabButton>
                     <TabButton
                         active={activeTab === 'persistence'}
                         onClick={() => setActiveTab('persistence')}
+                        tabId="persistence"
                     >
                         {t('agentConfig_tab_persistence')}
                     </TabButton>
@@ -415,6 +427,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                         active={activeTab === 'links'}
                         onClick={() => setActiveTab('links')}
                         badge={editedConfig.links?.length}
+                        tabId="links"
                     >
                         {t('agentConfig_tab_links')}
                     </TabButton>
@@ -422,6 +435,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                         active={activeTab === 'tasks'}
                         onClick={() => setActiveTab('tasks')}
                         badge={editedConfig.tasks?.length}
+                        tabId="tasks"
                     >
                         {t('agentConfig_tab_tasks')}
                     </TabButton>
@@ -429,6 +443,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                         active={activeTab === 'logs'}
                         onClick={() => setActiveTab('logs')}
                         badge={editedConfig.logs?.length}
+                        tabId="logs"
                     >
                         {t('agentConfig_tab_logs')}
                     </TabButton>
@@ -436,6 +451,7 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
                         active={activeTab === 'errors'}
                         onClick={() => setActiveTab('errors')}
                         badge={editedConfig.errors?.length}
+                        tabId="errors"
                     >
                         {t('agentConfig_tab_errors')}
                     </TabButton>
@@ -599,35 +615,45 @@ export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localL
 };
 
 // Tab Button Component
+// ⭐ L'icône TabIconNeon est au-dessus du libellé ; ses états (défaut / hover / actif)
+// sont pilotés par les classes .agent-tab-btn / .tab-active + :hover (voir index.css).
 const TabButton: React.FC<{
     active: boolean;
     onClick: () => void;
     children: React.ReactNode;
     badge?: number;
-}> = ({ active, onClick, children, badge }) => (
+    tabId: TabId;
+}> = ({ active, onClick, children, badge, tabId }) => (
     <button
         onClick={onClick}
         className={`
-      px-6 py-3 font-medium transition-colors relative
+      agent-tab-btn inline-flex flex-col items-center px-4 py-2 font-medium transition-colors relative
       ${active
-                ? 'text-cyan-400 border-b-2 border-cyan-400 bg-gray-800/50'
+                ? 'tab-active text-cyan-400 border-b-2 border-cyan-400 bg-gray-800/50'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/30'
             }
     `}
     >
-        {children}
-        {badge !== undefined && badge > 0 && (
-            <span className="ml-2 px-2 py-0.5 text-xs bg-cyan-600 text-white rounded-full">
-                {badge}
-            </span>
-        )}
+        <TabIconNeon
+            name={tabId}
+            className="w-10 h-10 mb-1 flex-shrink-0"
+            data-testid={`tab-icon-${tabId}`}
+        />
+        <span className="inline-flex items-center">
+            {children}
+            {badge !== undefined && badge > 0 && (
+                <span className="ml-2 px-2 py-0.5 text-xs bg-cyan-600 text-white rounded-full">
+                    {badge}
+                </span>
+            )}
+        </span>
     </button>
 );
 
 // Configuration Tab Component
 const ConfigurationTab: React.FC<{
-    config: any;
-    onChange: (field: string, value: any) => void;
+    config: CanonicalAgentInstanceConfiguration;
+    onChange: (field: string, value: unknown) => void;
     llmConfigs: LLMConfig[];
     localLLMProfiles: LocalLLMProfile[];
     agentName: string;
@@ -659,7 +685,7 @@ const ConfigurationTab: React.FC<{
     const originalCapabilities = useMemo(() => config.capabilities || [], [config.capabilities]);
     const [endpointChanged, setEndpointChanged] = useState(false);
 
-    const [lmStudioDynamicModels, setLmStudioDynamicModels] = useState<any[]>([]);
+    const [lmStudioDynamicModels, setLmStudioDynamicModels] = useState<ModelOption[]>([]);
     const [isLoadingLMStudioModels, setIsLoadingLMStudioModels] = useState(false);
 
     const { detection: lmStudioDetection, isDetecting: isDetectingLMStudio, redetect: redetectLMStudio } = useLMStudioDetection({
@@ -719,7 +745,7 @@ const ConfigurationTab: React.FC<{
     const hasCapabilityChanges = capabilityChanges.added.length > 0 || capabilityChanges.removed.length > 0;
 
     // Obtenir les modèles disponibles pour le provider sélectionné
-    const availableModels = useMemo(() => {
+    const availableModels = useMemo<ModelOption[]>(() => {
         if (!config.llmProvider) return [];
 
         if (config.llmProvider === LLMProvider.LMStudio && lmStudioDynamicModels.length > 0) {
@@ -754,13 +780,13 @@ const ConfigurationTab: React.FC<{
         onChange('llmProvider', provider);
         onChange('localLLMProfileId', '');
         setInlineDetectionError(null);
-        let models: any[] = [];
+        let models: ModelOption[] = [];
         if (provider === LLMProvider.LMStudio && lmStudioDynamicModels.length > 0) {
             models = lmStudioDynamicModels;
         } else {
             models = (LLM_MODELS[provider] || []).map((id: string) => ({ id }));
         }
-        const modelIds = models.map((m: any) => typeof m === 'string' ? m : m.id);
+        const modelIds = models.map((m: ModelOption) => typeof m === 'string' ? m : m.id);
         if (models.length > 0 && !modelIds.includes(config.model)) {
             onChange('model', modelIds[0]);
         }
@@ -798,8 +824,8 @@ const ConfigurationTab: React.FC<{
                     { useApi: true, token: accessToken }
                 );
             }
-        } catch (err: any) {
-            setInlineDetectionError(err.message || t('agentForm_localModel_notDetected'));
+        } catch (err: unknown) {
+            setInlineDetectionError((err instanceof Error ? err.message : undefined) || t('agentForm_localModel_notDetected'));
         } finally {
             setIsDetectingLocalModel(false);
         }
@@ -941,7 +967,7 @@ const ConfigurationTab: React.FC<{
                                 disabled={!config.llmProvider || availableModels.length === 0 || isLoadingLMStudioModels}
                             >
                                 {!config.model && <option value="">{t('agentConfig_llm_modelPlaceholder')}</option>}
-                                {availableModels.map((model: any) => {
+                                {availableModels.map((model: ModelOption) => {
                                     const modelId = typeof model === 'string' ? model : model.id;
                                     const modelName = typeof model === 'string' ? model : model.name;
                                     const isDynamic = typeof model === 'object' && model.isDynamic;
@@ -1194,22 +1220,24 @@ const ConfigurationTab: React.FC<{
 
 // History Tab Component
 const HistoryTab: React.FC<{
-    config: any;
-    onChange: (field: string, value: any) => void;
+    config: CanonicalAgentInstanceConfiguration;
+    onChange: (field: string, value: unknown) => void;
     llmConfigs: LLMConfig[];
     t: (key: string) => string;
 }> = ({ config, onChange, llmConfigs, t }) => {
     const availableProviders = llmConfigs.filter(c => c.enabled).map(c => c.provider);
 
-    const [lmStudioDynamicModelsHistory, setLmStudioDynamicModelsHistory] = useState<any[]>([]);
+    const [lmStudioDynamicModelsHistory, setLmStudioDynamicModelsHistory] = useState<ModelOption[]>([]);
     const [isLoadingLMStudioModelsHistory, setIsLoadingLMStudioModelsHistory] = useState(false);
+    // Alias local (const) pour bénéficier du narrowing dans les callbacks JSX ci-dessous
+    const historyConfig = config.historyConfig;
     // LMStudio uses localEndpoint (plaintext URL); apiKey fallback for legacy records
     const lmStudioHistoryConfig = llmConfigs.find(c => c.provider === LLMProvider.LMStudio);
     const lmStudioEndpoint = lmStudioHistoryConfig?.localEndpoint || lmStudioHistoryConfig?.apiKey;
 
     // Fetch modèles LMStudio si history provider est LMStudio
     useEffect(() => {
-        if (config.historyConfig?.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint) {
+        if (historyConfig?.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint) {
             setIsLoadingLMStudioModelsHistory(true);
             getLMStudioMergedModels(lmStudioEndpoint)
                 .then(models => setLmStudioDynamicModelsHistory(models))
@@ -1218,21 +1246,21 @@ const HistoryTab: React.FC<{
         } else {
             setLmStudioDynamicModelsHistory([]);
         }
-    }, [config.historyConfig?.llmProvider, lmStudioEndpoint]);
+    }, [historyConfig?.llmProvider, lmStudioEndpoint]);
 
-    const availableModels = useMemo(() => {
-        if (!config.historyConfig?.llmProvider) return [];
+    const availableModels = useMemo<ModelOption[]>(() => {
+        if (!historyConfig?.llmProvider) return [];
 
-        if (config.historyConfig.llmProvider === LLMProvider.LMStudio && lmStudioDynamicModelsHistory.length > 0) {
+        if (historyConfig.llmProvider === LLMProvider.LMStudio && lmStudioDynamicModelsHistory.length > 0) {
             return lmStudioDynamicModelsHistory;
         }
 
-        const staticModels = LLM_MODELS[config.historyConfig.llmProvider as LLMProvider] || [];
+        const staticModels = LLM_MODELS[historyConfig.llmProvider as LLMProvider] || [];
         return staticModels.map(id => ({ id, name: id }));
-    }, [config.historyConfig?.llmProvider, lmStudioDynamicModelsHistory]);
+    }, [historyConfig?.llmProvider, lmStudioDynamicModelsHistory]);
 
     const handleProviderChange = (provider: LLMProvider) => {
-        let models: any[] = [];
+        let models: ModelOption[] = [];
 
         if (provider === LLMProvider.LMStudio && lmStudioDynamicModelsHistory.length > 0) {
             models = lmStudioDynamicModelsHistory;
@@ -1243,7 +1271,7 @@ const HistoryTab: React.FC<{
         const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
         // Preserve existing history config when changing LLM provider
         onChange('historyConfig', {
-            ...config.historyConfig,
+            ...historyConfig,
             llmProvider: provider,
             model: modelIds[0] || ''
         });
@@ -1254,16 +1282,16 @@ const HistoryTab: React.FC<{
             <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
                 <ToggleSwitch
                     label={t('agentConfig_history_enableLabel')}
-                    checked={config.historyConfig?.enabled || false}
-                    onChange={(checked) => onChange('historyConfig', { ...config.historyConfig, enabled: checked })}
+                    checked={historyConfig?.enabled || false}
+                    onChange={(checked) => onChange('historyConfig', { ...historyConfig, enabled: checked })}
                 />
-                {config.historyConfig?.enabled && (
+                {historyConfig?.enabled && (
                     <div className="mt-4 space-y-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_history_limitsLabel')}</label>
                             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                                 {HISTORY_LIMIT_KEYS.map((key) => {
-                                    const isEnabled = config.historyConfig?.enabledLimits?.[key] ?? DEFAULT_HISTORY_CONFIG.enabledLimits[key];
+                                    const isEnabled = historyConfig?.enabledLimits?.[key] ?? DEFAULT_HISTORY_CONFIG.enabledLimits[key];
                                     return (
                                     <div key={key} className="rounded-md border border-gray-700 bg-gray-800/40 p-3 space-y-2">
                                         <div className="flex items-center justify-between gap-3">
@@ -1274,9 +1302,9 @@ const HistoryTab: React.FC<{
                                                     checked={isEnabled}
                                                     aria-label={`${t('history_limit_active')} ${t(getHistoryLimitLabelKey(key))}`}
                                                     onChange={(e) => onChange('historyConfig', {
-                                                        ...config.historyConfig,
+                                                        ...historyConfig,
                                                         enabledLimits: {
-                                                            ...config.historyConfig.enabledLimits,
+                                                            ...historyConfig.enabledLimits,
                                                             [key]: e.target.checked,
                                                         }
                                                     })}
@@ -1287,10 +1315,10 @@ const HistoryTab: React.FC<{
                                         </div>
                                         <input
                                             type="number"
-                                            value={config.historyConfig.limits[key]}
+                                            value={historyConfig.limits[key]}
                                             onChange={(e) => onChange('historyConfig', {
-                                                ...config.historyConfig,
-                                                limits: { ...config.historyConfig.limits, [key]: parseInt(e.target.value, 10) || 0 }
+                                                ...historyConfig,
+                                                limits: { ...historyConfig.limits, [key]: parseInt(e.target.value, 10) || 0 }
                                             })}
                                             disabled={!isEnabled}
                                             className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm disabled:cursor-not-allowed disabled:opacity-50"
@@ -1306,7 +1334,7 @@ const HistoryTab: React.FC<{
                                 <div>
                                     <label className="text-xs text-gray-400">{t('agentConfig_history_llmProviderLabel')}</label>
                                     <select
-                                        value={config.historyConfig?.llmProvider || 'gemini'}
+                                        value={historyConfig?.llmProvider || 'gemini'}
                                         onChange={(e) => handleProviderChange(e.target.value as LLMProvider)}
                                         className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm mt-1"
                                     >
@@ -1318,13 +1346,13 @@ const HistoryTab: React.FC<{
                                 <div>
                                     <label className="text-xs text-gray-400">
                                         {t('agentConfig_history_llmModelLabel')}
-                                        {config.historyConfig?.llmProvider === LLMProvider.LMStudio && isLoadingLMStudioModelsHistory && (
+                                        {historyConfig?.llmProvider === LLMProvider.LMStudio && isLoadingLMStudioModelsHistory && (
                                             <span className="ml-2 text-cyan-400">⌛</span>
                                         )}
                                     </label>
                                     <select
-                                        value={config.historyConfig?.model || ''}
-                                        onChange={(e) => onChange('historyConfig', { ...config.historyConfig, model: e.target.value })}
+                                        value={historyConfig?.model || ''}
+                                        onChange={(e) => onChange('historyConfig', { ...historyConfig, model: e.target.value })}
                                         className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm mt-1"
                                         disabled={isLoadingLMStudioModelsHistory}
                                     >
@@ -1334,7 +1362,7 @@ const HistoryTab: React.FC<{
                                             const isDynamic = typeof model === 'object' && model.isDynamic;
                                             return (
                                                 <option key={modelId} value={modelId}>
-                                                    {modelName} {!isDynamic && config.historyConfig?.llmProvider === LLMProvider.LMStudio ? '(Statique)' : ''}
+                                                    {modelName} {!isDynamic && historyConfig?.llmProvider === LLMProvider.LMStudio ? '(Statique)' : ''}
                                                 </option>
                                             );
                                         })}
@@ -1346,8 +1374,8 @@ const HistoryTab: React.FC<{
                         <div>
                             <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_history_systemPromptLabel')}</label>
                             <textarea
-                                value={config.historyConfig?.systemPrompt || ''}
-                                onChange={(e) => onChange('historyConfig', { ...config.historyConfig, systemPrompt: e.target.value })}
+                                value={historyConfig?.systemPrompt || ''}
+                                onChange={(e) => onChange('historyConfig', { ...historyConfig, systemPrompt: e.target.value })}
                                 rows={4}
                                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm"
                                 placeholder="Résume la conversation de manière factuelle..."
@@ -1402,10 +1430,12 @@ const FunctionsTab: React.FC<{
 
 // Formatting Tab Component
 const FormattingTab: React.FC<{
-    config: any;
-    onChange: (field: string, value: any) => void;
+    config: CanonicalAgentInstanceConfiguration;
+    onChange: (field: string, value: unknown) => void;
     t: (key: string) => string;
 }> = ({ config, onChange, t }) => {
+    // Alias local (const) pour bénéficier du narrowing dans les callbacks JSX ci-dessous
+    const outputConfig = config.outputConfig;
     const outputFormats: OutputFormat[] = ['json', 'xml', 'yaml', 'shell', 'powershell', 'python', 'html', 'css', 'javascript', 'typescript', 'php', 'sql', 'mysql', 'mongodb'];
 
     return (
@@ -1413,16 +1443,16 @@ const FormattingTab: React.FC<{
             <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
                 <ToggleSwitch
                     label={t('agentConfig_formatting_enableLabel')}
-                    checked={config.outputConfig?.enabled || false}
-                    onChange={(checked) => onChange('outputConfig', { ...config.outputConfig, enabled: checked })}
+                    checked={outputConfig?.enabled || false}
+                    onChange={(checked) => onChange('outputConfig', { ...outputConfig, enabled: checked })}
                 />
-                {config.outputConfig?.enabled && (
+                {outputConfig?.enabled && (
                     <div className="mt-4 space-y-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_formatting_formatLabel')}</label>
                             <select
-                                value={config.outputConfig?.format || 'json'}
-                                onChange={(e) => onChange('outputConfig', { ...config.outputConfig, format: e.target.value as OutputFormat })}
+                                value={outputConfig?.format || 'json'}
+                                onChange={(e) => onChange('outputConfig', { ...outputConfig, format: e.target.value as OutputFormat })}
                                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
                             >
                                 {outputFormats.map(fmt => (
@@ -1447,7 +1477,7 @@ const PlaceholderTab: React.FC<{
     title: string;
     description: string;
     icon: string;
-    items?: any[];
+    items?: unknown[];
 }> = ({ title, description, icon, items }) => (
     <div className="flex flex-col items-center justify-center h-full text-gray-400">
         <div className="text-6xl mb-4">{icon}</div>

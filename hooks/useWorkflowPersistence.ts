@@ -136,7 +136,7 @@ export function useWorkflowPersistence(
         // Prevent spam saves
         const now = Date.now();
         if (now - lastSaveTimeRef.current < MIN_SAVE_INTERVAL_MS) {
-            console.log('[useWorkflowPersistence] Save throttled, too soon');
+            console.debug('[useWorkflowPersistence] Save throttled, too soon');
             return false;
         }
         
@@ -427,7 +427,7 @@ export function useWorkflowPersistence(
                     );
                 }
                 
-                console.log(`[useWorkflowPersistence] Flushed ${results.length} results for ${instanceId}`);
+                console.debug(`[useWorkflowPersistence] Flushed ${results.length} results for ${instanceId}`);
             } catch (err) {
                 console.error(`[useWorkflowPersistence] Failed to flush results for ${instanceId}:`, err);
             }

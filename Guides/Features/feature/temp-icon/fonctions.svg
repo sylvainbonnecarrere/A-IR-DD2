@@ -1,0 +1,135 @@
+<svg xmlns="http://w3.org" viewBox="0 0 240 240" width="240" height="240">
+  <defs>
+    <!-- Filtre Glow Néon pour le cadre -->
+    <filter id="neon-border-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur1" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur2" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur3" />
+      <feMerge>
+        <feMergeNode in="blur3" />
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Filtre Glow Néon pour les outils au centre -->
+    <filter id="neon-icon-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur1" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Dégradé de fond en verre teinté violet -->
+    <linearGradient id="glass-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.32" />
+      <stop offset="50%" stop-color="#7e22ce" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0.30" />
+    </linearGradient>
+
+    <!-- Reflet brillant supérieur (effet bombe / verre) -->
+    <linearGradient id="glass-highlight-top" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.58" />
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.12" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- Reflet inférieur subtil -->
+    <linearGradient id="glass-highlight-bottom" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#e9d5ff" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#e9d5ff" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- Découpe interne pour contenir les reflets de verre -->
+    <clipPath id="inner-glass-clip">
+      <rect x="36" y="36" width="168" height="168" rx="34" />
+    </clipPath>
+  </defs>
+
+  <!-- 1. Fond de verre semi-transparent -->
+  <rect x="36" y="36" width="168" height="168" rx="34" fill="url(#glass-bg)" />
+
+  <!-- 2. Reflets spéculaires du verre -->
+  <g clip-path="url(#inner-glass-clip)">
+    <!-- Reflet principal en haut -->
+    <path d="M 30 30 L 210 30 L 210 82 Q 120 105 30 82 Z" fill="url(#glass-highlight-top)" />
+    <!-- Reflet doux en bas -->
+    <path d="M 30 210 L 210 210 L 210 182 Q 120 168 30 182 Z" fill="url(#glass-highlight-bottom)" />
+    <!-- Biseau lumineux interne -->
+    <rect x="38" y="38" width="164" height="164" rx="32" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="1.5" />
+  </g>
+
+  <!-- 3. Bordure double néon avec halo -->
+  <g filter="url(#neon-border-glow)">
+    <!-- Tube néon externe -->
+    <rect x="32" y="32" width="176" height="176" rx="38" fill="none" stroke="#a855f7" stroke-width="4" />
+    <!-- Cœur blanc lumineux du néon -->
+    <rect x="32" y="32" width="176" height="176" rx="38" fill="none" stroke="#f5d0fe" stroke-width="1.6" />
+    <!-- Tube néon interne fin -->
+    <rect x="38.5" y="38.5" width="163" height="163" rx="32" fill="none" stroke="#c084fc" stroke-width="1.4" stroke-opacity="0.85" />
+  </g>
+
+  <!-- 4. Icône centrale : Clé à molette et Tournevis croisés -->
+  <g filter="url(#neon-icon-glow)" stroke-linecap="round" stroke-linejoin="round">
+    
+    <!-- Clé à molette (en arrière-plan) -->
+    <g transform="translate(120, 120) rotate(-38) translate(-120, -120)">
+      <!-- Lueur violette -->
+      <path d="M 106 62 
+               A 21 21 0 0 0 108 100 
+               L 108 166 
+               A 12 12 0 0 0 132 166 
+               L 132 100 
+               A 21 21 0 0 0 134 62 
+               L 127 79 
+               L 113 79 Z" 
+            fill="none" stroke="#c084fc" stroke-width="6" />
+      <!-- Cœur blanc néon -->
+      <path d="M 106 62 
+               A 21 21 0 0 0 108 100 
+               L 108 166 
+               A 12 12 0 0 0 132 166 
+               L 132 100 
+               A 21 21 0 0 0 134 62 
+               L 127 79 
+               L 113 79 Z" 
+            fill="#1e1b4b" fill-opacity="0.35" stroke="#ffffff" stroke-width="2.4" />
+    </g>
+
+    <!-- Tournevis (au premier plan) -->
+    <g transform="translate(120, 120) rotate(35) translate(-120, -120)">
+      <!-- Tige métallique -->
+      <path d="M 116 112 L 116 68 L 112 56 L 128 56 L 124 68 L 124 112" 
+            fill="#1e1b4b" fill-opacity="0.45" stroke="#c084fc" stroke-width="5.5" />
+      <path d="M 116 112 L 116 68 L 112 56 L 128 56 L 124 68 L 124 112" 
+            fill="none" stroke="#ffffff" stroke-width="2.2" />
+
+      <!-- Manche ergonomique -->
+      <path d="M 109 112 
+               L 131 112 
+               C 135 112, 136 121, 130 124 
+               L 132 168 
+               A 12 12 0 0 1 108 168 
+               L 110 124 
+               C 104 121, 105 112, 109 112 Z" 
+            fill="#2e1065" fill-opacity="0.65" stroke="#c084fc" stroke-width="6" />
+      <path d="M 109 112 
+               L 131 112 
+               C 135 112, 136 121, 130 124 
+               L 132 168 
+               A 12 12 0 0 1 108 168 
+               L 110 124 
+               C 104 121, 105 112, 109 112 Z" 
+            fill="none" stroke="#ffffff" stroke-width="2.4" />
+
+      <!-- Petit anneau/trou au bas du manche -->
+      <circle cx="120" cy="167" r="3.5" fill="none" stroke="#c084fc" stroke-width="4.5" />
+      <circle cx="120" cy="167" r="3.5" fill="none" stroke="#ffffff" stroke-width="1.8" />
+    </g>
+
+  </g>
+</svg>

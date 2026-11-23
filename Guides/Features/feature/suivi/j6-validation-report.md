@@ -1,8 +1,8 @@
 # J6 - Rapport de validation initial (2026-11-03)
 
 **Pilote :** `08-testeur-e2e.agent.md`  
-**État :** campagne commencée, J6 non clos.  
-**Décision provisoire : NO-GO.** Les parcours de l'interface dépendant des écarts J5 1 à 3 seront traités au cutover final, conformément à la décision projet. Ils restent bloquants pour le verdict de livraison, mais ne bloquent pas la préparation et l'exécution des autres validations J6.
+**État :** CLOS — verdict final **GO** signé le 2026-11-19 (US-J7-15, section « US-J7-15 — Rejeu de J6 en environnement isolé et gate » ci-dessous).  
+**Décision provisoire historique (2026-11-03) : NO-GO**, levée après le jalon J7 (US-J7-05 à US-J7-15 toutes closes). Les parcours de l'interface dépendant des écarts J5 1 à 3 seront traités au cutover final, conformément à la décision projet. Ils restent bloquants pour le verdict de livraison, mais ne bloquent pas la préparation et l'exécution des autres validations J6.
 
 ## Actualisation J7-02 au 17/11/2026
 
@@ -37,7 +37,9 @@ Les tests créent puis suppriment uniquement leurs conteneurs identifiés par de
 
 ## Actualisation reprise J7 (2026-11-18)
 
-La feature `US-J7-02` est reprise sur la branche `feat/j7-02-quarantine-exit-fencing` (base commitée `e05f977`, baseline verte : root 90 suites/542 tests, backend 114 suites/715 tests, `ci:node25:runtime` 3 suites/20 tests, audit strict OK). La conception de la sortie sûre de quarantaine est validée dans `j7-02-quarantine-exit-fencing-design.md` et le backlog découpe le travail en `US-J7-05` à `US-J7-12` : fencing label/ID côté gateway, statuts terminaux `worker_lost`/`quarantined`, endpoint `POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry`, `recoveryPolicy` par agent, visibilité (journaux + événements runtime + alertes), déploiement sur l'hôte Linux cible, stabilisation de `minimize-restore` et de l'attachement workspace live, dette WebSocket. Le verdict J6 reste **NO-GO** tant que le chapeau J7 n'est pas fermé et rejoué via `US-J7-04`.
+La feature `US-J7-02` est reprise sur la branche `feat/j7-02-quarantine-exit-fencing` (base commitée `e05f977`, baseline verte : root 90 suites/542 tests, backend 114 suites/715 tests, `ci:node25:runtime` 3 suites/20 tests, audit strict OK). La conception de la sortie sûre de quarantaine est validée dans `Guides/Features/feature/refonte/README.md` et le backlog découpe le travail en `US-J7-05` à `US-J7-12` : fencing label/ID côté gateway, statuts terminaux `worker_lost`/`quarantined`, endpoint `POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry`, `recoveryPolicy` par agent, visibilité (journaux + événements runtime + alertes), déploiement sur l'hôte Linux cible, stabilisation de `minimize-restore` et de l'attachement workspace live, dette WebSocket. Le verdict J6 reste **NO-GO** tant que le chapeau J7 n'est pas fermé et rejoué via `US-J7-15`.
+
+**Note 2026-11-19 (09-architecte-applicatif)** : `US-J7-05` à `US-J7-12` sont implementées et validées (baseline re-vérifiée : backend 121 suites/821 tests, root 90 suites/544 tests, audit strict OK, `ci:node25:runtime` PASS). La suite du jalon J7 est réordonnée : `US-J7-13` (cutover UI, plan `Guides/Features/feature/refonte/README.md`), `US-J7-14` (validation du déploiement via rapports CI GitHub — aucun hôte de production accessible aux agents), puis `US-J7-15` (rejeu J6 + verdict). Ex-`US-J7-03`/`US-J7-04` renommées `US-J7-13`/`US-J7-15`.
 
 ### Validation opérationnelle US-J7-10 (2026-11-18, labo Linux isolé, agent `04-cicd-installation`)
 
@@ -75,7 +77,8 @@ npm run ci:report -- --branch main --sha <sha> --out ci-report-<sha>.md --requir
 # input confirm_production=DEPLOY_PRODUCTION obligatoire en production
 ```
 
-Rapport par push (à remplir par le responsable à chaque push ; état au 2026-11-19 : **en attente du premier push de release**, aucun rapport CI réel relevé côté agent) :
+Rapport par push (état au 2026-11-19 : rapport consolidé réel consigné pour le push `ef19500da572512b61f906b582b4871135cf1bbb`) :
+
 
 | Push (date) | SHA | ci.yml | runtime.yml | security.yml | deploy.yml (env) | Artefacts | Verdict |
 |---|---|---|---|---|---|---|---|
@@ -83,9 +86,144 @@ Rapport par push (à remplir par le responsable à chaque push ; état au 2026-1
 | 2026-11-19 | `ad294fb` | success 7/7 (run [#44569723328](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44569723328)) — job `report` vert, artefact `ci-report-ad294fb….json` | — | — | — | `ci-report-ad294fb…` | fix vérifié en CI |
 | 2026-11-19 | `7329931` | success 7/7 (run [#44584156283](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44584156283)) | push run [#44588892714](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44588892714) success 4/4 ; dispatch [#44593799575](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44593799575) failure 3/4 — job `Mongo Replica Journal (opt-in)` KO (beforeAll global sans service Mongo, timeout 30 s) | — | — | `ci-report-7329931….json` | replica job corrigé (service mongo:6.0 + MONGODB_URI loopback 27018), test rejoué localement 1/1 PASS EXIT=0 — voir commit suivant |
 
-Rapport brut collecté par `npm run ci:report -- --branch main --limit 3` le 2026-11-19 (gh 2.105.0, compte sylvainbonnecarrere) : CI `7329931` 7/7, `ad294fb` 7/7, `3481b75` 6/7 (incident `report`), `365f238` et antérieurs 6/6 ; Runtime push `7329931` 4/4 success.
+| 2026-11-19 | `ef19500da572512b61f906b582b4871135cf1bbb` | success 7/7 (run [#44603611322](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44603611322)) | success (run [#44603613810](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44603613810) ; `Mongo Replica Journal (opt-in)` skipped) | success 4/4 (run [#44603611326](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44603611326) ; `Dependency Review` skipped) | — (aucun run ; pas de déploiement production revendiqué) | `ci-report-ef19500…`, `backend-dist-ef19500…`, `frontend-dist-ef19500…`, `runtime-scan-report` | CI, Runtime et Security verts ; déploiement production non effectué |
+
+### Rapport complet du push ef19500
+
+## Rapport CI GitHub — sylvainbonnecarrere/A-IR-DD2 — branche `main` — sha `ef19500da572512b61f906b582b4871135cf1bbb`
+
+Généré le 2026-11-19T20:06:18.887Z.
+
+Distinction des preuves : **labo Linux isolé** = preuve opérationnelle locale (US-J7-10, 5/5 PASS) ; **CI GitHub** = preuve de déploiement tracée (ce rapport + artefacts) ; **production** = déploiements GitHub (environnements staging/production, bundle sha256) exécutés par le responsable.
+
+| Workflow | Run | SHA court | Conclusion | Jobs verts |
+|---|---|---|---|---|
+| CI | [#44603611322](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44603611322) | `ef19500` | success | 7/7 |
+| Runtime | [#44603613810](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44603613810) | `ef19500` | success | 4/4 |
+| Security | [#44603611326](https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44603611326) | `ef19500` | success | 4/4 |
+| deploy.yml | — | — | absent | aucun run pour le sha ef19500da572512b61f906b582b4871135cf1bbb |
+| release-artifacts.yml | — | — | absent | aucun run pour le sha ef19500da572512b61f906b582b4871135cf1bbb |
+
+### CI — run 44603611322 (success)
+
+- SHA: `ef19500da572512b61f906b582b4871135cf1bbb` · ref: `main` · event: push
+- URL: https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44603611322
+
+| Job | Conclusion |
+|---|---|
+| Frontend Component Tests | success |
+| Frontend Canvas Non-Regression | success |
+| Frontend Build | success |
+| Backend Build | success |
+| Backend Tests With Mongo | success |
+| Frontend Hydration Integration | success |
+| CI Run Report | success |
+
+| Artifact | Taille (o) | Expiré |
+|---|---|---|
+| backend-dist-ef19500da572512b61f906b582b4871135cf1bbb | 645935 | non |
+| ci-report-ef19500da572512b61f906b582b4871135cf1bbb | 776 | non |
+| frontend-dist-ef19500da572512b61f906b582b4871135cf1bbb | 546785 | non |
+
+### Runtime — run 44603613810 (success)
+
+- SHA: `ef19500da572512b61f906b582b4871135cf1bbb` · ref: `main` · event: push
+- URL: https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44603613810
+
+| Job | Conclusion |
+|---|---|
+| Runtime Scan | success |
+| Node24 Runtime Slice | success |
+| Runtime CI | success |
+| Mongo Replica Journal (opt-in) | skipped |
+
+| Artifact | Taille (o) | Expiré |
+|---|---|---|
+| runtime-scan-report | 1263 | non |
+
+### Security — run 44603611326 (success)
+
+- SHA: `ef19500da572512b61f906b582b4871135cf1bbb` · ref: `main` · event: push
+- URL: https://github.com/sylvainbonnecarrere/A-IR-DD2/actions/runs/44603611326
+
+| Job | Conclusion |
+|---|---|
+| Root Audit | success |
+| Dependency Review | skipped |
+| Backend Audit | success |
+| CodeQL (javascript-typescript) | success |
+
+
+
+Preuve consignée pour ce push : le rapport complet ci-dessus, sourced du fichier local `ci-report-ef19500da572512b61f906b582b4871135cf1bbb.md` collecté par le responsable via `npm run ci:report` (`gh` 2.105.0 en PowerShell, 2026-11-19T20:06:18Z). Note : le fichier local `ci-report-7329931e20136f9e83b3558c676c0540a008864d.md` n'est PAS une preuve (sa collecte avait partiellement échoué) ; les lignes historiques du tableau pour `3481b75`/`7329931` restent indicatives.
 
 Aucune opération destructive sur des données réelles ; environnements CI isolés uniquement. **Reste ouvert** : déploiement sur l'hôte Linux de production (hors accès agent) — la procédure README § déploiement systemd s'applique telle quelle ; le labo ne s'y substitue pas.
+
+## US-J7-15 — Rejeu de J6 en environnement isolé et gate (2026-11-19, agent `08-testeur-e2e`)
+
+**Branche/sha audités :** `main` @ `ad294fb` (contient `feat/j7-02-quarantine-exit-fencing` : son seul commit non mergé `79a310f` est le même fix CI que `ad294fb` sur main ; J7-11 `4446e91`, J7-13 `365f238`, J7-14 `5721d69`+`3481b75`+`ad294fb` tous présents). Aucun écart de merge restant.
+
+### Commandes exactes exécutées et résultats
+
+| # | Commande | Résultat |
+|---|---|---|
+| 1 | `npm run audit:workflow-architecture:strict` | PASS (`Audit result: OK`) |
+| 2 | `npm run ci:node25:runtime` | PASS, Node 24.22.1 (« Node 24 runtime verification succeeded ») |
+| 3 | `npm run audit:all` | EXIT=0 (root + backend, aucune vulnérabilité effective ≥ high) |
+| 4 | `npm --prefix backend run build` | EXIT=0 ; `dist/src/server.js` et `dist/src/services/runtime/dockerGatewayMain.js` présents |
+| 5 | `npm test -- --runInBand` (racine) | EXIT=0 — **93 suites / 585 tests PASS** |
+| 6 | `npm --prefix backend test -- --runInBand` | EXIT=0 — **121 suites passées / 5 skippées, 821 tests passés / 29 skippés** |
+| 7 | `npm run test:j6:backend` | **10 suites / 126 tests PASS** (exécuté 4× ; 1 échec isolé non reproduit, voir A1) |
+| 8 | `npm run test:j6:semi-e2e` (serveur 4173 démarré à froid par Playwright, `--strictPort`) | **11/11 PASS** |
+| 9 | Campagne live isolée : `mongo:6` éphémère (port 27018) + backend dédié (port 3101, `MONGODB_URI` jetable, `health/ready` 200) + frontend 4174 froid + specs live copiées vers 3101 | **7 PASS / 1 skip / 0 fail** en 55,7 s (skip = A2) |
+| 10 | `AIRDD2_TEST_DOCKER_RESERVATION=1 npm --prefix backend test -- --runInBand src/__tests__/docker-gateway-recovery.integration.test.ts docker-inflight-reservation.integration.test.ts docker-name-reservation.integration.test.ts` | 3 suites / 21 tests PASS |
+| 11 | idem `docker-gateway-admission.test.ts mongo-docker-gateway-admission.test.ts` | 2 suites / 21 tests PASS |
+| 12 | idem `docker-gateway-fencing.integration.test.ts docker-gateway-daemon.test.ts docker-gateway-fencing.test.ts docker-gateway-transport.test.ts` | 4 suites / 46 tests PASS, 1 skip |
+| 13 | `AIRDD2_TEST_MONGO_REPLICA=1 npm --prefix backend test -- --runInBand src/__tests__/mongo-docker-journal-replica.integration.test.ts` | **1/1 PASS** — replica set jetable créé par le test (opt-in **exécuté**, pas seulement classé) |
+| 14 | Labo systemd/gateway : `docker compose -p airdd2-j7-validation -f backend/deploy/recovery-validation/compose.yaml up -d --build --wait --wait-timeout 600` → `exec -T linux docker pull ubuntu:noble` → `exec -T -e AIRDD2_RECOVERY_VALIDATION=1 linux node deploy/recovery-validation/validate-systemd.cjs` → `down -v` | UP_EXIT=0, PULL_EXIT=0, **5/5 PASS**, VALIDATE_EXIT=0, DOWN_EXIT=0 (SIGKILL backend → `quarantined` + verrou tenu ; restart gateway op incertaine → fencing auto + réservation de nom + quiescence ; restart backend → `worker_lost` + verrou libéré ; fence-and-retry réel 202 + run fils `queued` + audit immuable + rejeu 200 sans effet ; cas négatif 504 + alerte `critical` + verrou tenu) |
+| 15 | `npm run ci:report -- --self-test` | PASS (`self-test OK`) |
+| 16 | `npm run ci:report -- --branch main --sha ef19500da572512b61f906b582b4871135cf1bbb --require-green` (exécuté par le responsable, `gh` disponible en PowerShell) | Relevé réel effectué et consigné ci-dessus (section « Rapport complet du push ef19500 », source `ci-report-ef19500da572512b61f906b582b4871135cf1bbb.md`) : CI run #44603611322 success 7/7, Runtime run #44603613810 success (`Mongo Replica Journal (opt-in)` skipped), Security run #44603611326 success 4/4 (`Dependency Review` skipped), `deploy.yml` non exécuté — aucun déploiement production revendiqué. Le relevé reste dû à chaque push de release (US-J7-14, voir A3) |
+
+### Matrice J6-01 (18 scénarios) après replay
+
+| # | Scénario | Preuve exécutée ce jour | Statut |
+|---:|---|---|---|
+| 1 | Installation et démarrage local | #2, #4, #9 (backend `ready` 200 sur Mongo éphémère ; Vite lancé par Playwright) | PASS |
+| 2 | Authentification | A2.4 semi-e2e (4 tests, #8) + `auth-workflows.routes` (#7) + AuthWorkspace live (#9) | PASS |
+| 3 | Création/chargement workflow | `workspace-snapshot` (#7) + A2.4 hydratation (#8) + hydrate live (#9) | PASS |
+| 4 | Ajout d'un agent | `instances/from-prototype` live (#9, instance visible dans l'UI) + stores/isolation + composants J7-13 | PASS |
+| 5 | Activation workflow | `auth-workflows.routes` graphe/cycles (#7) + toolbar J7-13 (composants, racine #5) | PASS |
+| 6 | Lancement d'un run | `runs-command.routes` (queued persisté avant 202, idempotence) + `execution-orchestrator` (#7) | PASS |
+| 7 | Suivi d'exécution | `useRuntimeStore.runtime-events` + contrat/publisher événements versionnés + `RunStatusBadge`/toolbar J7-13 (#5) | PASS |
+| 8 | Tâche en succès | `UserToolRun`/`ExecutionOrchestrator` + worker durable (#6) | PASS |
+| 9 | Tâche en échec | timeout/sandbox (`docker-sandbox.runner`, `runtime-health`) (#6, #7) | PASS |
+| 10 | Annulation effective | `runs-command.routes` cancel (queued→`stopped` ; running terminal seulement après confirmation) + labo #14 | PASS |
+| 11 | Retry / nouveau run | `runs-command` retry + `user-tool-run.service` (enfant, idempotence, lineage) + labo fence-and-retry 202 (#14) | PASS |
+| 12 | Reload pendant run | A2.4 reload (#8) + AuthWorkspace live reload (#9) + persistance run Mongo + reconciler (#6) | PASS |
+| 13 | Reconnexion canal temps réel | `websocket-auth` (JWT strict J7-12) (#7) + `runtime-events` offline/reconnecting (#5) | PASS |
+| 14 | Refus ressource d'un autre utilisateur | ownership HTTP + ownership WebSocket (#7) | PASS |
+| 15 | Migration historique | `workflow-v1-v2-migration` (nominale, idempotente, reprise) + snapshot V2-only (#7) | PASS |
+| 16 | Redémarrage backend/worker | labo #14 5/5 (SIGKILL, restart gateway, `worker_lost`/`quarantined`, fence-and-retry) + `durable-worker-restart.integration` + reconciler (#6) | PASS |
+| 17 | Dépendance externe indisponible | `docker-sandbox.runner` (dependency-missing simulé) + `runtime-health` (#7) ; aucun appel réseau réel | PASS |
+| 18 | Non-régression existante | #5 (585), #6 (821), #8 (11), #9 (7), #1 audit strict | PASS |
+
+### Matrice J6-02 (non-régression legacy) revalidée
+
+Toutes les lignes revalidées via `test:j6:backend` (#7, 126/126) et la suite backend complète (#6) : mutations V1 refusées (410/400, y compris `PATCH /:id/patch`), GET V2-only, snapshot unifié V2-only, migration V1→V2 idempotente, ownership HTTP et WebSocket, mode invité isolé, `saveEdges` refusé en authentifié. **Aucune fixture affaiblie** (pas de diff sur les fixtures de ces suites dans ce replay).
+
+### Anomalies classées
+
+| ID | Sévérité | Description | Classement |
+|---|---|---|---|
+| A1 | Mineure | 1 échec isolé dans `test:j6:backend` à la 1ère exécution (126 tests), non reproduit sur 3 relances ni dans la suite backend complète (121 suites/821 tests EXIT=0) | Non bloquant — flake à surveiller ; aucune assertion modifiée |
+| A2 | Non bloquant (justifié) | Skip du scénario « artefact runtime sandbox » en live isolée : `test.skip` conditionnel du test lui-même (health sandbox Python non prêt dans cet environnement) ; provisioning Python validé par ailleurs (#2, suites web-search-py) | Non bloquant — skip déclaratif, pas opportuniste |
+| A3 | Tracé (hors code) | Relevé `ci:report` réel effectué par le responsable (`gh` en PowerShell) pour le push `ef19500da572512b61f906b582b4871135cf1bbb` et consigné dans la section US-J7-14 ci-dessus (source `ci-report-ef19500….md`) ; `--self-test` OK | Clos pour ce push ; le relevé reste dû par le responsable à chaque push de release (US-J7-14) ; non bloquant pour le gate J6 isolé |
+| A4 | Information | Campagne live sur backend dev **partagé** (3001) flaky à froid (overlay d'hydratation > 60 s) ; 7/7 verts en stack isolée (#9) | Non reproductible en isolé — à confirmer au prochain labo ; non bloquant |
+| A5 | Mineure | Warnings React Flow `nodeTypes/edgeTypes` dans les traces Playwright | Sans impact sur les suites ; triage cosmétique |
+
+### Verdict
+
+**GO** — signé `08-testeur-e2e`, 2026-11-19. Les 18 scénarios J6-01 sont exécutés avec preuve verte en environnement isolé (aucune exception non classée, aucun `test.skip` opportuniste), la matrice J6-02 est revalidée sans affaiblir aucune fixture, les suites racines/backend/audit/runtime sont 100 % vertes, le labo systemd/gateway est 5/5 PASS, le test replica Mongo opt-in est exécuté et vert. Aucune anomalie critique ouverte, les scénarios de redémarrage (#16) et d'annulation (#10) sont couverts. Réserve consignée : le rapport CI du push audité (`ef19500da572512b61f906b582b4871135cf1bbb`) est relevé et consigné (A3, section US-J7-14 : CI/Runtime/Security verts, `deploy.yml` non exécuté, aucun déploiement production revendiqué) ; le relevé reste dû par le responsable à chaque push de release, conformément à US-J7-14, et le déploiement de production reste ouvert avant clôture du chapeau US-J7-02 côté déploiement tracé.
 
 ## Périmètre et isolation
 

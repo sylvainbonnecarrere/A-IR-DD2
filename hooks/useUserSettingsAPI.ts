@@ -51,7 +51,7 @@ export const useUserSettingsAPI = (): UseUserSettingsAPIResult => {
    */
   const fetchSettings = useCallback(async () => {
     if (!isAuthenticated) {
-      console.log('[useUserSettingsAPI] User not authenticated - skipping API fetch');
+      console.debug('[useUserSettingsAPI] User not authenticated - skipping API fetch');
       return;
     }
 
@@ -73,7 +73,7 @@ export const useUserSettingsAPI = (): UseUserSettingsAPIResult => {
 
       const data = await response.json();
       setSettings(data);
-      console.log('[useUserSettingsAPI] Settings fetched successfully:', data);
+      console.debug('[useUserSettingsAPI] Settings fetched successfully:', data);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch settings';
       setError(errorMessage);
@@ -113,7 +113,7 @@ export const useUserSettingsAPI = (): UseUserSettingsAPIResult => {
 
         const data = await response.json();
         setSettings(data);
-        console.log('[useUserSettingsAPI] Settings saved successfully:', data);
+        console.debug('[useUserSettingsAPI] Settings saved successfully:', data);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to save settings';
         setError(errorMessage);

@@ -45,7 +45,7 @@ import {
 
 const DEBUG = process.env.DEBUG_CLOUD_STORAGE === 'true' || process.env.NODE_ENV === 'development';
 const debugLog = (message: string) => {
-    if (DEBUG) console.log(`[S3Storage] ${message}`);
+    if (DEBUG) console.debug(`[S3Storage] ${message}`);
 };
 
 // Durées par défaut

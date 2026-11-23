@@ -312,7 +312,13 @@ describe('BosMediaModal', () => {
       });
     });
 
-    expect(await screen.findByText('Apercu actif')).toBeInTheDocument();
+    // ⭐ 2026-11-21 : le kicker « Aperçu actif » est supprimé ; le bouton « Fermer l'aperçu »
+    // (Button partagé, tone red) le remplace, à GAUCHE du titre de l'aperçu (ordre DOM).
+    const previewClose = await screen.findByTestId('bos-media-preview-close');
+    expect(previewClose).toHaveTextContent("Fermer l'apercu");
+    expect(screen.queryByText('Apercu actif')).not.toBeInTheDocument();
+    const previewTitle = screen.getByRole('heading', { level: 3 });
+    expect(previewClose.compareDocumentPosition(previewTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('preview payload')).toBeInTheDocument();
     expect(screen.getByTestId('bos-media-preview-scroll')).toBeInTheDocument();
   });

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
-import { Agent, ChatMessage, LLMCapability, LLMProvider, Tool, ToolCall, AgentInstance, ToolCallRecord, MapSource, MapsPanelPreloadedResults } from '../types';
+import { Agent, ChatMessage, LLMCapability, LLMProvider, Tool, ToolCall, AgentInstance, ToolCallRecord, MapSource, MapsPanelPreloadedResults, RobotId } from '../types';
 import { Button } from './UI';
 import { CloseIcon, EditIcon, SendIcon, UploadIcon, ImageIcon, ErrorIcon, ExpandIcon, HistorySynthesisIcon, MaximizeIcon } from './Icons';
 import { ConfirmationModal } from './modals/ConfirmationModal';
@@ -15,6 +15,8 @@ import * as llmService from '../services/llmService';
 import { createAdapter } from '../services/adapters/AdapterFactory';
 import { runAgentLoop } from '../services/llm/AgentLoop';
 import { ToolCallBlock } from './workflow/ToolCallBlock';
+import { RunStatusBadge } from './workflow/RunStatusBadge';
+import { useRunCommandModals } from '../hooks/useRunCommandModals';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
 import { executeTool } from '../utils/toolExecutor';
 import { getEffectiveCredential, isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
@@ -30,6 +32,8 @@ import { executeAgentToolCall, parseToolCallArguments } from '../services/agentT
 import { normalizePersistedToolTranscriptMessages } from '../services/persistedChatMessages';
 import { shouldSuppressVisualToolResult } from '../utils/toolResultVisibility';
 import { AGENT_NODE_HANDLES } from './workflow/connectionContracts';
+import NodeHandleSphere from './workflow/NodeHandleSphere';
+import { getRobotColor } from './workflow/BaseWorkflowNode';
 import { prepareConversationHistoryForAPI } from '../services/historySynthesisService';
 
 // ⭐ J4.5: Global counter to ensure unique message IDs even if Date.now() returns same value
@@ -249,7 +253,8 @@ function buildPendingToolCallMessage(messageId: string, toolName: string, args: 
   };
 }
 
-const cornerHandleClassName = 'w-3 h-3 bg-cyan-400 border-2 border-cyan-300 shadow-lg shadow-cyan-400/50 hover:bg-cyan-300 hover:shadow-cyan-300/70 transition-all duration-200 z-20';
+// ⭐ 2026-11-20 : poignées = sphères lumineuses violettes (NodeHandleSphere), stylées via .node-handle
+// (index.css) : hover = agrandissement, .connecting = plus brillant pendant le tracé de l'edge.
 
 function buildToolResultChatMessage(record: ToolCallRecord): ChatMessage {
   return {
@@ -389,6 +394,11 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
   // Use instance name if available, otherwise use prototype name with null safety
   const displayName = agentInstance?.name || agent?.name || 'Unknown Agent';
+
+  // ⭐ US-J7-13: badge de statut du run de l'instance (présent dans les 3 représentations :
+  // le header du nœud reste visible quand le nœud est minimisé, compact si minimisé).
+  const runInstanceId = agentInstance?.id ?? agentInstanceProp?.id ?? id.replace(/^node-/, '');
+  const runCommandModals = useRunCommandModals(resolvedWorkflowId ?? data?.workflowId, () => { /* refresh assuré par le sync de la page via les événements workspace */ });
 
   // Résoudre la configuration effective (instance > prototype)
   // Créer un "agent effectif" qui utilise la config de l'instance si disponible
@@ -1693,6 +1703,9 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
         // Les boutons et le reste du canvas fonctionnent normalement
       }}
     >
+      {/* ⭐ US-J7-13: modales de commandes du run (détail / reset & relance) */}
+      {runCommandModals.modals}
+
       {/* Laser border effect on hover */}
       <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300">
         <div className="absolute inset-[1px] rounded-lg bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-purple-500/20 animate-pulse"></div>
@@ -1704,9 +1717,12 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           id={handle.id}
           type={handle.type}
           position={handle.position}
-          className={cornerHandleClassName}
+          className="node-handle"
           style={handle.style}
-        />
+        >
+          {/* ⭐ la sphère au repos prend la couleur (assombrie) du robot créateur du node */}
+          <NodeHandleSphere color={data.robotId ? getRobotColor(data.robotId as RobotId).primary : undefined} />
+        </Handle>
       ))}
 
       {/* Header - zone de titre draggable avec classe spéciale */}
@@ -1728,6 +1744,14 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
               </h3>
             </div>
           </div>
+
+          {/* ⭐ US-J7-13: badge de statut du run (pastille + libellé ; compact si minimisé) */}
+          <RunStatusBadge
+            instanceId={runInstanceId}
+            compact={isMinimized}
+            onOpenRunDetail={runCommandModals.openRunDetail}
+            onOpenResetAndRelaunch={runCommandModals.requestResetAndRelaunch}
+          />
 
           <div data-arc-agent-node="header-controls" className="flex items-center space-x-1 flex-none">
           <Button

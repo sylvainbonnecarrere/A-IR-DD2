@@ -1,5 +1,50 @@
 import apiClient from '../utils/apiClient';
-import type { FunctionRunListResponse, FunctionRunRecord } from '../types/function.types';
+import type {
+  CancelRunResponse,
+  FenceAndRetryResponse,
+  FunctionRunListResponse,
+  FunctionRunRecord,
+  RetryRunResponse,
+  RunCommandErrorCode,
+} from '../types/function.types';
+
+/**
+ * Erreur typée des commandes de run : conserve le statut HTTP et le `code`
+ * du contrat serveur (409 RUN_NOT_CANCELLABLE / RUN_NOT_QUARANTINED /
+ * WORKSPACE_LOCKED_BY_OTHER_RUN, 504 FENCING_TIMEOUT_ESCALATED, …) pour que
+ * l'UI affiche l'état autoritaire sans rien masquer.
+ */
+export class RunCommandError extends Error {
+  readonly status?: number;
+  readonly code?: RunCommandErrorCode | string;
+
+  constructor(message: string, status?: number, code?: RunCommandErrorCode | string) {
+    super(message);
+    this.name = 'RunCommandError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export const toRunCommandError = (error: unknown, fallbackMessage: string): RunCommandError => {
+  if (error instanceof RunCommandError) {
+    return error;
+  }
+  const axiosLike = error as { response?: { status?: number; data?: { error?: unknown; code?: unknown } }; message?: string } | null;
+  const status = typeof axiosLike?.response?.status === 'number' ? axiosLike.response.status : undefined;
+  const data = axiosLike?.response?.data;
+  const code = data && typeof data.code === 'string' ? data.code : undefined;
+  const message = data && typeof data.error === 'string' ? data.error : (axiosLike?.message ?? fallbackMessage);
+  return new RunCommandError(message, status, code);
+};
+
+/** UUID v4 pour les clés d'idempotence (boutons Reset & Relance / Relancer). */
+export const newIdempotencyKey = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+};
 
 export interface LaunchWorkflowRunPayload {
   workflowId?: string;
@@ -55,9 +100,49 @@ class WorkflowRunService {
     return response.data;
   }
 
-  async cancelRun(executionId: string): Promise<{ success: boolean; executionId: string; status: string }> {
-    const response = await apiClient.post<{ success: boolean; executionId: string; status: string }>(`/api/runs/executions/${executionId}/cancel`);
-    return response.data;
+  async cancelRun(executionId: string): Promise<CancelRunResponse> {
+    try {
+      const response = await apiClient.post<CancelRunResponse>(`/api/runs/executions/${executionId}/cancel`);
+      return response.data;
+    } catch (error) {
+      throw toRunCommandError(error, 'Annulation du run impossible');
+    }
+  }
+
+  /**
+   * Relance d'un run terminal : `POST /api/runs/executions/:executionId/retry`
+   * (crée un NOUVEAU run `retryOfExecutionId`, jamais de `resume`). Requiert un
+   * header `Idempotency-Key` (contrat US-J7-05).
+   */
+  async retryRun(executionId: string, idempotencyKey: string = newIdempotencyKey()): Promise<RetryRunResponse> {
+    try {
+      const response = await apiClient.post<RetryRunResponse>(
+        `/api/runs/executions/${executionId}/retry`,
+        {},
+        { headers: { 'Idempotency-Key': idempotencyKey } },
+      );
+      return response.data;
+    } catch (error) {
+      throw toRunCommandError(error, 'Relance du run impossible');
+    }
+  }
+
+  /**
+   * Reset & Relance (US-J7-07) : `POST /api/workspaces/:workspaceId/runs/:runId/fence-and-retry`.
+   * 202 = nouveau run créé, 200 = rejeu idempotent, 409/504 = refus contrat (voir `RunCommandError.code`).
+   * Dans ce domaine `workspaceId === workflowId` (le workspace V2 est le workflow).
+   */
+  async fenceAndRetry(workspaceId: string, runId: string, idempotencyKey: string = newIdempotencyKey()): Promise<FenceAndRetryResponse> {
+    try {
+      const response = await apiClient.post<FenceAndRetryResponse>(
+        `/api/workspaces/${workspaceId}/runs/${runId}/fence-and-retry`,
+        {},
+        { headers: { 'Idempotency-Key': idempotencyKey } },
+      );
+      return response.data;
+    } catch (error) {
+      throw toRunCommandError(error, 'Reset & relance impossible');
+    }
   }
 }
 

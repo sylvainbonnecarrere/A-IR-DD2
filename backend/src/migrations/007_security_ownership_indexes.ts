@@ -109,7 +109,7 @@ async function runUp(): Promise<void> {
         }
 
         const summary = await ensureSecurityOwnershipIndexes(db);
-        console.log(
+        console.debug(
             `[Migration 007] security ownership indexes: collections=${summary.collectionsFound} created=${summary.indexesCreated} skipped=${summary.indexesSkipped}`
         );
     } finally {

@@ -139,6 +139,10 @@ test('les nodes gardent la meme position apres navigation vers un autre ecran et
     await waitForStableCanvas(page);
     const before = await snapshot(page);
     console.log('BEFORE', JSON.stringify(before));
+
+    // ⭐ US-J7-13 : la barre de commandes V2 est montée sur la page carte (flux, pas overlay)
+    await expect(page.getByTestId('workflow-toolbar')).toBeVisible();
+    await expect(page.getByTestId('workflow-current-name')).toContainText('Workflow reentry');
     expect(before.nodes.length).toBe(3);
     expect(before.scrolled).toEqual([]);
 
@@ -152,6 +156,10 @@ test('les nodes gardent la meme position apres navigation vers un autre ecran et
         await waitForStableCanvas(page);
         const after = await snapshot(page);
         console.log(`AFTER${i}`, JSON.stringify(after));
+
+        // ⭐ US-J7-13 : toujours présent après re-entrée, positions viewport inchangées
+        await expect(page.getByTestId('workflow-toolbar')).toBeVisible();
+        await expect(page.getByTestId('workflow-current-name')).toContainText('Workflow reentry');
         expect(after.nodes).toEqual(before.nodes);
         expect(after.minimap).toEqual(before.minimap);
         expect(after.controls).toEqual(before.controls);

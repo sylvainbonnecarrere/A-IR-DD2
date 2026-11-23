@@ -4,8 +4,43 @@ import { CloseIcon } from './Icons';
 // --- Button ---
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline';
+  tone?: ButtonTone;
+  ref?: React.Ref<HTMLButtonElement>;
 };
-export const Button = ({ children, className = '', variant = 'primary', ...props }: ButtonProps) => {
+
+// ⭐ `tone` : couleur de robot pour uniformiser les boutons d'action des headers de pages
+// (classes littérales pour que Tailwind les compile ; sans tone = comportement historique).
+export type ButtonTone = 'indigo' | 'yellow' | 'cyan' | 'green' | 'blue' | 'red';
+
+const BUTTON_TONE_CLASSES: Record<ButtonTone, { solid: string; outline: string }> = {
+  indigo: {
+    solid: 'bg-indigo-600 hover:bg-indigo-700 text-white focus:ring-indigo-500 shadow-[0_0_12px_rgba(99,102,241,0.4)] hover:shadow-[0_0_18px_rgba(99,102,241,0.55)] transition-shadow',
+    outline: 'border-indigo-500/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20 focus:ring-indigo-400',
+  },
+  yellow: {
+    solid: 'bg-yellow-500 hover:bg-yellow-400 text-black focus:ring-yellow-400 shadow-[0_0_12px_rgba(234,179,8,0.45)] hover:shadow-[0_0_18px_rgba(234,179,8,0.6)] transition-shadow',
+    // ⭐ 2026-11-21 : au survol le bouton outline s'illumine (halo fort) et le fond passe en
+    // dégradé du jaune de la charte (ex. bouton « Gestion des fichiers »).
+    outline: 'border-yellow-500/50 bg-yellow-500/10 text-yellow-100 hover:bg-gradient-to-r hover:from-yellow-400/50 hover:via-yellow-500/25 hover:to-amber-400/40 hover:text-yellow-50 hover:border-yellow-400 hover:shadow-[0_0_18px_rgba(234,179,8,0.6)] focus:ring-yellow-400 transition-shadow',
+  },
+  cyan: {
+    solid: 'bg-cyan-600 hover:bg-cyan-700 text-white focus:ring-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.4)] hover:shadow-[0_0_18px_rgba(6,182,212,0.55)] transition-shadow',
+    outline: 'border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 focus:ring-cyan-400',
+  },
+  green: {
+    solid: 'bg-green-600 hover:bg-green-700 text-white focus:ring-green-500 shadow-[0_0_12px_rgba(34,197,94,0.45)] hover:shadow-[0_0_18px_rgba(34,197,94,0.6)] transition-shadow',
+    outline: 'border-green-500/40 bg-green-500/10 text-green-100 hover:bg-green-500/20 focus:ring-green-400',
+  },
+  blue: {
+    solid: 'bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.45)] hover:shadow-[0_0_18px_rgba(59,130,246,0.6)] transition-shadow',
+    outline: 'border-blue-500/40 bg-blue-500/10 text-blue-100 hover:bg-blue-500/20 focus:ring-blue-400',
+  },
+  red: {
+    solid: 'bg-red-600 hover:bg-red-700 text-white focus:ring-red-500 shadow-[0_0_12px_rgba(239,68,68,0.45)] hover:shadow-[0_0_18px_rgba(239,68,68,0.6)] transition-shadow',
+    outline: 'border-red-500/40 bg-red-500/10 text-red-100 hover:bg-red-500/20 focus:ring-red-400',
+  },
+};
+export const Button = ({ children, className = '', variant = 'primary', tone, ...props }: ButtonProps) => {
   const baseClasses = 'rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center';
   const variantClasses = {
     primary: 'bg-indigo-600 hover:bg-indigo-700 text-white focus:ring-indigo-500 px-4 py-2 font-semibold text-sm',
@@ -14,8 +49,16 @@ export const Button = ({ children, className = '', variant = 'primary', ...props
     danger: 'bg-red-600 hover:bg-red-700 text-white focus:ring-red-500 px-4 py-2 font-semibold text-sm',
     outline: 'bg-transparent border-2 hover:bg-gray-700/50 focus:ring-gray-500 px-4 py-2 font-semibold text-sm',
   };
+  let variantClass = variantClasses[variant];
+  if (tone) {
+    if (variant === 'primary') {
+      variantClass = `${BUTTON_TONE_CLASSES[tone].solid} px-4 py-2 font-semibold text-sm`;
+    } else if (variant === 'outline') {
+      variantClass = `border ${BUTTON_TONE_CLASSES[tone].outline} px-4 py-2 font-semibold text-sm`;
+    }
+  }
   return (
-    <button className={`${baseClasses} ${variantClasses[variant]} ${className}`} {...props}>
+    <button className={`${baseClasses} ${variantClass} ${className}`} {...props}>
       {children}
     </button>
   );

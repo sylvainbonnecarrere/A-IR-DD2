@@ -267,4 +267,62 @@ describe('WorkflowCanvas drag anti-collision', () => {
         });
         expect(onUpdateNodePosition).not.toHaveBeenCalled();
     });
+
+    it('resolves a second immediate drag from the last applied position, not from the stale event node', () => {
+        // Reproduit le comportement d'App : handleUpdateNodePosition écrit la position dans le store.
+        const onUpdateNodePosition = jest.fn((nodeId: string, position: { x: number; y: number }) => {
+            workflowCanvasHarness.designStore = {
+                ...workflowCanvasHarness.designStore,
+                nodes: workflowCanvasHarness.designStore.nodes.map((n: any) => n.id === nodeId ? { ...n, position } : n),
+                agentInstances: workflowCanvasHarness.designStore.agentInstances.map((i: any) => i.id === `instance-${nodeId.replace('node-', '')}` ? { ...i, position } : i),
+            };
+        });
+
+        render(<WorkflowCanvas workflowName="QA Workflow" onUpdateNodePosition={onUpdateNodePosition} />);
+
+        // Premier drag : drop en collision avec node-1, résolu par collision.
+        act(() => {
+            workflowCanvasHarness.capturedOnNodesChange?.([
+                { id: 'node-2', type: 'position', position: { x: 20, y: 20 }, dragging: true },
+            ]);
+            workflowCanvasHarness.capturedOnNodeDragStop?.({}, {
+                id: 'node-2',
+                position: { x: 20, y: 20 },
+                data: { workflowId: 'wf-1', agentInstance: { id: 'instance-2', workflowId: 'wf-1' } },
+                width: 384,
+                height: 460,
+            });
+        });
+
+        const firstCall = onUpdateNodePosition.mock.calls.find((c: any) => c[0] === 'node-2');
+        expect(firstCall).toBeDefined();
+        expect(firstCall[1].x).toBeGreaterThanOrEqual(380);
+        const resolvedAfterFirstDrop = { ...firstCall[1] };
+
+        onUpdateNodePosition.mockClear();
+
+        // Second drag immédiat vers une zone libre (700, 20) : le dernier changement de
+        // position appliqué est (700, 20), mais en mode contrôlé le `node` de l'événement
+        // dragStop provient du store interne de React Flow, en retard d'un rendu : il
+        // transporte encore la position d'avant le second drag.
+        act(() => {
+            workflowCanvasHarness.capturedOnNodesChange?.([
+                { id: 'node-2', type: 'position', position: { x: 700, y: 20 }, dragging: true },
+            ]);
+            workflowCanvasHarness.capturedOnNodeDragStop?.({}, {
+                id: 'node-2',
+                position: { ...resolvedAfterFirstDrop },
+                data: { workflowId: 'wf-1', agentInstance: { id: 'instance-2', workflowId: 'wf-1' } },
+                width: 384,
+                height: 460,
+            });
+        });
+
+        const secondCall = onUpdateNodePosition.mock.calls.find((c: any) => c[0] === 'node-2');
+        expect(secondCall).toBeDefined();
+        // Le lâcher doit être résolu depuis (700, 20) et non ramené à la position périmée.
+        expect(secondCall[1]).toEqual({ x: 700, y: 20 });
+        const renderedNode = getWorkflowCanvasHarness().renderedNodes.find((n: any) => n.id === 'node-2') as any;
+        expect(renderedNode.position).toEqual({ x: 700, y: 20 });
+    });
 });

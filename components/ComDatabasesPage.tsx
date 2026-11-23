@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useLocalization } from '../hooks/useLocalization';
 import { CheckCircleIcon, ChevronDownIcon, LoaderIcon, DatabaseIcon, XIcon, PlusIcon } from './Icons';
+import { Button } from './UI';
+import { RobotIndicator } from './RobotPageChrome';
+import { RobotId } from '../types';
 import ConnectionListItem, { IConnectionItem } from './com/ConnectionListItem';
 import DatabaseExplorer from './com/DatabaseExplorer';
 import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
@@ -538,22 +541,23 @@ export const ComDatabasesPage: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-3">
-              <button
+              {/* ⭐ Bouton au style commun Button, couleur COM = vert (tone) + halo */}
+              <Button
+                type="button"
                 onClick={() => {
                   setSelectedNodeId(null);
                   setShowCreateForm(true);
                 }}
-                className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg font-semibold hover:from-green-500 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/50"
+                variant="primary"
+                tone="green"
+                className="flex items-center space-x-2"
               >
                 <PlusIcon className="w-4 h-4" />
                 <span>{t('com_db_button_add')}</span>
-              </button>
+              </Button>
 
-              {/* Governance Indicator - COM Green */}
-              <div className="bg-green-500/20 border border-green-500/30 rounded-lg px-3 py-1.5 whitespace-nowrap">
-                <div className="text-xs text-green-300 font-medium">{t('current_robot_label')}</div>
-                <div className="text-sm text-green-100 font-bold">COM</div>
-              </div>
+              {/* Robot Indicator standard - COM = vert, toujours à droite */}
+              <RobotIndicator color="green" robotId={RobotId.Com} />
             </div>
           </div>
         </div>

@@ -512,7 +512,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             console.warn('[AuthContext] Cannot refresh LLM API keys: no access token');
             return;
         }
-        console.log('[AuthContext] 🔄 Refreshing LLM API keys...');
+        console.debug('[AuthContext] 🔄 Refreshing LLM API keys...');
         await refreshRuntimeConfigState(accessToken);
     }, [accessToken, refreshRuntimeConfigState]);
 

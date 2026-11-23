@@ -4,7 +4,7 @@ import config from './environment';
 const isTestEnvironment = process.env.NODE_ENV === 'test';
 const logInfo = (...args: unknown[]) => {
     if (!isTestEnvironment) {
-        console.log(...args);
+        console.debug(...args);
     }
 };
 const logWarn = (...args: unknown[]) => {

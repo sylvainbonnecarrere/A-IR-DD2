@@ -29,7 +29,7 @@ const buildSandboxRequiredResult = (toolName: string): object => ({
 
 
 export const executeTool = async (toolCall: ToolCall): Promise<object> => {
-    console.log(`Executing tool: ${toolCall.name} with args: ${toolCall.arguments}`);
+    console.debug(`Executing tool: ${toolCall.name} with args: ${toolCall.arguments}`);
     
     try {
         const args = JSON.parse(toolCall.arguments);

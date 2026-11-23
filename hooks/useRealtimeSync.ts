@@ -36,7 +36,7 @@ export const useRealtimeSync = ({
       const lastSync = lastSyncTime.current.get(`position_${data.nodeId}`) || 0;
       if (Date.now() - lastSync < syncCooldown) return;
       
-      console.log('[Realtime] Position reçue:', data);
+      console.debug('[Realtime] Position reçue:', data);
       onUpdateNodePosition(data.nodeId, data.position);
       lastSyncTime.current.set(`position_${data.nodeId}`, Date.now());
     };
@@ -45,7 +45,7 @@ export const useRealtimeSync = ({
       // Ignorer nos propres updates
       if (data.userId === currentUserId) return;
       
-      console.log('[Realtime] Message reçu:', data);
+      console.debug('[Realtime] Message reçu:', data);
       onUpdateNodeMessages(data.nodeId, (prev) => [...prev, data.message]);
     };
 
@@ -53,7 +53,7 @@ export const useRealtimeSync = ({
       // Ignorer nos propres updates
       if (data.userId === currentUserId) return;
       
-      console.log('[Realtime] Toggle minimize reçu:', data);
+      console.debug('[Realtime] Toggle minimize reçu:', data);
       onToggleNodeMinimize(data.nodeId);
     };
 

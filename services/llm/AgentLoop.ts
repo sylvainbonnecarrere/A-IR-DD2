@@ -540,8 +540,8 @@ export async function runAgentLoop(
                 };
             }
 
-            if (!response.toolCalls || response.toolCalls.length === 0) {
-
+            // ⭐ hygiène : le if imbriqué ci-dessous reprenait exactement la condition externe
+            // (toujours vraie ici) avec une indentation cassée — supprimé, retour aplati.
             return {
                 finalResponse: response.content,
                 toolCallLog,
@@ -549,7 +549,6 @@ export async function runAgentLoop(
                 finishReason: response.finishReason,
                 traceLog,
             };
-            }
         }
 
         // Append assistant turn to history

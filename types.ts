@@ -631,7 +631,7 @@ export interface ToolCallRecord {
   retryable?: boolean;
   deterministicFailure?: boolean;
   duplicateSuppressed?: boolean;
-  persistedRunStatus?: 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'timed_out';
+  persistedRunStatus?: import('./types/function.types').FunctionRunStatus;
   persistedRunUpdatedAt?: string;
   artifacts?: Array<{
     path: string;

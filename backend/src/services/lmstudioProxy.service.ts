@@ -279,7 +279,7 @@ export async function detectAvailableEndpoint(): Promise<string> {
             const health = await checkLMStudioHealth(endpoint);
 
             if (health.healthy) {
-                console.log(`[LMStudio Proxy] Detected available endpoint: ${endpoint} (${health.models} models)`);
+                console.debug(`[LMStudio Proxy] Detected available endpoint: ${endpoint} (${health.models} models)`);
                 return endpoint;
             }
 

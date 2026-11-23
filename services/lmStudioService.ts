@@ -323,7 +323,7 @@ export const generateContentStream = async function* (
         timeout: LOCAL_LLM_RUNTIME_TIMEOUT_MS
     };
 
-    console.log(`[LMStudio] generateContentStream - endpoint: ${config.endpoint}, model: ${model}`);
+    console.debug(`[LMStudio] generateContentStream - endpoint: ${config.endpoint}, model: ${model}`);
 
     // Detect model capabilities from static model data (no API call)
     // NOTE: Removed detectAvailableModels() call here to avoid unnecessary /models requests
@@ -457,7 +457,7 @@ export const generateContentStream = async function* (
 
                         if (data.choices?.[0]?.finish_reason) {
                             if (toolCalls.length > 0) {
-                                console.log('[LMStudio] Completing with tool calls:', toolCalls);
+                                console.debug('[LMStudio] Completing with tool calls:', toolCalls);
                             } else if (tools && tools.length > 0) {
                                 console.warn(`[LMStudio] Model "${model}" did not return tool_calls. Function calling may not be supported by this model.`);
                             }
@@ -502,7 +502,7 @@ export const generateContent = async (
         timeout: LOCAL_LLM_RUNTIME_TIMEOUT_MS
     };
 
-    console.log(`[LMStudio] generateContent - endpoint: ${config.endpoint}, model: ${model}`);
+    console.debug(`[LMStudio] generateContent - endpoint: ${config.endpoint}, model: ${model}`);
 
     // Detect model capabilities from static model data (no API call)
     // NOTE: Removed detectAvailableModels() call here to avoid unnecessary /models requests

@@ -45,7 +45,7 @@ export class UserRepository implements IUserRepository {
         throw new Error(`User ${userId} not found`);
       }
 
-      console.log(`[UserRepository] Default workflow set for user ${userId}: ${defaultWorkflowId}`);
+      console.debug(`[UserRepository] Default workflow set for user ${userId}: ${defaultWorkflowId}`);
       return user;
     } catch (error) {
       console.error(`[UserRepository] setDefaultWorkflow error:`, error);
@@ -70,7 +70,7 @@ export class UserRepository implements IUserRepository {
         throw new Error(`User ${userId} not found`);
       }
 
-      console.log(`[UserRepository] Last active workflow set for user ${userId}: ${workflowId}`);
+      console.debug(`[UserRepository] Last active workflow set for user ${userId}: ${workflowId}`);
       return user;
     } catch (error) {
       console.error(`[UserRepository] setLastActiveWorkflow error:`, error);
@@ -95,7 +95,7 @@ export class UserRepository implements IUserRepository {
         throw new Error(`User ${userId} not found`);
       }
 
-      console.log(`[UserRepository] Workflow count synced for user ${userId}: ${workflowCount}`);
+      console.debug(`[UserRepository] Workflow count synced for user ${userId}: ${workflowCount}`);
       return user;
     } catch (error) {
       console.error(`[UserRepository] syncWorkflowCount error:`, error);

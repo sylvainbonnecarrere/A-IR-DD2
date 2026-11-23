@@ -8,7 +8,7 @@ const legacyEnvWarnings: string[] = [];
 // src est à src/, donc ../ = backend/, ../../ = racine du projet
 const envPath = path.resolve(__dirname, '../../.env');
 if (!isTestEnvironment) {
-    console.log(`📁 Loading .env from: ${envPath}`);
+    console.debug(`📁 Loading .env from: ${envPath}`);
 }
 
 const result = dotenv.config({ 
@@ -123,7 +123,7 @@ export function validateConfig(): void {
             console.warn('⚠️  Legacy environment variables detected:');
             legacyEnvWarnings.forEach((warning) => console.warn(`   - ${warning}`));
         }
-        console.log('✅ Configuration validated');
+        console.debug('✅ Configuration validated');
     }
 }
 

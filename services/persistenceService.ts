@@ -354,7 +354,7 @@ export async function saveWorkflow(
                 localStorage.setItem(GUEST_STORAGE_KEYS.WORKFLOW_EDGES, JSON.stringify(data.edges));
             }
             
-            console.log('[PersistenceService] Workflow saved to localStorage');
+            console.debug('[PersistenceService] Workflow saved to localStorage');
             return { success: true };
         }
 
@@ -396,7 +396,7 @@ export async function saveWorkflow(
             };
         }
 
-        console.log('[PersistenceService] Workflow saved to API');
+        console.debug('[PersistenceService] Workflow saved to API');
         return { success: true };
         
     } catch (err) {
@@ -462,7 +462,7 @@ export async function createAgentInstance(
             });
             
             localStorage.setItem(GUEST_STORAGE_KEYS.AGENT_INSTANCES, JSON.stringify(instances));
-            console.log('[PersistenceService] ✅ Agent instance created in localStorage:', data.id);
+            console.debug('[PersistenceService] ✅ Agent instance created in localStorage:', data.id);
             return { success: true, backendId: data.id };
         }
 
@@ -480,7 +480,7 @@ export async function createAgentInstance(
             };
         }
 
-        console.log('[PersistenceService] 📤 Creating agent instance:', {
+        console.debug('[PersistenceService] 📤 Creating agent instance:', {
             workflowId,
             prototypeId: data.prototypeId,
             name: data.name,
@@ -512,7 +512,7 @@ export async function createAgentInstance(
         }
 
         const response_data = await response.json();
-        console.log('[PersistenceService] ✅ Agent instance created in DB:', response_data.instance?._id || response_data._id);
+        console.debug('[PersistenceService] ✅ Agent instance created in DB:', response_data.instance?._id || response_data._id);
         
         // ✅ ÉTAPE 2: Retourner l'instance complète avec configuration_json
         // Le backend retourne { instance: {..., configuration_json}, node: {...} }
@@ -554,7 +554,7 @@ export async function saveAgentInstance(
             }
             
             localStorage.setItem(GUEST_STORAGE_KEYS.AGENT_INSTANCES, JSON.stringify(instances));
-            console.log('[PersistenceService] Agent instance saved to localStorage');
+            console.debug('[PersistenceService] Agent instance saved to localStorage');
             return { success: true };
         }
 
@@ -582,7 +582,7 @@ export async function saveAgentInstance(
             };
         }
 
-        console.log('[PersistenceService] Agent instance saved to API');
+        console.debug('[PersistenceService] Agent instance saved to API');
         return { success: true };
         
     } catch (err) {
@@ -640,7 +640,7 @@ export async function addAgentInstanceContent(
             }
             
             localStorage.setItem(GUEST_STORAGE_KEYS.AGENT_INSTANCES, JSON.stringify(instances));
-            console.log('[PersistenceService] Content added to localStorage');
+            console.debug('[PersistenceService] Content added to localStorage');
             return { success: true };
         }
 
@@ -673,7 +673,7 @@ export async function addAgentInstanceContent(
             };
         }
 
-        console.log('[PersistenceService] Content added via journal API');
+        console.debug('[PersistenceService] Content added via journal API');
         return { success: true };
         
     } catch (err) {

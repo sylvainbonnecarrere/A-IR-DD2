@@ -161,8 +161,8 @@ const WorkflowCard: React.FC<WorkflowCardProps> = ({
         variant={isActive ? 'secondary' : 'primary'}
         className={`w-full text-sm ${
           isActive
-            ? 'bg-yellow-500 text-black cursor-default hover:bg-yellow-500'
-            : 'bg-yellow-500 text-black hover:bg-yellow-400'
+            ? '!bg-yellow-400 !text-black cursor-default hover:!bg-yellow-400 disabled:!opacity-100 shadow-[0_0_12px_rgba(250,204,21,0.45)]'
+            : '!bg-yellow-600 !text-yellow-100 hover:!bg-yellow-500'
         }`}
         onClick={onSelect}
         disabled={isActive}
