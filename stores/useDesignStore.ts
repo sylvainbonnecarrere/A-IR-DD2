@@ -33,9 +33,9 @@ export interface ResolvedAgentExecutionSelectionContext extends AgentExecutionSe
 
 /**
  * Design Domain Store - Gère les prototypes et définitions statiques
- * Responsabilité : CRUD des agents, configuration des workflows, 
+ * Responsabilité : CRUD des agents, configuration des workflows,
  * données persistantes et sérialisables
- * 
+ *
  * PHASE 1A: Séparation Prototype vs Instance
  * PHASE 2: Multiple Workflows Management
  */
@@ -53,7 +53,7 @@ interface DesignStore {
   // V2 Workflow Design
   nodes: V2WorkflowNode[];
   edges: V2WorkflowEdge[];
-  
+
   // ⭐ PHASE 2: Multiple Workflows
   workflows: Workflow[];
   currentWorkflowId: string | null;
@@ -65,13 +65,17 @@ interface DesignStore {
   setCurrentRobot: (robotId: RobotId) => void;
 
   // Actions - Agents (Prototypes) with Governance
-  addAgent: (agent: Omit<Agent, 'id' | 'creator_id' | 'created_at' | 'updated_at'>) => { success: boolean; error?: string; agentId?: string };
+  addAgent: (agent: Omit<Agent, 'id' | 'creator_id' | 'created_at' | 'updated_at'>) => {
+    success: boolean;
+    error?: string;
+    agentId?: string;
+  };
   updateAgent: (id: string, agent: Partial<Agent>) => { success: boolean; error?: string };
   updateAgentId: (tempId: string, realObjectId: string) => { success: boolean; error?: string };
   deleteAgent: (id: string, options?: { deleteInstances?: boolean }) => { success: boolean; error?: string };
   selectAgent: (id: string | null) => void;
 
-  // Actions - Agent Instances  
+  // Actions - Agent Instances
   addAgentInstance: (prototypeId: string, position: { x: number; y: number }, name?: string, workflowId?: string) => string;
   updateAgentInstance: (id: string, updates: Partial<AgentInstance>) => void;
   updateInstanceId: (tempId: string, realId: string) => void;
@@ -90,7 +94,7 @@ interface DesignStore {
     instances: number;
     nodes: number;
     orphanedInstances: number;
-    integrity: string
+    integrity: string;
   };
   getPrototypeImpact: (prototypeId: string) => {
     instanceCount: number;
@@ -99,7 +103,7 @@ interface DesignStore {
     nodes: V2WorkflowNode[];
   };
 
-  // Actions - Workflow Design  
+  // Actions - Workflow Design
   addNode: (node: Omit<V2WorkflowNode, 'id'>) => void;
   updateNode: (id: string, updates: Partial<V2WorkflowNode>) => void;
   deleteNode: (id: string) => void;
@@ -109,7 +113,7 @@ interface DesignStore {
   // Utility
   getAgentsByRobot: (robotId: RobotId) => Agent[];
   clearWorkflow: () => void;
-  
+
   // ⭐ ÉTAPE 2.2-2.3: Reset & Hydration
   resetAll: () => void;
   hydrateFromServer: (data: {
@@ -118,13 +122,13 @@ interface DesignStore {
     nodes?: V2WorkflowNode[];
     edges?: V2WorkflowEdge[];
   }) => void;
-  
+
   // ⭐ Direct setters for testing and hydration
   setAgents: (agents: Agent[]) => void;
   setAgentInstances: (instances: AgentInstance[]) => void;
   setNodes: (nodes: V2WorkflowNode[]) => void;
   setEdges: (edges: V2WorkflowEdge[]) => void;
-  
+
   // ⭐ PHASE 2: Multiple Workflows Actions
   setWorkflows: (workflows: Workflow[]) => void;
   setCurrentWorkflowId: (id: string | null) => void;
@@ -142,12 +146,10 @@ export function selectAgentExecutionSelectionContext(
   state: Pick<DesignStore, 'agentInstances'>,
   agent: Agent | null,
   instanceId: string | undefined,
-  availableFunctions: UserFunction[]
+  availableFunctions: UserFunction[],
 ): AgentExecutionSelectionContext {
   const agentInstances = state.agentInstances ?? [];
-  const agentInstance = instanceId
-    ? agentInstances.find((instance) => instance.id === instanceId)
-    : undefined;
+  const agentInstance = instanceId ? agentInstances.find((instance) => instance.id === instanceId) : undefined;
 
   if (!agent) {
     return {
@@ -166,22 +168,17 @@ export function selectAgentExecutionSelectionContext(
   };
 }
 
-export function selectStoredAgentPrototype(
-  state: Pick<DesignStore, 'agents'>,
-  agentId: string | undefined
-): Agent | undefined {
+export function selectStoredAgentPrototype(state: Pick<DesignStore, 'agents'>, agentId: string | undefined): Agent | undefined {
   const agents = state.agents ?? [];
 
-  return agentId
-    ? agents.find((candidate) => candidate.id === agentId)
-    : undefined;
+  return agentId ? agents.find((candidate) => candidate.id === agentId) : undefined;
 }
 
 export function selectResolvedAgentExecutionSelectionContext(
   state: Pick<DesignStore, 'agents' | 'agentInstances'>,
   agent: Agent | null,
   instanceId: string | undefined,
-  availableFunctions: UserFunction[]
+  availableFunctions: UserFunction[],
 ): ResolvedAgentExecutionSelectionContext {
   const storedPrototype = selectStoredAgentPrototype(state, agent?.id);
   const resolvedAgent = storedPrototype ?? agent;
@@ -199,13 +196,11 @@ export function selectResolvedAgentHasToolNamed(
   agent: Agent | null,
   instanceId: string | undefined,
   availableFunctions: UserFunction[],
-  toolName: string
+  toolName: string,
 ): boolean {
   const { resolvedAgent, agentInstance } = selectResolvedAgentExecutionSelectionContext(state, agent, instanceId, availableFunctions);
 
-  return resolvedAgent
-    ? hasSelectedToolNamed(resolvedAgent, agentInstance, availableFunctions, toolName)
-    : false;
+  return resolvedAgent ? hasSelectedToolNamed(resolvedAgent, agentInstance, availableFunctions, toolName) : false;
 }
 
 export const useDesignStore = create<DesignStore>((set, get) => ({
@@ -216,7 +211,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   agentInstances: [],
   nodes: [],
   edges: [],
-  
+
   // ⭐ PHASE 2: Multiple Workflows - Initial state
   workflows: [],
   currentWorkflowId: null,
@@ -238,32 +233,27 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       id: `agent-${Date.now()}`,
       creator_id: state.currentRobotId,
       created_at: currentTime,
-      updated_at: currentTime
+      updated_at: currentTime,
     };
 
     // Validate governance
-    const validation = GovernanceService.enforceGovernance(
-      fullAgent,
-      'agent',
-      'create',
-      state.currentRobotId
-    );
+    const validation = GovernanceService.enforceGovernance(fullAgent, 'agent', 'create', state.currentRobotId);
 
     if (!validation.success) {
       return {
         success: false,
-        error: validation.error
+        error: validation.error,
       };
     }
 
     // Add agent if validation passes
     set((state) => ({
-      agents: [...state.agents, fullAgent]
+      agents: [...state.agents, fullAgent],
     }));
 
     return {
       success: true,
-      agentId: fullAgent.id
+      agentId: fullAgent.id,
     };
   },
 
@@ -271,17 +261,12 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     const state = get();
 
     // Governance validation
-    const validation = GovernanceService.enforceGovernance(
-      { creator_id: state.currentRobotId } as any,
-      'agent',
-      'modify',
-      state.currentRobotId
-    );
+    const validation = GovernanceService.enforceGovernance({ creator_id: state.currentRobotId }, 'agent', 'modify', state.currentRobotId);
 
     if (!validation.success) {
       return {
         success: false,
-        error: validation.error
+        error: validation.error,
       };
     }
 
@@ -289,7 +274,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       // Add updated_at timestamp for modifications
       const updatesWithTimestamp = {
         ...updates,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       };
 
       // PRINCIPE DE NON-AFFECTATION STRICT:
@@ -297,9 +282,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       // Les instances existantes conservent TOUTES leurs configurations actuelles.
       // Seules les FUTURES instances créées après cette modification utiliseront la nouvelle définition.
 
-      const updatedAgents = state.agents.map(agent =>
-        agent.id === id ? { ...agent, ...updatesWithTimestamp } : agent
-      );
+      const updatedAgents = state.agents.map((agent) => (agent.id === id ? { ...agent, ...updatesWithTimestamp } : agent));
 
       // NE PAS MODIFIER les instances existantes - elles restent inchangées
       // Ceci garantit que les agents déployés conservent leurs configurations personnalisées
@@ -322,22 +305,20 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     const state = get();
 
     // Find agent with tempId
-    const agentToUpdate = state.agents.find(a => a.id === tempId);
+    const agentToUpdate = state.agents.find((a) => a.id === tempId);
     if (!agentToUpdate) {
       return {
         success: false,
-        error: `Agent avec ID temporaire "${tempId}" non trouvé`
+        error: `Agent avec ID temporaire "${tempId}" non trouvé`,
       };
     }
 
     // Update agent ID in agents array
     set((state) => ({
-      agents: state.agents.map(agent =>
-        agent.id === tempId ? { ...agent, id: realObjectId } : agent
-      ),
+      agents: state.agents.map((agent) => (agent.id === tempId ? { ...agent, id: realObjectId } : agent)),
       // Update all instances that reference this prototype
-      agentInstances: state.agentInstances.map(instance =>
-        instance.prototypeId === tempId ? { ...instance, prototypeId: realObjectId } : instance
+      agentInstances: state.agentInstances.map((instance) =>
+        instance.prototypeId === tempId ? { ...instance, prototypeId: realObjectId } : instance,
       ),
       // Update selected agent if it's the one being updated
       selectedAgentId: state.selectedAgentId === tempId ? realObjectId : state.selectedAgentId,
@@ -353,50 +334,41 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     const state = get();
 
     // Governance validation
-    const validation = GovernanceService.enforceGovernance(
-      { creator_id: state.currentRobotId } as any,
-      'agent',
-      'delete',
-      state.currentRobotId
-    );
+    const validation = GovernanceService.enforceGovernance({ creator_id: state.currentRobotId }, 'agent', 'delete', state.currentRobotId);
 
     if (!validation.success) {
       return {
         success: false,
-        error: validation.error
+        error: validation.error,
       };
     }
 
     if (options.deleteInstances) {
       // Suppression complète : prototype + instances + nodes
-      const instancesToDelete = state.agentInstances
-        .filter(instance => instance.prototypeId === id)
-        .map(instance => instance.id);
+      const instancesToDelete = state.agentInstances.filter((instance) => instance.prototypeId === id).map((instance) => instance.id);
 
       // Identify nodes to delete (nodes with instances belonging to this prototype)
       const nodesToDelete = state.nodes
-        .filter(node => {
+        .filter((node) => {
           const instanceId = node.data.agentInstance?.id;
           return instanceId && instancesToDelete.includes(instanceId);
         })
-        .map(node => node.id);
+        .map((node) => node.id);
 
       set((state) => ({
-        agents: state.agents.filter(agent => agent.id !== id),
+        agents: state.agents.filter((agent) => agent.id !== id),
         selectedAgentId: state.selectedAgentId === id ? null : state.selectedAgentId,
         // Remove related instances
-        agentInstances: state.agentInstances.filter(instance => instance.prototypeId !== id),
+        agentInstances: state.agentInstances.filter((instance) => instance.prototypeId !== id),
         // Remove related nodes
-        nodes: state.nodes.filter(node => !nodesToDelete.includes(node.id)),
+        nodes: state.nodes.filter((node) => !nodesToDelete.includes(node.id)),
         // Remove related edges (edges connected to deleted nodes)
-        edges: state.edges.filter(edge =>
-          !nodesToDelete.includes(edge.source) && !nodesToDelete.includes(edge.target)
-        )
+        edges: state.edges.filter((edge) => !nodesToDelete.includes(edge.source) && !nodesToDelete.includes(edge.target)),
       }));
     } else {
       // Suppression du prototype uniquement : les instances deviennent orphelines
       set((state) => ({
-        agents: state.agents.filter(agent => agent.id !== id),
+        agents: state.agents.filter((agent) => agent.id !== id),
         selectedAgentId: state.selectedAgentId === id ? null : state.selectedAgentId,
         // Ne PAS supprimer les instances ni les nodes - ils restent orphelins
       }));
@@ -417,7 +389,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
 
   // Agent Instance actions
   addAgentInstance: (prototypeId, position, name, workflowId) => {
-    const prototype = get().agents.find(a => a.id === prototypeId);
+    const prototype = get().agents.find((a) => a.id === prototypeId);
     if (!prototype) throw new Error(`Prototype ${prototypeId} not found`);
 
     const instanceId = `instance-${Date.now()}`;
@@ -438,7 +410,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       links: [],
       tasks: [],
       logs: [],
-      errors: []
+      errors: [],
     };
 
     const instance: AgentInstance = {
@@ -449,90 +421,86 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       position,
       isMinimized: false,
       isMaximized: false,
-      configuration_json // ✅ Configuration clonée et isolée
+      configuration_json, // ✅ Configuration clonée et isolée
     };
 
     set((state) => ({
-      agentInstances: [...state.agentInstances, instance]
+      agentInstances: [...state.agentInstances, instance],
     }));
 
     return instanceId;
   },
 
-  updateAgentInstance: (id, updates) => set((state) => ({
-    agentInstances: state.agentInstances.map(instance =>
-      instance.id === id ? { ...instance, ...updates } : instance
-    )
-  })),
+  updateAgentInstance: (id, updates) =>
+    set((state) => ({
+      agentInstances: state.agentInstances.map((instance) => (instance.id === id ? { ...instance, ...updates } : instance)),
+    })),
 
   /**
    * Replace temporary instance ID (created locally) with real ID from backend
    * Called after successful API creation of AgentInstance
-   * 
+   *
    * ⭐ ÉTAPE 1 FIX: Also renames the node ID from 'node-tempId' to 'node-realId'
    * This ensures node.id matches instance.id, fixing "Instance non trouvée" errors
    */
-  updateInstanceId: (tempId, realId) => set((state) => ({
-    agentInstances: state.agentInstances.map(instance =>
-      instance.id === tempId ? { ...instance, id: realId } : instance
-    ),
-    // ⭐ CRITICAL: Update nodes that reference this instance
-    // Both rename the node ID itself AND update the instance reference inside
-    nodes: state.nodes.map(node => {
-      // Check if node references this instance (by old tempId)
-      if (node.data.agentInstance?.id === tempId) {
-        return {
-          ...node,
-          // ⭐ ÉTAPE 1 FIX: Rename the node ID itself from 'node-tempId' to 'node-realId'
-          id: `node-${realId}`,
-          data: {
-            ...node.data,
-            agentInstance: {
-              ...node.data.agentInstance,
-              id: realId  // Also update the instance reference inside
-            }
-          }
-        };
-      }
-      return node;
-    })
-  })),
+  updateInstanceId: (tempId, realId) =>
+    set((state) => ({
+      agentInstances: state.agentInstances.map((instance) => (instance.id === tempId ? { ...instance, id: realId } : instance)),
+      // ⭐ CRITICAL: Update nodes that reference this instance
+      // Both rename the node ID itself AND update the instance reference inside
+      nodes: state.nodes.map((node) => {
+        // Check if node references this instance (by old tempId)
+        if (node.data.agentInstance?.id === tempId) {
+          return {
+            ...node,
+            // ⭐ ÉTAPE 1 FIX: Rename the node ID itself from 'node-tempId' to 'node-realId'
+            id: `node-${realId}`,
+            data: {
+              ...node.data,
+              agentInstance: {
+                ...node.data.agentInstance,
+                id: realId, // Also update the instance reference inside
+              },
+            },
+          };
+        }
+        return node;
+      }),
+    })),
 
-  updateInstanceConfig: (id, configUpdates) => set((state) => ({
-    agentInstances: state.agentInstances.map(instance => {
-      if (instance.id !== id) return instance;
+  updateInstanceConfig: (id, configUpdates) =>
+    set((state) => ({
+      agentInstances: state.agentInstances.map((instance) => {
+        if (instance.id !== id) return instance;
 
-      // Fusionner les mises à jour avec la configuration existante
-      const updatedConfig = instance.configuration_json
-        ? { ...instance.configuration_json, ...configUpdates }
-        : configUpdates;
+        // Fusionner les mises à jour avec la configuration existante
+        const updatedConfig: AgentInstance['configuration_json'] = instance.configuration_json
+          ? { ...instance.configuration_json, ...configUpdates }
+          : (configUpdates as AgentInstance['configuration_json']);
 
-      return { ...instance, configuration_json: updatedConfig as any };
-    })
-  })),
+        return { ...instance, configuration_json: updatedConfig };
+      }),
+    })),
 
-  deleteAgentInstance: (id) => set((state) => {
-    // Find nodes to delete (nodes with this instance)
-    const nodesToDelete = state.nodes
-      .filter(node => node.data.agentInstance?.id === id)
-      .map(node => node.id);
+  deleteAgentInstance: (id) =>
+    set((state) => {
+      // Find nodes to delete (nodes with this instance)
+      const nodesToDelete = state.nodes.filter((node) => node.data.agentInstance?.id === id).map((node) => node.id);
 
-    return {
-      agentInstances: state.agentInstances.filter(instance => instance.id !== id),
-      nodes: state.nodes.filter(node => node.data.agentInstance?.id !== id),
-      // Also delete edges connected to these nodes
-      edges: state.edges.filter(edge =>
-        !nodesToDelete.includes(edge.source) && !nodesToDelete.includes(edge.target)
-      )
-    };
-  }),
+      return {
+        agentInstances: state.agentInstances.filter((instance) => instance.id !== id),
+        nodes: state.nodes.filter((node) => node.data.agentInstance?.id !== id),
+        // Also delete edges connected to these nodes
+        edges: state.edges.filter((edge) => !nodesToDelete.includes(edge.source) && !nodesToDelete.includes(edge.target)),
+      };
+    }),
 
   getResolvedInstance: (instanceId) => {
     const state = get();
-    const instance = state.agentInstances.find(i => i.id === instanceId);
+    const instance = state.agentInstances.find((i) => i.id === instanceId);
     if (!instance) return undefined;
 
-    const prototype = state.agents.find(a => a.id === instance.prototypeId);
+    const prototype = state.agents.find((a) => a.id === instance.prototypeId);
     if (!prototype) return undefined;
 
     return { instance, prototype };
@@ -540,7 +508,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
 
   getInstancesOfPrototype: (prototypeId) => {
     // Return all instances of this prototype (they should match nodes 1:1 if cleanup is correct)
-    return get().agentInstances.filter(instance => instance.prototypeId === prototypeId);
+    return get().agentInstances.filter((instance) => instance.prototypeId === prototypeId);
   },
 
   getInstanceCount: (prototypeId) => {
@@ -551,18 +519,18 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   // PHASE 1B: Orphan detection and cleanup
   detectOrphanedInstances: () => {
     const { agentInstances, agents } = get();
-    const existingPrototypeIds = new Set(agents.map(agent => agent.id));
+    const existingPrototypeIds = new Set(agents.map((agent) => agent.id));
 
-    return agentInstances.filter(instance => !existingPrototypeIds.has(instance.prototypeId));
+    return agentInstances.filter((instance) => !existingPrototypeIds.has(instance.prototypeId));
   },
 
   cleanupOrphanedInstances: () => {
     const orphanedInstances = get().detectOrphanedInstances();
-    const orphanedIds = orphanedInstances.map(instance => instance.id);
+    const orphanedIds = orphanedInstances.map((instance) => instance.id);
 
     if (orphanedIds.length > 0) {
-      set(state => ({
-        agentInstances: state.agentInstances.filter(instance => !orphanedIds.includes(instance.id))
+      set((state) => ({
+        agentInstances: state.agentInstances.filter((instance) => !orphanedIds.includes(instance.id)),
       }));
 
       console.debug(`🧹 Cleaned up ${orphanedIds.length} orphaned instances:`, orphanedIds);
@@ -573,21 +541,17 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
 
   validateWorkflowIntegrity: () => {
     const { nodes, agentInstances } = get();
-    const existingInstanceIds = new Set(agentInstances.map(instance => instance.id));
+    const existingInstanceIds = new Set(agentInstances.map((instance) => instance.id));
 
     // Find workflow nodes with missing agent instances
-    const orphanedNodes = nodes.filter(node =>
-      node.data.agentInstance && !existingInstanceIds.has(node.data.agentInstance.id)
-    );
+    const orphanedNodes = nodes.filter((node) => node.data.agentInstance && !existingInstanceIds.has(node.data.agentInstance.id));
 
     // Auto-fix by removing orphaned nodes
     if (orphanedNodes.length > 0) {
-      const orphanedNodeIds = orphanedNodes.map(node => node.id);
-      set(state => ({
-        nodes: state.nodes.filter(node => !orphanedNodeIds.includes(node.id)),
-        edges: state.edges.filter(edge =>
-          !orphanedNodeIds.includes(edge.source) && !orphanedNodeIds.includes(edge.target)
-        )
+      const orphanedNodeIds = orphanedNodes.map((node) => node.id);
+      set((state) => ({
+        nodes: state.nodes.filter((node) => !orphanedNodeIds.includes(node.id)),
+        edges: state.edges.filter((edge) => !orphanedNodeIds.includes(edge.source) && !orphanedNodeIds.includes(edge.target)),
       }));
 
       console.debug(`🔧 Fixed ${orphanedNodes.length} orphaned workflow nodes:`, orphanedNodeIds);
@@ -599,16 +563,17 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   getDiagnostics: () => {
     const { agents, agentInstances, nodes } = get();
     const orphanedInstances = get().detectOrphanedInstances();
-    const agentInstanceNodes = nodes.filter(node => node.data.agentInstance);
+    const agentInstanceNodes = nodes.filter((node) => node.data.agentInstance);
 
     return {
       prototypes: agents.length,
       instances: agentInstances.length,
       nodes: nodes.length,
       orphanedInstances: orphanedInstances.length,
-      integrity: orphanedInstances.length === 0 && agentInstanceNodes.length === agentInstances.length
-        ? 'OK'
-        : `${orphanedInstances.length} orphaned instances, ${agentInstanceNodes.length}/${agentInstances.length} instances in workflow`
+      integrity:
+        orphanedInstances.length === 0 && agentInstanceNodes.length === agentInstances.length
+          ? 'OK'
+          : `${orphanedInstances.length} orphaned instances, ${agentInstanceNodes.length}/${agentInstances.length} instances in workflow`,
     };
   },
 
@@ -616,61 +581,58 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     const state = get();
 
     // 1. Trouver les nodes actuellement déployés pour ce prototype
-    const affectedNodes = state.nodes.filter(node =>
-      node.data.agentInstance?.prototypeId === prototypeId
-    );
+    const affectedNodes = state.nodes.filter((node) => node.data.agentInstance?.prototypeId === prototypeId);
 
     // 2. Extraire les IDs des instances actuellement déployées
-    const deployedInstanceIds = new Set(
-      affectedNodes.map(node => node.data.agentInstance?.id).filter(Boolean) as string[]
-    );
+    const deployedInstanceIds = new Set(affectedNodes.map((node) => node.data.agentInstance?.id).filter(Boolean) as string[]);
 
     // 3. Ne compter que les instances qui sont effectivement déployées sur le workflow
-    const affectedInstances = state.agentInstances.filter(instance =>
-      instance.prototypeId === prototypeId && deployedInstanceIds.has(instance.id)
+    const affectedInstances = state.agentInstances.filter(
+      (instance) => instance.prototypeId === prototypeId && deployedInstanceIds.has(instance.id),
     );
 
     return {
       instanceCount: affectedInstances.length, // Nombre réel d'instances déployées
       nodeCount: affectedNodes.length,
       instances: affectedInstances,
-      nodes: affectedNodes
+      nodes: affectedNodes,
     };
   },
 
   // Workflow design actions
-  addNode: (nodeData) => set((state) => ({
-    nodes: [...state.nodes, { ...nodeData, id: `node-${Date.now()}` }]
-  })),
+  addNode: (nodeData) =>
+    set((state) => ({
+      nodes: [...state.nodes, { ...nodeData, id: `node-${Date.now()}` }],
+    })),
 
-  updateNode: (id, updates) => set((state) => ({
-    nodes: state.nodes.map(node =>
-      node.id === id ? { ...node, ...updates } : node
-    )
-  })),
+  updateNode: (id, updates) =>
+    set((state) => ({
+      nodes: state.nodes.map((node) => (node.id === id ? { ...node, ...updates } : node)),
+    })),
 
-  deleteNode: (id) => set((state) => {
-    // Find the node being deleted to get its instance ID
-    const nodeToDelete = state.nodes.find(node => node.id === id);
-    const instanceId = nodeToDelete?.data.agentInstance?.id;
+  deleteNode: (id) =>
+    set((state) => {
+      // Find the node being deleted to get its instance ID
+      const nodeToDelete = state.nodes.find((node) => node.id === id);
+      const instanceId = nodeToDelete?.data.agentInstance?.id;
 
-    return {
-      nodes: state.nodes.filter(node => node.id !== id),
-      edges: state.edges.filter(edge => edge.source !== id && edge.target !== id),
-      // CRITICAL: Also delete the associated agentInstance to maintain consistency
-      agentInstances: instanceId
-        ? state.agentInstances.filter(instance => instance.id !== instanceId)
-        : state.agentInstances
-    };
-  }),
+      return {
+        nodes: state.nodes.filter((node) => node.id !== id),
+        edges: state.edges.filter((edge) => edge.source !== id && edge.target !== id),
+        // CRITICAL: Also delete the associated agentInstance to maintain consistency
+        agentInstances: instanceId ? state.agentInstances.filter((instance) => instance.id !== instanceId) : state.agentInstances,
+      };
+    }),
 
-  addEdge: (edgeData) => set((state) => ({
-    edges: [...state.edges, { ...edgeData, id: `edge-${Date.now()}` }]
-  })),
+  addEdge: (edgeData) =>
+    set((state) => ({
+      edges: [...state.edges, { ...edgeData, id: `edge-${Date.now()}` }],
+    })),
 
-  deleteEdge: (id) => set((state) => ({
-    edges: state.edges.filter(edge => edge.id !== id)
-  })),
+  deleteEdge: (id) =>
+    set((state) => ({
+      edges: state.edges.filter((edge) => edge.id !== id),
+    })),
 
   // Utility functions
   getAgentsByRobot: (robotId) => {
@@ -679,33 +641,36 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     return state.agents;
   },
 
-  clearWorkflow: () => set({
-    nodes: [],
-    edges: []
-  }),
+  clearWorkflow: () =>
+    set({
+      nodes: [],
+      edges: [],
+    }),
 
   // ⭐ PHASE 2: Multiple Workflows Actions
   setWorkflows: (workflows) => set({ workflows }),
-  
+
   setCurrentWorkflowId: (id) => set({ currentWorkflowId: id }),
 
-  markWorkflowViewportFit: (workflowId, signature) => set((state) => ({
-    viewportFitHistory: {
-      ...state.viewportFitHistory,
-      [workflowId]: signature,
-    },
-  })),
+  markWorkflowViewportFit: (workflowId, signature) =>
+    set((state) => ({
+      viewportFitHistory: {
+        ...state.viewportFitHistory,
+        [workflowId]: signature,
+      },
+    })),
 
-  clearWorkflowViewportFit: (workflowId) => set((state) => {
-    if (!state.viewportFitHistory[workflowId]) {
-      return {};
-    }
+  clearWorkflowViewportFit: (workflowId) =>
+    set((state) => {
+      if (!state.viewportFitHistory[workflowId]) {
+        return {};
+      }
 
-    const nextHistory = { ...state.viewportFitHistory };
-    delete nextHistory[workflowId];
-    return { viewportFitHistory: nextHistory };
-  }),
-  
+      const nextHistory = { ...state.viewportFitHistory };
+      delete nextHistory[workflowId];
+      return { viewportFitHistory: nextHistory };
+    }),
+
   /**
    * Load all workflows for the current user
    * ⭐ V2: Utilise apiClient (auth + baseURL automatiques)
@@ -714,22 +679,22 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     set({ isLoadingWorkflows: true, workflowLoadError: null });
     try {
       console.debug('[Workflows] Attempting GET /api/workflows via apiClient');
-      
+
       const { data } = await apiClient.get('/api/workflows');
       const workflows: Workflow[] = data.workflows || data;
-      
+
       console.debug(`[Workflows] Primary endpoint returned ${workflows.length} workflows`);
-      
+
       // Auto-select active workflow
       const activeWorkflow = workflows.find((w: Workflow) => w.isActive);
-      
+
       set({
         workflows,
         currentWorkflowId: activeWorkflow?._id || (workflows.length > 0 ? workflows[0]._id : null),
         isLoadingWorkflows: false,
-        workflowLoadError: null
+        workflowLoadError: null,
       });
-      
+
       console.debug('[Workflows] State updated successfully');
     } catch (primaryError) {
       // ⭐ ROBUST FALLBACK: Try workspace endpoint if primary fails
@@ -740,34 +705,36 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
         if (!currentWorkflow) {
           throw new Error('No workflow in workspace response');
         }
-        
-        const workflows: Workflow[] = [{
-          _id: currentWorkflow._id || currentWorkflow.id,
-          userId: workspaceData.metadata?.userId || '',
-          name: currentWorkflow.name,
-          description: currentWorkflow.description || '',
-          isActive: currentWorkflow.isActive,
-          isDefault: currentWorkflow.isDefault || false,
-          createdAt: currentWorkflow.createdAt,
-          updatedAt: currentWorkflow.updatedAt
-        }];
-        
+
+        const workflows: Workflow[] = [
+          {
+            _id: currentWorkflow._id || currentWorkflow.id,
+            userId: workspaceData.metadata?.userId || '',
+            name: currentWorkflow.name,
+            description: currentWorkflow.description || '',
+            isActive: currentWorkflow.isActive,
+            isDefault: currentWorkflow.isDefault || false,
+            createdAt: currentWorkflow.createdAt,
+            updatedAt: currentWorkflow.updatedAt,
+          },
+        ];
+
         set({
           workflows,
           currentWorkflowId: workflows[0]._id,
           isLoadingWorkflows: false,
-          workflowLoadError: null
+          workflowLoadError: null,
         });
         console.debug('[Workflows] Successfully loaded 1 workflow via fallback endpoint');
       } catch (fallbackError) {
         const errorMsg = fallbackError instanceof Error ? fallbackError.message : 'Unknown error loading workflows';
         console.error('[Workflows] Fatal error:', errorMsg);
-      set({ workflowLoadError: errorMsg, isLoadingWorkflows: false });
+        set({ workflowLoadError: errorMsg, isLoadingWorkflows: false });
         throw fallbackError;
       }
     }
   },
-  
+
   /**
    * Create new workflow
    * ⭐ V2: Utilise apiClient
@@ -776,12 +743,12 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     set({ isLoadingWorkflows: true, workflowLoadError: null });
     try {
       const { data: newWorkflow } = await apiClient.post('/api/workflows', { name, description });
-      
+
       set((state) => ({
         workflows: [...state.workflows, newWorkflow],
-        isLoadingWorkflows: false
+        isLoadingWorkflows: false,
       }));
-      
+
       return newWorkflow;
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -789,7 +756,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       throw error;
     }
   },
-  
+
   /**
    * Update workflow (name/description/isDefault)
    * ⭐ V4: Accepte isDefault optionnel pour changer le workflow par défaut
@@ -802,20 +769,20 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
         body.isDefault = isDefault;
       }
       const { data: updatedWorkflow } = await apiClient.put(`/api/workflows/${id}`, body);
-      
+
       set((state) => {
-        let updatedWorkflows = state.workflows.map(w => w._id === id ? updatedWorkflow : w);
-        
+        let updatedWorkflows = state.workflows.map((w) => (w._id === id ? updatedWorkflow : w));
+
         // ⭐ V4: Si isDefault=true, retirer isDefault des autres workflows localement
         if (isDefault === true) {
-          updatedWorkflows = updatedWorkflows.map(w => 
-            w._id === id ? { ...w, ...updatedWorkflow, isDefault: true } : { ...w, isDefault: false }
+          updatedWorkflows = updatedWorkflows.map((w) =>
+            w._id === id ? { ...w, ...updatedWorkflow, isDefault: true } : { ...w, isDefault: false },
           );
         }
-        
+
         return {
           workflows: updatedWorkflows,
-          isLoadingWorkflows: false
+          isLoadingWorkflows: false,
         };
       });
     } catch (error) {
@@ -824,7 +791,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       throw error;
     }
   },
-  
+
   /**
    * Delete workflow - with cascade handling
    * ⭐ V2: Utilise apiClient
@@ -833,20 +800,20 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     set({ isLoadingWorkflows: true, workflowLoadError: null });
     try {
       await apiClient.delete(`/api/workflows/${id}`);
-      
+
       set((state) => {
-        const remaining = state.workflows.filter(w => w._id !== id);
-        
+        const remaining = state.workflows.filter((w) => w._id !== id);
+
         // If current workflow was deleted, auto-select another
         let nextWorkflowId = state.currentWorkflowId;
         if (state.currentWorkflowId === id && remaining.length > 0) {
           nextWorkflowId = remaining[0]._id;
         }
-        
+
         return {
           workflows: remaining,
           currentWorkflowId: nextWorkflowId,
-          isLoadingWorkflows: false
+          isLoadingWorkflows: false,
         };
       });
     } catch (error) {
@@ -855,16 +822,16 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       throw error;
     }
   },
-  
+
   /**
    * Get currently active workflow
    */
   getActiveWorkflow: () => {
     const state = get();
     if (!state.currentWorkflowId) return undefined;
-    return state.workflows.find(w => w._id === state.currentWorkflowId);
+    return state.workflows.find((w) => w._id === state.currentWorkflowId);
   },
-  
+
   /**
    * Get workflow statistics (agent/node counts)
    * ⭐ V2: Utilise apiClient
@@ -883,35 +850,32 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
    * ⭐ ÉTAPE 2.2: Reset complet du store pour wipe à la connexion
    * Appelé lors du login/logout pour éviter la fuite de données guest → auth
    */
-  resetAll: () => set({
-    currentRobotId: RobotId.Archi,
-    agents: [],
-    selectedAgentId: null,
-    agentInstances: [],
-    nodes: [],
-    edges: [],
-    workflows: [],
-    currentWorkflowId: null,
-    viewportFitHistory: {},
-    isLoadingWorkflows: false,
-    workflowLoadError: null
-  }),
+  resetAll: () =>
+    set({
+      currentRobotId: RobotId.Archi,
+      agents: [],
+      selectedAgentId: null,
+      agentInstances: [],
+      nodes: [],
+      edges: [],
+      workflows: [],
+      currentWorkflowId: null,
+      viewportFitHistory: {},
+      isLoadingWorkflows: false,
+      workflowLoadError: null,
+    }),
 
   /**
    * ⭐ ÉTAPE 2.3: Hydratation du store depuis les données serveur
    * Appelé après fetch /api/user/workspace
    */
-  hydrateFromServer: (data: {
-    agents?: Agent[];
-    agentInstances?: AgentInstance[];
-    nodes?: V2WorkflowNode[];
-    edges?: V2WorkflowEdge[];
-  }) => set({
-    agents: data.agents || [],
-    agentInstances: data.agentInstances || [],
-    nodes: data.nodes || [],
-    edges: data.edges || []
-  }),
+  hydrateFromServer: (data: { agents?: Agent[]; agentInstances?: AgentInstance[]; nodes?: V2WorkflowNode[]; edges?: V2WorkflowEdge[] }) =>
+    set({
+      agents: data.agents || [],
+      agentInstances: data.agentInstances || [],
+      nodes: data.nodes || [],
+      edges: data.edges || [],
+    }),
 
   /**
    * ⭐ Direct setters for testing and hydration
@@ -919,10 +883,10 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   setAgents: (agents) => set({ agents }),
   setAgentInstances: (instances) => set({ agentInstances: instances }),
   setNodes: (nodes) => set({ nodes }),
-  setEdges: (edges) => set({ edges })
+  setEdges: (edges) => set({ edges }),
 }));
 
 // PHASE 1B: Development debugging exposure
 if (typeof window !== 'undefined') {
-  (window as any).__DESIGN_STORE__ = useDesignStore;
+  (window as unknown as { __DESIGN_STORE__?: typeof useDesignStore }).__DESIGN_STORE__ = useDesignStore;
 }

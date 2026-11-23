@@ -1,5 +1,15 @@
 import { create } from 'zustand';
-import { ChatMessage, InvisibleHistorySummaryState, LLMConfig, LLMProvider, LocalLLMProfile, PendingNodeAttachment, RobotId } from '../types';
+import {
+  ChatMessage,
+  InvisibleHistorySummaryState,
+  LLMConfig,
+  LLMProvider,
+  LocalLLMProfile,
+  PendingNodeAttachment,
+  RobotId,
+  type Agent,
+  type AgentInstance,
+} from '../types';
 import type { FunctionRunRecord, FunctionRunStatus } from '../types/function.types';
 
 const isDevelopmentEnvironment = process.env.NODE_ENV !== 'production';
@@ -31,7 +41,7 @@ const mergeNodeMessages = (sourceMessages: ChatMessage[] = [], targetMessages: C
   });
 };
 
-const renameRecordKey = <T,>(
+const renameRecordKey = <T>(
   record: Record<string, T>,
   fromKey: string,
   toKey: string,
@@ -45,9 +55,7 @@ const renameRecordKey = <T,>(
   const sourceValue = nextRecord[fromKey];
   delete nextRecord[fromKey];
 
-  nextRecord[toKey] = merge
-    ? merge(sourceValue, nextRecord[toKey])
-    : sourceValue;
+  nextRecord[toKey] = merge ? merge(sourceValue, nextRecord[toKey]) : sourceValue;
 
   return nextRecord;
 };
@@ -118,8 +126,8 @@ interface RuntimeStore {
 
   // Fullscreen Chat State
   fullscreenChatNodeId: string | null; // nodeId for fullscreen chat mode
-  fullscreenChatAgent: any | null; // Agent object for fullscreen chat (V1 or V2)
-  fullscreenChatAgentInstance?: any | null; // ⭐ AgentInstance for accessing instanceId
+  fullscreenChatAgent: Agent | null; // Agent object for fullscreen chat (V1 or V2)
+  fullscreenChatAgentInstance?: AgentInstance | null; // ⭐ AgentInstance for accessing instanceId
 
   // Configuration Modal State
   configModalInstanceId: string | null; // instanceId for configuration modal
@@ -158,8 +166,8 @@ interface RuntimeStore {
   setImageModificationPanelOpen: (isOpen: boolean, imageInfo?: { nodeId: string; sourceImage: string; mimeType: string }) => void;
   setFullscreenImage: (image: { src: string; mimeType: string } | null) => void;
   setFullscreenChatNodeId: (nodeId: string | null) => void;
-  setFullscreenChatAgent: (agent: any | null) => void;
-  setFullscreenChatAgentInstance?: (agentInstance: any | null) => void; // ⭐ setter for instanceId
+  setFullscreenChatAgent: (agent: Agent | null) => void;
+  setFullscreenChatAgentInstance?: (agentInstance: AgentInstance | null) => void; // ⭐ setter for instanceId
   setConfigModalInstanceId: (instanceId: string | null) => void;
   setNavigationHandler: (handler: ((robotId: RobotId, path: string) => void) | null) => void;
 
@@ -177,10 +185,10 @@ interface RuntimeStore {
   getNodePendingAttachment: (nodeId: string) => PendingNodeAttachment | null;
   isNodeExecuting: (nodeId: string) => boolean;
   getIsNodeMinimized: (nodeId: string) => boolean;
-  
+
   // ⭐ ÉTAPE 2.2: Reset complet pour wipe à la connexion
   resetAll: () => void;
-  
+
   // ⭐ V2: Reset pour switch de workflow (préserve llmConfigs qui sont user-level)
   resetForWorkflowSwitch: () => void;
 }
@@ -188,7 +196,16 @@ interface RuntimeStore {
 const normalizeRuntimeStatus = (event: RuntimeEventEnvelope): string | null => {
   const payloadStatus = typeof event.payload?.status === 'string' ? event.payload.status : null;
 
-  if (payloadStatus === 'queued' || payloadStatus === 'running' || payloadStatus === 'completed' || payloadStatus === 'failed' || payloadStatus === 'stopped' || payloadStatus === 'timed_out' || payloadStatus === 'worker_lost' || payloadStatus === 'quarantined') {
+  if (
+    payloadStatus === 'queued' ||
+    payloadStatus === 'running' ||
+    payloadStatus === 'completed' ||
+    payloadStatus === 'failed' ||
+    payloadStatus === 'stopped' ||
+    payloadStatus === 'timed_out' ||
+    payloadStatus === 'worker_lost' ||
+    payloadStatus === 'quarantined'
+  ) {
     return payloadStatus;
   }
 
@@ -240,172 +257,183 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   lastSavedAt: {}, // ⭐ ÉTAPE 3: Track last save timestamp per node
 
   // Message actions
-  setNodeMessages: (nodeId, messages) => set((state) => ({
-    nodeMessages: { ...state.nodeMessages, [nodeId]: messages }
-  })),
+  setNodeMessages: (nodeId, messages) =>
+    set((state) => ({
+      nodeMessages: { ...state.nodeMessages, [nodeId]: messages },
+    })),
 
-  addNodeMessage: (nodeId, message) => set((state) => ({
-    nodeMessages: {
-      ...state.nodeMessages,
-      [nodeId]: [...(state.nodeMessages[nodeId] || []), message]
-    }
-  })),
+  addNodeMessage: (nodeId, message) =>
+    set((state) => ({
+      nodeMessages: {
+        ...state.nodeMessages,
+        [nodeId]: [...(state.nodeMessages[nodeId] || []), message],
+      },
+    })),
 
-  updateNodeMessage: (nodeId, messageId, updates) => set((state) => ({
-    nodeMessages: {
-      ...state.nodeMessages,
-      [nodeId]: (state.nodeMessages[nodeId] || []).map(msg =>
-        msg.id === messageId ? { ...msg, ...updates } : msg
-      )
-    }
-  })),
+  updateNodeMessage: (nodeId, messageId, updates) =>
+    set((state) => ({
+      nodeMessages: {
+        ...state.nodeMessages,
+        [nodeId]: (state.nodeMessages[nodeId] || []).map((msg) => (msg.id === messageId ? { ...msg, ...updates } : msg)),
+      },
+    })),
 
-  clearNodeMessages: (nodeId) => set((state) => ({
-    nodeMessages: { ...state.nodeMessages, [nodeId]: [] },
-    nodeInvisibleHistorySummaries: { ...state.nodeInvisibleHistorySummaries, [nodeId]: null }
-  })),
+  clearNodeMessages: (nodeId) =>
+    set((state) => ({
+      nodeMessages: { ...state.nodeMessages, [nodeId]: [] },
+      nodeInvisibleHistorySummaries: { ...state.nodeInvisibleHistorySummaries, [nodeId]: null },
+    })),
 
-  setNodePendingAttachment: (nodeId, attachment) => set((state) => ({
-    nodePendingAttachments: {
-      ...state.nodePendingAttachments,
-      [nodeId]: attachment,
-    }
-  })),
-
-  updateNodePendingAttachment: (nodeId, updates) => set((state) => {
-    const currentAttachment = state.nodePendingAttachments[nodeId];
-    if (!currentAttachment) {
-      return state;
-    }
-
-    return {
+  setNodePendingAttachment: (nodeId, attachment) =>
+    set((state) => ({
       nodePendingAttachments: {
         ...state.nodePendingAttachments,
-        [nodeId]: {
-          ...currentAttachment,
-          ...updates,
-        }
+        [nodeId]: attachment,
+      },
+    })),
+
+  updateNodePendingAttachment: (nodeId, updates) =>
+    set((state) => {
+      const currentAttachment = state.nodePendingAttachments[nodeId];
+      if (!currentAttachment) {
+        return state;
       }
-    };
-  }),
 
-  clearNodePendingAttachment: (nodeId) => set((state) => ({
-    nodePendingAttachments: {
-      ...state.nodePendingAttachments,
-      [nodeId]: null,
-    }
-  })),
+      return {
+        nodePendingAttachments: {
+          ...state.nodePendingAttachments,
+          [nodeId]: {
+            ...currentAttachment,
+            ...updates,
+          },
+        },
+      };
+    }),
 
-  setNodeInvisibleHistorySummary: (nodeId, summaryState) => set((state) => ({
-    nodeInvisibleHistorySummaries: {
-      ...state.nodeInvisibleHistorySummaries,
-      [nodeId]: summaryState,
-    }
-  })),
+  clearNodePendingAttachment: (nodeId) =>
+    set((state) => ({
+      nodePendingAttachments: {
+        ...state.nodePendingAttachments,
+        [nodeId]: null,
+      },
+    })),
+
+  setNodeInvisibleHistorySummary: (nodeId, summaryState) =>
+    set((state) => ({
+      nodeInvisibleHistorySummaries: {
+        ...state.nodeInvisibleHistorySummaries,
+        [nodeId]: summaryState,
+      },
+    })),
 
   setRuntimeConnectionState: (stateValue) => set({ runtimeConnectionState: stateValue }),
-  recordRuntimeEvent: (event) => set((state) => {
-    const nextStatus = normalizeRuntimeStatus(event);
-    const nextRunStatuses = { ...state.runStatuses };
-    const nextTaskStatuses = { ...state.taskStatuses };
-    const nextRunLockHeld = { ...state.runLockHeld };
-    const nextInstanceRunIds = { ...state.instanceRunIds };
+  recordRuntimeEvent: (event) =>
+    set((state) => {
+      const nextStatus = normalizeRuntimeStatus(event);
+      const nextRunStatuses = { ...state.runStatuses };
+      const nextTaskStatuses = { ...state.taskStatuses };
+      const nextRunLockHeld = { ...state.runLockHeld };
+      const nextInstanceRunIds = { ...state.instanceRunIds };
 
-    if (event.aggregateType === 'run' && nextStatus) {
-      nextRunStatuses[event.aggregateId] = nextStatus;
-    }
-
-    if (event.aggregateType === 'task' && nextStatus) {
-      nextTaskStatuses[event.aggregateId] = nextStatus;
-    }
-
-    // ⭐ US-J7-09/J7-13: quarantaine — verrou tenu + mapping instance -> run
-    if (event.aggregateType === 'run') {
-      if (event.payload?.lockHeld === true) {
-        nextRunLockHeld[event.aggregateId] = true;
+      if (event.aggregateType === 'run' && nextStatus) {
+        nextRunStatuses[event.aggregateId] = nextStatus;
       }
-      const agentId = typeof event.payload?.agentId === 'string' ? event.payload.agentId : null;
-      if (agentId) {
-        // `run:recovery_relaunched` porte le nouveau run dans payload.newRunId
-        const newRunId = typeof event.payload?.newRunId === 'string' ? event.payload.newRunId : null;
-        nextInstanceRunIds[agentId] = newRunId ?? event.aggregateId;
-        if (newRunId) {
-          nextRunStatuses[newRunId] = 'queued';
+
+      if (event.aggregateType === 'task' && nextStatus) {
+        nextTaskStatuses[event.aggregateId] = nextStatus;
+      }
+
+      // ⭐ US-J7-09/J7-13: quarantaine — verrou tenu + mapping instance -> run
+      if (event.aggregateType === 'run') {
+        if (event.payload?.lockHeld === true) {
+          nextRunLockHeld[event.aggregateId] = true;
+        }
+        const agentId = typeof event.payload?.agentId === 'string' ? event.payload.agentId : null;
+        if (agentId) {
+          // `run:recovery_relaunched` porte le nouveau run dans payload.newRunId
+          const newRunId = typeof event.payload?.newRunId === 'string' ? event.payload.newRunId : null;
+          nextInstanceRunIds[agentId] = newRunId ?? event.aggregateId;
+          if (newRunId) {
+            nextRunStatuses[newRunId] = 'queued';
+          }
         }
       }
-    }
 
-    return {
-      latestRuntimeEvent: event,
-      runStatuses: nextRunStatuses,
-      taskStatuses: nextTaskStatuses,
-      runLockHeld: nextRunLockHeld,
-      instanceRunIds: nextInstanceRunIds,
-    };
-  }),
-  clearRuntimeObservation: () => set({
-    latestRuntimeEvent: null,
-    runStatuses: {},
-    taskStatuses: {},
-    runLockHeld: {},
-    instanceRunIds: {},
-    workflowLatestRunId: {},
-    workflowRuns: {},
-    runSyncState: {},
-  }),
+      return {
+        latestRuntimeEvent: event,
+        runStatuses: nextRunStatuses,
+        taskStatuses: nextTaskStatuses,
+        runLockHeld: nextRunLockHeld,
+        instanceRunIds: nextInstanceRunIds,
+      };
+    }),
+  clearRuntimeObservation: () =>
+    set({
+      latestRuntimeEvent: null,
+      runStatuses: {},
+      taskStatuses: {},
+      runLockHeld: {},
+      instanceRunIds: {},
+      workflowLatestRunId: {},
+      workflowRuns: {},
+      runSyncState: {},
+    }),
   /**
    * ⭐ US-J7-13: ingère une lecture REST `GET /api/runs?workflowId=…` (liste triée
    * desc) dans l'état d'observation. Le REST reste autoritaire à la (re)connexion.
    */
-  setRunSnapshot: (workflowId, runs) => set((state) => {
-    const nextRunStatuses = { ...state.runStatuses };
-    const nextRunLockHeld = { ...state.runLockHeld };
-    const nextInstanceRunIds = { ...state.instanceRunIds };
-    const nextWorkflowLatestRunId = { ...state.workflowLatestRunId };
-    const nextRunSyncState = { ...state.runSyncState };
+  setRunSnapshot: (workflowId, runs) =>
+    set((state) => {
+      const nextRunStatuses = { ...state.runStatuses };
+      const nextRunLockHeld = { ...state.runLockHeld };
+      const nextInstanceRunIds = { ...state.instanceRunIds };
+      const nextWorkflowLatestRunId = { ...state.workflowLatestRunId };
+      const nextRunSyncState = { ...state.runSyncState };
 
-    if (!Array.isArray(runs)) {
-      return { runSyncState: { ...nextRunSyncState, [workflowId]: 'error' } };
-    }
-
-    for (const run of runs) {
-      if (!run || typeof run.executionId !== 'string') continue;
-      nextRunStatuses[run.executionId] = run.status;
-      // Le verrou est tenu pour un run quarantined ; les événements peuvent aussi le signaler.
-      nextRunLockHeld[run.executionId] = run.lockHeld ?? (run.status === 'quarantined');
-      const runWorkflowId = typeof run.workflowId === 'string' && run.workflowId ? run.workflowId : workflowId;
-      if (!nextWorkflowLatestRunId[runWorkflowId]) {
-        nextWorkflowLatestRunId[runWorkflowId] = run.executionId; // premier = plus récent (tri desc)
+      if (!Array.isArray(runs)) {
+        return { runSyncState: { ...nextRunSyncState, [workflowId]: 'error' } };
       }
-      if (typeof run.agentInstanceId === 'string' && run.agentInstanceId && !nextInstanceRunIds[run.agentInstanceId]) {
-        nextInstanceRunIds[run.agentInstanceId] = run.executionId;
-      }
-    }
 
-    nextRunSyncState[workflowId] = 'ready';
-    return {
-      workflowRuns: { ...state.workflowRuns, [workflowId]: runs },
-      runStatuses: nextRunStatuses,
-      runLockHeld: nextRunLockHeld,
-      instanceRunIds: nextInstanceRunIds,
-      workflowLatestRunId: nextWorkflowLatestRunId,
-      runSyncState: nextRunSyncState,
-    };
-  }),
-  setRunSyncState: (workflowId, syncState) => set((state) => ({
-    runSyncState: { ...state.runSyncState, [workflowId]: syncState },
-  })),
+      for (const run of runs) {
+        if (!run || typeof run.executionId !== 'string') continue;
+        nextRunStatuses[run.executionId] = run.status;
+        // Le verrou est tenu pour un run quarantined ; les événements peuvent aussi le signaler.
+        nextRunLockHeld[run.executionId] = run.lockHeld ?? run.status === 'quarantined';
+        const runWorkflowId = typeof run.workflowId === 'string' && run.workflowId ? run.workflowId : workflowId;
+        if (!nextWorkflowLatestRunId[runWorkflowId]) {
+          nextWorkflowLatestRunId[runWorkflowId] = run.executionId; // premier = plus récent (tri desc)
+        }
+        if (typeof run.agentInstanceId === 'string' && run.agentInstanceId && !nextInstanceRunIds[run.agentInstanceId]) {
+          nextInstanceRunIds[run.agentInstanceId] = run.executionId;
+        }
+      }
+
+      nextRunSyncState[workflowId] = 'ready';
+      return {
+        workflowRuns: { ...state.workflowRuns, [workflowId]: runs },
+        runStatuses: nextRunStatuses,
+        runLockHeld: nextRunLockHeld,
+        instanceRunIds: nextInstanceRunIds,
+        workflowLatestRunId: nextWorkflowLatestRunId,
+        runSyncState: nextRunSyncState,
+      };
+    }),
+  setRunSyncState: (workflowId, syncState) =>
+    set((state) => ({
+      runSyncState: { ...state.runSyncState, [workflowId]: syncState },
+    })),
 
   // Execution state
-  setNodeExecuting: (nodeId, isExecuting) => set((state) => {
-    const newExecutingNodes = new Set(state.executingNodes);
-    if (isExecuting) {
-      newExecutingNodes.add(nodeId);
-    } else {
-      newExecutingNodes.delete(nodeId);
-    }
-    return { executingNodes: newExecutingNodes };
-  }),
+  setNodeExecuting: (nodeId, isExecuting) =>
+    set((state) => {
+      const newExecutingNodes = new Set(state.executingNodes);
+      if (isExecuting) {
+        newExecutingNodes.add(nodeId);
+      } else {
+        newExecutingNodes.delete(nodeId);
+      }
+      return { executingNodes: newExecutingNodes };
+    }),
 
   // LLM Config
   updateLLMConfigs: (configs) => {
@@ -417,50 +445,59 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   },
 
   // UI State actions
-  setImagePanelOpen: (isOpen, nodeId) => set({
-    isImagePanelOpen: isOpen,
-    currentImageNodeId: isOpen ? nodeId || null : null
-  }),
+  setImagePanelOpen: (isOpen, nodeId) =>
+    set({
+      isImagePanelOpen: isOpen,
+      currentImageNodeId: isOpen ? nodeId || null : null,
+    }),
 
-  setImageModificationPanelOpen: (isOpen, imageInfo) => set({
-    isImageModificationPanelOpen: isOpen,
-    editingImageInfo: isOpen ? imageInfo || null : null
-  }),
+  setImageModificationPanelOpen: (isOpen, imageInfo) =>
+    set({
+      isImageModificationPanelOpen: isOpen,
+      editingImageInfo: isOpen ? imageInfo || null : null,
+    }),
 
-  setFullscreenImage: (image) => set({
-    fullscreenImage: image
-  }),
+  setFullscreenImage: (image) =>
+    set({
+      fullscreenImage: image,
+    }),
 
-  setFullscreenChatNodeId: (nodeId) => set({
-    fullscreenChatNodeId: nodeId
-  }),
+  setFullscreenChatNodeId: (nodeId) =>
+    set({
+      fullscreenChatNodeId: nodeId,
+    }),
 
-  setFullscreenChatAgent: (agent) => set({
-    fullscreenChatAgent: agent
-  }),
+  setFullscreenChatAgent: (agent) =>
+    set({
+      fullscreenChatAgent: agent,
+    }),
 
-  setFullscreenChatAgentInstance: (agentInstance) => set({
-    fullscreenChatAgentInstance: agentInstance
-  }),
+  setFullscreenChatAgentInstance: (agentInstance) =>
+    set({
+      fullscreenChatAgentInstance: agentInstance,
+    }),
 
-  setConfigModalInstanceId: (instanceId) => set({
-    configModalInstanceId: instanceId
-  }),
+  setConfigModalInstanceId: (instanceId) =>
+    set({
+      configModalInstanceId: instanceId,
+    }),
 
-  setNavigationHandler: (handler) => set({
-    navigationHandler: handler
-  }),
+  setNavigationHandler: (handler) =>
+    set({
+      navigationHandler: handler,
+    }),
 
   // ⭐ NOUVEAU: Node Minimize Actions (UI state only, not persisted)
-  toggleNodeMinimized: (nodeId) => set((state) => {
-    const newMinimizedNodeIds = new Set(state.minimizedNodeIds);
-    if (newMinimizedNodeIds.has(nodeId)) {
-      newMinimizedNodeIds.delete(nodeId); // Restore to normal
-    } else {
-      newMinimizedNodeIds.add(nodeId); // Minimize
-    }
-    return { minimizedNodeIds: newMinimizedNodeIds };
-  }),
+  toggleNodeMinimized: (nodeId) =>
+    set((state) => {
+      const newMinimizedNodeIds = new Set(state.minimizedNodeIds);
+      if (newMinimizedNodeIds.has(nodeId)) {
+        newMinimizedNodeIds.delete(nodeId); // Restore to normal
+      } else {
+        newMinimizedNodeIds.add(nodeId); // Minimize
+      }
+      return { minimizedNodeIds: newMinimizedNodeIds };
+    }),
 
   // Utility functions
   getNodeMessages: (nodeId) => {
@@ -493,27 +530,29 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
    * Called after successful journal persist
    * Used to filter out already-saved messages on next save
    */
-  setLastSavedAt: (nodeId, timestamp) => set((state) => ({
-    lastSavedAt: { ...state.lastSavedAt, [nodeId]: timestamp }
-  })),
+  setLastSavedAt: (nodeId, timestamp) =>
+    set((state) => ({
+      lastSavedAt: { ...state.lastSavedAt, [nodeId]: timestamp },
+    })),
 
   /**
    * ⭐ ÉTAPE 3: Clear last saved timestamp for a node
    * Rarely needed, but useful for testing or manual reset
    */
-  clearLastSavedAt: (nodeId) => set((state) => ({
-    lastSavedAt: { ...state.lastSavedAt, [nodeId]: null }
-  })),
+  clearLastSavedAt: (nodeId) =>
+    set((state) => ({
+      lastSavedAt: { ...state.lastSavedAt, [nodeId]: null },
+    })),
 
   /**
    * ⭐ ÉTAPE 3: Get only NEW messages since last save
    * Filters messages by timestamp > lastSavedAt (second-level precision)
-   * 
+   *
    * LOGIC:
    * - If lastSavedAt[nodeId] is null: return ALL messages (first save)
    * - Otherwise: return only messages newer than lastSavedAt timestamp
    * - Timestamp precision: SECOND-level (more reliable than milliseconds)
-   * 
+   *
    * @returns Array of messages created after the last save
    */
   getNewMessages: (nodeId) => {
@@ -529,7 +568,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
 
     // Filter by timestamp > lastSaved (second-level precision to avoid millisecond drift)
     const lastSavedSeconds = Math.floor(lastSaved.getTime() / 1000);
-    const newMessages = messages.filter(msg => {
+    const newMessages = messages.filter((msg) => {
       // Parse message timestamp - default to epoch if missing
       const msgTime = msg.timestamp ? new Date(msg.timestamp).getTime() : 0;
       const msgSeconds = Math.floor(msgTime / 1000);
@@ -538,77 +577,93 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
 
     // Only log in development to avoid production noise
     if (isDevelopmentEnvironment) {
-      console.debug(`[useRuntimeStore] getNewMessages(${nodeId}): ${newMessages.length} new messages (out of ${messages.length} total). Last saved: ${lastSaved.toISOString()}`);
+      console.debug(
+        `[useRuntimeStore] getNewMessages(${nodeId}): ${newMessages.length} new messages (out of ${messages.length} total). Last saved: ${lastSaved.toISOString()}`,
+      );
     }
     return newMessages;
   },
 
-  renameNodeRuntimeState: (fromNodeId, toNodeId) => set((state) => {
-    if (!fromNodeId || !toNodeId || fromNodeId === toNodeId) {
-      return state;
-    }
+  renameNodeRuntimeState: (fromNodeId, toNodeId) =>
+    set((state) => {
+      if (!fromNodeId || !toNodeId || fromNodeId === toNodeId) {
+        return state;
+      }
 
-    const fromInstanceId = fromNodeId.replace(/^node-/, '');
-    const toInstanceId = toNodeId.replace(/^node-/, '');
+      const fromInstanceId = fromNodeId.replace(/^node-/, '');
+      const toInstanceId = toNodeId.replace(/^node-/, '');
 
-    return {
-      nodeMessages: renameRecordKey(state.nodeMessages, fromNodeId, toNodeId, (sourceMessages, targetMessages) => mergeNodeMessages(sourceMessages, targetMessages || [])),
-      nodePendingAttachments: renameRecordKey(state.nodePendingAttachments, fromNodeId, toNodeId, (sourceAttachment, targetAttachment) => targetAttachment ?? sourceAttachment),
-      nodeInvisibleHistorySummaries: renameRecordKey(state.nodeInvisibleHistorySummaries, fromNodeId, toNodeId, (sourceSummary, targetSummary) => targetSummary ?? sourceSummary),
-      executingNodes: renameNodeInSet(state.executingNodes, fromNodeId, toNodeId),
-      minimizedNodeIds: renameNodeInSet(state.minimizedNodeIds, fromNodeId, toNodeId),
-      lastSavedAt: renameRecordKey(state.lastSavedAt, fromNodeId, toNodeId, (sourceTimestamp, targetTimestamp) => {
-        if (!targetTimestamp) {
-          return sourceTimestamp;
-        }
+      return {
+        nodeMessages: renameRecordKey(state.nodeMessages, fromNodeId, toNodeId, (sourceMessages, targetMessages) =>
+          mergeNodeMessages(sourceMessages, targetMessages || []),
+        ),
+        nodePendingAttachments: renameRecordKey(
+          state.nodePendingAttachments,
+          fromNodeId,
+          toNodeId,
+          (sourceAttachment, targetAttachment) => targetAttachment ?? sourceAttachment,
+        ),
+        nodeInvisibleHistorySummaries: renameRecordKey(
+          state.nodeInvisibleHistorySummaries,
+          fromNodeId,
+          toNodeId,
+          (sourceSummary, targetSummary) => targetSummary ?? sourceSummary,
+        ),
+        executingNodes: renameNodeInSet(state.executingNodes, fromNodeId, toNodeId),
+        minimizedNodeIds: renameNodeInSet(state.minimizedNodeIds, fromNodeId, toNodeId),
+        lastSavedAt: renameRecordKey(state.lastSavedAt, fromNodeId, toNodeId, (sourceTimestamp, targetTimestamp) => {
+          if (!targetTimestamp) {
+            return sourceTimestamp;
+          }
 
-        return sourceTimestamp > targetTimestamp ? sourceTimestamp : targetTimestamp;
-      }),
-      currentImageNodeId: state.currentImageNodeId === fromNodeId ? toNodeId : state.currentImageNodeId,
-      editingImageInfo: state.editingImageInfo?.nodeId === fromNodeId
-        ? { ...state.editingImageInfo, nodeId: toNodeId }
-        : state.editingImageInfo,
-      fullscreenChatNodeId: state.fullscreenChatNodeId === fromNodeId ? toNodeId : state.fullscreenChatNodeId,
-      fullscreenChatAgentInstance: state.fullscreenChatAgentInstance?.id === fromInstanceId
-        ? { ...state.fullscreenChatAgentInstance, id: toInstanceId }
-        : state.fullscreenChatAgentInstance,
-      configModalInstanceId: state.configModalInstanceId === fromInstanceId ? toInstanceId : state.configModalInstanceId,
-    };
-  }),
+          return sourceTimestamp > targetTimestamp ? sourceTimestamp : targetTimestamp;
+        }),
+        currentImageNodeId: state.currentImageNodeId === fromNodeId ? toNodeId : state.currentImageNodeId,
+        editingImageInfo:
+          state.editingImageInfo?.nodeId === fromNodeId ? { ...state.editingImageInfo, nodeId: toNodeId } : state.editingImageInfo,
+        fullscreenChatNodeId: state.fullscreenChatNodeId === fromNodeId ? toNodeId : state.fullscreenChatNodeId,
+        fullscreenChatAgentInstance:
+          state.fullscreenChatAgentInstance?.id === fromInstanceId
+            ? { ...state.fullscreenChatAgentInstance, id: toInstanceId }
+            : state.fullscreenChatAgentInstance,
+        configModalInstanceId: state.configModalInstanceId === fromInstanceId ? toInstanceId : state.configModalInstanceId,
+      };
+    }),
 
   /**
    * ⭐ ÉTAPE 2.2: Reset complet du store runtime pour wipe à la connexion
    * Nettoie tous les messages et états d'exécution
    */
-  resetAll: () => set({
-    nodeMessages: {},
-    nodePendingAttachments: {},
-    nodeInvisibleHistorySummaries: {},
-    executingNodes: new Set(),
-    minimizedNodeIds: new Set(), // ⭐ RESET: Restore à normal
-    lastSavedAt: {}, // ⭐ ÉTAPE 3: Reset save timestamps on logout
-    runtimeConnectionState: 'offline',
-    latestRuntimeEvent: null,
-    runStatuses: {},
-    taskStatuses: {},
-    runLockHeld: {},
-    instanceRunIds: {},
-    workflowLatestRunId: {},
-    workflowRuns: {},
-    runSyncState: {},
-    llmConfigs: [],
-    localLLMProfiles: [],
-    isImagePanelOpen: false,
-    isImageModificationPanelOpen: false,
-    currentImageNodeId: null,
-    editingImageInfo: null,
-    fullscreenImage: null,
-    fullscreenChatNodeId: null,
-    fullscreenChatAgent: null,
-    fullscreenChatAgentInstance: null, // ⭐ New
-    configModalInstanceId: null
-    // Note: navigationHandler conservé car c'est une fonction
-  }),
+  resetAll: () =>
+    set({
+      nodeMessages: {},
+      nodePendingAttachments: {},
+      nodeInvisibleHistorySummaries: {},
+      executingNodes: new Set(),
+      minimizedNodeIds: new Set(), // ⭐ RESET: Restore à normal
+      lastSavedAt: {}, // ⭐ ÉTAPE 3: Reset save timestamps on logout
+      runtimeConnectionState: 'offline',
+      latestRuntimeEvent: null,
+      runStatuses: {},
+      taskStatuses: {},
+      runLockHeld: {},
+      instanceRunIds: {},
+      workflowLatestRunId: {},
+      workflowRuns: {},
+      runSyncState: {},
+      llmConfigs: [],
+      localLLMProfiles: [],
+      isImagePanelOpen: false,
+      isImageModificationPanelOpen: false,
+      currentImageNodeId: null,
+      editingImageInfo: null,
+      fullscreenImage: null,
+      fullscreenChatNodeId: null,
+      fullscreenChatAgent: null,
+      fullscreenChatAgentInstance: null, // ⭐ New
+      configModalInstanceId: null,
+      // Note: navigationHandler conservé car c'est une fonction
+    }),
 
   /**
    * ⭐ V2: Reset pour switch de workflow
@@ -644,9 +699,9 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       fullscreenChatNodeId: null,
       fullscreenChatAgent: null,
       fullscreenChatAgentInstance: null,
-      configModalInstanceId: null
+      configModalInstanceId: null,
     });
-  }
+  },
 }));
 
 // ⭐ US-J7-13: sélecteurs dérivés (lecture seule, utilisables avec useRuntimeStore(selector))
@@ -664,10 +719,7 @@ interface RuntimeObservationSlice {
 }
 
 /** Badge de statut d'un nœud : dernier run connu de son agentInstance. */
-export const getInstanceRunStatus = (
-  state: RuntimeObservationSlice,
-  instanceId?: string | null,
-): InstanceRunStatus | null => {
+export const getInstanceRunStatus = (state: RuntimeObservationSlice, instanceId?: string | null): InstanceRunStatus | null => {
   if (!instanceId) return null;
   const runId = state.instanceRunIds[instanceId];
   if (!runId) return null;
