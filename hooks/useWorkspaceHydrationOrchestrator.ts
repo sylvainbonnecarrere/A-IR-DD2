@@ -279,7 +279,7 @@ export const useWorkspaceHydrationOrchestrator = ({
             setNodeMessages(nodeId, nextMessages);
         }
 
-        console.log('[App] Workspace snapshot applied:', {
+        console.debug('[App] Workspace snapshot applied:', {
             workflowId: snapshotWorkflowId,
             prototypes: hydratedPrototypes.length,
             instances: hydratedInstances.length,
@@ -368,7 +368,7 @@ export const useWorkspaceHydrationOrchestrator = ({
 
                 hydratedWorkspaceIdentityRef.current = `auth:${userId}`;
 
-                console.log('[App] Workspace reload complete:', {
+                console.debug('[App] Workspace reload complete:', {
                     reason,
                     mode: 'initial-auth',
                     userId,
@@ -424,7 +424,7 @@ export const useWorkspaceHydrationOrchestrator = ({
 
                 hydratedWorkspaceIdentityRef.current = `auth:${userId}`;
 
-                console.log('[App] Workspace reload complete:', {
+                console.debug('[App] Workspace reload complete:', {
                     reason,
                     mode: 'resume',
                     userId,

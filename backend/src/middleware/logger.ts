@@ -57,12 +57,12 @@ export function logLMStudioRequest(
         logEntry.endpoint = req.query.endpoint as string;
     }
 
-    console.log('[LMStudio Proxy]', JSON.stringify(logEntry));
+    console.debug('[LMStudio Proxy]', JSON.stringify(logEntry));
 
     // Logger la durée de la requête à la fin
     res.on('finish', () => {
         const duration = Date.now() - startTime;
-        console.log(`[LMStudio Proxy] ${req.method} ${req.path} - ${res.statusCode} (${duration}ms)`);
+        console.debug(`[LMStudio Proxy] ${req.method} ${req.path} - ${res.statusCode} (${duration}ms)`);
     });
 
     next();

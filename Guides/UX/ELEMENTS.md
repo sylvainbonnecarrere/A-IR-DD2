@@ -104,6 +104,8 @@ Glyphes supplémentaires (ton **green**, contrôles de run) : `play` = triangle 
   `RobotId.Archi` sur ARCHI) car le `currentRobotId` du store ne reflète pas forcément la page.
   Nom affiché = nom i18n du robot (`robot_*_name`, dérivé du `robotId`) ;
   `data-testid="robot-indicator"` + `data-robot-color`. Label i18n commun : `current_robot_label`.
+  **Nom du robot toujours en gras et majuscules** (affichage unifié sur toutes les pages) :
+  `text-sm font-bold uppercase tracking-wide` + couleur du robot.
   Ne pas réintroduire de bloc ad hoc.
 - **PhilFunctionsPage** : le badge runtime (`SandboxHealthLoader` : « Runtime dev/test (dev-only) ·
   imports natifs à vérifier… ») n'est PAS dans le header mais **descendu sur la barre des onglets,
@@ -115,6 +117,13 @@ Glyphes supplémentaires (ton **green**, contrôles de run) : `play` = triangle 
   « Gérer vos workflows » (`BosWorkflowManagementPage.tsx`) — `<Button variant="outline" tone="yellow">`.
   La page « Carte du workflow » (header passé via `RobotPageRouter.tsx` → `bosMediaHeaderAction` sur
   `WorkflowPage`) utilise **le même** `variant="outline" tone="yellow"` (et non plus `primary`).
+  **Au survol, le bouton outline jaune s'illumine** : halo renforcé
+  `hover:shadow-[0_0_18px_rgba(234,179,8,0.6)]`, bordure `hover:border-yellow-400`, texte
+  `hover:text-yellow-50`, et **fond intérieur en dégradé du jaune de la charte**
+  `hover:bg-gradient-to-r hover:from-yellow-400/50 hover:via-yellow-500/25 hover:to-amber-400/40`
+  (classes du `outline` `tone="yellow"` dans `components/UI.tsx` ; quand `tone` est posé, le
+  `variant="outline"` de base est entièrement remplacé). Au repos : `border-yellow-500/50
+  bg-yellow-500/10 text-yellow-100`.
 - **Carte workflow (liste, `components/workflow/WorkflowCard.tsx`)** : le bouton au **jaune le plus
   vif est celui du workflow actif**, le **jaune sombre** celui de « Sélectionner par défaut » :
   actif = `!bg-yellow-400 !text-black hover:!bg-yellow-400 disabled:!opacity-100` + halo
@@ -134,7 +143,7 @@ via `selected: true` posé par l'app).
 
 | Action utilisateur | Résultat attendu |
 |---|---|
-| Survol d'une poignée | sphère `scale(1.18)`, halo renforcé (luminosité retrouvée) |
+| Survol d'une poignée | sphère `scale(1.18)`, halo **fort** couleur créateur + cœur blanc (contraste net avec le repos très sombre) |
 | Clic / appui sur une poignée | sphère s'illumine **immédiatement** (`:active` + `.connecting`) + **lasso** (fil) entre la poignée et le curseur |
 | Lasso actif, survol d'une poignée cible valide | la cible s'allume aussi (`.valid` / `:hover`) |
 | Clic / relâcher sur la poignée cible | edge créé ; les deux poignées reviennent au repos (transition 0.3 s) |
@@ -146,21 +155,24 @@ via `selected: true` posé par l'app).
 #### Poignées (sphères lumineuses) — `components/workflow/NodeHandleSphere.tsx` + `index.css`
 
 - Rendu : **SVG inline** enfant du `<Handle className="node-handle">` dans `V2AgentNode.tsx`.
-  Contrat `AGENT_NODE_HANDLES` (`components/workflow/connectionContracts.ts`) inchangé :
-  `target-top-left` (`Position.Left`) et `source-top-right` (`Position.Right`), `style: { top: 0 }`.
-- Sphère **20px**, fausse 3D : au repos elle est **très sombre et de la couleur du robot
+  Contrat `AGENT_NODE_HANDLES` (`components/workflow/connectionContracts.ts`) inchangé côté
+  ids/positions : `target-top-left` (`Position.Left`) et `source-top-right` (`Position.Right`),
+  `style: { top: -8 }` (⭐ 2026-11-21 : sphère remontée de 8px — elle empiète sur la marge
+  au-dessus du node ; sphère de 20px donc 8px dehors / 12px dedans).
+- Sphère **20px**, fausse 3D : au repos elle est **extrêmement sombre et de la couleur du robot
   créateur du node** — prop `color` de `NodeHandleSphere` = `getRobotColor(data.robotId).primary`
   (helper exporté de `BaseWorkflowNode.tsx` : BOS violet `#8b5cf6`, COM orange `#f97316`,
   PHIL emerald `#10b981`, TIM amber `#f59e0b`, ARCHI cyan `#06b6d4`). Le dégradé radial est
-  calculé à partir de cette couleur en l'assombrissant (mix noir 0.35/0.6/0.85, reflet blanc
-  0.1) + reflet spéculaire 0.18 + anneau 0.18 ; halo de repos via la var CSS inline
-  `--sphere-rest-glow: rgba(couleur, 0.3)`. `useId` pour l'id du dégradé.
+  calculé à partir de cette couleur en l'assombrissant fortement (⭐ 2026-11-21 : mix noir
+  0.5/0.75/0.92, reflet blanc 0.06) + reflet spéculaire 0.1 + anneau 0.1 ; halos via les vars
+  CSS inline `--sphere-rest-glow: rgba(couleur, 0.22)` (repos) et
+  `--sphere-hover-glow: rgba(couleur, 0.95)` (survol). `useId` pour l'id du dégradé.
 - États CSS (`.react-flow__handle.node-handle …`, transition `transform .18s ease, filter .3s ease`) :
 
   | État | Sélecteur | Rendu |
   |---|---|---|
-  | repos | `.node-handle-sphere` | halo `drop-shadow(0 0 2px var(--sphere-rest-glow, rgba(99,102,241,.28)))` — très sombre, couleur créateur |
-  | survol | `.node-handle:hover .node-handle-sphere` | `scale(1.18)` + `drop-shadow(0 0 8px rgba(129,140,248,.95))` |
+  | repos | `.node-handle-sphere` | halo `drop-shadow(0 0 1px var(--sphere-rest-glow, rgba(99,102,241,.2)))` — **extrêmement sombre**, couleur créateur (⭐ 2026-11-21 : halo minimal pour contraste net) |
+  | survol | `.node-handle:hover .node-handle-sphere` | `scale(1.18)` + double halo `drop-shadow(0 0 10px var(--sphere-hover-glow, couleur créateur @0.95))` + `drop-shadow(0 0 4px rgba(255,255,255,.55))` — **nettement plus lumineux** que le repos (⭐ 2026-11-21) |
   | clic / tracé | `:active`, `.connecting` (+ variantes `:hover`, placées APRÈS, spécificité sup.) | `scale(1.22)` + double halo `12px rgba(199,210,254,1)` + `6px rgba(255,255,255,.9)` |
   | cible atteinte | `.valid` | `10px rgba(165,180,252,1)` + `4px rgba(255,255,255,.8)` |
 
@@ -228,10 +240,13 @@ via `selected: true` posé par l'app).
   la suppression se fait depuis le node sur la carte). Le modal de confirmation et le handler
   restent en place mais ne sont plus déclenchés depuis le header.
 
-### Note technique — modale « Media du workflow » (BosMediaModal, 2026-11-20)
+### Note technique — modale « Media du workflow » (BosMediaModal, 2026-11-20, taille revue 2026-11-21)
 
-- Modale **plus large** : `max-w-7xl` (au lieu de `max-w-5xl`), toutes les colonnes tiennent dans
-  le format horizontal (`table-fixed`).
+- Modale **encore un peu plus large et beaucoup plus haute** (apercus de fichiers/images lisibles) :
+  conteneur `flex h-[95vh] w-full max-w-[88rem] flex-col overflow-hidden` (au lieu de
+  `max-h-[85vh] max-w-7xl`) ; apercu image `max-h-[80vh]`, vidéo `max-h-[80vh]`, iframe PDF
+  `h-[80vh]` (au lieu de 70vh), conteneur de scroll de l'aperçu `max-h-[80vh]` (au lieu de 55vh).
+  Toutes les colonnes tiennent dans le format horizontal (`table-fixed`).
 - **Colonne Actions en PREMIERE colonne** (`w-[110px]`) : boutons **icônes seules** (`EyeIcon` /
   `DownloadIcon` / `TrashIcon`, 32×32), intitulés dans une **infobulle standard** `.info-bubble`
   (variante compacte `.info-bubble-sm` : largeur auto, nowrap). `aria-label` = intitulé (pas de
@@ -239,6 +254,11 @@ via `selected: true` posé par l'app).
 - **Colonne Source à largeur fixe** (`w-[200px]`) : le localisateur est tronqué aux **30 derniers
   caractères** max (`…` + `slice(-30)`, helper `truncateTail`) ; **clic sur la case = sélection du
   texte** (`selectTextOnClick` via `window.getSelection()` + Range). `data-testid="bos-media-source-<mediaId>"`.
+- **Header du panneau d'aperçu** (2026-11-21) : le bouton **« Fermer l'aperçu » est placé à
+  GAUCHE**, à la place de l'ancien kicker « Aperçu actif » (kicker supprimé) ; à sa droite le titre
+  de l'aperçu (nom du fichier, `h3`) puis le type MIME. Le bouton suit la charte boutons :
+  composant partagé `Button` (`components/UI.tsx`), `variant="outline" tone="red"` (action de
+  fermeture = rouge), `data-testid="bos-media-preview-close"` — plus de style ad hoc.
 
 ### Note technique — contrôles de run et infobulles (2026-11-20)
 

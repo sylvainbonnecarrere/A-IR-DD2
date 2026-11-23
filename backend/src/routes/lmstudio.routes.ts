@@ -52,7 +52,7 @@ router.get('/health', async (req: Request, res: Response) => {
     try {
         const endpoint = (req.query.endpoint as string) || 'http://localhost:1234';
 
-        console.log(`[LMStudio Proxy] Health check for endpoint: ${endpoint}`);
+        console.debug(`[LMStudio Proxy] Health check for endpoint: ${endpoint}`);
         const health = await checkLMStudioHealth(endpoint);
 
         res.json(health);
@@ -74,10 +74,10 @@ router.get('/models', async (req: Request, res: Response) => {
     try {
         const endpoint = (req.query.endpoint as string) || 'http://localhost:1234';
 
-        console.log(`[LMStudio Proxy] Fetching models from: ${endpoint}`);
+        console.debug(`[LMStudio Proxy] Fetching models from: ${endpoint}`);
         const models = await fetchLMStudioModels(endpoint);
 
-        console.log(`[LMStudio Proxy] Found ${models.data?.length || 0} models`);
+        console.debug(`[LMStudio Proxy] Found ${models.data?.length || 0} models`);
         res.json(models);
     } catch (error) {
         console.error('[LMStudio Proxy] Fetch models error:', error);
@@ -94,14 +94,14 @@ router.get('/models', async (req: Request, res: Response) => {
  */
 router.get('/detect-endpoint', async (req: Request, res: Response) => {
     try {
-        console.log('[LMStudio Proxy] Auto-detecting endpoint...');
+        console.debug('[LMStudio Proxy] Auto-detecting endpoint...');
         const endpoint = await detectAvailableEndpoint();
 
         // Récupérer la liste des modèles pour enrichir la réponse
         const modelsData = await fetchLMStudioModels(endpoint);
         const modelsList = modelsData.data?.map(m => m.id) || [];
 
-        console.log(`[LMStudio Proxy] Detected endpoint: ${endpoint} with ${modelsList.length} models`);
+        console.debug(`[LMStudio Proxy] Detected endpoint: ${endpoint} with ${modelsList.length} models`);
 
         res.json({
             healthy: true,
@@ -134,7 +134,7 @@ router.post('/embeddings', async (req: Request, res: Response) => {
             });
         }
 
-        console.log(`[LMStudio Proxy] Embeddings request - Model: ${model}`);
+        console.debug(`[LMStudio Proxy] Embeddings request - Model: ${model}`);
 
         const response = await fetch(`${endpoint}/v1/embeddings`, {
             method: 'POST',
@@ -172,7 +172,7 @@ router.post('/completions', async (req: Request, res: Response) => {
             });
         }
 
-        console.log(`[LMStudio Proxy] Completion request - Model: ${model}`);
+        console.debug(`[LMStudio Proxy] Completion request - Model: ${model}`);
 
         const response = await fetch(`${endpoint}/v1/completions`, {
             method: 'POST',
@@ -210,7 +210,7 @@ router.post(
         try {
             const { endpoint = 'http://localhost:1234', ...requestBody } = req.body as ChatCompletionRequest & { endpoint?: string };
 
-            console.log(`[LMStudio Proxy] Chat completion request - Model: ${requestBody.model}, Stream: ${requestBody.stream}`);
+            console.debug(`[LMStudio Proxy] Chat completion request - Model: ${requestBody.model}, Stream: ${requestBody.stream}`);
 
             // Mode streaming (SSE)
             if (requestBody.stream) {

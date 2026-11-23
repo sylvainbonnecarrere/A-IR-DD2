@@ -378,7 +378,7 @@ router.post('/from-prototype', requireAuth,
         );
 
         // Log des valeurs finales pour debugging
-        console.log('[AgentInstances] 📋 Instance data prepared (PHASE 2):', {
+        console.debug('[AgentInstances] 📋 Instance data prepared (PHASE 2):', {
             name: finalName,
             role: finalRole,
             llmProvider: finalLlmProvider,
@@ -474,7 +474,7 @@ router.post('/from-prototype', requireAuth,
         workflow.isDirty = true;
         await workflow.save();
 
-        console.log('[AgentInstances] ✅ Instance créée depuis prototype (PHASE 2):', {
+        console.debug('[AgentInstances] ✅ Instance créée depuis prototype (PHASE 2):', {
             instanceId: instance._id,
             executionId,
             prototypeId: prototype.id,
@@ -564,7 +564,7 @@ router.put('/:id',
             const user = req.user as IUser;
             const instanceId = req.params.id;
             
-            console.log('[AgentInstances] 🔧 PUT /:id called:', {
+            console.debug('[AgentInstances] 🔧 PUT /:id called:', {
                 instanceId,
                 userId: user.id,
                 bodyKeys: Object.keys(req.body),
@@ -576,7 +576,7 @@ router.put('/:id',
             const instance = await AgentInstance.findOne({ _id: instanceId, userId: user.id });
 
             if (!instance) {
-                console.log('[AgentInstances] ❌ Instance not found or user mismatch:', {
+                console.debug('[AgentInstances] ❌ Instance not found or user mismatch:', {
                     instanceId,
                     instanceFound: !!instance
                 });
@@ -722,7 +722,7 @@ router.put('/:id',
             const historyConfigObj = instance.historyConfig as any || {};
             const persistenceConfigObj = instance.persistenceConfig as any || {};
             const persistenceSummary = summarizePersistenceConfigBoundary(persistenceConfigObj);
-            console.log('[AgentInstances] ✅ PUT endpoint saved:', {
+            console.debug('[AgentInstances] ✅ PUT endpoint saved:', {
                 instanceId: instance._id?.toString(),
                 name: instance.name,
                 role: instance.role,
@@ -1093,7 +1093,7 @@ router.post('/:id/content',
             });
 
             if (!result.saved) {
-                console.log(`[AgentInstances] Legacy content skipped for ${instanceId}: ${result.reason || 'unknown reason'}`);
+                console.debug(`[AgentInstances] Legacy content skipped for ${instanceId}: ${result.reason || 'unknown reason'}`);
                 return res.status(200).json({
                     success: true,
                     skipped: true,
@@ -1104,7 +1104,7 @@ router.post('/:id/content',
                 });
             }
 
-            console.log(`[AgentInstances] ✅ Legacy content stored in journals for ${instanceId}: ${content.type}`);
+            console.debug(`[AgentInstances] ✅ Legacy content stored in journals for ${instanceId}: ${content.type}`);
             res.status(201).json({ 
                 success: true,
                 contentCount,
@@ -1199,7 +1199,7 @@ router.post(
                 });
             }
 
-            console.log(`[Journal] Created ${type} entry for instance ${agentInstanceId}`);
+            console.debug(`[Journal] Created ${type} entry for instance ${agentInstanceId}`);
             res.json({ success: true, journalId: result.entryId });
         } catch (error) {
             console.error('[Journal] POST error:', error);
@@ -1274,7 +1274,7 @@ router.post(
                 });
             }
 
-            console.log(`[Journal] Imported media draft for instance ${agentInstanceId}`);
+            console.debug(`[Journal] Imported media draft for instance ${agentInstanceId}`);
             return res.status(200).json({ success: true, journalId: result.entryId });
         } catch (error) {
             console.error('[Journal] Imported media draft POST error:', error);
@@ -1391,7 +1391,7 @@ router.get('/:id/journals',
                 .sort({ timestamp: 1 }) // ⭐ FIX: Use timestamp field (not createdAt), order: oldest first
                 .lean();
 
-            console.log(`[Journals] Loaded ${journals.length} entries for instance ${instanceId}`);
+            console.debug(`[Journals] Loaded ${journals.length} entries for instance ${instanceId}`);
 
             res.json({
                 success: true,

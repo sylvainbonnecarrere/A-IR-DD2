@@ -523,7 +523,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
 
     // First save: return all messages
     if (!lastSaved) {
-      console.log(`[useRuntimeStore] getNewMessages(${nodeId}): First save - returning all ${messages.length} messages`);
+      console.debug(`[useRuntimeStore] getNewMessages(${nodeId}): First save - returning all ${messages.length} messages`);
       return messages;
     }
 
@@ -538,7 +538,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
 
     // Only log in development to avoid production noise
     if (isDevelopmentEnvironment) {
-      console.log(`[useRuntimeStore] getNewMessages(${nodeId}): ${newMessages.length} new messages (out of ${messages.length} total). Last saved: ${lastSaved.toISOString()}`);
+      console.debug(`[useRuntimeStore] getNewMessages(${nodeId}): ${newMessages.length} new messages (out of ${messages.length} total). Last saved: ${lastSaved.toISOString()}`);
     }
     return newMessages;
   },

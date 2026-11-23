@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useLocalization } from '@/hooks/useLocalization';
 import { CloseIcon, EyeIcon, DownloadIcon, TrashIcon } from '@/components/Icons';
+import { Button } from '@/components/UI';
 import {
   workflowMediaExplorerService,
   WorkflowMediaExplorerItem,
@@ -389,11 +390,11 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     }
 
     if (previewState.mimeType.startsWith('image/')) {
-      return <img src={previewState.objectUrl} alt={previewState.item.originalName} className="h-auto max-w-full rounded-xl object-contain" />;
+      return <img src={previewState.objectUrl} alt={previewState.item.originalName} className="h-auto max-h-[80vh] max-w-full rounded-xl object-contain" />;
     }
 
     if (previewState.mimeType.startsWith('video/')) {
-      return <video src={previewState.objectUrl} controls className="h-auto max-h-[70vh] w-full rounded-xl bg-black" />;
+      return <video src={previewState.objectUrl} controls className="h-auto max-h-[80vh] w-full rounded-xl bg-black" />;
     }
 
     if (previewState.mimeType.startsWith('audio/')) {
@@ -401,7 +402,7 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
     }
 
     if (previewState.mimeType === 'application/pdf') {
-      return <iframe src={previewState.objectUrl} title={previewState.item.originalName} className="h-[70vh] w-full rounded-xl bg-white" />;
+      return <iframe src={previewState.objectUrl} title={previewState.item.originalName} className="h-[80vh] w-full rounded-xl bg-white" />;
     }
 
     if (previewState.textContent !== null) {
@@ -510,7 +511,9 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="flex max-h-[85vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-950 shadow-[0_32px_120px_rgba(15,23,42,0.55)]">
+      {/* ⭐ 2026-11-21 : modale un peu plus large (max-w-[88rem]) et beaucoup plus haute (h-[95vh])
+          pour des aperçus de fichiers/images confortables */}
+      <div className="flex h-[95vh] w-full max-w-[88rem] flex-col overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-950 shadow-[0_32px_120px_rgba(15,23,42,0.55)]">
         <div className="border-b border-slate-800 bg-slate-900/90 px-6 py-5">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -738,23 +741,27 @@ const BosMediaModal: React.FC<BosMediaModalProps> = ({
 
         {previewState ? (
           <div className="border-t border-slate-800 bg-slate-950/95 px-6 py-5">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-cyan-300/70">
-                  {t('bos_media_preview_label', 'Apercu actif')}
-                </p>
-                <h3 className="mt-2 text-lg font-semibold text-slate-50">{previewState.item.originalName}</h3>
-                <p className="mt-1 text-sm text-slate-400">{previewState.mimeType}</p>
-              </div>
-              <button
+            {/* ⭐ 2026-11-21 : le bouton « Fermer l'aperçu » passe à GAUCHE, à la place du kicker
+                « Aperçu actif » (supprimé). Bouton conforme charte : composant partagé `Button`,
+                `variant="outline" tone="red"` (action de fermeture = rouge), `data-testid` dédié. */}
+            <div className="mb-4 flex items-center gap-4">
+              <Button
                 type="button"
+                variant="outline"
+                tone="red"
                 onClick={() => replacePreview(null)}
-                className="rounded-full border border-slate-700 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white"
+                data-testid="bos-media-preview-close"
+                className="flex-shrink-0"
               >
                 {t('bos_media_preview_close', 'Fermer l\'apercu')}
-              </button>
+              </Button>
+              <div>
+                <h3 className="text-lg font-semibold text-slate-50">{previewState.item.originalName}</h3>
+                <p className="mt-1 text-sm text-slate-400">{previewState.mimeType}</p>
+              </div>
             </div>
-            <div data-testid="bos-media-preview-scroll" className="max-h-[55vh] overflow-auto rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+            {/* ⭐ 2026-11-21 : 80vh pour accompagner la modale h-[95vh] (aperçus plein écran confortables) */}
+            <div data-testid="bos-media-preview-scroll" className="max-h-[80vh] overflow-auto rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
               <div className="flex min-h-full items-start justify-center">
                 {renderPreviewContent()}
               </div>

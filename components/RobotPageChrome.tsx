@@ -57,7 +57,8 @@ export const RobotIndicator: React.FC<{
             data-robot-color={color}
         >
             <div className={`text-xs font-medium ${classes.label}`}>{t('current_robot_label')}</div>
-            <div className={`text-sm font-bold ${classes.name}`}>{displayName}</div>
+            {/* ⭐ 2026-11-21 : nom du robot TOUJOURS en gras + majuscules (charte graphique) */}
+            <div className={`text-sm font-bold uppercase tracking-wide ${classes.name}`}>{displayName}</div>
             {subtitle ? <div className={`text-xs ${classes.sub}`}>{subtitle}</div> : null}
         </div>
     );

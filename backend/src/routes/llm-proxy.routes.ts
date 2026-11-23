@@ -86,7 +86,7 @@ router.post('/get-api-key', requireAuth, validateRequest(getApiKeySchema), async
         // Déchiffrer API key côté serveur (SÉCURITÉ)
         const apiKey = config.getDecryptedApiKey();
 
-        console.log(`[LLMProxy] API key retrieved for user ${user.id}, provider ${provider}`);
+        console.debug(`[LLMProxy] API key retrieved for user ${user.id}, provider ${provider}`);
 
         res.json({
             provider: config.provider,

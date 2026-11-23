@@ -19,7 +19,9 @@ const BUTTON_TONE_CLASSES: Record<ButtonTone, { solid: string; outline: string }
   },
   yellow: {
     solid: 'bg-yellow-500 hover:bg-yellow-400 text-black focus:ring-yellow-400 shadow-[0_0_12px_rgba(234,179,8,0.45)] hover:shadow-[0_0_18px_rgba(234,179,8,0.6)] transition-shadow',
-    outline: 'border-yellow-500/40 bg-yellow-500/10 text-yellow-100 hover:bg-yellow-500/20 focus:ring-yellow-400',
+    // ⭐ 2026-11-21 : au survol le bouton outline s'illumine (halo fort) et le fond passe en
+    // dégradé du jaune de la charte (ex. bouton « Gestion des fichiers »).
+    outline: 'border-yellow-500/50 bg-yellow-500/10 text-yellow-100 hover:bg-gradient-to-r hover:from-yellow-400/50 hover:via-yellow-500/25 hover:to-amber-400/40 hover:text-yellow-50 hover:border-yellow-400 hover:shadow-[0_0_18px_rgba(234,179,8,0.6)] focus:ring-yellow-400 transition-shadow',
   },
   cyan: {
     solid: 'bg-cyan-600 hover:bg-cyan-700 text-white focus:ring-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.4)] hover:shadow-[0_0_18px_rgba(6,182,212,0.55)] transition-shadow',

@@ -78,6 +78,9 @@ type ReactFlowNodeWithMeasuredSize = Node & { measured?: { height?: number; widt
 type ReactFlowNodeLookup = {
   getNode?: (nodeId: string) => ReactFlowNodeWithMeasuredSize | undefined;
   getNodes?: () => ReactFlowNodeWithMeasuredSize[];
+  // ⭐ hygiène tsc : getNodesBounds existe au runtime (store RF) mais pas dans le type
+  // ReactFlowInstance<any, any> de RF 11.11.4 -> déclaré ici, params volontairement larges.
+  getNodesBounds?: (nodes: readonly unknown[]) => { x: number; y: number; width: number; height: number };
 };
 
 const normalizeOptionalDimension = (value: number | null | undefined): number | undefined => (
@@ -300,8 +303,8 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       }
 
       let bounds: { x: number; y: number; width: number; height: number } | null = null;
-      if (typeof reactFlowInstance.getNodesBounds === 'function') {
-        bounds = reactFlowInstance.getNodesBounds(candidateNodes as any);
+      if (typeof reactFlowLookup.getNodesBounds === 'function') {
+        bounds = reactFlowLookup.getNodesBounds(candidateNodes);
       } else {
         const reduced = candidateNodes.reduce((acc, node) => {
           const nodePosition = 'position' in node && node.position ? node.position : { x: 0, y: 0 };

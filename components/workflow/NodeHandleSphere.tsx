@@ -8,8 +8,10 @@ import React, { useId } from 'react';
  * `--sphere-rest-glow` posée inline sur le <svg>).
  *
  * États (CSS dans index.css, sur .node-handle-sphere) :
- * - repos    : sphère sombre couleur créateur, halo `2px var(--sphere-rest-glow)`
- * - :hover   : s'agrandit légèrement (scale 1.18) + halo renforcé (luminosité retrouvée)
+ * - repos    : sphère TRÈS sombre couleur créateur, halo minimal `1px var(--sphere-rest-glow)`
+ *   (⭐ 2026-11-21 : encore assombrie, reflet et anneau affaiblis, alpha du halo 0.22)
+ * - :hover   : s'agrandit (scale 1.18) + halo FORT en couleur créateur
+ *   `10px var(--sphere-hover-glow)` + cœur blanc `4px` (⭐ 2026-11-21 : contraste repos/survol net)
  * - :active / .connecting (classe posée par React Flow pendant le tracé d'un edge) :
  *   plus brillante (halo blanc/indigo clair fort), jusqu'à la connexion à une autre poignée
  *
@@ -42,12 +44,13 @@ const NodeHandleSphere: React.FC<{ className?: string; color?: string }> = ({ cl
     const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
     const gradId = `sphereGrad${uid}`;
 
-    // Dégradé **très sombre** de la couleur du créateur : on assombrit partout,
-    // seul un léger reflet clair en haut à gauche rappelle la teinte.
-    const cLight = mix(color, 'white', 0.1);
-    const cMid = mix(color, 'black', 0.35);
-    const cBase = mix(color, 'black', 0.6);
-    const cDark = mix(color, 'black', 0.85);
+    // Dégradé **extrêmement sombre** de la couleur du créateur (⭐ 2026-11-21 : renforcé —
+    // le repos doit être bien plus sombre que le survol) : on assombrit partout,
+    // seul un très léger reflet clair en haut à gauche rappelle la teinte.
+    const cLight = mix(color, 'white', 0.06);
+    const cMid = mix(color, 'black', 0.5);
+    const cBase = mix(color, 'black', 0.75);
+    const cDark = mix(color, 'black', 0.92);
     const ring = mix(color, 'white', 0.3);
 
     return (
@@ -57,7 +60,10 @@ const NodeHandleSphere: React.FC<{ className?: string; color?: string }> = ({ cl
             width="100%"
             height="100%"
             aria-hidden="true"
-            style={{ ['--sphere-rest-glow' as any]: rgba(color, 0.3) }}
+            style={{
+                ['--sphere-rest-glow' as any]: rgba(color, 0.22),
+                ['--sphere-hover-glow' as any]: rgba(color, 0.95),
+            }}
         >
             <defs>
                 <radialGradient id={gradId} cx="35%" cy="30%" r="78%">
@@ -70,9 +76,9 @@ const NodeHandleSphere: React.FC<{ className?: string; color?: string }> = ({ cl
             {/* sphère (très sombre au repos, couleur du robot créateur) */}
             <circle cx="16" cy="16" r="12.5" fill={`url(#${gradId})`} />
             {/* reflet spéculaire (effet 3D) */}
-            <ellipse cx="11.5" cy="10.5" rx="4.6" ry="3.2" fill="#ffffff" opacity="0.18" transform="rotate(-24 11.5 10.5)" />
+            <ellipse cx="11.5" cy="10.5" rx="4.6" ry="3.2" fill="#ffffff" opacity="0.1" transform="rotate(-24 11.5 10.5)" />
             {/* anneau de bord */}
-            <circle cx="16" cy="16" r="12.5" fill="none" stroke={ring} strokeOpacity="0.18" strokeWidth="1" />
+            <circle cx="16" cy="16" r="12.5" fill="none" stroke={ring} strokeOpacity="0.1" strokeWidth="1" />
         </svg>
     );
 };

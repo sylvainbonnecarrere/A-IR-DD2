@@ -8,7 +8,8 @@ let workflowCanvasHarness = resetWorkflowCanvasHarness();
 const reactFlowMock = {
     getZoom: jest.fn(() => 1),
     getViewport: jest.fn(() => ({ x: 0, y: 0, zoom: 1 })),
-    getNode: jest.fn(() => null),
+    // ⭐ hygiène tsc : param optionnel + retour unknown pour accepter les mockImplementation
+    getNode: jest.fn((_id?: string): unknown => null),
     getNodes: jest.fn(() => []),
     getNodesBounds: jest.fn(() => ({ x: 0, y: 0, width: 0, height: 0 })),
     setCenter: jest.fn(),

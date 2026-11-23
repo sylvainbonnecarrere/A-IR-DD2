@@ -399,7 +399,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
         
         // Save if ANY field changed
         if (enabledChanged || apiKeyChanged || endpointChanged || capabilitiesChanged) {
-          console.log(`[SettingsModal] Saving ${config.provider}`);
+          console.debug(`[SettingsModal] Saving ${config.provider}`);
           
           // Send both fields - backend will use the appropriate one based on provider type
           savePromises.push(

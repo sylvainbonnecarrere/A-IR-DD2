@@ -1,6 +1,22 @@
 // services/geminiService.ts
-import { GoogleGenAI, Modality, Content } from "@google/genai";
+import { GoogleGenAI, Modality, Content, Part } from "@google/genai";
+import type { GenerateContentConfig, GenerateVideosConfig, GenerateVideosParameters } from "@google/genai";
 import { ChatMessage, Tool, OutputConfig } from "../types";
+
+/** Config Gemini : le SDK ne type pas `thinkingLevel` en top-level (champ envoyé tel quel au runtime). */
+type GeminiContentConfig = GenerateContentConfig & { thinkingLevel?: string };
+
+/** Forme du résultat de l'appel dynamique `ai.operations.get` (l'API SDK typée est `getVideosOperation`). */
+interface PolledVideoOperation {
+    done?: boolean;
+    response?: {
+        generatedVideos?: Array<{
+            uri?: string;
+            url?: string;
+            video?: { uri?: string };
+        }>;
+    };
+}
 
 const formatTools = (tools?: Tool[]) => {
     if (!tools || tools.length === 0) return undefined;
@@ -19,7 +35,7 @@ const formatHistory = (history?: ChatMessage[]): Content[] => {
 
     for (const msg of history) {
         if (msg.sender === 'user') {
-            const parts: any[] = [{ text: msg.text }];
+            const parts: Part[] = [{ text: msg.text }];
             if (msg.image && msg.mimeType) {
                 parts.push({ inlineData: { mimeType: msg.mimeType, data: msg.image } });
             }
@@ -67,7 +83,7 @@ export const generateContentStream = async function* (
     const formattedTools = formatTools(tools);
     const formattedHistory = formatHistory(history);
 
-    const config: any = {};
+    const config: GeminiContentConfig = {};
 
     let finalSystemInstruction = systemInstruction;
     if (outputConfig?.enabled && outputConfig.format !== 'json') {
@@ -130,7 +146,7 @@ export const generateContent = async (
     const formattedTools = formatTools(tools);
     const formattedHistory = formatHistory(history);
 
-    const config: any = {};
+    const config: GeminiContentConfig = {};
 
     let finalSystemInstruction = systemInstruction;
     if (outputConfig?.enabled && outputConfig.format !== 'json') {
@@ -176,7 +192,7 @@ export const generateContentWithSearch = async (
 
     const ai = new GoogleGenAI({ apiKey });
     try {
-        const config: any = {
+        const config: GeminiContentConfig = {
             tools: [{ googleSearch: {} }],
             ...(systemInstruction && { systemInstruction }),
         };
@@ -195,8 +211,8 @@ export const generateContentWithSearch = async (
         const text = response.text;
         const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
         const citations = groundingChunks
-            .map((chunk: any) => ({ title: chunk.web?.title || 'Source', uri: chunk.web?.uri || '#' }))
-            .filter((c: any) => c.uri !== '#');
+            .map((chunk) => ({ title: chunk.web?.title || 'Source', uri: chunk.web?.uri || '#' }))
+            .filter((c) => c.uri !== '#');
 
         return { text, citations };
     } catch (error) {
@@ -291,7 +307,7 @@ export const generateVideo = async (
     const ai = new GoogleGenAI({ apiKey });
     try {
         // Build config
-        const config: any = {
+        const config: GenerateVideosConfig = {
             aspectRatio: options.aspectRatio || '16:9',
             resolution: options.resolution || '720p',
             durationSeconds: options.durationSeconds || 8,
@@ -311,7 +327,7 @@ export const generateVideo = async (
             config.referenceImages = options.referenceImages.map(ref => ({
                 image: { mimeType: ref.image.mimeType, data: ref.image.data },
                 referenceType: ref.referenceType,
-            }));
+            })) as unknown as GenerateVideosConfig['referenceImages'];
         }
 
         // Last frame (for interpolation)
@@ -321,7 +337,7 @@ export const generateVideo = async (
 
         // Build request
         const videoModel = model || 'veo-001';
-        const request: any = {
+        const request: GenerateVideosParameters = {
             model: videoModel,
             prompt: options.prompt,
             config,
@@ -369,8 +385,9 @@ export const pollVideoOperation = async (
 
     const ai = new GoogleGenAI({ apiKey });
     try {
-        // Cast to any because Google GenAI SDK types may not match runtime behavior
-        const operation = await (ai.operations as any).get({ name: operationId }) as any;
+        // L'API SDK typée est getVideosOperation ; le runtime expose aussi un get() générique.
+        const operationsApi = ai.operations as unknown as { get: (params: { name: string }) => Promise<unknown> };
+        const operation = (await operationsApi.get({ name: operationId })) as PolledVideoOperation;
 
         if (operation.done) {
             if (operation.response?.generatedVideos?.[0]) {

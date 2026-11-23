@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 require('dotenv').config({ path: '.env' });
 
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/a-ir-dd2-dev';

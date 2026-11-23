@@ -200,12 +200,12 @@ router.post('/', requireAuth, validateRequest(upsertConfigSchema), async (req: R
             if (isLocal) {
                 if (!isMaskedEndpoint) {
                     config.setLocalEndpoint(localEndpoint || '');
-                    console.log(`[LLMConfig] Updated local endpoint for user ${userId}, provider ${provider}`);
+                    console.debug(`[LLMConfig] Updated local endpoint for user ${userId}, provider ${provider}`);
                 }
             } else {
                 if (!isMaskedKey) {
                     config.setApiKey(apiKey || '');
-                    console.log(`[LLMConfig] Updated API key for user ${userId}, provider ${provider}`);
+                    console.debug(`[LLMConfig] Updated API key for user ${userId}, provider ${provider}`);
                 }
             }
             
@@ -229,7 +229,7 @@ router.post('/', requireAuth, validateRequest(upsertConfigSchema), async (req: R
                 config.setApiKey(apiKey || '');
             }
             await config.save();
-            console.log(`[LLMConfig] Created ${isLocal ? 'local' : 'cloud'} config for user ${userId}, provider ${provider}`);
+            console.debug(`[LLMConfig] Created ${isLocal ? 'local' : 'cloud'} config for user ${userId}, provider ${provider}`);
         }
 
         // Build response (mask API key but NOT endpoint - it's public)
@@ -292,7 +292,7 @@ router.delete('/:provider', requireAuth, async (req: Request, res: Response) => 
         // NOTE J4.4: UserSettings.llmConfigs sync REMOVED
         // llm_configs collection is now the SINGLE source of truth
 
-        console.log(`[LLMConfig] Deleted config for user ${userId}, provider ${provider}`);
+        console.debug(`[LLMConfig] Deleted config for user ${userId}, provider ${provider}`);
         res.json({ message: 'Config LLM supprimée' });
     } catch (error) {
         console.error('[LLMConfig] DELETE error:', error);

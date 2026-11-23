@@ -8,13 +8,13 @@ describe('V2AgentNode handle topology', () => {
                 id: 'target-top-left',
                 type: 'target',
                 position: Position.Left,
-                style: { top: 0 },
+                style: { top: -8 },
             }),
             expect.objectContaining({
                 id: 'source-top-right',
                 type: 'source',
                 position: Position.Right,
-                style: { top: 0 },
+                style: { top: -8 },
             }),
         ]);
     });

@@ -201,7 +201,7 @@ export class WorkflowController {
                     }
                 };
 
-                console.log(`[WorkflowController] Instance créée: ${result.instance._id} dans workflow ${workflowId}`);
+                console.debug(`[WorkflowController] Instance créée: ${result.instance._id} dans workflow ${workflowId}`);
                 res.status(201).json(response);
             } catch (transactionError) {
                 await session.abortTransaction();
@@ -379,7 +379,7 @@ export class WorkflowController {
                     deleteResult.audit.persistenceError = persistedAudit.persistenceError;
                 }
 
-                console.log(`[WorkflowController] Nœud supprimé: ${nodeId}`, {
+                console.debug(`[WorkflowController] Nœud supprimé: ${nodeId}`, {
                     deletedInstanceId: deleteResult.deletedInstanceId,
                     journalsDeleted: deleteResult.journalsDeleted,
                     mediaDeleted: deleteResult.mediaDeleted,

@@ -13,7 +13,7 @@
  * - Prêt pour l'architecture V2 des robots
  */
 
-import type { V2WorkflowNode, V2WorkflowEdge, Workflow } from '../types';
+import type { V2WorkflowNode, V2WorkflowEdge, Workflow, RobotId } from '../types';
 import { API_BASE_URL } from '../config/api.config';
 const GUEST_WORKFLOW_KEY = 'guest_workflow_v1';
 const GUEST_NODES_KEY = 'guest_workflow_nodes_v1';
@@ -23,6 +23,25 @@ interface PersistenceOptions {
   token?: string | null;
   isAuthenticated?: boolean;
 }
+
+/** Enregistrement de nœud tel que persisté en localStorage (champs legacy _id/workflowId). */
+interface StoredWorkflowNode extends V2WorkflowNode {
+  _id?: string;
+  workflowId?: string;
+  updatedAt?: Date;
+}
+
+/** Enregistrement d'edge tel que persisté en localStorage (champs legacy _id/workflowId). */
+interface StoredWorkflowEdge extends V2WorkflowEdge {
+  _id?: string;
+  workflowId?: string;
+}
+
+/** Données d'entrée de createNode (legacy : robotId/label aussi acceptés en top-level). */
+type NodeCreationInput = Partial<V2WorkflowNode> & {
+  robotId?: string;
+  label?: string;
+};
 
 /**
  * Service: Workflows
@@ -43,7 +62,7 @@ export const WorkflowService = {
         }
       });
     } else {
-      return this._loadFromStorage(GUEST_WORKFLOW_KEY, []);
+      return WorkflowService._loadFromStorage<Workflow[]>(GUEST_WORKFLOW_KEY, []);
     }
   },
 
@@ -62,8 +81,8 @@ export const WorkflowService = {
         }
       });
     } else {
-      const workflows = this._loadFromStorage(GUEST_WORKFLOW_KEY, []);
-      return workflows.find((w: any) => w._id === workflowId) || null;
+      const workflows = WorkflowService._loadFromStorage<Workflow[]>(GUEST_WORKFLOW_KEY, []);
+      return workflows.find((w: Workflow) => w._id === workflowId) || null;
     }
   },
 
@@ -118,8 +137,8 @@ export const WorkflowService = {
       });
     } else {
       // Mode invité: mettre à jour dans localStorage
-      const workflows = this._loadFromStorage(GUEST_WORKFLOW_KEY, []);
-      const index = workflows.findIndex((w: any) => w._id === workflowId);
+      const workflows = WorkflowService._loadFromStorage<Workflow[]>(GUEST_WORKFLOW_KEY, []);
+      const index = workflows.findIndex((w: Workflow) => w._id === workflowId);
 
       if (index === -1) {
         throw new Error('Workflow not found');
@@ -153,8 +172,8 @@ export const WorkflowService = {
       });
     } else {
       // Mode invité: supprimer de localStorage
-      const workflows = this._loadFromStorage(GUEST_WORKFLOW_KEY, []);
-      const filtered = workflows.filter((w: any) => w._id !== workflowId);
+      const workflows = WorkflowService._loadFromStorage<Workflow[]>(GUEST_WORKFLOW_KEY, []);
+      const filtered = workflows.filter((w: Workflow) => w._id !== workflowId);
       this._saveToStorage(GUEST_WORKFLOW_KEY, filtered);
     }
   },
@@ -177,10 +196,10 @@ export const WorkflowService = {
   /**
    * Privé: Requête API générique
    */
-  async _fetchFromAPI(
+  async _fetchFromAPI<T = unknown>(
     endpoint: string,
     init: RequestInit
-  ): Promise<any> {
+  ): Promise<T> {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...init,
       headers: {
@@ -205,7 +224,7 @@ export const WorkflowService = {
   /**
    * Privé: Charger depuis localStorage
    */
-  _loadFromStorage(key: string, defaultValue: any): any {
+  _loadFromStorage<T>(key: string, defaultValue: T): T {
     try {
       const stored = localStorage.getItem(key);
       return stored ? JSON.parse(stored) : defaultValue;
@@ -218,7 +237,7 @@ export const WorkflowService = {
   /**
    * Privé: Sauvegarder en localStorage
    */
-  _saveToStorage(key: string, data: any): void {
+  _saveToStorage(key: string, data: unknown): void {
     try {
       localStorage.setItem(key, JSON.stringify(data));
     } catch (err) {
@@ -247,8 +266,8 @@ export const WorkflowNodeService = {
         }
       );
     } else {
-      const nodes = WorkflowService._loadFromStorage(GUEST_NODES_KEY, []);
-      return nodes.filter((n: any) => n.workflowId === workflowId);
+      const nodes = WorkflowService._loadFromStorage<StoredWorkflowNode[]>(GUEST_NODES_KEY, []);
+      return nodes.filter((n: StoredWorkflowNode) => n.workflowId === workflowId);
     }
   },
 
@@ -266,17 +285,17 @@ export const WorkflowNodeService = {
         body: JSON.stringify(node)
       });
     } else {
-      const nodes = WorkflowService._loadFromStorage(GUEST_NODES_KEY, []) as V2WorkflowNode[];
+      const nodes = WorkflowService._loadFromStorage<StoredWorkflowNode[]>(GUEST_NODES_KEY, []) as V2WorkflowNode[];
       // Construire un V2WorkflowNode valid avec les données fournies
       const newNode: V2WorkflowNode = {
         id: `node-${Date.now()}`,
-        type: (node as any).type || 'agent',
-        position: (node as any).position || { x: 0, y: 0 },
+        type: node.type || 'agent',
+        position: node.position || { x: 0, y: 0 },
         data: {
-          robotId: (node as any).robotId || (node as any).data?.robotId || 'Archi',
-          label: (node as any).label || (node as any).data?.label || 'New Node',
-          isMinimized: (node as any).data?.isMinimized,
-          isMaximized: (node as any).data?.isMaximized
+          robotId: ((node as NodeCreationInput).robotId || node.data?.robotId || 'Archi') as RobotId,
+          label: (node as NodeCreationInput).label || node.data?.label || 'New Node',
+          isMinimized: node.data?.isMinimized,
+          isMaximized: node.data?.isMaximized
         }
       };
       nodes.push(newNode);
@@ -300,8 +319,8 @@ export const WorkflowNodeService = {
         body: JSON.stringify(updates)
       });
     } else {
-      const nodes = WorkflowService._loadFromStorage(GUEST_NODES_KEY, []);
-      const index = nodes.findIndex((n: any) => n._id === nodeId);
+      const nodes = WorkflowService._loadFromStorage<StoredWorkflowNode[]>(GUEST_NODES_KEY, []);
+      const index = nodes.findIndex((n: StoredWorkflowNode) => n._id === nodeId);
       if (index === -1) throw new Error('Node not found');
 
       const updated = { ...nodes[index], ...updates, updatedAt: new Date() };
@@ -323,8 +342,8 @@ export const WorkflowNodeService = {
         }
       });
     } else {
-      const nodes = WorkflowService._loadFromStorage(GUEST_NODES_KEY, []);
-      const filtered = nodes.filter((n: any) => n._id !== nodeId);
+      const nodes = WorkflowService._loadFromStorage<StoredWorkflowNode[]>(GUEST_NODES_KEY, []);
+      const filtered = nodes.filter((n: StoredWorkflowNode) => n._id !== nodeId);
       WorkflowService._saveToStorage(GUEST_NODES_KEY, filtered);
     }
   }
@@ -339,7 +358,7 @@ export const WorkflowEdgeService = {
     options: PersistenceOptions
   ): Promise<V2WorkflowEdge[]> {
     if (options.isAuthenticated && options.token) {
-      const response = await WorkflowService._fetchFromAPI(
+      const response = await WorkflowService._fetchFromAPI<{ edges?: V2WorkflowEdge[] }>(
         `/api/workflows/${workflowId}/v2/graph`,
         {
           method: 'GET',
@@ -350,8 +369,8 @@ export const WorkflowEdgeService = {
       );
       return Array.isArray(response?.edges) ? response.edges : [];
     } else {
-      const edges = WorkflowService._loadFromStorage(GUEST_EDGES_KEY, []);
-      return edges.filter((e: any) => e.workflowId === workflowId);
+      const edges = WorkflowService._loadFromStorage<StoredWorkflowEdge[]>(GUEST_EDGES_KEY, []);
+      return edges.filter((e: StoredWorkflowEdge) => e.workflowId === workflowId);
     }
   },
 
@@ -365,13 +384,13 @@ export const WorkflowEdgeService = {
       );
     }
 
-    const edges = WorkflowService._loadFromStorage(GUEST_EDGES_KEY, []) as V2WorkflowEdge[];
+    const edges = WorkflowService._loadFromStorage<StoredWorkflowEdge[]>(GUEST_EDGES_KEY, []) as V2WorkflowEdge[];
     const newEdge: V2WorkflowEdge = {
       id: `edge-${Date.now()}`,
-      source: (edge as any).source || '',
-      target: (edge as any).target || '',
-      type: (edge as any).type || 'default',
-      data: (edge as any).data
+      source: edge.source || '',
+      target: edge.target || '',
+      type: edge.type || 'default',
+      data: edge.data
     };
     edges.push(newEdge);
     WorkflowService._saveToStorage(GUEST_EDGES_KEY, edges);
@@ -388,8 +407,8 @@ export const WorkflowEdgeService = {
       );
     }
 
-    const edges = WorkflowService._loadFromStorage(GUEST_EDGES_KEY, []);
-    const filtered = edges.filter((e: any) => e._id !== edgeId);
+    const edges = WorkflowService._loadFromStorage<StoredWorkflowEdge[]>(GUEST_EDGES_KEY, []);
+    const filtered = edges.filter((e: StoredWorkflowEdge) => e._id !== edgeId);
     WorkflowService._saveToStorage(GUEST_EDGES_KEY, filtered);
   }
 };

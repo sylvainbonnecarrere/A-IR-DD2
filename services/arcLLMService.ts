@@ -181,7 +181,7 @@ export const generateVideo = async (
     apiKey: string,
     options: VideoGenerationOptions
 ): Promise<VideoGenerationStatus> => {
-    console.log('[Arc-LLM] generateVideo called', { options });
+    console.debug('[Arc-LLM] generateVideo called', { options });
 
     // Validation
     const validation = ArcLLMValidator.validateVideoRequest(options);
@@ -208,7 +208,7 @@ export const generateVideo = async (
         // Generate unique operation ID to track async process
         const operationId = `arc-video-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-        console.log('[Arc-LLM] Video generation started:', operationId);
+        console.debug('[Arc-LLM] Video generation started:', operationId);
 
         return {
             operationId,
@@ -237,7 +237,7 @@ export const pollVideoStatus = async (
     apiKey: string,
     operationId: string
 ): Promise<VideoGenerationStatus> => {
-    console.log('[Arc-LLM] pollVideoStatus called:', operationId);
+    console.debug('[Arc-LLM] pollVideoStatus called:', operationId);
 
     try {
         // TODO: [Arc-LLM] Implémenter appel réel API polling
@@ -251,7 +251,7 @@ export const pollVideoStatus = async (
         const isCompleted = mockProgress >= 90;
 
         if (isCompleted) {
-            console.log('[Arc-LLM] Video generation completed:', operationId);
+            console.debug('[Arc-LLM] Video generation completed:', operationId);
             return {
                 operationId,
                 status: 'COMPLETED',
@@ -260,7 +260,7 @@ export const pollVideoStatus = async (
             };
         }
 
-        console.log('[Arc-LLM] Video generation in progress:', { operationId, progress: mockProgress });
+        console.debug('[Arc-LLM] Video generation in progress:', { operationId, progress: mockProgress });
         return {
             operationId,
             status: 'PROCESSING',
@@ -299,7 +299,7 @@ export const generateContentWithMaps = async (
     systemInstruction?: string,
     userLocation?: { lat: number; lng: number }
 ): Promise<MapsGroundingResponse> => {
-    console.log('[Arc-LLM] generateContentWithMaps called', { prompt, userLocation });
+    console.debug('[Arc-LLM] generateContentWithMaps called', { prompt, userLocation });
 
     // Validation (aucun tool/outputConfig passé ici, exclusion mutuelle appliquée upstream)
     const validation = ArcLLMValidator.validateGroundingRequest('maps');
@@ -377,7 +377,7 @@ export const generateContentWithMaps = async (
             }
         ];
 
-        console.log('[Arc-LLM] Maps Grounding completed:', { sources: mockMapSources.length });
+        console.debug('[Arc-LLM] Maps Grounding completed:', { sources: mockMapSources.length });
 
         return {
             text: mockText,
@@ -413,7 +413,7 @@ export const generateContentWithWebSearch = async (
     prompt: string,
     systemInstruction?: string
 ): Promise<WebSearchGroundingResponse> => {
-    console.log('[Arc-LLM] generateContentWithWebSearch called', { prompt });
+    console.debug('[Arc-LLM] generateContentWithWebSearch called', { prompt });
 
     // Validation
     const validation = ArcLLMValidator.validateGroundingRequest('web');
@@ -473,7 +473,7 @@ export const generateContentWithWebSearch = async (
             }
         ];
 
-        console.log('[Arc-LLM] Web Search Grounding completed:', { sources: mockWebSources.length });
+        console.debug('[Arc-LLM] Web Search Grounding completed:', { sources: mockWebSources.length });
 
         return {
             text: mockText,
@@ -499,7 +499,7 @@ export const generateContentWithWebSearch = async (
 export const getUserLocation = (): Promise<{ lat: number; lng: number }> => {
     return new Promise((resolve, reject) => {
         // Mock : Retourner coordonnées Paris par défaut
-        console.log('[Arc-LLM] Getting user location (mock: Paris)');
+        console.debug('[Arc-LLM] Getting user location (mock: Paris)');
         resolve({ lat: 48.8566, lng: 2.3522 });
 
         // TODO: [Arc-LLM] Implémenter géolocalisation réelle

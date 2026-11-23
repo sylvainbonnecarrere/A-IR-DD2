@@ -74,15 +74,15 @@ export async function detectLocalLLMCapabilities(endpoint: string): Promise<Dete
         // Étape 1: Vérifier cache
         const cached = detectionCache.get(endpoint);
         if (cached) {
-            console.log(`[LocalLLMDetection] Cache hit for ${endpoint}`);
+            console.debug(`[LocalLLMDetection] Cache hit for ${endpoint}`);
             return cached;
         }
 
-        console.log(`[LocalLLMDetection] Starting detection for endpoint: ${endpoint}`);
+        console.debug(`[LocalLLMDetection] Starting detection for endpoint: ${endpoint}`);
 
         // Étape 2: Appeler le backend proxy unique
         const proxyUrl = `${getBackendUrl()}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(endpoint)}`;
-        console.log(`[LocalLLMDetection] Calling backend proxy: ${proxyUrl}`);
+        console.debug(`[LocalLLMDetection] Calling backend proxy: ${proxyUrl}`);
 
         const response = await fetch(proxyUrl, {
             method: 'GET',
@@ -111,7 +111,7 @@ export async function detectLocalLLMCapabilities(endpoint: string): Promise<Dete
         // Étape 3: Mettre en cache
         detectionCache.set(endpoint, result);
 
-        console.log(`[LocalLLMDetection] Detection complete for ${endpoint}:`, {
+        console.debug(`[LocalLLMDetection] Detection complete for ${endpoint}:`, {
             healthy: result.healthy,
             modelId: result.modelId,
             capabilitiesCount: result.capabilities.length
@@ -147,7 +147,7 @@ export async function detectLMStudioModel(endpoint: string): Promise<DetectionRe
  */
 export function invalidateCache(endpoint?: string): void {
     detectionCache.invalidate(endpoint);
-    console.log(`[LocalLLMDetection] Cache invalidated${endpoint ? ` for ${endpoint}` : ' (all)'}`);
+    console.debug(`[LocalLLMDetection] Cache invalidated${endpoint ? ` for ${endpoint}` : ' (all)'}`);
 }
 
 /**

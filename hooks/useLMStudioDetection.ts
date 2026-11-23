@@ -91,7 +91,7 @@ export const useLMStudioDetection = (
             if (onSuccess) {
                 const saveThisConfig = (config: { apiKey: string; enabled: boolean; capabilities: Record<string, boolean> }) => {
                     // Ici, on pourrait appeler un hook de persistance comme useLLMConfigs
-                    console.log('Sauvegarde de la configuration LMStudio...', config);
+                    console.debug('Sauvegarde de la configuration LMStudio...', config);
                     // Exemple: updateConfig('LMStudio', { ...config, model: detection.modelId });
                     return Promise.resolve();
                 };

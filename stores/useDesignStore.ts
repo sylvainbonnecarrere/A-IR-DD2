@@ -345,7 +345,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       // They should automatically use the updated agent object
     }));
 
-    console.log(`[useDesignStore] ✅ Updated agent ID: "${tempId}" → "${realObjectId}"`);
+    console.debug(`[useDesignStore] ✅ Updated agent ID: "${tempId}" → "${realObjectId}"`);
     return { success: true };
   },
 
@@ -406,7 +406,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     setTimeout(() => {
       const { fixedCount } = get().validateWorkflowIntegrity();
       if (fixedCount > 0) {
-        console.log(`🔧 Post-deletion cleanup: fixed ${fixedCount} additional orphaned nodes`);
+        console.debug(`🔧 Post-deletion cleanup: fixed ${fixedCount} additional orphaned nodes`);
       }
     }, 0);
 
@@ -565,7 +565,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
         agentInstances: state.agentInstances.filter(instance => !orphanedIds.includes(instance.id))
       }));
 
-      console.log(`🧹 Cleaned up ${orphanedIds.length} orphaned instances:`, orphanedIds);
+      console.debug(`🧹 Cleaned up ${orphanedIds.length} orphaned instances:`, orphanedIds);
     }
 
     return orphanedIds.length;
@@ -590,7 +590,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
         )
       }));
 
-      console.log(`🔧 Fixed ${orphanedNodes.length} orphaned workflow nodes:`, orphanedNodeIds);
+      console.debug(`🔧 Fixed ${orphanedNodes.length} orphaned workflow nodes:`, orphanedNodeIds);
     }
 
     return { orphanedNodes, fixedCount: orphanedNodes.length };
@@ -713,12 +713,12 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   loadUserWorkflows: async () => {
     set({ isLoadingWorkflows: true, workflowLoadError: null });
     try {
-      console.log('[Workflows] Attempting GET /api/workflows via apiClient');
+      console.debug('[Workflows] Attempting GET /api/workflows via apiClient');
       
       const { data } = await apiClient.get('/api/workflows');
       const workflows: Workflow[] = data.workflows || data;
       
-      console.log(`[Workflows] Primary endpoint returned ${workflows.length} workflows`);
+      console.debug(`[Workflows] Primary endpoint returned ${workflows.length} workflows`);
       
       // Auto-select active workflow
       const activeWorkflow = workflows.find((w: Workflow) => w.isActive);
@@ -730,7 +730,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
         workflowLoadError: null
       });
       
-      console.log('[Workflows] State updated successfully');
+      console.debug('[Workflows] State updated successfully');
     } catch (primaryError) {
       // ⭐ ROBUST FALLBACK: Try workspace endpoint if primary fails
       console.warn('[Workflows] Primary endpoint failed, attempting fallback to /api/user/workspace');
@@ -758,7 +758,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
           isLoadingWorkflows: false,
           workflowLoadError: null
         });
-        console.log('[Workflows] Successfully loaded 1 workflow via fallback endpoint');
+        console.debug('[Workflows] Successfully loaded 1 workflow via fallback endpoint');
       } catch (fallbackError) {
         const errorMsg = fallbackError instanceof Error ? fallbackError.message : 'Unknown error loading workflows';
         console.error('[Workflows] Fatal error:', errorMsg);

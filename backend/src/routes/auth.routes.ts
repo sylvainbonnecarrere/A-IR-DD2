@@ -57,7 +57,7 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
 
         // ⭐ SELF-HEALING: Créer le workflow par défaut pour le nouvel utilisateur
         const defaultWorkflow = await WorkflowSelfHealingService.createDefaultWorkflowForNewUser(user.id);
-        console.log(`✅ [Auth] Default workflow created for user ${user.email}:`, defaultWorkflow.id);
+        console.debug(`✅ [Auth] Default workflow created for user ${user.email}:`, defaultWorkflow.id);
 
         // Générer tokens JWT
         const payload = {
@@ -68,7 +68,7 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
         const accessToken = generateAccessToken(payload);
         const refreshToken = generateRefreshToken(payload);
 
-        console.log(`✅ [Auth] User registered: ${user.email}`);
+        console.debug(`✅ [Auth] User registered: ${user.email}`);
 
         res.status(201).json({
             user: {
@@ -128,7 +128,7 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
         const accessToken = generateAccessToken(payload);
         const refreshToken = generateRefreshToken(payload);
 
-        console.log(`✅ [Auth] User logged in: ${user.email}`);
+        console.debug(`✅ [Auth] User logged in: ${user.email}`);
 
         res.json({
             user: {
@@ -176,7 +176,7 @@ router.post('/refresh', validateRequest(refreshSchema), async (req, res) => {
             role: payload.role
         });
 
-        console.log(`🔄 [Auth] Token refreshed for: ${user.email}`);
+        console.debug(`🔄 [Auth] Token refreshed for: ${user.email}`);
 
         res.json({ accessToken: newAccessToken });
     } catch (error) {
@@ -195,7 +195,7 @@ router.post('/refresh', validateRequest(refreshSchema), async (req, res) => {
 router.post('/logout', (req, res) => {
     // Note: Avec JWT, la déconnexion est principalement côté client
     // Le frontend doit supprimer les tokens du storage
-    console.log('👋 [Auth] User logged out');
+    console.debug('👋 [Auth] User logged out');
     res.json({ message: 'Déconnexion réussie' });
 });
 

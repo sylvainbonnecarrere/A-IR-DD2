@@ -18,7 +18,7 @@
  */
 
 import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import { backfillMediaReferenceCatalogFields } from '../migrations/006_media_reference_catalog_backfill';
 import { migrateLegacyWorkflowGraphsToV2 } from '../migrations/008_workflow_v1_to_v2_migration';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';

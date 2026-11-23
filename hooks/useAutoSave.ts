@@ -140,7 +140,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
         setStatus('saved');
         setLastSavedAt(new Date());
         setError(null);
-        console.log('[useAutoSave] ✅ Auto-save successful');
+        console.debug('[useAutoSave] ✅ Auto-save successful');
         
         // Reset status after 3 seconds
         setTimeout(() => {
@@ -231,7 +231,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
       
       // Only trigger if we had previous state (skip initial render)
       if (prevNodesRef.current && prevEdgesRef.current) {
-        console.log('[useAutoSave] 📝 Changes detected, scheduling auto-save...');
+        console.debug('[useAutoSave] 📝 Changes detected, scheduling auto-save...');
         scheduleAutoSave();
       }
     }

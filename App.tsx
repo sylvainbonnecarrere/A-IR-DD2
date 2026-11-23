@@ -17,6 +17,7 @@ import { NotificationDisplay } from './components/NotificationDisplay';
 import { QueryProvider } from './providers';
 import { getSettingsStorage } from './utils/SettingsStorage';
 import { webSocketService } from './services/webSocketService';
+import type { RuntimeEventEnvelope } from './services/webSocketService';
 // ⭐ ÉTAPE 5: Import HydrationOverlay for loading state
 import { HydrationOverlay } from './components/HydrationOverlay';
 // ⭐ V2: Import WorkflowSwitchOverlay for workflow switch (Bos amber)
@@ -135,7 +136,7 @@ export function AppContent() {
   const handleRobotNavigation = useCallback((robotId: RobotId, path: string) => {
     setCurrentPath(path);
     // TODO: Implement proper routing logic
-    console.log(`Navigating to robot ${robotId} at path ${path}`);
+    console.debug(`Navigating to robot ${robotId} at path ${path}`);
   }, []);
 
   const handleRuntimeNavigation = useCallback((robotId: string, path: string) => {
@@ -209,7 +210,8 @@ export function AppContent() {
       setRuntimeConnectionState(state.error ? 'degraded' : 'offline');
     };
 
-    const handleRuntimeEvent = (event: { id: string; type: string; version: number; aggregateType: 'run' | 'task'; aggregateId: string; workspaceId: string; correlationId?: string; occurredAt: string; payload: Record<string, unknown> }) => {
+    // ⭐ hygiène : type nommé partagé (version: 1 littéral) au lieu d'un type inline divergent
+    const handleRuntimeEvent = (event: RuntimeEventEnvelope) => {
       recordRuntimeEvent(event);
     };
 
@@ -340,7 +342,7 @@ export function AppContent() {
     const { fixedCount } = validateWorkflowIntegrity();
 
     if (cleanedCount > 0 || fixedCount > 0) {
-      console.log(`🚀 App startup integrity check completed: cleaned ${cleanedCount} instances, fixed ${fixedCount} nodes`);
+      console.debug(`🚀 App startup integrity check completed: cleaned ${cleanedCount} instances, fixed ${fixedCount} nodes`);
     }
   }, []); // Run only once on mount
 
@@ -406,7 +408,7 @@ export function AppContent() {
 
     // ⭐ AUTO-SAVE: Immediately persist to backend (if authenticated)
     if (isAuthenticated && accessToken && workflowId) {
-      console.log('[App] 📤 Auto-saving new agent instance to backend:', {
+      console.debug('[App] 📤 Auto-saving new agent instance to backend:', {
         instanceId,
         prototypeId: agent.id,
         workflowId
@@ -445,7 +447,7 @@ export function AppContent() {
       let finalInstanceId = instanceId;
       
       if (result.success) {
-        console.log('[App] ✅ Agent instance persisted to DB with backendId:', result.backendId);
+        console.debug('[App] ✅ Agent instance persisted to DB with backendId:', result.backendId);
         
         // ✅ ÉTAPE 2: Synchroniser l'instance complète du backend avec Zustand
         // Le backend retourne l'instance avec configuration_json enrichie
@@ -490,9 +492,10 @@ export function AppContent() {
             useRuntimeStore.getState().renameNodeRuntimeState(fromNodeId, toNodeId);
 
             setCurrentImageNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
-            setCurrentImageAgentInstance((agentInstance) => remapAgentInstanceReference(agentInstance, instanceId, persistedBackendId, workflowId));
+            // ⭐ hygiène tsc : le setter du store prend une VALEUR (pas un updater React)
+            setCurrentImageAgentInstance(remapAgentInstanceReference(currentImageAgentInstance, instanceId, persistedBackendId, workflowId));
             setCurrentVideoNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
-            setCurrentVideoAgentInstance((agentInstance) => remapAgentInstanceReference(agentInstance, instanceId, persistedBackendId, workflowId));
+            setCurrentVideoAgentInstance(remapAgentInstanceReference(currentVideoAgentInstance, instanceId, persistedBackendId, workflowId));
             setCurrentMapsNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
             setEditingImageInfo((imageInfo) => remapEditingImageInfo(imageInfo, fromNodeId, toNodeId, instanceId, persistedBackendId, workflowId));
           }
@@ -565,7 +568,7 @@ export function AppContent() {
       }
       
     } else {
-      console.log('[App] Guest mode - agent instance saved to localStorage via store');
+      console.debug('[App] Guest mode - agent instance saved to localStorage via store');
       
       // Guest mode: créer le node avec l'ID local
       // ⭐ FIX: Utiliser getState() pour obtenir la valeur actuelle du store
@@ -595,13 +598,13 @@ export function AppContent() {
    * Gère les deux formats d'ID (legacy et V2)
    */
   const handleDeleteNode = useCallback(async (nodeId: string) => {
-    console.log('[App] handleDeleteNode called with:', nodeId);
+    console.debug('[App] handleDeleteNode called with:', nodeId);
 
     const v2Node = storeNodes.find((node) => node.id === nodeId);
     const finalInstanceId = v2Node?.data?.agentInstance?.id
       || (nodeId.startsWith('node-') ? nodeId.replace(/^node-/, '') : undefined);
 
-    console.log('[App] Delete node resolution:', {
+    console.debug('[App] Delete node resolution:', {
       nodeId,
       storeInstanceId: v2Node?.data?.agentInstance?.id,
       finalInstanceId,
@@ -620,13 +623,13 @@ export function AppContent() {
       });
 
       if (deleted) {
-        console.log('[App] ✅ Agent instance deleted from backend:', finalInstanceId);
+        console.debug('[App] ✅ Agent instance deleted from backend:', finalInstanceId);
       }
     }
   }, [storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId]);
 
   const handleDeleteNodes = useCallback(async (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy = 'delete_media'): Promise<AgentBatchDeleteResult> => {
-    console.log('[App] handleDeleteNodes called with:', instanceIds, 'policy:', mediaPolicy);
+    console.debug('[App] handleDeleteNodes called with:', instanceIds, 'policy:', mediaPolicy);
 
     const workflowId = resolveCurrentWorkflowId();
     return deleteWorkflowInstances({
@@ -745,7 +748,7 @@ export function AppContent() {
     // This approach separates concerns: coordinates in Design Store, UI state in Runtime Store
     const { toggleNodeMinimized } = useRuntimeStore.getState();
     toggleNodeMinimized(nodeId);
-    console.log('[App] Toggled minimize for node:', nodeId);
+    console.debug('[App] Toggled minimize for node:', nodeId);
   };
 
   const handleUpdateNodeMessages = (nodeId: string, messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {

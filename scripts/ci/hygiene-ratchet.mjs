@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+// ⭐ Ratchet d'hygiène (2026-11-21) : bloque toute AUGMENTATION du nombre de `any`
+// explicites et de `console.log(` dans le code versionné (frontend racine + backend/src).
+// La dette existante est connue et listée dans hygiene-baseline.json ; on ne fait que
+// empêcher qu'elle grossisse. Pour corriger la dette : diminuer les compteurs, puis
+// `npm run hygiene:update-baseline`.
+//
+// Usage :
+//   node scripts/ci/hygiene-ratchet.mjs            -> vérifie (exit 1 si régression)
+//   node scripts/ci/hygiene-ratchet.mjs --update   -> recale la baseline sur l'actuel
+import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const baselinePath = path.join(root, 'scripts', 'ci', 'hygiene-baseline.json');
+
+const ANY_RE = /(:\s*any\b|as\s+any\b|<any>|any\[\]|Promise<any>)/g;
+const LOG_RE = /console\.log\(/g;
+
+const listFiles = (pattern) => execSync(`git ls-files ${pattern}`, { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+
+const frontendFiles = listFiles('"*.ts" "*.tsx"').filter((f) => !f.startsWith('backend/') && !f.includes('node_modules'));
+const backendFiles = listFiles('"backend/src/*.ts"');
+
+const countIn = (files, re) =>
+  files.reduce((n, f) => {
+    try {
+      return n + (fs.readFileSync(path.join(root, f), 'utf8').match(re) || []).length;
+    } catch {
+      return n;
+    }
+  }, 0);
+
+const current = {
+  anyFrontend: countIn(frontendFiles, ANY_RE),
+  anyBackend: countIn(backendFiles, ANY_RE),
+  consoleLogFrontend: countIn(frontendFiles, LOG_RE),
+  consoleLogBackend: countIn(backendFiles, LOG_RE),
+};
+
+if (process.argv.includes('--update')) {
+  fs.writeFileSync(
+    baselinePath,
+    JSON.stringify(
+      { note: 'Baseline ratchet hygiène — ne recale que quand la dette DIMINUE.', updatedAt: new Date().toISOString(), ...current },
+      null,
+      2,
+    ) + '\n',
+  );
+  console.log('Baseline recalée :', JSON.stringify(current));
+  process.exit(0);
+}
+
+const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+const keys = Object.keys(current);
+let regressed = false;
+
+console.log('Hygiene ratchet (baseline -> actuel) :');
+for (const k of keys) {
+  const before = baseline[k] ?? 0;
+  const after = current[k];
+  const status = after > before ? 'REGRESSION' : after < before ? 'amelioration' : 'stable';
+  if (after > before) regressed = true;
+  console.log(`  ${k}: ${before} -> ${after}  [${status}]`);
+}
+
+if (regressed) {
+  console.error('\nECHEC ratchet : la dette (any / console.log) a AUGMENTE — corrige ou justifie, ne recale pas la baseline.');
+  process.exit(1);
+}
+console.log('\nOK : aucune augmentation de la dette hygiène.');

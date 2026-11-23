@@ -76,14 +76,14 @@ export const useJournalQueue = () => {
   ) => {
     // ⭐ FIX: Ne pas enregistrer si l'utilisateur n'est pas authentifié
     if (!accessTokenRef.current) {
-      console.log(`[JournalQueue] Skipping ${type} entry - user not authenticated (guest mode)`);
+      console.debug(`[JournalQueue] Skipping ${type} entry - user not authenticated (guest mode)`);
       return;
     }
     
     // ⭐ FIX: En mode MANUEL, ne pas envoyer automatiquement (sauf si forcé par le bouton Save)
     const saveMode = useSaveModeStore.getState().saveMode;
     if (saveMode === 'manual' && !forceImmediate) {
-      console.log(`[JournalQueue] Skipping ${type} entry - save mode is 'manual' (use Save button)`);
+      console.debug(`[JournalQueue] Skipping ${type} entry - save mode is 'manual' (use Save button)`);
       return;
     }
     
@@ -108,7 +108,7 @@ export const useJournalQueue = () => {
     statsRef.current.totalQueued++;
     statsRef.current.currentQueue = [...queueRef.current];
 
-    console.log(`[JournalQueue] ✅ Enqueued ${type} entry (queue size: ${queueRef.current.length})`);
+    console.debug(`[JournalQueue] ✅ Enqueued ${type} entry (queue size: ${queueRef.current.length})`);
 
     // Déclencher le traitement
     flushQueue();
@@ -158,11 +158,11 @@ export const useJournalQueue = () => {
 
       const result = await response.json();
       if (result.skipped) {
-        console.log(`[JournalQueue] Entry skipped: ${result.reason}`);
+        console.debug(`[JournalQueue] Entry skipped: ${result.reason}`);
         return true; // Considérer comme succès (config désactivée)
       }
 
-      console.log(`[JournalQueue] ✅ ${entry.type} entry persisted:`, result.journalId);
+      console.debug(`[JournalQueue] ✅ ${entry.type} entry persisted:`, result.journalId);
       return true;
     } catch (error) {
       console.error(`[JournalQueue] Persistence error:`, error);
@@ -189,13 +189,13 @@ export const useJournalQueue = () => {
   const flushQueue = useCallback(async () => {
     // Éviter les appels concurrents
     if (processingRef.current) {
-      console.log('[JournalQueue] Already processing, skipping flush');
+      console.debug('[JournalQueue] Already processing, skipping flush');
       return;
     }
 
     // Vérifier la connectivité
     if (!navigator.onLine) {
-      console.log('[JournalQueue] Offline mode - queue paused');
+      console.debug('[JournalQueue] Offline mode - queue paused');
       return;
     }
 
@@ -207,7 +207,7 @@ export const useJournalQueue = () => {
 
         // Vérifier si c'est temps de retrier
         if (entry.nextRetryAt && entry.nextRetryAt > Date.now()) {
-          console.log(`[JournalQueue] Entry ${entry.id} not ready for retry yet`);
+          console.debug(`[JournalQueue] Entry ${entry.id} not ready for retry yet`);
           break; // Sortir et attendre le prochain cycle
         }
 
@@ -223,7 +223,7 @@ export const useJournalQueue = () => {
           if (entry.retryCount < entry.maxRetries) {
             entry.retryCount++;
             entry.nextRetryAt = Date.now() + calculateRetryDelay(entry.retryCount);
-            console.log(
+            console.debug(
               `[JournalQueue] Retry scheduled for entry ${entry.id} ` +
               `(attempt ${entry.retryCount}/${entry.maxRetries})`
             );
@@ -270,7 +270,7 @@ export const useJournalQueue = () => {
   const clearQueue = useCallback(() => {
     queueRef.current = [];
     statsRef.current.currentQueue = [];
-    console.log('[JournalQueue] Queue cleared');
+    console.debug('[JournalQueue] Queue cleared');
   }, []);
 
   /**
@@ -278,12 +278,12 @@ export const useJournalQueue = () => {
    */
   useEffect(() => {
     const handleOnline = () => {
-      console.log('[JournalQueue] Online - resuming flush');
+      console.debug('[JournalQueue] Online - resuming flush');
       flushQueue();
     };
 
     const handleOffline = () => {
-      console.log('[JournalQueue] Offline - pausing flush');
+      console.debug('[JournalQueue] Offline - pausing flush');
     };
 
     window.addEventListener('online', handleOnline);

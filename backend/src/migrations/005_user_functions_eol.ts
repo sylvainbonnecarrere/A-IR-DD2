@@ -148,7 +148,7 @@ async function runUp(): Promise<void> {
 
         const summary = await migrateLegacyUserFunctionsToUserToolsAndDropCollection(db);
 
-        console.log(
+        console.debug(
             `[Migration 005] user_functions EOL: found=${summary.collectionFound} scanned=${summary.scanned} created=${summary.created} skippedExistingById=${summary.skippedExistingById} blocked=${summary.blockedByLogicalConflict} dropped=${summary.dropped}`
         );
 

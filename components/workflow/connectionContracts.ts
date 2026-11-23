@@ -6,13 +6,15 @@ export const AGENT_NODE_HANDLES = [
         id: 'target-top-left',
         type: 'target' as const,
         position: Position.Left,
-        style: { top: 0 },
+        // ⭐ 2026-11-21 : sphère remontée de 8px au-dessus du bord du node (empiète sur la marge)
+        style: { top: -8 },
     },
     {
         id: 'source-top-right',
         type: 'source' as const,
         position: Position.Right,
-        style: { top: 0 },
+        // ⭐ 2026-11-21 : sphère remontée de 8px au-dessus du bord du node (empiète sur la marge)
+        style: { top: -8 },
     },
 ];
 

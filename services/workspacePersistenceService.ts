@@ -87,7 +87,7 @@ export const WorkspacePersistenceService = {
             };
             
             localStorage.setItem(GUEST_STORAGE_KEYS.WORKFLOW, JSON.stringify(updated));
-            console.log('[WorkspacePersistence] Saved workflow to localStorage');
+            console.debug('[WorkspacePersistence] Saved workflow to localStorage');
             
             return { id: updated.id, success: true };
         }
@@ -113,7 +113,7 @@ export const WorkspacePersistenceService = {
         }
 
         const saved = await response.json();
-        console.log('[WorkspacePersistence] Saved workflow to API:', saved._id || saved.id);
+        console.debug('[WorkspacePersistence] Saved workflow to API:', saved._id || saved.id);
         
         return { id: saved._id || saved.id, success: true };
     },
@@ -129,7 +129,7 @@ export const WorkspacePersistenceService = {
         if (!options.isAuthenticated) {
             // Guest mode: localStorage
             localStorage.setItem(GUEST_STORAGE_KEYS.WORKFLOW_NODES, JSON.stringify(nodes));
-            console.log('[WorkspacePersistence] Saved nodes to localStorage:', nodes.length);
+            console.debug('[WorkspacePersistence] Saved nodes to localStorage:', nodes.length);
             return { success: true };
         }
 
@@ -153,7 +153,7 @@ export const WorkspacePersistenceService = {
         });
 
         await Promise.all(promises);
-        console.log('[WorkspacePersistence] Saved nodes to API V2:', nodes.length);
+        console.debug('[WorkspacePersistence] Saved nodes to API V2:', nodes.length);
         
         return { success: true };
     },
@@ -169,7 +169,7 @@ export const WorkspacePersistenceService = {
         if (!options.isAuthenticated) {
             // Guest mode: localStorage
             localStorage.setItem(GUEST_STORAGE_KEYS.WORKFLOW_EDGES, JSON.stringify(edges));
-            console.log('[WorkspacePersistence] Saved edges to localStorage:', edges.length);
+            console.debug('[WorkspacePersistence] Saved edges to localStorage:', edges.length);
             return { success: true };
         }
 
@@ -201,7 +201,7 @@ export const WorkspacePersistenceService = {
             localStorage.setItem(GUEST_STORAGE_KEYS.WORKFLOW_EDGES, JSON.stringify(edges));
         }
 
-        console.log('[WorkspacePersistence] Complete workspace saved:', workflowId);
+        console.debug('[WorkspacePersistence] Complete workspace saved:', workflowId);
         return { workflowId, success: true };
     },
 
@@ -217,7 +217,7 @@ export const WorkspacePersistenceService = {
             localStorage.removeItem(GUEST_STORAGE_KEYS.WORKFLOW);
             localStorage.removeItem(GUEST_STORAGE_KEYS.WORKFLOW_NODES);
             localStorage.removeItem(GUEST_STORAGE_KEYS.WORKFLOW_EDGES);
-            console.log('[WorkspacePersistence] Deleted workflow from localStorage');
+            console.debug('[WorkspacePersistence] Deleted workflow from localStorage');
             return { success: true };
         }
 
@@ -233,7 +233,7 @@ export const WorkspacePersistenceService = {
             throw new Error(`Failed to delete workflow: ${response.statusText}`);
         }
 
-        console.log('[WorkspacePersistence] Deleted workflow from API:', workflowId);
+        console.debug('[WorkspacePersistence] Deleted workflow from API:', workflowId);
         return { success: true };
     },
 
@@ -257,7 +257,7 @@ export const WorkspacePersistenceService = {
 
         // Auth mode: Could debounce API call or use local state
         // For now, this is handled by the workflow reducer
-        console.log('[WorkspacePersistence] Marked workflow dirty:', workflowId);
+        console.debug('[WorkspacePersistence] Marked workflow dirty:', workflowId);
     }
 };
 

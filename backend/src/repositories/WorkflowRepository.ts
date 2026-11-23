@@ -40,7 +40,7 @@ export class WorkflowRepository implements IWorkflowRepository {
     try {
       const newWorkflow = new Workflow(workflow);
       const saved = await newWorkflow.save();
-      console.log(`[WorkflowRepository] Created workflow ${saved._id} for user ${workflow.userId}`);
+      console.debug(`[WorkflowRepository] Created workflow ${saved._id} for user ${workflow.userId}`);
       return saved;
     } catch (error) {
       console.error(`[WorkflowRepository] create error:`, error);
@@ -57,7 +57,7 @@ export class WorkflowRepository implements IWorkflowRepository {
       ).exec();
       
       if (updated) {
-        console.log(`[WorkflowRepository] Updated workflow ${workflowId}`);
+        console.debug(`[WorkflowRepository] Updated workflow ${workflowId}`);
       }
       return updated;
     } catch (error) {
@@ -72,7 +72,7 @@ export class WorkflowRepository implements IWorkflowRepository {
       const deleted = !!result;
       
       if (deleted) {
-        console.log(`[WorkflowRepository] Deleted workflow ${workflowId}`);
+        console.debug(`[WorkflowRepository] Deleted workflow ${workflowId}`);
       }
       return deleted;
     } catch (error) {

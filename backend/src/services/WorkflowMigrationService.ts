@@ -73,12 +73,12 @@ export class WorkflowMigrationService implements IWorkflowMigrationService {
         // Use first workflow as default
         targetWorkflow = workflows[0];
         action = 'assigned';
-        console.log(`[WorkflowMigrationService] Migration: User ${userId} had ${workflows.length} workflows, assigning first as default`);
+        console.debug(`[WorkflowMigrationService] Migration: User ${userId} had ${workflows.length} workflows, assigning first as default`);
       } else {
         // Create default workflow
         targetWorkflow = await this.createDefaultWorkflow(userId);
         action = 'created';
-        console.log(`[WorkflowMigrationService] Migration: Created default workflow for user ${userId}`);
+        console.debug(`[WorkflowMigrationService] Migration: Created default workflow for user ${userId}`);
       }
 
       // 4. Update User record
@@ -91,7 +91,7 @@ export class WorkflowMigrationService implements IWorkflowMigrationService {
       const count = await this.workflowRepository.countByUserId(userId);
       await this.userRepository.syncWorkflowCount(userId, count);
 
-      console.log(`[WorkflowMigrationService] Success: User ${userId} now has default workflow ${targetWorkflow._id}`);
+      console.debug(`[WorkflowMigrationService] Success: User ${userId} now has default workflow ${targetWorkflow._id}`);
 
       return {
         success: true,
@@ -150,7 +150,7 @@ async createDefaultWorkflow(userId: string): Promise<IWorkflow> {
         ]
       }).select('_id email').limit(batchSize).exec();
 
-      console.log(`[WorkflowMigrationService] Found ${usersWithoutDefault.length} users to migrate`);
+      console.debug(`[WorkflowMigrationService] Found ${usersWithoutDefault.length} users to migrate`);
 
       for (const user of usersWithoutDefault) {
         try {
@@ -170,7 +170,7 @@ async createDefaultWorkflow(userId: string): Promise<IWorkflow> {
         }
       }
 
-      console.log(`[WorkflowMigrationService] Migration complete: ${migratedCount} users migrated, ${errors.length} errors`);
+      console.debug(`[WorkflowMigrationService] Migration complete: ${migratedCount} users migrated, ${errors.length} errors`);
       return { migratedCount, errors };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);

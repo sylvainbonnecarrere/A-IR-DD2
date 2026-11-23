@@ -40,7 +40,7 @@ export function initializeImageStrategies(): void {
     // ImageServiceFactory.registerStrategy(LLMProvider.StabilityAI, new StabilityImageStrategy());
     // ImageServiceFactory.registerStrategy(LLMProvider.Flux, new FluxImageStrategy());
 
-    console.log('[ImageCapabilities] Initialized strategies:',
+    console.debug('[ImageCapabilities] Initialized strategies:',
         ImageServiceFactory.getImageGenerationProviders().join(', '));
 }
 

@@ -244,7 +244,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                 const messagesToSend = newMessages.slice(0, MAX_MESSAGES_PER_BATCH);
 
                 if (messagesToSend.length > 0) {
-                    console.log(`[SavePrototypeButton] 📤 Sending ${messagesToSend.length}/${newMessages.length} messages for instance ${agentInstance.id}`);
+                    console.debug(`[SavePrototypeButton] 📤 Sending ${messagesToSend.length}/${newMessages.length} messages for instance ${agentInstance.id}`);
                 }
 
                 for (const message of messagesToSend) {
@@ -379,7 +379,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
                 }
             }
 
-            console.log(`[SavePrototypeButton] ✅ Complete: ${saved} saved, ${totalErrors} errors`);
+            console.debug(`[SavePrototypeButton] ✅ Complete: ${saved} saved, ${totalErrors} errors`);
         } finally {
             isSavingRef.current = false;
             abortControllerRef.current = null;
@@ -394,7 +394,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
     const handleSave = useCallback(async () => {
         // ⭐ TRIPLE GUARD: État UI + Ref + Render condition
         if (buttonState === 'saving' || isSavingRef.current || !shouldRender) {
-            console.log('[SavePrototypeButton] Save blocked:', { buttonState, isSaving: isSavingRef.current, shouldRender });
+            console.debug('[SavePrototypeButton] Save blocked:', { buttonState, isSaving: isSavingRef.current, shouldRender });
             return;
         }
 
@@ -436,7 +436,7 @@ export const SavePrototypeButton: React.FC<SavePrototypeButtonProps> = ({
 
             // 2. Sauvegarder les journaux
             const journalResult = await persistJournals();
-            console.log(`[SavePrototypeButton] Workflow: ${result.success}, Journals: ${journalResult.saved} saved, ${journalResult.errors} errors`);
+            console.debug(`[SavePrototypeButton] Workflow: ${result.success}, Journals: ${journalResult.saved} saved, ${journalResult.errors} errors`);
 
             if (result.success && !journalResult.aborted) {
                 setButtonState('success');

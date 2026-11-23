@@ -3,7 +3,7 @@ import { ChatMessage } from '../types';
 import { authSessionStorage } from '../utils/authSessionStorage';
 
 // Types pour les événements (synchronisés avec le backend)
-interface RuntimeEventEnvelope {
+export interface RuntimeEventEnvelope {
   id: string;
   type: string;
   version: 1;
@@ -128,7 +128,7 @@ class WebSocketService {
 
     // === CONNEXION/DÉCONNEXION ===
     this.socket.on('connect', () => {
-      console.log('[WebSocket] Connecté au serveur');
+      console.debug('[WebSocket] Connecté au serveur');
       this.connectionState.isConnected = true;
       this.connectionState.isConnecting = false;
       this.connectionState.error = null;
@@ -143,7 +143,7 @@ class WebSocketService {
     });
 
     this.socket.on('disconnect', (reason) => {
-      console.log('[WebSocket] Déconnecté:', reason);
+      console.debug('[WebSocket] Déconnecté:', reason);
       this.connectionState.isConnected = false;
       this.connectionState.isConnecting = false;
       this.connectionState.connectedUsers = [];
@@ -267,7 +267,7 @@ class WebSocketService {
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
     
     setTimeout(() => {
-      console.log(`[WebSocket] Tentative de reconnexion ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+      console.debug(`[WebSocket] Tentative de reconnexion ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
       this.connect();
     }, delay);
   }

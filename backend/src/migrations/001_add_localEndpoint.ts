@@ -22,7 +22,7 @@ const LOCAL_PROVIDERS = ['LLM local (on premise)', 'Jan', 'Ollama'];
 
 async function migrateLocalEndpoints() {
     try {
-        console.log('[Migration] Starting localEndpoint migration...');
+        console.debug('[Migration] Starting localEndpoint migration...');
         
         // Connect to MongoDB
         const mongoUri = process.env.MONGODB_URI;
@@ -31,11 +31,11 @@ async function migrateLocalEndpoints() {
         }
         
         await mongoose.connect(mongoUri);
-        console.log('[Migration] Connected to MongoDB');
+        console.debug('[Migration] Connected to MongoDB');
         
         // Count existing configs
         const totalConfigs = await LLMConfig.countDocuments();
-        console.log(`[Migration] Found ${totalConfigs} total configs`);
+        console.debug(`[Migration] Found ${totalConfigs} total configs`);
         
         // Find all local provider configs
         const localConfigs = await LLMConfig.find({
@@ -44,7 +44,7 @@ async function migrateLocalEndpoints() {
         console        .log(`[Migration] Found ${localConfigs.length} local provider configs to migrate`);
         
         if (localConfigs.length === 0) {
-            console.log('[Migration] No local configs to migrate - DONE');
+            console.debug('[Migration] No local configs to migrate - DONE');
             await mongoose.connection.close();
             return;
         }
@@ -70,26 +70,26 @@ async function migrateLocalEndpoints() {
                 await config.save();
                 successCount++;
                 
-                console.log(`[Migration] ✅ Migrated ${config.provider} for user ${config.userId}`);
+                console.debug(`[Migration] ✅ Migrated ${config.provider} for user ${config.userId}`);
             } catch (err) {
                 errorCount++;
                 console.error(`[Migration] ❌ Failed to migrate ${config.provider}:`, err instanceof Error ? err.message : 'Unknown error');
             }
         }
         
-        console.log(`[Migration] Migration complete: ${successCount} success, ${errorCount} errors`);
+        console.debug(`[Migration] Migration complete: ${successCount} success, ${errorCount} errors`);
         
         // Create index if doesn't exist
         try {
             await LLMConfig.collection.createIndex({ localEndpoint: 1 });
-            console.log('[Migration] ✅ Created index on localEndpoint');
+            console.debug('[Migration] ✅ Created index on localEndpoint');
         } catch (err) {
             console.warn('[Migration] ⚠️ Index creation warning:', err instanceof Error ? err.message : 'Unknown error');
         }
         
         // Disconnect
         await mongoose.connection.close();
-        console.log('[Migration] ✅ MIGRATION COMPLETED SUCCESSFULLY');
+        console.debug('[Migration] ✅ MIGRATION COMPLETED SUCCESSFULLY');
         
     } catch (err) {
         console.error('[Migration] ❌ MIGRATION FAILED:', err instanceof Error ? err.message : 'Unknown error');

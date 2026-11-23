@@ -580,19 +580,24 @@ body {
 .node-handle-sphere * {
   pointer-events: none;
 }
-/* Repos : sphère **très sombre** de la couleur du robot créateur du node (var
-   --sphere-rest-glow posée inline sur le <svg> par NodeHandleSphere), halo très discret. */
+/* Repos : sphère **extrêmement sombre** de la couleur du robot créateur du node (var
+   --sphere-rest-glow posée inline sur le <svg> par NodeHandleSphere), halo minimal.
+   ⭐ 2026-11-21 : halo réduit à 1px (au lieu de 2px) pour un contraste net avec le survol. */
 .node-handle-sphere {
   display: block;
   width: 100%;
   height: 100%;
-  filter: drop-shadow(0 0 2px var(--sphere-rest-glow, rgba(99, 102, 241, 0.28)));
+  filter: drop-shadow(0 0 1px var(--sphere-rest-glow, rgba(99, 102, 241, 0.2)));
   transition: transform 0.18s ease, filter 0.3s ease;
 }
-/* Survol : la sphère s'agrandit légèrement et retrouve sa luminosité. */
+/* Survol : la sphère s'agrandit et s'illumine FORTEMENT — double halo en couleur du robot
+   créateur (var --sphere-hover-glow @0.95) + cœur blanc, bien plus lumineux que le repos.
+   ⭐ 2026-11-21 : contraste repos/survol renforcé (halo 8px indigo fixe -> 10px couleur + blanc). */
 .react-flow__handle.node-handle:hover .node-handle-sphere {
   transform: scale(1.18);
-  filter: drop-shadow(0 0 8px rgba(129, 140, 248, 0.95));
+  filter:
+    drop-shadow(0 0 10px var(--sphere-hover-glow, rgba(129, 140, 248, 0.95)))
+    drop-shadow(0 0 4px rgba(255, 255, 255, 0.55));
 }
 /* Clic (mousedown, :active) ou classe .connecting posée par React Flow pendant le tracé :
    la sphère s'illumine IMMÉDIATEMENT et fort (jusqu'à la connexion), même si la souris

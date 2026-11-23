@@ -1,5 +1,16 @@
+import type { AxiosResponse } from 'axios';
 import apiClient from '../../utils/apiClient';
 import WorkflowRunService from '../../services/workflowRunService';
+
+// ⭐ hygiène tsc : construit une AxiosResponse complète et typée à partir du body { data }
+// (les mocks partiels ne sont plus assignables au contrat d'axios).
+const okResponse = <T>(body: { data: T }): AxiosResponse<T> => ({
+  ...body,
+  status: 200,
+  statusText: 'OK',
+  headers: {},
+  config: {} as AxiosResponse<T>['config'],
+});
 
 describe('WorkflowRunService V2 contract bridge', () => {
   beforeEach(() => {
@@ -7,7 +18,7 @@ describe('WorkflowRunService V2 contract bridge', () => {
   });
 
   it('lists workflow-scoped runs through the canonical /api/runs route', async () => {
-    jest.spyOn(apiClient, 'get').mockResolvedValue({
+    jest.spyOn(apiClient, 'get').mockResolvedValue(okResponse({
       data: {
         items: [{
           executionId: 'run-1',
@@ -28,7 +39,7 @@ describe('WorkflowRunService V2 contract bridge', () => {
           sortOrder: 'desc',
         },
       },
-    });
+    }));
 
     const result = await WorkflowRunService.listWorkflowRuns('wf-123');
 
@@ -44,13 +55,13 @@ describe('WorkflowRunService V2 contract bridge', () => {
   });
 
   it('launches a run through the canonical execute endpoint using workflow context', async () => {
-    jest.spyOn(apiClient, 'post').mockResolvedValue({
+    jest.spyOn(apiClient, 'post').mockResolvedValue(okResponse({
       data: {
         executionId: 'run-456',
         status: 'queued',
         idempotency: { key: null, replayed: false },
       },
-    });
+    }));
 
     const result = await WorkflowRunService.launchRun({
       workflowId: 'wf-123',
@@ -71,7 +82,7 @@ describe('WorkflowRunService V2 contract bridge', () => {
   });
 
   it('reads a run by executionId through the canonical details route', async () => {
-    jest.spyOn(apiClient, 'get').mockResolvedValue({
+    jest.spyOn(apiClient, 'get').mockResolvedValue(okResponse({
       data: {
         executionId: 'run-789',
         status: 'running',
@@ -79,7 +90,7 @@ describe('WorkflowRunService V2 contract bridge', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:05.000Z',
       },
-    });
+    }));
 
     const result = await WorkflowRunService.getRun('run-789', 'tool-99');
 
@@ -91,9 +102,9 @@ describe('WorkflowRunService V2 contract bridge', () => {
   });
 
   it('cancels a queued or running run via the execution cancel route', async () => {
-    jest.spyOn(apiClient, 'post').mockResolvedValue({
+    jest.spyOn(apiClient, 'post').mockResolvedValue(okResponse({
       data: { success: true, executionId: 'run-cancelled', status: 'stopped' },
-    });
+    }));
 
     const result = await WorkflowRunService.cancelRun('run-cancelled');
 

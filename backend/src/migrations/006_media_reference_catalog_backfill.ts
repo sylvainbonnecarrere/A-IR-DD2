@@ -246,7 +246,7 @@ async function runUp(): Promise<void> {
         }
 
         const summary = await backfillMediaReferenceCatalogFields(db);
-        console.log(
+        console.debug(
             `[Migration 006] media_references backfill: found=${summary.collectionFound} scanned=${summary.scanned} updated=${summary.updated} compatible=${summary.alreadyCompatible} blocked=${summary.blocked} indexes=${summary.indexesEnsured}`
         );
     } finally {

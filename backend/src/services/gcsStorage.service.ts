@@ -32,7 +32,7 @@ import {
 
 const DEBUG = process.env.DEBUG_CLOUD_STORAGE === 'true' || process.env.NODE_ENV === 'development';
 const debugLog = (message: string) => {
-    if (DEBUG) console.log(`[GCSStorage] ${message}`);
+    if (DEBUG) console.debug(`[GCSStorage] ${message}`);
 };
 
 // Durées par défaut

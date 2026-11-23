@@ -227,7 +227,7 @@ const seedPassword = process.env.DEV_TEST_USER_PASSWORD;
 if (seedPassword) {
   db.users.insertOne({
     email: seedEmail,
-    password: require('bcryptjs').hashSync(seedPassword, 12),
+    password: require('bcrypt').hashSync(seedPassword, 12),
     role: 'user',
     isActive: true,
     createdAt: new Date(),
