@@ -1,4 +1,7 @@
 import mongoose from 'mongoose';
+import type { IAgentInstance } from '../../models/AgentInstance.model';
+import type { IWorkflowNodeV2 } from '../../models/WorkflowNodeV2.model';
+import type { IAgentJournal } from '../../models/AgentJournal.model';
 import { IWorkflowRepository } from '../../repositories/IWorkflowRepository';
 import type { PersistenceConfig, CreateInstanceRequestBody } from '../../types/persistence';
 import { DEFAULT_PERSISTENCE_CONFIG, normalizePersistenceConfigForPersistence } from '../../types/persistence';
@@ -12,9 +15,9 @@ export interface CreateWorkflowInstanceInput {
 export type CreateWorkflowInstanceResult =
   | {
       kind: 'created';
-      instance: any;
-      node: any;
-      journal: any;
+      instance: IAgentInstance;
+      node: IWorkflowNodeV2;
+      journal: IAgentJournal;
     }
   | {
       kind: 'not_found';
@@ -24,20 +27,17 @@ export class CreateWorkflowInstanceUseCase {
   constructor(
     private readonly workflowRepository: IWorkflowRepository,
     private readonly agentInstanceModel: {
-      create: (documents: unknown[], options?: { session?: mongoose.ClientSession }) => Promise<any[]>;
+      create: (documents: unknown[], options?: { session?: mongoose.ClientSession }) => Promise<IAgentInstance[]>;
     },
     private readonly workflowNodeModel: {
-      create: (documents: unknown[], options?: { session?: mongoose.ClientSession }) => Promise<any[]>;
+      create: (documents: unknown[], options?: { session?: mongoose.ClientSession }) => Promise<IWorkflowNodeV2[]>;
     },
     private readonly agentJournalModel: {
-      create: (documents: unknown[], options?: { session?: mongoose.ClientSession }) => Promise<any[]>;
+      create: (documents: unknown[], options?: { session?: mongoose.ClientSession }) => Promise<IAgentJournal[]>;
     },
   ) {}
 
-  async execute(
-    input: CreateWorkflowInstanceInput,
-    session?: mongoose.ClientSession,
-  ): Promise<CreateWorkflowInstanceResult> {
+  async execute(input: CreateWorkflowInstanceInput, session?: mongoose.ClientSession): Promise<CreateWorkflowInstanceResult> {
     const workflow = await this.workflowRepository.findOwnedById(input.workflowId, input.userId);
     if (!workflow) {
       return { kind: 'not_found' };
@@ -99,22 +99,27 @@ export class CreateWorkflowInstanceUseCase {
 
     const [node] = await this.workflowNodeModel.create([nodeData], session ? { session } : undefined);
 
-    const [journal] = await this.agentJournalModel.create([{
-      agentInstanceId: instance._id,
-      workflowId: new mongoose.Types.ObjectId(input.workflowId),
-      type: 'system',
-      severity: 'info',
-      payload: {
-        event: 'instance_created',
-        details: {
-          name: instance.name,
-          role: instance.role,
-          nodeId: node._id.toString(),
+    const [journal] = await this.agentJournalModel.create(
+      [
+        {
+          agentInstanceId: instance._id,
+          workflowId: new mongoose.Types.ObjectId(input.workflowId),
+          type: 'system',
+          severity: 'info',
+          payload: {
+            event: 'instance_created',
+            details: {
+              name: instance.name,
+              role: instance.role,
+              nodeId: node._id.toString(),
+            },
+            triggeredBy: input.userId,
+          },
+          timestamp: new Date(),
         },
-        triggeredBy: input.userId,
-      },
-      timestamp: new Date(),
-    }], session ? { session } : undefined);
+      ],
+      session ? { session } : undefined,
+    );
 
     return {
       kind: 'created',
