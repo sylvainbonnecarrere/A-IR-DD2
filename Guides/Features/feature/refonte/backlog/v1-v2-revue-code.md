@@ -1,10 +1,13 @@
 # Revue de code post-clôture — feature refonte V1 → V2 (`v1-v2-revue-code`)
 
-**Auteur :** `01-architecte` (revue architecturale)
-**Date :** 2026-11-21
-**Branche :** `main` @ `f2499f6` + working tree non commité de l'agent `06-frontend` (32 suppressions indexées, 79 fichiers modifiés, 6 nouveaux fichiers — rapport `Guides/Features/feature/refonte/erreurs/rapport-hygiene-code-2026-11-21.md`)
+**Auteur initial :** `01-architecte-bdd` (revue architecturale, 2026-11-21)
+**Revue critique et mise à jour :** `09-architecte-applicatif` (2026-11-23)
+**Date :** 2026-11-21, révisée le 2026-11-23
+**Branche :** `main` @ `ba6ee8b` — la vague 1 d'hygiène de `06-frontend` est **commitée** (2026-11-23 13:11 UTC, 119 fichiers, +4164/−867 ; working tree propre au 2026-11-23 13:28 UTC). La revue initiale décrivait un working tree non commité @ `f2499f6` ; ce n'est plus l'état courant.
 **Backlog source clôturé :** `Guides/Features/feature/refonte/backlog/v1-v2-refonte-backlog.md` (gate de cutover V2 §13 : **GO signé 2026-11-19**, toutes US J0–J7 closes)
-**Objectif :** valider la première vague de corrections d'hygiène non commitées, corriger les réserves architecturales avant commit, puis planifier la suite (dette `any`, `console.log`, lint/prettier, CI) en US exécutables.
+**Objectif :** valider la première vague de corrections d'hygiène (désormais committée), corriger les réserves architecturales **restées ouvertes** avant d'activer le gate CI, puis planifier la suite (dette `any`, `console.log`, lint/prettier, CI) en US exécutables.
+
+> **Mise à jour 2026-11-23 (`09-architecte-applicatif`) — constat majeur :** la vague 1 a été committée (`ba6ee8b`, « J2 Livraison US J2 - Revue de code ») **sans** les corrections R1–R3 que la revue initiale exigeait « avant commit » (série US-RC-00a/b/c). Re-vérification sur `ba6ee8b` : **R1, R2, R3 sont toujours ouvertes**, et une 4ᵉ réserve **R4** est identifiée (`format:changed` non bloquant). Ces 4 réserves redeviennent **bloquantes pour la suite** — avant US-RC-01 (gate CI) et avant les campagnes `any` — car un ratchet contournable en local et un check de format toujours vert rendraient le gate CI trompeur. R1 reste un risque de régression silencieuse. Toutes les preuves chiffrées de la vague 1 ont été re-exécutées sur `ba6ee8b` et sont conformes (§2.1).
 
 ---
 
@@ -20,115 +23,145 @@ Aucun reliquat fonctionnel du backlog n'est ouvert. La revue qui suit porte **un
 
 ---
 
-## 2. Verdict sur la première vague de corrections `06-frontend` (non commitées)
+## 2. Verdict sur la vague de corrections `06-frontend` (commitée dans `ba6ee8b`)
 
-### 2.1 VALIDÉE — preuves re-exécutées par l'architecte (2026-11-21)
+### 2.1 VALIDÉE — preuves re-exécutées (01-architecte 2026-11-21, re-jouées par 09 sur `ba6ee8b` le 2026-11-23)
 
 | Contrôle | Résultat constaté | Verdict |
 |---|---|---|
-| `tsc --noEmit` frontend racine | 0 erreur (exit 0) — était 13 | ✅ |
-| `cd backend && npx tsc --noEmit` | 0 erreur (exit 0) | ✅ |
-| `npx eslint . --quiet` (erreurs seules) | 0 erreur (exit 0) | ✅ |
-| `node scripts/ci/hygiene-ratchet.mjs` | OK, baseline 376/433/126/2 stable (exit 0) | ✅ |
+| `tsc --noEmit` frontend racine | 0 erreur (exit 0) — était 13. **Re-joué 2026-11-23 : exit 0** | ✅ |
+| `cd backend && npx tsc --noEmit` | 0 erreur (exit 0). **Re-joué 2026-11-23 : exit 0** | ✅ |
+| `npx eslint . --quiet` (erreurs seules) | 0 erreur (exit 0). **Re-joué 2026-11-23 : exit 0** | ✅ |
+| `node scripts/ci/hygiene-ratchet.mjs` | OK, baseline 376/433/126/2 stable (exit 0). **Re-joué 2026-11-23 : 376/433/126/2 [stable], exit 0** | ✅ |
 | Suites jest modifiées (workflowRunService, useAppWorkflowController, WorkflowCanvas.render, V2AgentNode.handles) | 4 suites / 25 tests PASS | ✅ |
 | Typage des 5 gros fichiers `any` (workflowService, llmService, geminiService, AgentConfigurationModal, useWorkflowData) | 72 `any` supprimés, **0 ajoutés** ; génériques (`_loadFromStorage<T>`, `_fetchFromAPI<T>`, `okResponse<T>`), interfaces nommées (`StoredWorkflowNode/Edge`), type guards (`errorMessageOf(err: unknown)`) — pas de `any` déguisé | ✅ qualité SOLID |
 | `AgentLoop.ts` ~l.543 | `if` imbriqué redondant supprimé, retour aplati, comportement identique | ✅ |
 | Suppression `backend/src/server.js` + `websocket/WebSocketManager.js` | aucune référence trouvée (main = `dist/src/server.js`, dev = `tsx src/server.ts`) ; 0 `.js` restant dans `backend/src` | ✅ |
-| 30 `.pyc` désindexés + `.gitignore` (`__pycache__/`, `*.pyc`) | conforme | ✅ |
+| 30 `.pyc` désindexés + `.gitignore` (`__pycache__/`, `*.pyc`) | conforme (présents dans `ba6ee8b`) | ✅ |
 | `bcryptjs` → `bcrypt` natif (hashs `$2b$` compatibles) | `User.model.ts`, `databaseInit.ts`, `init-collections.js`, `fix-test-user.js` cohérents ; 0 occurrence `bcryptjs` | ✅ |
 | Garde-fous : `eslint.config.mjs` (flat, dette en `warn`, structurel en `error`), `.prettierrc.json`, `scripts/ci/hygiene-ratchet.mjs` + baseline | bien calibrés, dette ratchetée en augmentation | ✅ |
 
-### 2.2 RÉSERVES — 3 points à corriger **avant commit** (US-RC-00, P0)
+### 2.2 RÉSERVES — 4 points **OUVERTS** sur `ba6ee8b` (série US-RC-00a/b/c, P0 — bloquants avant US-RC-01)
 
-| # | Réserve | Détail | Correction attendue |
-|---|---|---|---|
-| R1 | **Stale closure dans `App.tsx`** | `addAgentToWorkflow` (useCallback l.393) appelle `setCurrentImageAgentInstance(remapAgentInstanceReference(currentImageAgentInstance, …))` (l.496) et idem vidéo (l.498), mais `currentImageAgentInstance`/`currentVideoAgentInstance` **ne sont pas dans les dépendances** du useCallback (l.594). La correction "setter prend une valeur" (juste au demeurant — le setter `useAppShellStore` prend une valeur, pas un updater) échange l'ancien bug de type contre un risque de closure périmée. | Utiliser le pattern déjà présent dans le même fichier : `useAppShellStore.getState().currentImageAgentInstance` (cf. l.277/281) — pas de dépendance ajoutée, état toujours courant. |
-| R2 | **Ratchet aveugle aux fichiers non suivis** | `hygiene-ratchet.mjs` compte via `git ls-files` : un **nouveau fichier non commité** contenant des `any`/`console.log` échappe au comptage en local (il ne sera vu qu'au commit, donc en CI seulement). | Ajouter `git ls-files --others --exclude-standard` au périmètre de comptage (fichiers nouveaux non suivis). |
-| R3 | **`init-collections.js` : commentaire manquant** | Le fichier est monté dans `/docker-entrypoint-initdb.d/` du conteneur `mongo:6.0` (docker-compose.yml l.17) où `require('bcrypt')` (natif) n'est pas disponible ; SETUP_NOTES le marque « reference only / deprecated ». Le passage à `bcrypt` y est cohérent mais un lecteur pourrait croire le script exécutable tel quel. | Ajouter un commentaire d'en-tête : « reference only — en conteneur mongo, remplacer par un hash `$2b$` précalculé, `require` indisponible ». |
+Statut re-vérifié le 2026-11-23 par `09-architecte-applicatif` : aucune des réserves R1–R3 n'a été traitée dans le commit `ba6ee8b` ; R4 est nouvelle.
+
+| # | Réserve | Preuve dans `ba6ee8b` | Correction attendue | Responsable |
+|---|---|---|---|---|
+| R1 | **Stale closure dans `App.tsx`** | `addAgentToWorkflow` (useCallback l.393) appelle `setCurrentImageAgentInstance(remapAgentInstanceReference(currentImageAgentInstance, …))` (l.496) et idem vidéo (l.498) avec les sélecteurs l.95/98, mais le deps array (l.594 : `[addAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId, updateInstanceId, addNode]`) ne contient **ni** `currentImageAgentInstance` **ni** `currentVideoAgentInstance`. Risque concret : `remapAgentInstanceReference` (`utils/mediaPanelRuntimeSync.ts:16-31`) ne remappe que si `agentInstance.id === fromInstanceId` — avec une closure périmée (agent image changé entre-temps), le remap vers le `persistedBackendId` n'est pas appliqué (ou l'est sur la mauvaise instance) → le panneau média pointe vers un ID local non persisté. | Utiliser le pattern déjà présent dans le même fichier : `useAppShellStore.getState().currentImageAgentInstance` (cf. l.277-281 `clearTransientUiState`/`resetGuestShellState`) — pas de dépendance ajoutée, état toujours courant. | `06-frontend` |
+| R2 | **Ratchet aveugle aux fichiers non suivis** | `scripts/ci/hygiene-ratchet.mjs:24` — `listFiles` = `git ls-files <pattern>` seul : un **nouveau fichier non commité** contenant des `any`/`console.log` échappe au comptage en local (vu seulement au commit, donc en CI seulement). | Ajouter `--others --exclude-standard` au `git ls-files` ; ajouter un `--self-test` au script (pattern établi par `audit-gate.mjs` : crée un fichier temporaire non suivi avec `as any`, attend exit 1, nettoie). | `04-cicd-installation` |
+| R3 | **`init-collections.js` : commentaire d'en-tête manquant** | `backend/docker/init-collections.js` commence directement par `// MongoDB Collections & Schema Initialization` — aucun avertissement. Le fichier est monté dans `/docker-entrypoint-initdb.d/` du conteneur `mongo:6.0` (docker-compose.yml l.17) où `require('bcrypt')` (natif) n'est pas disponible ; SETUP_NOTES le marque « reference only / deprecated », mais un lecteur du fichier seul pourrait croire le script exécutable tel quel. | Commentaire d'en-tête : « reference only — en conteneur mongo, remplacer par un hash `$2b$` précalculé, `require` indisponible ». | `03-backend` (co `04-cicd-installation`, docker) |
+| R4 | **(Nouveau 09) `format:changed` non bloquant + diff PR vide** | `package.json` : le script `format:changed` se termine par `2>/dev/null \|\| true` → **exit 0 systématique**, non bloquant même en CI. De plus `git diff origin/main...HEAD` est vide en checkout shallow de PR (`actions/checkout@v5` par défaut, `fetch-depth: 1`, et `origin/main` peut ne pas exister) → check vide = vert même avec des fichiers non formatés. | Retirer le `|| true` ; utiliser `git diff --name-only --diff-filter=ACM origin/${{ github.base_ref:-main }}...HEAD` ; en CI, `actions/checkout` avec `fetch-depth: 0` dans le job concerné (US-RC-01). En local, fallback `main...HEAD` conservé. | `04-cicd-installation` |
 
 ### 2.3 Améliorations architecturales proposées (planifiées en §3)
 
-- **Contrats partagés aux frontières** (pattern *ports/adapters*) : le front duplique encore des formes de contrats backend (`RuntimeEventEnvelope` exporté de `webSocketService.ts` est une bonne amorce) — étendre à un package de contrats communs (run/task/événements) plutôt que de typer fichier par fichier.
+- **Contrats partagés aux frontières** (pattern *ports/adapters*) : le front duplique encore des formes de contrats backend (`RuntimeEventEnvelope` déclarée dans `services/webSocketService.ts:6` avec `type: string` et `payload: Record<string, unknown>`, à comparer au contrat Zod backend `backend/src/domain/execution/runtimeEvent.contract.ts:63-127` — enum de types, whitelist de payload, `version: z.literal(1)`). Voir US-RC-10 pour le mécanisme retenu (génération + parité, pas de monorepo).
 - **Logger structuré backend** (pattern *strategy*) : remplacer `console.debug/warn/error` par une interface `ILogger` à niveaux (`LOG_LEVEL`), implémentation console en dev / JSON structuré en prod — ne pas se contenter de renommer.
 - **Dette `any` par boundaries, pas par fichier** : la campagne `any` doit cibler d'abord les frontières (API axios, localStorage, socket, payloads LLM) où un contrat fort élimine des dizaines de `any` d'un coup (ex. `useWorkflowData.ts` l'a montré : `catch (err: unknown)` + guard = pattern reproductible).
-- **`App.tsx` reste la zone à haut risque** (§11 du backlog source) : planifier une extraction progressive de sa logique métier vers hooks/services dédiés, en US séparées — hors périmètre de l'hygiène pure.
+- **`App.tsx` reste la zone à haut risque** (§11 du backlog source) : extraction progressive de sa logique métier vers hooks/services dédiés, en US séparées — désormais tracée en **US-RC-11** (la revue initiale en parlait sans US dédiée).
 
 ---
 
 ## 3. User stories de la revue de code
 
-### US-RC-00 — Corrections architecturales avant commit (réserves R1–R3)
+Les réserves R1–R4 sont découpées en **trois US à agent unique**, exécutées dans l'ordre chronologique strict `US-RC-00a` → `US-RC-00b` → `US-RC-00c` (un commit par US, historique propre et revert facile), suivies du commit de clôture puis de `US-RC-01`. Rationale de l'ordre : R1 est la seule réserve à **risque fonctionnel** (régression silencieuse) → d'abord ; R2+R4 sont les **prérequis du gate CI** → ensuite ; R3 est documentaire → en dernier. Coordination : `09-architecte-applicatif` ; revue : `01-architecte-bdd`.
+
+### US-RC-00a — R1 : stale closure dans `App.tsx` (P0)
 
 **Agent responsable :** `06-frontend.agent.md`
-**Co-responsable :** `01-architecte` (revue)
-**Criticité :** Haute (bloquant pour le commit de la vague 1)
-**Description :** corriger R1 (stale closure `App.tsx` via `useAppShellStore.getState()`), R2 (ratchet + fichiers non suivis), R3 (commentaire `init-collections.js`). Aucun changement de comportement.
-**Dépendances :** aucune (working tree courant).
-**Risques et consequences :** R1 non corrigé = régression potentielle silencieuse (référence d'instance périmée lors du remap d'ID) ; R2 non corrigé = le ratchet peut être contourné en local.
-**Impacts codebase et tests :** `App.tsx`, `scripts/ci/hygiene-ratchet.mjs`, `backend/docker/init-collections.js`, test de ratchet (fixture avec fichier non suivi) ; rejouer les suites `App`/workflow.
-**Criteres d'acceptation :**
-- `App.tsx` : plus aucun usage de `currentImageAgentInstance`/`currentVideoAgentInstance` hors deps dans `addAgentToWorkflow` (utiliser `getState()`) ;
-- ratchet : un fichier nouveau non suivi avec `any`/`console.log` fait échouer le script en local ;
-- `init-collections.js` porte le commentaire d'en-tête ;
-- `tsc` 0/0, eslint 0 erreur, suites concernées vertes, ratchet OK.
+**Criticité :** Haute (P0) — première de la série, bloquante avant US-RC-01 et les campagnes `any`.
+**Description :** corriger la stale closure de `addAgentToWorkflow` (useCallback l.393) : l.496/498 lisent `currentImageAgentInstance`/`currentVideoAgentInstance` (sélecteurs l.95/98) hors du deps array (l.594). Aucun changement de comportement métier visé.
+**Dépendances :** aucune (working tree propre sur `main` @ `ba6ee8b`).
+**Risques et conséquences :** non corrigé = régression potentielle silencieuse : `remapAgentInstanceReference` (`utils/mediaPanelRuntimeSync.ts:16-31`) ne remappe que si `agentInstance.id === fromInstanceId` — avec une closure périmée (agent image changé entre-temps), le remap vers le `persistedBackendId` n'est pas appliqué (ou l'est sur la mauvaise instance) → le panneau média pointe vers un ID local non persisté.
+**Impacts codebase et tests :** `App.tsx` uniquement + test de régression (deux ajouts d'agents consécutifs avec changement d'agent image entre les deux → remap appliqué à l'instance courante) ; rejouer les suites `App`/workflow.
+**Correction attendue :** utiliser le pattern déjà présent dans le même fichier : `useAppShellStore.getState().currentImageAgentInstance` / `.currentVideoAgentInstance` (cf. l.277-281 `clearTransientUiState`/`resetGuestShellState`) — pas de dépendance ajoutée, état toujours courant.
+**Critères d'acceptation :**
+- `App.tsx` : `addAgentToWorkflow` lit l'état via `useAppShellStore.getState()` — plus aucune référence closure de ces deux états hors deps ;
+- test de régression stale closure ajouté et vert (échoue sur le code actuel) ;
+- `tsc` 0, eslint 0 erreur, suites `App`/workflow vertes.
+
+**État d'avancement (2026-11-23, agent `06-frontend`, branche `main` @ `ba6ee8b` + working tree) : IMPLÉMENTÉE ET VALIDÉE — FEU VERT `01-architecte` pour `US-RC-00b`.** Correction livrée dans `App.tsx` (l.500-503) : `const shellState = useAppShellStore.getState();` puis `setCurrentImageAgentInstance(remapAgentInstanceReference(shellState.currentImageAgentInstance, ...))` et idem vidéo — plus aucune référence closure de ces deux états dans le useCallback (les sélecteurs l.95/98 ne servent plus qu'au rendu, l.877). Test de régression `tests/unitaires/App.addAgentStaleClosure.test.tsx` (scénario : deux ajouts consécutifs avec changement d'agent image/vidéo entre les deux → remap appliqué à l'instance courante) : **passe sur le code corrigé, ÉCHOUE sur l'ancien code** (vérifié par stash/rejeu, 1 failed → 1 passed). Validations architecte re-exécutées : `tsc --noEmit` 0, `eslint --quiet` 0 erreur sur `App.tsx` + test, suites `App.workspaceHydration` + `useAppWorkflowController` + `useAppShellStore` 3 suites/25 tests PASS, nouveau test 1/1 PASS. Aucun changement de comportement métier (lecture d'état courant au lieu de closure). **Handoff `US-RC-00b` (`04-cicd-installation`) :** prendre le relais sur le working tree courant (App.tsx modifié + test non suivi) ; périmètre R2 (`scripts/ci/hygiene-ratchet.mjs:24` — ajouter `git ls-files --others --exclude-standard` + `--self-test` façon `audit-gate.mjs`) et R4 (`package.json` — `format:changed` sans `|| true`, diff `origin/${base_ref}...HEAD` + note `fetch-depth: 0` pour US-RC-01) ; à noter que le ratchet actuel ne verra pas le nouveau test non suivi tant que R2 n'est pas appliqué (c'est précisément le bug R2). Un commit par US, ordre strict `00a` → `00b` → `00c`.
+
+### US-RC-00b — R2 + R4 : ratchet fiable et `format:changed` bloquant (P0, prérequis du gate CI)
+
+**Agent responsable :** `04-cicd-installation.agent.md`
+**Criticité :** Haute (P0) — **bloquante avant US-RC-01** : un gate CI bâti sur un ratchet contournable en local et un check de format toujours vert serait trompeur.
+**Description :** corriger R2 (`scripts/ci/hygiene-ratchet.mjs:24` — `listFiles` = `git ls-files` seul) et R4 (`package.json` — script `format:changed` terminé par `|| true` + diff `origin/main...HEAD` vide en checkout shallow de PR).
+**Dépendances :** US-RC-00a commitée (ordre de la série).
+**Risques et conséquences :** R2 non corrigé = un nouveau fichier non suivi avec `any`/`console.log` échappe au ratchet en local ; R4 non corrigé = `format:changed` jamais bloquant, y compris en CI sur PR (checkout `fetch-depth: 1`, `origin/main` absent → diff vide → vert).
+**Impacts codebase et tests :** `scripts/ci/hygiene-ratchet.mjs`, `package.json` (script `format:changed`) ; self-test du ratchet ; test `format:changed`.
+**Critères d'acceptation :**
+- ratchet : `git ls-files --others --exclude-standard` ajouté au périmètre ; `--self-test` présent et vert (pattern `audit-gate.mjs` : crée un fichier temporaire non suivi avec `as any`, attend exit 1, nettoie) ; un fichier nouveau non suivi avec `any`/`console.log` fait échouer le script en local ;
+- `format:changed` : plus de `|| true` ; exit ≠ 0 si un fichier modifié vs base n'est pas formaté ; formule `git diff --name-only --diff-filter=ACM origin/${{ github.base_ref:-main }}...HEAD` (fallback local `main...HEAD` conservé) — la note `fetch-depth: 0` pour le job CI est posée pour US-RC-01 ;
+- ratchet OK (baseline 376/433/126/2), `tsc` 0, eslint 0 erreur.
+
+### US-RC-00c — R3 : commentaire d'en-tête « reference only » d'`init-collections.js` (P1)
+
+**Agent responsable :** `03-backend.agent.md` (co `04-cicd-installation`, docker)
+**Criticité :** Moyenne (P1) — documentaire, dernière de la série.
+**Description :** `backend/docker/init-collections.js` est monté dans `/docker-entrypoint-initdb.d/` du conteneur `mongo:6.0` (docker-compose.yml l.17) où `require('bcrypt')` (natif) n'est pas disponible ; SETUP_NOTES le marque « reference only / deprecated », mais le fichier commence directement par `// MongoDB Collections & Schema Initialization` — un lecteur du fichier seul pourrait croire le script exécutable tel quel.
+**Dépendances :** US-RC-00b commitée (ordre de la série).
+**Critères d'acceptation :**
+- commentaire d'en-tête en première ligne : « reference only — en conteneur mongo, remplacer par un hash `$2b$` précalculé, `require` indisponible » ;
+- aucun changement de code, `tsc` back 0, suites backend non impactées.
 
 ### US-RC-01 — Câblage CI du gate hygiène (depuis US-HYG-01)
 
 **Agent responsable :** `04-cicd-installation.agent.md`
 **Criticité :** Haute (P0)
-**Description :** ajouter `npm run lint` (exit 1 si erreur) + `npm run hygiene` (ratchet) + `npm run format:check` en preflight de chaque PR dans `.github/workflows/*`, sans casser les jobs existants.
-**Dépendances :** US-RC-00 (le ratchet doit être fiable avant d'être bloquant en CI).
-**Risques :** un gate CI mal calibré bloque des PR légitimes → le calibrer d'abord sur main (job vert), puis bloquant.
-**Impacts codebase et tests :** `.github/workflows/*`, `package.json` scripts ; vérifier le job sur une PR test.
-**Criteres d'acceptation :** PR qui augmente `any`/`console.log` ou ajoute une erreur lint est bloquée ; job vert sur `main`.
+**Description :** ajouter un job dédié `hygiene-gate` dans `.github/workflows/ci.yml` (déclenché sur `push` main/develop + `pull_request`, comme les jobs existants) : `actions/checkout@v5` **avec `fetch-depth: 0`** (indispensable à `format:changed` vs `base_ref`, cf. R4), `setup-node` 24.22.1 + cache npm, `npm ci`, puis `npm run lint` (exit 1 si erreur), `npm run hygiene` (ratchet, incluant fichiers non suivis après R2), `npm run format:changed`. Ne pas toucher aux autres workflows (`runtime.yml`, `security.yml`, `deploy.yml`, `frontend-tests.yml`, `release-artifacts.yml`).
+**Dépendances :** US-RC-00b commitée (le ratchet et `format:changed` doivent être fiables avant d'être bloquants en CI).
+**Risques :** un gate CI mal calibré bloque des PR légitimes → le calibrer d'abord sur `main` (job vert), puis bloquant ; lesson `insight-04-cicd-installation.md` : tout job qui exécute un script du repo doit checker out, et ne pas dépendre de `gh api --slurp`.
+**Impacts codebase et tests :** `.github/workflows/ci.yml`, `package.json` scripts ; vérifier le job sur une PR test.
+**Critères d'acceptation :** PR qui augmente `any`/`console.log` (y compris dans un nouveau fichier non encore commité au moment du push — couvert par R2) ou ajoute une erreur lint ou un fichier non formaté est bloquée ; job vert sur `main`.
 
 ### US-RC-02 — Campagne `any` frontend par boundaries (depuis US-HYG-02)
 
 **Agent responsable :** `06-frontend.agent.md`
 **Criticité :** Moyenne (P1)
 **Description :** campagne sur les 376 `any` frontend restants, **par frontières** (axios/apiClient, localStorage, socket, payloads LLM, composants `components/com/*`) et non par fichier isolé : introduire des contrats/typages aux frontières, 5–10 fichiers/US, lots décroissants.
-**Dépendances :** US-RC-00.
-**Risques :** un typage trop étroit casse des flux legacy silencieusement → tests des modules + `tsc` 0 à chaque lot ; ne jamais affaiblir un test pour passer.
-**Impacts codebase et tests :** `services/*`, `hooks/*`, `components/com/*`, `stores/*` ; `hygiene:update-baseline` après chaque lot.
-**Criteres d'acceptation :** `tsc` 0, tests des modules OK, compteur `anyFrontend` en baisse stricte à chaque lot, ratchet OK.
+**Dépendances :** série US-RC-00a/b/c commitée.
+**Périmètre ratchet :** le compteur `anyFrontend` inclut `tests/` — la campagne couvre les tests aussi, ou bien l'exclusion des tests se fait dans le ratchet **et** la baseline en même temps (jamais unilatéralement).
+**Risques :** un typage trop étroit casse des flux legacy silencieusement → tests des modules + `tsc` 0 à chaque lot ; ne jamais affaiblir un test pour passer ; ne jamais recaler la baseline à la hausse (`hygiene:update-baseline` uniquement après baisse).
+**Impacts codebase et tests :** `services/*`, `hooks/*`, `components/com/*`, `stores/*`, `tests/*` ; `hygiene:update-baseline` après chaque lot.
+**Critères d'acceptation :** `tsc` 0, tests des modules OK, compteur `anyFrontend` en baisse stricte à chaque lot, ratchet OK.
 
 ### US-RC-03 — Campagne `any` backend par boundaries (depuis US-HYG-03)
 
 **Agent responsable :** `03-backend.agent.md`
-**Co-responsable :** `01-architecte` (contrat domaine)
+**Co-responsable :** `01-architecte-bdd` (contrat domaine)
 **Criticité :** Moyenne (P1)
-**Description :** idem sur les 433 `any` de `backend/src`, en priorisant les frontières (routes → Zod déjà présent, repositories, gateway/socket, stores Mongo) ; réutiliser les contrats `domain/execution/*.contract.ts` existants comme source de vérité.
-**Dépendances :** US-RC-00.
-**Risques :** toucher aux repositories/stores sanscontrat peut casser la persistance → suites `test:j6:backend` + contrats en garde-fou.
+**Description :** idem sur les 433 `any` de `backend/src` (le glob du ratchet couvre bien tous les sous-dossiers, `__tests__` inclus — 324 fichiers), en priorisant les frontières (routes → Zod déjà présent, repositories, gateway/socket, stores Mongo) ; réutiliser les contrats `domain/execution/*.contract.ts` existants comme source de vérité.
+**Dépendances :** série US-RC-00a/b/c commitée.
+**Risques :** toucher aux repositories/stores sans contrat peut casser la persistance → suites `test:j6:backend` + contrats en garde-fou.
 **Impacts codebase et tests :** `backend/src/routes|repositories|services|websocket|models` ; `cd backend && npx tsc --noEmit` 0.
-**Criteres d'acceptation :** idem US-RC-02 côté backend + `ci:node25:runtime` PASS.
+**Critères d'acceptation :** idem US-RC-02 côté backend + `ci:node25:runtime` PASS.
 
 ### US-RC-04 — `console.log` restants → `console.debug` / logger (depuis US-HYG-04)
 
 **Agent responsable :** `06-frontend` (front) + `03-backend` (back)
 **Criticité :** Faible (P2)
-**Description :** 126 `console.log` front (essentiellement tests) + 2 back restants → `console.debug` ; puis règle `no-console` en `error` pour les **nouveaux** fichiers uniquement.
+**Description :** 126 `console.log` front (majoritairement des tests) + 2 back restants — cible réelle identifiée : `backend/src/__tests__/simple-from-prototype.test.ts:73-74` — → `console.debug` ; puis règle `no-console` en `error` pour les **nouveaux** fichiers uniquement.
 **Dépendances :** US-RC-02/03 (en parallèle possible, périmètres disjoints).
-**Criteres d'acceptation :** ratchet `consoleLogBackend` à 0, baisse front, règle error sans régression, eslint 0 erreur.
+**Critères d'acceptation :** ratchet `consoleLogBackend` à 0, baisse front, règle error sans régression, eslint 0 erreur.
 
 ### US-RC-05 — Prettier sur fichiers modifiés en CI (depuis US-HYG-05)
 
 **Agent responsable :** `04-cicd-installation.agent.md`
 **Criticité :** Faible (P2)
-**Description :** `format:changed` (diff vs main) en CI ; la campagne de formatage repo-wide reste une US séparée et optionnelle (gros diff, ne jamais lancer sans US dédiée).
-**Dépendances :** aucune.
-**Criteres d'acceptation :** `format:changed` vert en CI ; aucun reformat implicite dans les PR.
+**Description :** `format:changed` (diff vs base de la PR) bloquant en CI via US-RC-01 — **après correction R4** (script actuellement non bloquant). La campagne de formatage repo-wide reste une US séparée et optionnelle (gros diff, ne jamais lancer sans US dédiée).
+**Dépendances :** US-RC-00b (R4).
+**Critères d'acceptation :** `format:changed` vert et bloquant en CI ; aucun reformat implicite dans les PR.
 
 ### US-RC-06 — Logger structuré backend (depuis US-HYG-06)
 
 **Agent responsable :** `03-backend.agent.md`
-**Co-responsable :** `01-architecte` (contrat `ILogger`)
+**Co-responsable :** `01-architecte-bdd` (contrat `ILogger`)
 **Criticité :** Faible (P3)
 **Description :** pattern *strategy* — interface `ILogger` (`debug/info/warn/error` + contexte structuré), implémentation `ConsoleLogger` (dev) et `JsonLogger` (prod, `LOG_LEVEL` env) ; remplacer tous les `console.*` de `backend/src` par le logger injecté. Ne pas se contenter de renommer `console.debug`.
 **Dépendances :** US-RC-03 (typage des services d'abord).
 **Risques :** perdre des logs en prod si le niveau par défaut est trop haut → défaut `info` en prod, `debug` en dev ; smoke sur `dist`.
 **Impacts codebase et tests :** `backend/src/services/logger/*`, wiring `server.ts` (injection), tests de niveau.
-**Criteres d'acceptation :** plus aucun `console.*` dans `backend/src`, logs identiques en dev, `LOG_LEVEL` respecté, suites backend vertes.
+**Critères d'acceptation :** plus aucun `console.*` dans `backend/src`, logs identiques en dev, `LOG_LEVEL` respecté, suites backend vertes.
 
 ### US-RC-07 — Nettoyage des warnings eslint en lots (depuis US-HYG-07)
 
@@ -136,7 +169,7 @@ Aucun reliquat fonctionnel du backlog n'est ouvert. La revue qui suit porte **un
 **Criticité :** Faible (P3)
 **Description :** traiter les ~2383 warnings par lots (`no-unused-vars` ~405, `prefer-const`, etc.) ; ratchet des warnings comme pour `any`.
 **Dépendances :** US-RC-02/03.
-**Criteres d'acceptation :** `eslint . --quiet` reste 0 erreur, warnings en baisse ratchetée, aucune régression de tests.
+**Critères d'acceptation :** `eslint . --quiet` reste 0 erreur, warnings en baisse ratchetée, aucune régression de tests.
 
 ### US-RC-08 — `rules-of-hooks` en error (depuis US-HYG-08)
 
@@ -144,26 +177,35 @@ Aucun reliquat fonctionnel du backlog n'est ouvert. La revue qui suit porte **un
 **Criticité :** Faible (P3)
 **Description :** corriger le faux positif `react-hooks/rules-of-hooks` v6 + React 19 (pin de version du plugin ou config) sur `V2AgentNode.tsx` et consorts, puis repasser la règle en `error`.
 **Dépendances :** US-RC-02.
-**Criteres d'acceptation :** 0 faux positif, règle `error` active, eslint 0 erreur.
+**Critères d'acceptation :** 0 faux positif, règle `error` active, eslint 0 erreur.
 
 ### US-RC-09 — Nettoyage historique git des `.pyc` (depuis US-HYG-09)
 
 **Agent responsable :** `04-cicd-installation.agent.md`
 **Co-responsable :** responsable projet (revue obligatoire)
 **Criticité :** Optionnel (P3)
-**Description :** `git filter-repo` (ou BFG) pour retirer les 30 `.pyc` de l'historique — **réécriture d'historique soumise à revue** ; clone sain vérifié après.
-**Dépendances :** US-RC-00 commitée (le `.gitignore` doit exister avant).
-**Criteres d'acceptation :** historique sans `.pyc`, clone sain vérifié, revue signée.
+**Description :** `git filter-repo` (ou BFG) pour retirer les 30 `.pyc` de l'historique (ils ont été désindexés dans `ba6ee8b` mais restent dans l'historique) — **réécriture d'historique soumise à revue** ; clone sain vérifié après.
+**Dépendances :** série US-RC-00a/b/c commitée (le `.gitignore` doit exister avant — c'est le cas depuis `ba6ee8b`).
+**Critères d'acceptation :** historique sans `.pyc`, clone sain vérifié, revue signée.
 
 ### US-RC-10 — Contrat partagé front/back des événements runtime
 
 **Agent responsable :** `06-frontend.agent.md`
 **Co-responsable :** `03-backend.agent.md` (contrat domaine)
 **Criticité :** Moyenne
-**Description :** `RuntimeEventEnvelope` est exporté de `services/webSocketService.ts` (bonne amorce) mais reste une copie du contrat backend `backend/src/domain/execution/runtimeEvent.contract.ts`. Établir un **contrat partagé** (types + schémas Zod) consommé par les deux côtés, avec les 3 nouveaux types de quarantaine (`run:quarantined`, `run:fenced`, `run:recovery_relaunched`, US-J7-09) — pattern *contrat versionné partagé*, évite la divergence (le bug `version: number` vs littéral `1` en est la preuve).
-**Dépendances :** US-RC-00 ; US-J7-09 livrée.
-**Impacts codebase et tests :** `services/webSocketService.ts`, `stores/useRuntimeStore.ts`, contrat partagé (ex. `packages/contracts` ou `backend/src/domain` servi au front), tests de sérialisation.
-**Criteres d'acceptation :** un seul contrat source, front et back le consomment, `tsc` 0/0, tests runtime_event PASS des deux côtés, aucun type inline dupliqué.
+**Description :** `RuntimeEventEnvelope` est déclarée côté front dans `services/webSocketService.ts:6` (`type: string`, `payload: Record<string, unknown>`) — une copie divergente du contrat backend `backend/src/domain/execution/runtimeEvent.contract.ts` (enum Zod `RuntimeEventTypeSchema`, whitelist `RuntimeEventPayloadSchema`, `version: z.literal(1)`). **Mécanisme retenu** (pas de monorepo `packages/contracts` : le `rootDir: "."` du `backend/tsconfig.json` interdit d'importer hors de `backend/`, et le front n'importe jamais depuis `backend/src`) : le contrat Zod backend reste **source de vérité unique** ; un script `scripts/ci/sync-runtime-contract.mjs` génère le type front (`types/runtimeEvent.generated.ts`) à partir des schémas, et un **test de parité en CI** (hash du contrat source vs hash du fichier généré, ratchet-like) bloque toute divergence. Couvrir les 3 nouveaux types de quarantaine (`run:quarantined`, `run:fenced`, `run:recovery_relaunched`, US-J7-09) et corriger la divergence `type: string` (front) vs enum (back).
+**Dépendances :** série US-RC-00a/b/c ; US-J7-09 livrée.
+**Impacts codebase et tests :** `services/webSocketService.ts` (import du type généré, plus de déclaration locale), `stores/useRuntimeStore.ts`, `scripts/ci/sync-runtime-contract.mjs`, `types/runtimeEvent.generated.ts`, test de parité ; tests de sérialisation.
+**Critères d'acceptation :** un seul contrat source, front et back le consomment (front via le fichier généré vérifié en parité), `tsc` 0/0, tests runtime_event PASS des deux côtés, plus aucun type inline dupliqué dans `webSocketService.ts`, `type` typé par l'enum et non `string`.
+
+### US-RC-11 — Extraction progressive de la logique métier d'`App.tsx` (nouveau, depuis §2.3)
+
+**Agent responsable :** `06-frontend.agent.md`
+**Co-responsable :** `09-architecte-applicatif` (revue des frontières)
+**Criticité :** Basse (P3, optionnel, hors gate)
+**Description :** `App.tsx` reste la zone à haut risque (§11 du backlog source) : extraire sa logique métier restante (orchestration persistance, remaps d'instances, hydratation) vers des hooks/services dédiés, **une extraction par US**, sans alourdir le composant. R1 (US-RC-00a) en est la première correction ponctuelle, pas une extraction.
+**Dépendances :** US-RC-00a ; tests d'hydratation (`test:integration:hydration`) et canvas (`test:canvas:non-regression`) verts à chaque extraction.
+**Critères d'acceptation :** par extraction : responsabilité déplacée vers un hook/service nommé, `App.tsx` strictement allégé, `tsc` 0, suites hydratation/canvas vertes.
 
 ---
 
@@ -171,27 +213,31 @@ Aucun reliquat fonctionnel du backlog n'est ouvert. La revue qui suit porte **un
 
 1. **Contrats aux frontières, pas de `any` au milieu** : typage par *ports/adapters* — Zod aux entrées HTTP/socket, génériques aux accès storage, contrats partagés front/back (US-RC-10). Un contrat fort élimine plus de dette que dix typages locaux.
 2. **Open/closed sur la dette** : le ratchet bloque la régression, la baseline ne recale qu'à la baisse — jamais d'assouplissement pour masquer une régression (règle du backlog source §8 reprise ici).
-3. **Single responsibility sur App.tsx** : zone à haut risque (§11 backlog source) — toute correction future extrait de la logique vers hooks/services dédiés plutôt que d'alourdir le composant.
+3. **Single responsibility sur App.tsx** : zone à haut risque (§11 backlog source) — toute correction future extrait de la logique vers hooks/services dédiés plutôt que d'alourdir le composant (US-RC-11).
 4. **Strategy pour le logging** (US-RC-06) : `ILogger` injecté, niveaux par env, pas de `console.*` dispersés.
 5. **Fail-closed conservé** : aucune correction d'hygiène ne doit affaiblir les garde-fous J7 (fencing fail-closed, audit append-only, filtrage `workspaceId` strict) — rejouer `ci:node25:runtime` et les suites J7 à chaque lot backend.
+6. **Tout gate CI a un `--self-test`** (pattern établi par `scripts/ci/audit-gate.mjs`, insight `04-cicd-installation`) : le ratchet (R2) et le futur gate hygiène (US-RC-01) doivent pouvoir se prouver eux-mêmes.
 
 ## 5. Ordre d'exécution imposé
 
-1. `US-RC-00` (réserves R1–R3) → **commit de la vague 1** par le responsable projet ;
-2. `US-RC-01` (gate CI) dès que la vague 1 est commitée ;
-3. `US-RC-02` / `US-RC-03` en parallèle (périmètres front/back disjoints), lots de 5–10 fichiers, baseline recalée à la baisse après chaque lot ;
-4. `US-RC-10` (contrat partagé) peut démarrer dès US-RC-00, à livrer avec US-RC-02 ;
-5. `US-RC-04` / `US-RC-05` en parallèle ;
-6. `US-RC-06` → `US-RC-07` → `US-RC-08` ;
-7. `US-RC-09` (historique git) en dernier, optionnel, avec revue signée.
+1. `US-RC-00a` (R1, `06-frontend`) → **commit** ;
+2. `US-RC-00b` (R2+R4, `04-cicd-installation`) → **commit** — prérequis du gate CI ;
+3. `US-RC-00c` (R3, `03-backend`) → **commit** ;
+4. `US-RC-01` (gate CI `hygiene-gate` dans `ci.yml`, `04-cicd-installation`) dès les trois US commitées — jamais avant, le ratchet et `format:changed` doivent être fiables ;
+5. `US-RC-02` / `US-RC-03` en parallèle (périmètres front/back disjoints), lots de 5–10 fichiers, baseline recalée à la baisse après chaque lot ;
+6. `US-RC-10` (contrat partagé) peut démarrer dès US-RC-00a, à livrer avec US-RC-02 ;
+7. `US-RC-04` / `US-RC-05` en parallèle ;
+8. `US-RC-06` → `US-RC-07` → `US-RC-08` ;
+9. `US-RC-11` (extraction App.tsx) optionnel, par extractions unitaires ;
+10. `US-RC-09` (historique git) en dernier, optionnel, avec revue signée.
 
 ## 6. Definition of Done de cette revue
 
-1. Vague 1 commitée après correction des réserves R1–R3 (US-RC-00) ;
-2. Gate CI actif : lint + ratchet + format:changed bloquants sur les PR (US-RC-01) ;
-3. Dette `any` en baisse ratchetée des deux côtés, `tsc` 0/0, eslint 0 erreur, prettier `format:changed` vert ;
+1. Réserves R1–R4 corrigées via `US-RC-00a`/`US-RC-00b`/`US-RC-00c`, chacune commitée dans l'ordre (la vague 1 `ba6ee8b` étant déjà committée, ces corrections forment des commits séparés tracés) ;
+2. Gate CI actif : lint + ratchet + format:changed **bloquants** sur les PR (US-RC-01), avec self-test du ratchet ;
+3. Dette `any` en baisse ratchetée des deux côtés, `tsc` 0/0, eslint 0 erreur, prettier `format:changed` vert et bloquant ;
 4. Logger structuré backend en place, plus de `console.*` dans `backend/src` ;
-5. Contrat partagé front/back des événements runtime en place (US-RC-10) ;
+5. Contrat partagé front/back des événements runtime en place, parité vérifiée en CI (US-RC-10) ;
 6. Toutes les suites impactées restent au vert (racine, backend, `ci:node25:runtime`, audit strict) — **aucune régression du GO signé 2026-11-19**.
 
 ## 7. Hors périmètre (ne pas traiter ici)
@@ -199,4 +245,33 @@ Aucun reliquat fonctionnel du backlog n'est ouvert. La revue qui suit porte **un
 - Dette fonctionnelle `saveEdges` → write path legacy `/api/workflows/:id/edges` : à rattacher à la prochaine feature « liens entre nodes » (réserve tracée au gate §13), pas à l'hygiène.
 - Formatage prettier repo-wide (gros diff) : US dédiée optionnelle, jamais lancée sans autorisation.
 - Réécriture d'historique git (US-RC-09) : soumise à revue signée du responsable projet.
-- Toute modification des workflows CI de release au-delà du preflight PR (US-RC-01).
+- Création d'un monorepo `packages/contracts` pour US-RC-10 : hors périmètre (`rootDir` backend, build séparé) — la génération + test de parité est retenue à la place.
+- Toute modification des workflows CI de release au-delà du job `hygiene-gate` de `ci.yml` (US-RC-01).
+
+---
+
+## 8. Prochaine feature — points tracés (hors périmètre de cette revue)
+
+Tracé le 2026-11-23 par le responsable projet, à approfondir **après clôture de ce backlog de revue** — ne pas traiter ici. Deux objectifs, avec preuves mesurées sur `main` @ `ba6ee8b` (vérifiées par `09-architecte-applicatif`) :
+
+### 8.1 Architecture LLM propre et SOLID — stubs silencieux et catalogue périmé
+
+- **Stubs silencieux** : `services/anthropicService.ts:199` et `services/qwenService.ts:120` — `generateContent` renvoie littéralement `{ text: "Not implemented" }`. Chaîne exploitable : `services/historySynthesisService.ts:161` appelle `llmService.generateContent(...)` (`services/llmService.ts:88`), donc un modèle de synthèse Anthropic ou Qwen produirait ce texte comme résumé de l'historique (à confirmer par un test de non-régression dans la prochaine feature).
+- **Catalogue périmé** : `llmModels.ts:183-229` référence encore la famille Claude 4.x (`claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`, `claude-opus-4-5-20251101`, `claude-opus-4-1-20250805`) alors que les modèles courants sont en 5.x.
+- **Providers parallèles à surfaces non homogènes** : 11 services provider (`anthropicService`, `arcLLMService`, `deepSeekService`, `geminiService`, `grokService`, `kimiService`, `lmStudioService`, `mistralService`, `openAIService`, `perplexityService`, `qwenService`, plus `mockLLMService`) joints dans `llmService.ts` par `asDispatchableService` (l.42 : `service as ProviderServiceDispatch` depuis `unknown`) au-dessus d'un switch `getServiceProvider` (l.45) ; les capacités sont optionnelles et testées à l'aveugle (`if (!service.generateContentWithSearch)`), sans contrat commun imposé.
+
+**Objectif de la prochaine feature :** contrat unique type *port* (`ILLMProvider`) avec implémentations homogènes, **échec explicite à la place de tout stub silencieux**, dispatch typé sans cast depuis `unknown`, et catalogue `llmModels.ts` actualisé (5.x).
+
+### 8.2 Découpage des « god objects »
+
+Tailles mesurées sur `main` @ `ba6ee8b` :
+
+| Fichier | Lignes | Défaut constaté |
+|---|---|---|
+| `components/V2AgentNode.tsx` | 2119 | composant god : 3 représentations du nœud + logique runtime + handles |
+| `components/modals/AgentConfigurationModal.tsx` | 1495 | modale god |
+| `components/WorkflowCanvas.tsx` | 1435 | canvas god (rendu + collisions + viewport + drag) |
+| `backend/src/routes/agent-instances.routes.ts` | 1409 | logique métier dans la route — violation de la règle §4.2 du backlog source (routes = adaptateurs minces) |
+| `backend/src/services/databaseInit.ts` | 1145 | bootstrap + migrations + seed + index concentrés (§11 du backlog source : zone à haut risque) |
+
+**Objectif de la prochaine feature :** découpage par responsabilité (composants/presenters, use cases, repositories, modules d'init), en US dédiées avec suites de non-régression vertes à chaque extraction.

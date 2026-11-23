@@ -492,10 +492,15 @@ export function AppContent() {
             useRuntimeStore.getState().renameNodeRuntimeState(fromNodeId, toNodeId);
 
             setCurrentImageNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
-            // ⭐ hygiène tsc : le setter du store prend une VALEUR (pas un updater React)
-            setCurrentImageAgentInstance(remapAgentInstanceReference(currentImageAgentInstance, instanceId, persistedBackendId, workflowId));
+            // ⭐ US-RC-00a (R1, stale closure) : lire l'état COURANT via getState() — pattern déjà
+            // présent dans ce fichier (clearTransientUiState/resetGuestShellState, l.277-281).
+            // Les sélecteurs l.95/98 hors deps array donnaient une closure périmée : le remap
+            // s'appliquait à une mauvaise instance (ou null) si l'agent image/vidéo changeait
+            // entre deux ajouts. Aucun ajout au deps array (getState est stable).
+            const shellState = useAppShellStore.getState();
+            setCurrentImageAgentInstance(remapAgentInstanceReference(shellState.currentImageAgentInstance, instanceId, persistedBackendId, workflowId));
             setCurrentVideoNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
-            setCurrentVideoAgentInstance(remapAgentInstanceReference(currentVideoAgentInstance, instanceId, persistedBackendId, workflowId));
+            setCurrentVideoAgentInstance(remapAgentInstanceReference(shellState.currentVideoAgentInstance, instanceId, persistedBackendId, workflowId));
             setCurrentMapsNodeId((activeNodeId) => remapPanelNodeId(activeNodeId, fromNodeId, toNodeId));
             setEditingImageInfo((imageInfo) => remapEditingImageInfo(imageInfo, fromNodeId, toNodeId, instanceId, persistedBackendId, workflowId));
           }
