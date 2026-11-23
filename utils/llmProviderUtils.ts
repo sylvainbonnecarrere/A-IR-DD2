@@ -3,6 +3,8 @@
  * SOLID Single Responsibility: Credential & Config Validation
  */
 
+import type { LLMConfig } from '../types';
+
 // Provider classification
 const LOCAL_PROVIDERS = ['LLM local (on premise)'];
 
@@ -12,14 +14,13 @@ const LOCAL_PROVIDERS = ['LLM local (on premise)'];
 export const isLocalProvider = (provider: string): boolean => {
   if (!provider) return false;
   const normalized = (provider || '').trim();
-  return LOCAL_PROVIDERS.some(p => p.trim().toLowerCase() === normalized.toLowerCase());
+  return LOCAL_PROVIDERS.some((p) => p.trim().toLowerCase() === normalized.toLowerCase());
 };
 
 /**
  * Detect if a provider is LMStudio specifically
  */
-export const isLMStudio = (provider: string): boolean => 
-  (provider || '').trim().toLowerCase() === 'llm local (on premise)';
+export const isLMStudio = (provider: string): boolean => (provider || '').trim().toLowerCase() === 'llm local (on premise)';
 
 /**
  * Get label for input field based on provider type
@@ -48,9 +49,9 @@ export const getInputType = (provider: string): 'text' | 'password' => {
  */
 export const getProviderHelperText = (provider: string): string => {
   if (isLMStudio(provider)) {
-    return 'URL de l\'endpoint LLM local (ex: http://localhost:1234)';
+    return "URL de l'endpoint LLM local (ex: http://localhost:1234)";
   }
-  
+
   return '';
 };
 
@@ -60,7 +61,7 @@ export const getProviderHelperText = (provider: string): string => {
  * - Local providers: must have non-empty, non-masked localEndpoint
  * - Cloud providers: must have non-empty, non-masked apiKey
  */
-export const isLLMConfigured = (config: any, provider: string): boolean => {
+export const isLLMConfigured = (config: LLMConfig | null | undefined, provider: string): boolean => {
   if (!config || !config.enabled) return false;
 
   if (isLocalProvider(provider)) {
@@ -77,7 +78,7 @@ export const isLLMConfigured = (config: any, provider: string): boolean => {
  * - Local: returns localEndpoint
  * - Cloud: returns apiKey
  */
-export const getEffectiveCredential = (config: any, provider: string): string => {
+export const getEffectiveCredential = (config: LLMConfig | null | undefined, provider: string): string => {
   if (!config) return '';
-  return isLocalProvider(provider) ? (config.localEndpoint || '') : (config.apiKey || '');
+  return isLocalProvider(provider) ? config.localEndpoint || '' : config.apiKey || '';
 };

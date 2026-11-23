@@ -1,11 +1,11 @@
 /**
  * 🎯 SERVICE LAYER: LLM Config Persistence
- * 
+ *
  * Pattern: Strategy Pattern + Dependency Inversion
  * Responsabilité: Router les appels de persistance LLM Config
  *   - Si utilisateur authentifié → API backend
  *   - Si utilisateur invité → localStorage
- * 
+ *
  * Usage: Jamais appelé directement par les composants
  * Les composants utilisent le hook useLLMConfigs à la place
  */
@@ -16,7 +16,7 @@ import { GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
 
 export interface LLMConfigServiceOptions {
   useApi?: boolean; // true = backend, false = localStorage
-  token?: string;   // JWT token si useApi=true
+  token?: string; // JWT token si useApi=true
 }
 
 // ============================================================================
@@ -30,13 +30,13 @@ function getLocalConfigs(): ILLMConfigUI[] {
   try {
     const data = localStorage.getItem(STORAGE_KEY);
     if (!data) return [];
-    
+
     const configs = JSON.parse(data) as ILLMConfigUI[];
-    
+
     // ⭐ J4.4.3: Ensure apiKey is populated from apiKeyPlaintext for backward compatibility
-    return configs.map(config => ({
+    return configs.map((config) => ({
       ...config,
-      apiKey: config.apiKey || config.apiKeyPlaintext || ''
+      apiKey: config.apiKey || config.apiKeyPlaintext || '',
     }));
   } catch (error) {
     console.error('[LLMConfigService] localStorage.getItem failed:', error);
@@ -57,18 +57,13 @@ function saveLocalConfigs(configs: ILLMConfigUI[]): void {
 // PARTIE 2: API BACKEND (Authenticated)
 // ============================================================================
 
-async function apiRequest(
-  endpoint: string,
-  method: 'GET' | 'POST' | 'DELETE',
-  token: string,
-  body?: any
-): Promise<any> {
+async function apiRequest<T = unknown>(endpoint: string, method: 'GET' | 'POST' | 'DELETE', token: string, body?: any): Promise<any> {
   const options: RequestInit = {
     method,
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    }
+      Authorization: `Bearer ${token}`,
+    },
   };
 
   if (body) {
@@ -79,9 +74,7 @@ async function apiRequest(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.error || `API Error: ${response.status} ${response.statusText}`
-    );
+    throw new Error(errorData.error || `API Error: ${response.status} ${response.statusText}`);
   }
 
   return response.json();
@@ -94,9 +87,7 @@ async function apiRequest(
 /**
  * Récupère toutes les configs LLM de l'utilisateur
  */
-export async function getAllLLMConfigs(
-  options: LLMConfigServiceOptions
-): Promise<ILLMConfigUI[]> {
+export async function getAllLLMConfigs(options: LLMConfigServiceOptions): Promise<ILLMConfigUI[]> {
   if (options.useApi && options.token) {
     // Backend API
     try {
@@ -115,18 +106,11 @@ export async function getAllLLMConfigs(
 /**
  * Récupère une config LLM spécifique par provider
  */
-export async function getLLMConfig(
-  provider: string,
-  options: LLMConfigServiceOptions
-): Promise<ILLMConfigUI | null> {
+export async function getLLMConfig(provider: string, options: LLMConfigServiceOptions): Promise<ILLMConfigUI | null> {
   if (options.useApi && options.token) {
     // Backend API
     try {
-      const response = await apiRequest(
-        `/api/llm-configs/${provider}`,
-        'GET',
-        options.token
-      );
+      const response = await apiRequest(`/api/llm-configs/${provider}`, 'GET', options.token);
       return response;
     } catch (error) {
       if ((error as Error).message.includes('404')) {
@@ -137,7 +121,7 @@ export async function getLLMConfig(
   } else {
     // localStorage (Guest)
     const configs = getLocalConfigs();
-    return configs.find(c => c.provider === provider) || null;
+    return configs.find((c) => c.provider === provider) || null;
   }
 }
 
@@ -153,20 +137,15 @@ export async function upsertLLMConfig(
     enabled: boolean;
     capabilities?: Record<string, boolean>;
   },
-  options: LLMConfigServiceOptions
+  options: LLMConfigServiceOptions,
 ): Promise<ILLMConfigUI> {
   if (options.useApi && options.token) {
     // Backend API
     try {
-      const response = await apiRequest(
-        '/api/llm-configs',
-        'POST',
-        options.token,
-        {
-          provider,
-          ...data
-        }
-      );
+      const response = await apiRequest('/api/llm-configs', 'POST', options.token, {
+        provider,
+        ...data,
+      });
       return response;
     } catch (error) {
       console.error('[LLMConfigService] upsertLLMConfig API failed:', error);
@@ -175,7 +154,7 @@ export async function upsertLLMConfig(
   } else {
     // localStorage (Guest)
     const configs = getLocalConfigs();
-    const index = configs.findIndex(c => c.provider === provider);
+    const index = configs.findIndex((c) => c.provider === provider);
 
     const newConfig: ILLMConfigUI = {
       id: index >= 0 ? configs[index].id : `local_${Date.now()}`,
@@ -191,7 +170,7 @@ export async function upsertLLMConfig(
       apiKey: data.apiKey,
       // NEW: Support local endpoint (plaintext URL storage)
       localEndpoint: data.localEndpoint,
-      hasLocalEndpoint: !!data.localEndpoint
+      hasLocalEndpoint: !!data.localEndpoint,
     };
 
     if (index >= 0) {
@@ -208,18 +187,11 @@ export async function upsertLLMConfig(
 /**
  * Supprime une config LLM
  */
-export async function deleteLLMConfig(
-  provider: string,
-  options: LLMConfigServiceOptions
-): Promise<void> {
+export async function deleteLLMConfig(provider: string, options: LLMConfigServiceOptions): Promise<void> {
   if (options.useApi && options.token) {
     // Backend API
     try {
-      await apiRequest(
-        `/api/llm-configs/${provider}`,
-        'DELETE',
-        options.token
-      );
+      await apiRequest(`/api/llm-configs/${provider}`, 'DELETE', options.token);
     } catch (error) {
       console.error('[LLMConfigService] deleteLLMConfig API failed:', error);
       throw error;
@@ -227,7 +199,7 @@ export async function deleteLLMConfig(
   } else {
     // localStorage (Guest)
     const configs = getLocalConfigs();
-    const filtered = configs.filter(c => c.provider !== provider);
+    const filtered = configs.filter((c) => c.provider !== provider);
     saveLocalConfigs(filtered);
   }
 }
@@ -237,7 +209,7 @@ export async function deleteLLMConfig(
  */
 export async function validateProvider(
   provider: string,
-  options: LLMConfigServiceOptions
+  options: LLMConfigServiceOptions,
 ): Promise<{
   valid: boolean;
   enabled: boolean;
@@ -247,24 +219,19 @@ export async function validateProvider(
   if (options.useApi && options.token) {
     // Backend API
     try {
-      return await apiRequest(
-        '/api/llm/validate-provider',
-        'POST',
-        options.token,
-        { provider }
-      );
+      return await apiRequest('/api/llm/validate-provider', 'POST', options.token, { provider });
     } catch (error) {
       console.error('[LLMConfigService] validateProvider API failed:', error);
       throw error;
     }
   } else {
     // localStorage (Guest)
-    const config = getLocalConfigs().find(c => c.provider === provider);
+    const config = getLocalConfigs().find((c) => c.provider === provider);
     return {
       valid: !!config && config.enabled && config.hasApiKey,
       enabled: config?.enabled || false,
       hasApiKey: config?.hasApiKey || false,
-      capabilities: config?.capabilities || {}
+      capabilities: config?.capabilities || {},
     };
   }
 }
@@ -274,21 +241,13 @@ export async function validateProvider(
  * ⚠️ IMPORTANT: Cette fonction ne fonctionne QUE en mode authentifié
  * Elle n'est pas disponible en mode localStorage (guest)
  */
-export async function getDecryptedApiKey(
-  provider: string,
-  token: string
-): Promise<string> {
+export async function getDecryptedApiKey(provider: string, token: string): Promise<string> {
   if (!token) {
     throw new Error('getDecryptedApiKey requires authentication');
   }
 
   try {
-    const response = await apiRequest(
-      '/api/llm/get-api-key',
-      'POST',
-      token,
-      { provider }
-    );
+    const response = await apiRequest('/api/llm/get-api-key', 'POST', token, { provider });
     return response.apiKey;
   } catch (error) {
     console.error('[LLMConfigService] getDecryptedApiKey failed:', error);
@@ -313,11 +272,7 @@ export async function getAllDecryptedApiKeys(token: string): Promise<
   }
 
   try {
-    return await apiRequest(
-      '/api/llm/get-all-api-keys',
-      'POST',
-      token
-    );
+    return await apiRequest('/api/llm/get-all-api-keys', 'POST', token);
   } catch (error) {
     console.error('[LLMConfigService] getAllDecryptedApiKeys failed:', error);
     throw error;

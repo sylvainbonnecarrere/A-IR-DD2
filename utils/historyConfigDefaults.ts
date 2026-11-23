@@ -2,7 +2,7 @@
  * @file historyConfigDefaults.ts
  * @description Utilitaires pour HistoryConfig avec defaults robustes
  * @domain Runtime Domain - History Configuration
- * 
+ *
  * Fournit:
  * - Defaults HistoryConfig complète
  * - Initialisation avec fallbacks
@@ -55,40 +55,41 @@ export const createDefaultHistoryConfig = (): HistoryConfig => ({
   llmProvider: LLMProvider.Gemini, // Fallback provider
   model: 'gemini-2.0-flash', // Default model
   role: 'Archiviste Concis', // Archiviste role (neutral, factual summarization)
-  systemPrompt: 'Résume la conversation suivante de manière factuelle et concise, en conservant les points clés et les décisions prises. Le résumé servira de mémoire pour un autre agent IA. Sois bref mais complet (max 500 mots).',
+  systemPrompt:
+    'Résume la conversation suivante de manière factuelle et concise, en conservant les points clés et les décisions prises. Le résumé servira de mémoire pour un autre agent IA. Sois bref mais complet (max 500 mots).',
   limits: { ...DEFAULT_HISTORY_LIMITS },
-  enabledLimits: { ...DEFAULT_ENABLED_HISTORY_LIMITS }
+  enabledLimits: { ...DEFAULT_ENABLED_HISTORY_LIMITS },
 });
 
 /**
  * Initialise HistoryConfig avec smart defaults
- * 
+ *
  * Stratégie:
  * 1. Si historyConfig est complet et valide → utiliser directement
  * 2. Si historyConfig est partial → merger avec defaults (preserve user changes)
  * 3. Si historyConfig est undefined → utiliser full defaults avec first enabled provider
  * 4. Chat = jamais undefined (invariant)
- * 
+ *
  * @param existingConfig Config actuelle (peut être undefined, partial, ou complet)
  * @param enabledProviders Liste des providers disponibles (triés par priorité)
  * @returns HistoryConfig valide et complète
  */
 export const initializeHistoryConfig = (
   existingConfig: Partial<HistoryConfig> | undefined,
-  enabledProviders: LLMProvider[]
+  enabledProviders: LLMProvider[],
 ): HistoryConfig => {
   // Start with full defaults
   const defaults = createDefaultHistoryConfig();
-  
+
   // If no existing config, use defaults with first enabled provider
   if (!existingConfig) {
     const firstEnabledProvider = enabledProviders[0] || LLMProvider.Gemini;
     const firstModelOfProvider = LLM_MODELS[firstEnabledProvider]?.[0] || 'gemini-2.0-flash';
-    
+
     return {
       ...defaults,
       llmProvider: firstEnabledProvider,
-      model: firstModelOfProvider
+      model: firstModelOfProvider,
     };
   }
 
@@ -97,27 +98,29 @@ export const initializeHistoryConfig = (
   return {
     // MANDATORY: Always have enabled flag
     enabled: existingConfig.enabled ?? defaults.enabled,
-    
+
     // LLM Config: Use existing if valid, else use first enabled provider
-    llmProvider: (existingConfig.llmProvider && enabledProviders.includes(existingConfig.llmProvider))
-      ? existingConfig.llmProvider
-      : enabledProviders[0] || LLMProvider.Gemini,
-    
-    model: existingConfig.model || 
+    llmProvider:
+      existingConfig.llmProvider && enabledProviders.includes(existingConfig.llmProvider)
+        ? existingConfig.llmProvider
+        : enabledProviders[0] || LLMProvider.Gemini,
+
+    model:
+      existingConfig.model ||
       LLM_MODELS[existingConfig.llmProvider || enabledProviders[0] || LLMProvider.Gemini]?.[0] ||
       'gemini-2.0-flash',
-    
+
     // Synthesis Config: Use existing or defaults
     role: existingConfig.role || defaults.role,
     systemPrompt: existingConfig.systemPrompt || defaults.systemPrompt,
-    
+
     // Limits: Merge existing with defaults (preserve user overrides)
     limits: {
       char: existingConfig.limits?.char ?? defaults.limits.char,
       word: existingConfig.limits?.word ?? defaults.limits.word,
       token: existingConfig.limits?.token ?? defaults.limits.token,
       sentence: existingConfig.limits?.sentence ?? defaults.limits.sentence,
-      message: existingConfig.limits?.message ?? defaults.limits.message
+      message: existingConfig.limits?.message ?? defaults.limits.message,
     },
 
     enabledLimits: {
@@ -134,27 +137,21 @@ export const initializeHistoryConfig = (
  * Valide une HistoryConfig et la répare si incomplète
  * Utilisé lors du load depuis backend (peut avoir partial data)
  */
-export const validateAndRepairHistoryConfig = (
-  config: any,
-  enabledProviders: LLMProvider[]
-): HistoryConfig => {
+export const validateAndRepairHistoryConfig = (config: unknown, enabledProviders: LLMProvider[]): HistoryConfig => {
   if (!config || typeof config !== 'object') {
     return initializeHistoryConfig(undefined, enabledProviders);
   }
 
   // Check for missing critical fields
-  const isPartial = 
-    !config.llmProvider ||
-    !config.model ||
-    !hasCompleteLimitValues(config.limits) ||
-    !hasCompleteEnabledLimits(config.enabledLimits);
+  const cfg = config as Partial<HistoryConfig>;
+  const isPartial = !cfg.llmProvider || !cfg.model || !hasCompleteLimitValues(cfg.limits) || !hasCompleteEnabledLimits(cfg.enabledLimits);
 
   if (isPartial) {
     // Merge with defaults to restore completeness
-    return initializeHistoryConfig(config, enabledProviders);
+    return initializeHistoryConfig(cfg, enabledProviders);
   }
 
-  return config as HistoryConfig;
+  return cfg as HistoryConfig;
 };
 
 /**
@@ -162,26 +159,23 @@ export const validateAndRepairHistoryConfig = (
  * Assure que tous les champs requis sont présents
  * Valide que le provider est toujours dans la liste des providers disponibles
  */
-export const prepareHistoryConfigForSave = (
-  config: Partial<HistoryConfig>,
-  enabledProviders?: LLMProvider[]
-): HistoryConfig => {
+export const prepareHistoryConfigForSave = (config: Partial<HistoryConfig>, enabledProviders?: LLMProvider[]): HistoryConfig => {
   const defaults = createDefaultHistoryConfig();
-  
+
   // Déterminer le provider: utiliser celui du user s'il est toujours valide, sinon fallback
   let llmProvider = (config.llmProvider as LLMProvider) || defaults.llmProvider;
   if (enabledProviders && !enabledProviders.includes(llmProvider)) {
     // Provider que l'user a choisi n'est plus enabled → fallback au premier disponible
     llmProvider = enabledProviders[0] || defaults.llmProvider;
   }
-  
+
   // Déterminer le modèle : si provider a changé, prendre le premier modèle du nouveau provider
   let model = config.model;
   if (!model || (enabledProviders && !enabledProviders.includes(config.llmProvider as LLMProvider))) {
     // Model pas set ou provider a changé → prendre premier modèle du provider
     model = LLM_MODELS[llmProvider]?.[0] || defaults.model;
   }
-  
+
   return {
     enabled: config.enabled ?? defaults.enabled,
     llmProvider,
@@ -193,7 +187,7 @@ export const prepareHistoryConfigForSave = (
       word: config.limits?.word ?? defaults.limits.word,
       token: config.limits?.token ?? defaults.limits.token,
       sentence: config.limits?.sentence ?? defaults.limits.sentence,
-      message: config.limits?.message ?? defaults.limits.message
+      message: config.limits?.message ?? defaults.limits.message,
     },
     enabledLimits: {
       char: config.enabledLimits?.char ?? defaults.enabledLimits.char,

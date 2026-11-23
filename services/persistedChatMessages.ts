@@ -79,11 +79,7 @@ function parseLegacyToolResult(text: string): {
   };
 }
 
-function resolveLegacyToolStatus(
-  toolMessage: ChatMessage,
-  toolResultMessage: ChatMessage,
-  result: unknown,
-): 'success' | 'error' {
+function resolveLegacyToolStatus(toolMessage: ChatMessage, toolResultMessage: ChatMessage, result: unknown): 'success' | 'error' {
   if (toolMessage.isError || toolResultMessage.isError) {
     return 'error';
   }
@@ -110,8 +106,8 @@ function normalizeLegacyToolMessages(messages: ChatMessage[]): ChatMessage[] {
     }
 
     const parsedInvocation = parseLegacyToolInvocation(toolMessage.text);
-    const canNormalizeInvocation = parsedInvocation
-      && (toolMessage.sender === 'tool' || (toolMessage.sender === 'agent' && !!parsedInvocation.executionId));
+    const canNormalizeInvocation =
+      parsedInvocation && (toolMessage.sender === 'tool' || (toolMessage.sender === 'agent' && !!parsedInvocation.executionId));
 
     if (!canNormalizeInvocation || !parsedInvocation) {
       continue;
@@ -130,9 +126,10 @@ function normalizeLegacyToolMessages(messages: ChatMessage[]): ChatMessage[] {
 
       const parsedResult = parseLegacyToolResult(candidate.text);
       const sameExecutionId = !!parsedInvocation.executionId && parsedResult.executionId === parsedInvocation.executionId;
-      const sameToolName = candidate.sender === 'tool_result'
-        && !!candidate.toolName
-        && candidate.toolName === (toolMessage.toolName ?? parsedInvocation.functionName);
+      const sameToolName =
+        candidate.sender === 'tool_result' &&
+        !!candidate.toolName &&
+        candidate.toolName === (toolMessage.toolName ?? parsedInvocation.functionName);
 
       if (sameExecutionId || sameToolName) {
         matchingToolResultIndex = resultIndex;
@@ -190,69 +187,84 @@ export const mapPersistedToolCallRecord = (record: any): ToolCallRecord | undefi
 
   return {
     ...record,
-    timestamp: new Date(record.timestamp || Date.now())
+    timestamp: new Date(record.timestamp || Date.now()),
   };
 };
 
-export const mapPersistedChatMessages = (messages: any[] = []): ChatMessage[] => normalizePersistedToolTranscriptMessages(messages.map((message: any, index: number) => ({
-  id: message.id || `chat-${index}-${message.timestamp || Date.now()}`,
-  sender: message.sender === 'user'
-    ? 'user'
-    : message.sender === 'tool'
-      ? 'tool'
-      : message.sender === 'tool_result'
-        ? 'tool_result'
-        : 'agent',
-  text: message.text || '',
-  timestamp: new Date(message.timestamp || Date.now()),
-  image: message.image,
-  mimeType: message.mimeType,
-  filename: message.fileName || message.filename,
-  fileContent: message.fileContent,
-  citations: message.citations,
-  toolCalls: message.toolCalls,
-  toolCallId: message.toolCallId,
-  toolName: message.toolName,
-  status: message.status,
-  isError: message.isError,
-  mapsGrounding: message.mapsGrounding,
-  webSearchGrounding: message.webSearchGrounding,
-  videoGeneration: message.videoGeneration,
-  thinking: message.thinking,
-  document: message.document,
-  documentType: message.documentType,
-  toolCallRecord: mapPersistedToolCallRecord(message.toolCallRecord),
-})));
+// ⭐ US-RC-02 lot 7 : message persisté = ChatMessage partiel avec timestamp sérialisé (ISO)
+export type PersistedChatMessage = Omit<Partial<ChatMessage>, 'timestamp' | 'toolCallRecord'> & {
+  timestamp?: string | number | Date;
+  toolCallRecord?: unknown;
+  fileName?: string;
+};
 
-export const buildPersistedMessageIdentity = (message: ChatMessage) => [
-  (() => {
-    if (message.toolCallRecord?.id) {
-      return `tool-record::${message.toolCallRecord.id}`;
-    }
+export const mapPersistedChatMessages = (messages: PersistedChatMessage[] = []): ChatMessage[] =>
+  normalizePersistedToolTranscriptMessages(
+    messages.map((message: PersistedChatMessage, index: number) => ({
+      id: message.id || `chat-${index}-${message.timestamp || Date.now()}`,
+      sender:
+        message.sender === 'user'
+          ? 'user'
+          : message.sender === 'tool'
+            ? 'tool'
+            : message.sender === 'tool_result'
+              ? 'tool_result'
+              : 'agent',
+      text: message.text || '',
+      timestamp: new Date(message.timestamp || Date.now()),
+      image: message.image,
+      mimeType: message.mimeType,
+      filename: message.fileName || message.filename,
+      fileContent: message.fileContent,
+      citations: message.citations,
+      toolCalls: message.toolCalls,
+      toolCallId: message.toolCallId,
+      toolName: message.toolName,
+      status: message.status,
+      isError: message.isError,
+      mapsGrounding: message.mapsGrounding,
+      webSearchGrounding: message.webSearchGrounding,
+      videoGeneration: message.videoGeneration,
+      thinking: message.thinking,
+      document: message.document,
+      documentType: message.documentType,
+      toolCallRecord: mapPersistedToolCallRecord(message.toolCallRecord),
+    })),
+  );
 
-    if (message.sender === 'tool_result' && message.toolCallId) {
-      return `tool-result::${message.toolCallId}`;
-    }
+export const buildPersistedMessageIdentity = (message: ChatMessage) =>
+  [
+    (() => {
+      if (message.toolCallRecord?.id) {
+        return `tool-record::${message.toolCallRecord.id}`;
+      }
 
-    if (message.id) {
-      return `message::${message.id}`;
-    }
+      if (message.sender === 'tool_result' && message.toolCallId) {
+        return `tool-result::${message.toolCallId}`;
+      }
 
-    const toolCallIds = Array.isArray(message.toolCalls)
-      ? message.toolCalls.map((toolCall) => toolCall.id).filter(Boolean).join('|')
-      : '';
+      if (message.id) {
+        return `message::${message.id}`;
+      }
 
-    return [
-      message.sender,
-      message.text,
-      normalizeTimestamp(message.timestamp),
-      message.status || '',
-      message.toolCallId || '',
-      message.toolName || '',
-      toolCallIds,
-    ].join('::');
-  })(),
-].join('');
+      const toolCallIds = Array.isArray(message.toolCalls)
+        ? message.toolCalls
+            .map((toolCall) => toolCall.id)
+            .filter(Boolean)
+            .join('|')
+        : '';
+
+      return [
+        message.sender,
+        message.text,
+        normalizeTimestamp(message.timestamp),
+        message.status || '',
+        message.toolCallId || '',
+        message.toolName || '',
+        toolCallIds,
+      ].join('::');
+    })(),
+  ].join('');
 
 export const mergePersistedAndRuntimeMessages = (persistedMessages: ChatMessage[], currentMessages: ChatMessage[]): ChatMessage[] => {
   if (persistedMessages.length === 0) {

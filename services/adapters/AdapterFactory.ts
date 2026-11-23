@@ -36,25 +36,18 @@ const LOCAL_PROVIDERS: LLMProvider[] = [LLMProvider.LMStudio];
  *                        Pass this from V2AgentNode `resolveLocalEndpoint()` so each
  *                        instance uses its own profile, not the generic LLMConfig.
  */
-export function createAdapter(
-    provider: LLMProvider,
-    config: LLMConfig | null,
-    model: string,
-    authToken?: string
-): ILLMAdapter | null {
-    if (!LOCAL_PROVIDERS.includes(provider)) {
-        // Native function-calling provider — use existing streaming path
-        return null;
-    }
+export function createAdapter(provider: LLMProvider, config: LLMConfig | null, model: string, authToken?: string): ILLMAdapter | null {
+  if (!LOCAL_PROVIDERS.includes(provider)) {
+    // Native function-calling provider — use existing streaming path
+    return null;
+  }
 
-    const endpoint: string = (config as any)?.localEndpoint
-        || (config as any)?.apiKey
-        || 'http://localhost:1234';
+  const endpoint: string = (config as any)?.localEndpoint || (config as any)?.apiKey || 'http://localhost:1234';
 
-    return new LocalLLMAdapter(provider, {
-        endpoint,
-        model,
-        apiKey: (config as any)?.apiKey,
-        authToken,
-    });
+  return new LocalLLMAdapter(provider, {
+    endpoint,
+    model,
+    apiKey: (config as any)?.apiKey,
+    authToken,
+  });
 }

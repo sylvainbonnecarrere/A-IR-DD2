@@ -12,15 +12,7 @@
  * NON-RÉGRESSION: Guest mode unchanged if user is null
  */
 
-import React, {
-    createContext,
-    useContext,
-    useState,
-    useEffect,
-    ReactNode,
-    useCallback,
-    useRef
-} from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { User, AuthContextType, StoredAuthData, AuthResponse, AuthLoadingState, LLMApiKey, AuthSessionStatus } from './types/auth.types';
 import { LLMConfig, LocalLLMProfile } from '../types';
 import { wipeGuestData, checkGuestDataExists } from '../utils/guestDataUtils';
@@ -29,19 +21,13 @@ import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useLocalizationStore } from '../stores/useLocalizationStore';
 import { useFunctionStore } from '../stores/useFunctionStore';
-import {
-    INITIAL_RUNTIME_LLM_CONFIGS,
-} from '../services/runtimeConfigRepository';
+import { INITIAL_RUNTIME_LLM_CONFIGS } from '../services/runtimeConfigRepository';
 import { authSessionStorage } from '../utils/authSessionStorage';
+import { AUTH_SESSION_DEGRADED_EVENT, AUTH_SESSION_REFRESHED_EVENT, requestAccessTokenRefresh } from '../utils/authSessionService';
 import {
-    AUTH_SESSION_DEGRADED_EVENT,
-    AUTH_SESSION_REFRESHED_EVENT,
-    requestAccessTokenRefresh,
-} from '../utils/authSessionService';
-import {
-    loadAuthenticatedRuntimeBootstrap,
-    loadGuestRuntimeBootstrap,
-    type RuntimeBootstrapState,
+  loadAuthenticatedRuntimeBootstrap,
+  loadGuestRuntimeBootstrap,
+  type RuntimeBootstrapState,
 } from '../services/runtimeBootstrapService';
 import { clearQueryClient } from '../providers/QueryProvider';
 
@@ -53,7 +39,7 @@ import { API_BASE_URL } from '../config/api.config';
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 interface AuthProviderProps {
-    children: ReactNode;
+  children: ReactNode;
 }
 
 /**
@@ -66,478 +52,483 @@ interface AuthProviderProps {
  * 3. Render: isLoading=false (or false from start if no stored auth)
  */
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-    // Estado
-    const [user, setUser] = useState<User | null>(null);
-    const [accessToken, setAccessToken] = useState<string | null>(null);
-    const [refreshToken, setRefreshToken] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(true); // Start true to avoid FOUC
-    const [sessionStatus, setSessionStatus] = useState<AuthSessionStatus>('loading');
-    const [error, setError] = useState<string | null>(null);
-    const [llmApiKeys, setLlmApiKeys] = useState<LLMApiKey[] | null>(null); // J4.2: Session-only storage
-    const [runtimeLLMConfigs, setRuntimeLLMConfigs] = useState<LLMConfig[]>(INITIAL_RUNTIME_LLM_CONFIGS);
-    const [localLLMProfiles, setLocalLLMProfiles] = useState<LocalLLMProfile[]>([]);
-    const [isMounted, setIsMounted] = useState(false); // ⭐ J4.4: Prevent async cleanup errors
-    const runtimeBootstrapRequestIdRef = useRef(0);
+  // Estado
+  const [user, setUser] = useState<User | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true); // Start true to avoid FOUC
+  const [sessionStatus, setSessionStatus] = useState<AuthSessionStatus>('loading');
+  const [error, setError] = useState<string | null>(null);
+  const [llmApiKeys, setLlmApiKeys] = useState<LLMApiKey[] | null>(null); // J4.2: Session-only storage
+  const [runtimeLLMConfigs, setRuntimeLLMConfigs] = useState<LLMConfig[]>(INITIAL_RUNTIME_LLM_CONFIGS);
+  const [localLLMProfiles, setLocalLLMProfiles] = useState<LocalLLMProfile[]>([]);
+  const [isMounted, setIsMounted] = useState(false); // ⭐ J4.4: Prevent async cleanup errors
+  const runtimeBootstrapRequestIdRef = useRef(0);
 
-    /**
-     * ⭐ J4.4: Track mount state to prevent async state updates after unmount
-     * This prevents the "message channel closed before response" error
-     */
-    useEffect(() => {
-        setIsMounted(true);
-        return () => {
-            setIsMounted(false);
-        };
-    }, []);
+  /**
+   * ⭐ J4.4: Track mount state to prevent async state updates after unmount
+   * This prevents the "message channel closed before response" error
+   */
+  useEffect(() => {
+    setIsMounted(true);
+    return () => {
+      setIsMounted(false);
+    };
+  }, []);
 
-    const resetStores = useCallback(() => {
-        try {
-            useDesignStore.getState().resetAll();
-            useWorkflowStore.getState().resetAll();
-            useRuntimeStore.getState().resetAll();
-            useLocalizationStore.getState().resetAll();
-            useFunctionStore.getState().resetStore();
-        } catch (err) {
-            // Silent fail - stores may not be initialized
-        }
-    }, []);
+  const resetStores = useCallback(() => {
+    try {
+      useDesignStore.getState().resetAll();
+      useWorkflowStore.getState().resetAll();
+      useRuntimeStore.getState().resetAll();
+      useLocalizationStore.getState().resetAll();
+      useFunctionStore.getState().resetStore();
+    } catch (err) {
+      // Silent fail - stores may not be initialized
+    }
+  }, []);
 
-    const clearAuthState = useCallback((options?: {
-        sessionStatus?: AuthSessionStatus;
-        error?: string | null;
-        resetStores?: boolean;
-        clearStorage?: boolean;
-    }) => {
-        const {
-            sessionStatus: nextSessionStatus = 'ready',
-            error: nextError = null,
-            resetStores: shouldResetStores = true,
-            clearStorage = true,
-        } = options ?? {};
+  const clearAuthState = useCallback(
+    (options?: { sessionStatus?: AuthSessionStatus; error?: string | null; resetStores?: boolean; clearStorage?: boolean }) => {
+      const {
+        sessionStatus: nextSessionStatus = 'ready',
+        error: nextError = null,
+        resetStores: shouldResetStores = true,
+        clearStorage = true,
+      } = options ?? {};
 
-        runtimeBootstrapRequestIdRef.current += 1;
+      runtimeBootstrapRequestIdRef.current += 1;
 
-        setUser(null);
-        setAccessToken(null);
-        setRefreshToken(null);
-        setLlmApiKeys(null);
-        setRuntimeLLMConfigs(INITIAL_RUNTIME_LLM_CONFIGS);
-        setLocalLLMProfiles([]);
-        setError(nextError);
-        setSessionStatus(nextSessionStatus);
+      setUser(null);
+      setAccessToken(null);
+      setRefreshToken(null);
+      setLlmApiKeys(null);
+      setRuntimeLLMConfigs(INITIAL_RUNTIME_LLM_CONFIGS);
+      setLocalLLMProfiles([]);
+      setError(nextError);
+      setSessionStatus(nextSessionStatus);
 
-        clearQueryClient();
+      clearQueryClient();
 
-        if (clearStorage) {
+      if (clearStorage) {
+        authSessionStorage.clear();
+      }
+
+      if (shouldResetStores) {
+        resetStores();
+      }
+    },
+    [resetStores],
+  );
+
+  /**
+   * Hydrate auth from localStorage on mount
+   * SAFE: Try-catch prevents app crash if localStorage corrupted
+   */
+  useEffect(() => {
+    const hydrateFromStorage = () => {
+      let nextSessionStatus: AuthSessionStatus = 'ready';
+      let nextError: string | null = null;
+
+      try {
+        const storedAuth = authSessionStorage.read();
+        if (storedAuth.status === 'ok') {
+          const { user, accessToken, refreshToken }: StoredAuthData = storedAuth.data;
+
+          // Validate structure
+          if (user && user.id && user.email && accessToken && refreshToken) {
+            nextSessionStatus = 'restoring-session';
+            if (isMounted) {
+              setUser(user);
+              setAccessToken(accessToken);
+              setRefreshToken(refreshToken);
+              // ⭐ J4.5: Fetch LLM keys on session restore (was missing!)
+              // Note: fetchLLMApiKeys is called via effect below
+            }
+          } else {
+            // Malformed data - clear
             authSessionStorage.clear();
+            nextSessionStatus = 'degraded';
+            nextError = 'Session locale invalide. Veuillez vous reconnecter.';
+          }
+        } else if (storedAuth.status === 'invalid') {
+          authSessionStorage.clear();
+          nextSessionStatus = 'degraded';
+          nextError = 'Session locale invalide. Veuillez vous reconnecter.';
         }
-
-        if (shouldResetStores) {
-            resetStores();
+      } catch (err) {
+        authSessionStorage.clear();
+        nextSessionStatus = 'degraded';
+        nextError = 'Session locale invalide. Veuillez vous reconnecter.';
+      } finally {
+        // Always finish loading (fallback to guest mode)
+        if (isMounted) {
+          setSessionStatus(nextSessionStatus);
+          setError(nextError);
+          setIsLoading(false);
         }
-    }, [resetStores]);
+      }
+    };
 
-    /**
-     * Hydrate auth from localStorage on mount
-     * SAFE: Try-catch prevents app crash if localStorage corrupted
-     */
-    useEffect(() => {
-        const hydrateFromStorage = () => {
-            let nextSessionStatus: AuthSessionStatus = 'ready';
-            let nextError: string | null = null;
+    hydrateFromStorage();
+  }, [isMounted]);
 
-            try {
-                const storedAuth = authSessionStorage.read();
-                if (storedAuth.status === 'ok') {
-                    const { user, accessToken, refreshToken }: StoredAuthData = storedAuth.data;
+  /**
+   * Listen for logout event from API interceptor (e.g., 401 response)
+   */
+  useEffect(() => {
+    const handleLogoutEvent = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const isExpiredSession = customEvent.detail?.reason !== 'manual_logout';
+      clearAuthState({
+        sessionStatus: isExpiredSession ? 'degraded' : 'ready',
+        error: isExpiredSession ? customEvent.detail?.message || 'Session expirée. Veuillez vous reconnecter.' : null,
+      });
+    };
 
-                    // Validate structure
-                    if (user && user.id && user.email && accessToken && refreshToken) {
-                        nextSessionStatus = 'restoring-session';
-                        if (isMounted) {
-                            setUser(user);
-                            setAccessToken(accessToken);
-                            setRefreshToken(refreshToken);
-                            // ⭐ J4.5: Fetch LLM keys on session restore (was missing!)
-                            // Note: fetchLLMApiKeys is called via effect below
-                        }
-                    } else {
-                        // Malformed data - clear
-                        authSessionStorage.clear();
-                        nextSessionStatus = 'degraded';
-                        nextError = 'Session locale invalide. Veuillez vous reconnecter.';
-                    }
-                } else if (storedAuth.status === 'invalid') {
-                    authSessionStorage.clear();
-                    nextSessionStatus = 'degraded';
-                    nextError = 'Session locale invalide. Veuillez vous reconnecter.';
-                }
-            } catch (err) {
-                authSessionStorage.clear();
-                nextSessionStatus = 'degraded';
-                nextError = 'Session locale invalide. Veuillez vous reconnecter.';
-            } finally {
-                // Always finish loading (fallback to guest mode)
-                if (isMounted) {
-                    setSessionStatus(nextSessionStatus);
-                    setError(nextError);
-                    setIsLoading(false);
-                }
-            }
-        };
+    const handleSessionRefreshedEvent = (event: Event) => {
+      const customEvent = event as CustomEvent<{ accessToken?: string }>;
+      const refreshedToken = customEvent.detail?.accessToken;
+      if (!refreshedToken) {
+        return;
+      }
 
-        hydrateFromStorage();
-    }, [isMounted]);
+      setAccessToken(refreshedToken);
+      setSessionStatus('ready');
+      setError(null);
+    };
 
-    /**
-     * Listen for logout event from API interceptor (e.g., 401 response)
-     */
-    useEffect(() => {
-        const handleLogoutEvent = (event: Event) => {
-            const customEvent = event as CustomEvent;
-            const isExpiredSession = customEvent.detail?.reason !== 'manual_logout';
-            clearAuthState({
-                sessionStatus: isExpiredSession ? 'degraded' : 'ready',
-                error: isExpiredSession
-                    ? customEvent.detail?.message || 'Session expirée. Veuillez vous reconnecter.'
-                    : null,
-            });
-        };
+    const handleSessionDegradedEvent = (event: Event) => {
+      const customEvent = event as CustomEvent<{ message?: string }>;
+      clearAuthState({
+        sessionStatus: 'degraded',
+        error: customEvent.detail?.message || 'Session expirée. Veuillez vous reconnecter.',
+      });
+    };
 
-        const handleSessionRefreshedEvent = (event: Event) => {
-            const customEvent = event as CustomEvent<{ accessToken?: string }>;
-            const refreshedToken = customEvent.detail?.accessToken;
-            if (!refreshedToken) {
-                return;
-            }
+    window.addEventListener('auth:logout', handleLogoutEvent);
+    window.addEventListener(AUTH_SESSION_REFRESHED_EVENT, handleSessionRefreshedEvent);
+    window.addEventListener(AUTH_SESSION_DEGRADED_EVENT, handleSessionDegradedEvent);
 
-            setAccessToken(refreshedToken);
-            setSessionStatus('ready');
-            setError(null);
-        };
+    return () => {
+      window.removeEventListener('auth:logout', handleLogoutEvent);
+      window.removeEventListener(AUTH_SESSION_REFRESHED_EVENT, handleSessionRefreshedEvent);
+      window.removeEventListener(AUTH_SESSION_DEGRADED_EVENT, handleSessionDegradedEvent);
+    };
+  }, [clearAuthState]);
 
-        const handleSessionDegradedEvent = (event: Event) => {
-            const customEvent = event as CustomEvent<{ message?: string }>;
-            clearAuthState({
-                sessionStatus: 'degraded',
-                error: customEvent.detail?.message || 'Session expirée. Veuillez vous reconnecter.',
-            });
-        };
+  /**
+   * Save auth data to localStorage and state
+   */
+  const saveAuthData = useCallback((userData: User, accessToken: string, refreshToken: string) => {
+    const authData: StoredAuthData = { user: userData, accessToken, refreshToken };
+    authSessionStorage.write(authData);
+    setUser(userData);
+    setAccessToken(accessToken);
+    setRefreshToken(refreshToken);
+    setSessionStatus('ready');
+    setError(null);
+  }, []);
 
-        window.addEventListener('auth:logout', handleLogoutEvent);
-        window.addEventListener(AUTH_SESSION_REFRESHED_EVENT, handleSessionRefreshedEvent);
-        window.addEventListener(AUTH_SESSION_DEGRADED_EVENT, handleSessionDegradedEvent);
+  const refreshRuntimeConfigState = useCallback(
+    async (tokenOverride?: string): Promise<RuntimeBootstrapState | null> => {
+      if (!isMounted) return null;
 
-        return () => {
-            window.removeEventListener('auth:logout', handleLogoutEvent);
-            window.removeEventListener(AUTH_SESSION_REFRESHED_EVENT, handleSessionRefreshedEvent);
-            window.removeEventListener(AUTH_SESSION_DEGRADED_EVENT, handleSessionDegradedEvent);
-        };
-    }, [clearAuthState]);
+      const effectiveToken = tokenOverride ?? accessToken ?? undefined;
+      const shouldUseApi = !!effectiveToken;
+      const requestId = runtimeBootstrapRequestIdRef.current + 1;
+      runtimeBootstrapRequestIdRef.current = requestId;
 
-    /**
-     * Save auth data to localStorage and state
-     */
-    const saveAuthData = useCallback((userData: User, accessToken: string, refreshToken: string) => {
-        const authData: StoredAuthData = { user: userData, accessToken, refreshToken };
-        authSessionStorage.write(authData);
-        setUser(userData);
-        setAccessToken(accessToken);
-        setRefreshToken(refreshToken);
-        setSessionStatus('ready');
-        setError(null);
-    }, []);
-
-    const refreshRuntimeConfigState = useCallback(async (tokenOverride?: string): Promise<RuntimeBootstrapState | null> => {
-        if (!isMounted) return null;
-
-        const effectiveToken = tokenOverride ?? accessToken ?? undefined;
-        const shouldUseApi = !!effectiveToken;
-        const requestId = runtimeBootstrapRequestIdRef.current + 1;
-        runtimeBootstrapRequestIdRef.current = requestId;
-
-        if (shouldUseApi) {
-            const runtimeState = await loadAuthenticatedRuntimeBootstrap(effectiveToken);
-
-            if (!isMounted || requestId !== runtimeBootstrapRequestIdRef.current) return runtimeState;
-
-            setLlmApiKeys(runtimeState.llmApiKeys);
-            setRuntimeLLMConfigs(runtimeState.runtimeLLMConfigs);
-            setLocalLLMProfiles(runtimeState.localLLMProfiles);
-            setSessionStatus('ready');
-            return runtimeState;
-        }
-
-        const runtimeState = await loadGuestRuntimeBootstrap();
+      if (shouldUseApi) {
+        const runtimeState = await loadAuthenticatedRuntimeBootstrap(effectiveToken);
 
         if (!isMounted || requestId !== runtimeBootstrapRequestIdRef.current) return runtimeState;
 
         setLlmApiKeys(runtimeState.llmApiKeys);
         setRuntimeLLMConfigs(runtimeState.runtimeLLMConfigs);
         setLocalLLMProfiles(runtimeState.localLLMProfiles);
-
-        if (sessionStatus !== 'degraded') {
-            setSessionStatus('ready');
-        }
+        setSessionStatus('ready');
         return runtimeState;
-    }, [accessToken, isMounted, sessionStatus]);
+      }
 
-    /**     * ⭐ J4.5 FIX: Fetch LLM API keys when accessToken becomes available
-     * This handles both:
-     * - Fresh login (fetchLLMApiKeys already called in login(), but this is a safety net)
-     * - Session restore from localStorage (hydrateFromStorage doesn't call fetchLLMApiKeys)
-     */
-    useEffect(() => {
-        if (!isMounted || isLoading || !accessToken) return;
-        if (sessionStatus !== 'restoring-session') return;
-        void refreshRuntimeConfigState(accessToken);
-    }, [accessToken, isMounted, isLoading, refreshRuntimeConfigState, sessionStatus]);
+      const runtimeState = await loadGuestRuntimeBootstrap();
 
-    /**     * Login with email & password
-     * POST /api/auth/login
-     * 
-     * CRITICAL: Wipes guest data before setting auth state
-     * This prevents data leak from guest session to authenticated session
-     */
-    const login = useCallback(async (email: string, password: string) => {
-        setError(null);
-        setIsLoading(true);
-        setSessionStatus('loading');
+      if (!isMounted || requestId !== runtimeBootstrapRequestIdRef.current) return runtimeState;
 
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password }),
-                credentials: 'omit' // No cookies for now
-            });
+      setLlmApiKeys(runtimeState.llmApiKeys);
+      setRuntimeLLMConfigs(runtimeState.runtimeLLMConfigs);
+      setLocalLLMProfiles(runtimeState.localLLMProfiles);
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Login failed');
-            }
+      if (sessionStatus !== 'degraded') {
+        setSessionStatus('ready');
+      }
+      return runtimeState;
+    },
+    [accessToken, isMounted, sessionStatus],
+  );
 
-            const { user: userData, accessToken, refreshToken }: AuthResponse = await response.json();
+  /**     * ⭐ J4.5 FIX: Fetch LLM API keys when accessToken becomes available
+   * This handles both:
+   * - Fresh login (fetchLLMApiKeys already called in login(), but this is a safety net)
+   * - Session restore from localStorage (hydrateFromStorage doesn't call fetchLLMApiKeys)
+   */
+  useEffect(() => {
+    if (!isMounted || isLoading || !accessToken) return;
+    if (sessionStatus !== 'restoring-session') return;
+    void refreshRuntimeConfigState(accessToken);
+  }, [accessToken, isMounted, isLoading, refreshRuntimeConfigState, sessionStatus]);
 
-            // ⭐ CRITICAL: Wipe guest data BEFORE setting auth state
-            // This prevents guest session data from bleeding into auth session
-            const guestCheck = checkGuestDataExists();
-            if (guestCheck.totalKeys > 0) {
-                const wipeResult = wipeGuestData();
-            }
-            
-            // ⭐ NEW: Reset localization store on login to prevent data leak
-            const localizationStore = useLocalizationStore.getState();
-            localizationStore.resetAll();
+  /**     * Login with email & password
+   * POST /api/auth/login
+   *
+   * CRITICAL: Wipes guest data before setting auth state
+   * This prevents data leak from guest session to authenticated session
+   */
+  const login = useCallback(
+    async (email: string, password: string) => {
+      setError(null);
+      setIsLoading(true);
+      setSessionStatus('loading');
 
-            saveAuthData(userData, accessToken, refreshToken);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+          credentials: 'omit', // No cookies for now
+        });
 
-            // J4.2: Fetch LLM API keys after successful login
-            await refreshRuntimeConfigState(accessToken);
-        } catch (err: any) {
-            const errorMsg = err.message || 'Connection error';
-            setError(errorMsg);
-            throw err; // Re-throw for modal/UI handling
-        } finally {
-            setIsLoading(false);
-        }
-    }, [refreshRuntimeConfigState, saveAuthData]);
-
-    /**
-     * Register with email & password
-     * POST /api/auth/register
-     * 
-     * CRITICAL: Wipes guest data before setting auth state
-     */
-    const register = useCallback(async (email: string, password: string) => {
-        setError(null);
-        setIsLoading(true);
-        setSessionStatus('loading');
-
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password })
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Registration failed');
-            }
-
-            const { user: userData, accessToken, refreshToken }: AuthResponse = await response.json();
-
-            // ⭐ CRITICAL: Wipe guest data BEFORE setting auth state
-            const guestCheck = checkGuestDataExists();
-            if (guestCheck.totalKeys > 0) {
-                const wipeResult = wipeGuestData();
-            }
-
-            saveAuthData(userData, accessToken, refreshToken);
-
-            // J4.2: Fetch LLM API keys after successful registration
-            await refreshRuntimeConfigState(accessToken);
-        } catch (err: any) {
-            const errorMsg = err.message || 'Connection error';
-            setError(errorMsg);
-            throw err;
-        } finally {
-            setIsLoading(false);
-        }
-    }, [refreshRuntimeConfigState, saveAuthData]);
-
-    /**
-     * Logout - ENFORCED FULL WIPE (Security strict rule)
-     * RULE: When a user logs out, absolutely no element belonging to that user
-     * must remain accessible to subsequent visitors (guests or other users).
-     * This implementation performs a deterministic, irrevocable cleanup:
-     * - Clears all `localStorage` and `sessionStorage`
-     * - Attempts to delete all IndexedDB databases (when available)
-     * - Calls `wipeGuestData()` to defensively remove known guest keys and reset stores
-     * - Resets all zustand stores and clears the auth session storage
-     *
-     * This is intentionally aggressive and must remain so to respect the
-     * security invariant: logout => zero retention of user-specific data.
-     */
-    const logout = useCallback(() => {
-        // 1) Defensive: wipe known guest keys and reset in-memory stores
-        try {
-            wipeGuestData();
-        } catch (err) {
-            console.warn('[AuthContext] wipeGuestData failed during logout', err);
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Login failed');
         }
 
-        // 2) Aggressive: clear all storages (localStorage + sessionStorage)
-        try {
-            try {
-                localStorage.clear();
-            } catch (e) {
-                console.warn('[AuthContext] localStorage.clear failed during logout', e);
-            }
+        const { user: userData, accessToken, refreshToken }: AuthResponse = await response.json();
 
-            try {
-                sessionStorage.clear();
-            } catch (e) {
-                console.warn('[AuthContext] sessionStorage.clear failed during logout', e);
-            }
-        } catch (err) {
-            console.warn('[AuthContext] Storage clear encountered an error', err);
+        // ⭐ CRITICAL: Wipe guest data BEFORE setting auth state
+        // This prevents guest session data from bleeding into auth session
+        const guestCheck = checkGuestDataExists();
+        if (guestCheck.totalKeys > 0) {
+          const wipeResult = wipeGuestData();
         }
 
-        // 3) Best-effort: delete all IndexedDB databases (if supported)
-        try {
-            if (typeof indexedDB !== 'undefined' && typeof indexedDB.databases === 'function') {
-                // browsers that support indexedDB.databases()
-                // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                (async () => {
-                    try {
-                        const dbs = await (indexedDB as any).databases();
-                        for (const dbInfo of dbs) {
-                            if (dbInfo && dbInfo.name) {
-                                indexedDB.deleteDatabase(dbInfo.name);
-                            }
-                        }
-                    } catch (e) {
-                        // Not critical — best-effort cleanup
-                        console.warn('[AuthContext] indexedDB cleanup failed', e);
-                    }
-                })();
-            }
-        } catch (err) {
-            console.warn('[AuthContext] IndexedDB cleanup not available', err);
-        }
+        // ⭐ NEW: Reset localization store on login to prevent data leak
+        const localizationStore = useLocalizationStore.getState();
+        localizationStore.resetAll();
 
-        // 4) Reset auth-related state and zustand stores. clearStorage=false because
-        // we've already cleared localStorage above (avoid redundant ops).
-        clearAuthState({ sessionStatus: 'ready', error: null, clearStorage: false, resetStores: true });
+        saveAuthData(userData, accessToken, refreshToken);
 
-        // 5) Emit logout event for other parts of the app to react (if needed)
-        try {
-            window.dispatchEvent(new CustomEvent('auth:logout', { detail: { reason: 'manual_logout' } }));
-        } catch (e) {
-            // ignore
-        }
-    }, [clearAuthState]);
-
-    /**
-     * Refresh access token using refresh token
-     * POST /api/auth/refresh
-     * (Backend endpoint will be added in Phase 2)
-     */
-    const refreshAccessToken = useCallback(async () => {
-        if (!refreshToken) {
-            throw new Error('No refresh token available');
-        }
-
-        setSessionStatus('restoring-session');
-
-        try {
-            const newAccessToken = await requestAccessTokenRefresh(refreshToken);
-            const authData: StoredAuthData = {
-                user: user as User,
-                accessToken: newAccessToken,
-                refreshToken,
-            };
-            authSessionStorage.write(authData);
-            setAccessToken(newAccessToken);
-            setSessionStatus('ready');
-            setError(null);
-        } catch (err: any) {
-            clearAuthState({
-                sessionStatus: 'degraded',
-                error: 'Session expirée. Veuillez vous reconnecter.'
-            });
-            throw err;
-        }
-    }, [clearAuthState, refreshToken, user]);
-
-    /**
-     * Clear error message
-     */
-    const clearError = useCallback(() => {
-        setError(null);
-    }, []);
-
-    /**
-     * ⭐ J4.6 FIX: Wrapper function to refresh LLM API keys
-     * Uses the current accessToken from context (not passed as parameter)
-     * This ensures we always use the most up-to-date token
-     * 
-     * NOTE: Do NOT include llmApiKeys in dependencies!
-     * Including it creates a circular dependency and causes cascade updates
-     */
-    const refreshLLMApiKeysWrapper = useCallback(async () => {
-        if (!accessToken) {
-            console.warn('[AuthContext] Cannot refresh LLM API keys: no access token');
-            return;
-        }
-        console.debug('[AuthContext] 🔄 Refreshing LLM API keys...');
+        // J4.2: Fetch LLM API keys after successful login
         await refreshRuntimeConfigState(accessToken);
-    }, [accessToken, refreshRuntimeConfigState]);
+      } catch (err: unknown) {
+        const errorMsg = (err instanceof Error ? err.message : '') || 'Connection error';
+        setError(errorMsg);
+        throw err; // Re-throw for modal/UI handling
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [refreshRuntimeConfigState, saveAuthData],
+  );
 
-    // Context value
-    const value: AuthContextType = {
-        user,
-        accessToken,
+  /**
+   * Register with email & password
+   * POST /api/auth/register
+   *
+   * CRITICAL: Wipes guest data before setting auth state
+   */
+  const register = useCallback(
+    async (email: string, password: string) => {
+      setError(null);
+      setIsLoading(true);
+      setSessionStatus('loading');
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Registration failed');
+        }
+
+        const { user: userData, accessToken, refreshToken }: AuthResponse = await response.json();
+
+        // ⭐ CRITICAL: Wipe guest data BEFORE setting auth state
+        const guestCheck = checkGuestDataExists();
+        if (guestCheck.totalKeys > 0) {
+          const wipeResult = wipeGuestData();
+        }
+
+        saveAuthData(userData, accessToken, refreshToken);
+
+        // J4.2: Fetch LLM API keys after successful registration
+        await refreshRuntimeConfigState(accessToken);
+      } catch (err: unknown) {
+        const errorMsg = (err instanceof Error ? err.message : '') || 'Connection error';
+        setError(errorMsg);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [refreshRuntimeConfigState, saveAuthData],
+  );
+
+  /**
+   * Logout - ENFORCED FULL WIPE (Security strict rule)
+   * RULE: When a user logs out, absolutely no element belonging to that user
+   * must remain accessible to subsequent visitors (guests or other users).
+   * This implementation performs a deterministic, irrevocable cleanup:
+   * - Clears all `localStorage` and `sessionStorage`
+   * - Attempts to delete all IndexedDB databases (when available)
+   * - Calls `wipeGuestData()` to defensively remove known guest keys and reset stores
+   * - Resets all zustand stores and clears the auth session storage
+   *
+   * This is intentionally aggressive and must remain so to respect the
+   * security invariant: logout => zero retention of user-specific data.
+   */
+  const logout = useCallback(() => {
+    // 1) Defensive: wipe known guest keys and reset in-memory stores
+    try {
+      wipeGuestData();
+    } catch (err) {
+      console.warn('[AuthContext] wipeGuestData failed during logout', err);
+    }
+
+    // 2) Aggressive: clear all storages (localStorage + sessionStorage)
+    try {
+      try {
+        localStorage.clear();
+      } catch (e) {
+        console.warn('[AuthContext] localStorage.clear failed during logout', e);
+      }
+
+      try {
+        sessionStorage.clear();
+      } catch (e) {
+        console.warn('[AuthContext] sessionStorage.clear failed during logout', e);
+      }
+    } catch (err) {
+      console.warn('[AuthContext] Storage clear encountered an error', err);
+    }
+
+    // 3) Best-effort: delete all IndexedDB databases (if supported)
+    try {
+      if (typeof indexedDB !== 'undefined' && typeof indexedDB.databases === 'function') {
+        // browsers that support indexedDB.databases()
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        (async () => {
+          try {
+            const dbs = await (indexedDB as IDBFactory & { databases(): Promise<IDBDatabaseInfo[]> }).databases();
+            for (const dbInfo of dbs) {
+              if (dbInfo && dbInfo.name) {
+                indexedDB.deleteDatabase(dbInfo.name);
+              }
+            }
+          } catch (e) {
+            // Not critical — best-effort cleanup
+            console.warn('[AuthContext] indexedDB cleanup failed', e);
+          }
+        })();
+      }
+    } catch (err) {
+      console.warn('[AuthContext] IndexedDB cleanup not available', err);
+    }
+
+    // 4) Reset auth-related state and zustand stores. clearStorage=false because
+    // we've already cleared localStorage above (avoid redundant ops).
+    clearAuthState({ sessionStatus: 'ready', error: null, clearStorage: false, resetStores: true });
+
+    // 5) Emit logout event for other parts of the app to react (if needed)
+    try {
+      window.dispatchEvent(new CustomEvent('auth:logout', { detail: { reason: 'manual_logout' } }));
+    } catch (e) {
+      // ignore
+    }
+  }, [clearAuthState]);
+
+  /**
+   * Refresh access token using refresh token
+   * POST /api/auth/refresh
+   * (Backend endpoint will be added in Phase 2)
+   */
+  const refreshAccessToken = useCallback(async () => {
+    if (!refreshToken) {
+      throw new Error('No refresh token available');
+    }
+
+    setSessionStatus('restoring-session');
+
+    try {
+      const newAccessToken = await requestAccessTokenRefresh(refreshToken);
+      const authData: StoredAuthData = {
+        user: user as User,
+        accessToken: newAccessToken,
         refreshToken,
-        isAuthenticated: !!user && !!accessToken,
-        isLoading,
-        sessionStatus,
-        error,
-        llmApiKeys, // J4.2: Expose LLM API keys to components
-        runtimeLLMConfigs,
-        localLLMProfiles,
-        login,
-        register,
-        logout,
-        refreshAccessToken,
-        clearError,
-        refreshLLMApiKeys: refreshLLMApiKeysWrapper, // ⭐ J4.6: Use wrapper that captures current accessToken
-        refreshRuntimeConfigState,
-    };
+      };
+      authSessionStorage.write(authData);
+      setAccessToken(newAccessToken);
+      setSessionStatus('ready');
+      setError(null);
+    } catch (err: unknown) {
+      clearAuthState({
+        sessionStatus: 'degraded',
+        error: 'Session expirée. Veuillez vous reconnecter.',
+      });
+      throw err;
+    }
+  }, [clearAuthState, refreshToken, user]);
 
-    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  /**
+   * Clear error message
+   */
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
+
+  /**
+   * ⭐ J4.6 FIX: Wrapper function to refresh LLM API keys
+   * Uses the current accessToken from context (not passed as parameter)
+   * This ensures we always use the most up-to-date token
+   *
+   * NOTE: Do NOT include llmApiKeys in dependencies!
+   * Including it creates a circular dependency and causes cascade updates
+   */
+  const refreshLLMApiKeysWrapper = useCallback(async () => {
+    if (!accessToken) {
+      console.warn('[AuthContext] Cannot refresh LLM API keys: no access token');
+      return;
+    }
+    console.debug('[AuthContext] 🔄 Refreshing LLM API keys...');
+    await refreshRuntimeConfigState(accessToken);
+  }, [accessToken, refreshRuntimeConfigState]);
+
+  // Context value
+  const value: AuthContextType = {
+    user,
+    accessToken,
+    refreshToken,
+    isAuthenticated: !!user && !!accessToken,
+    isLoading,
+    sessionStatus,
+    error,
+    llmApiKeys, // J4.2: Expose LLM API keys to components
+    runtimeLLMConfigs,
+    localLLMProfiles,
+    login,
+    register,
+    logout,
+    refreshAccessToken,
+    clearError,
+    refreshLLMApiKeys: refreshLLMApiKeysWrapper, // ⭐ J4.6: Use wrapper that captures current accessToken
+    refreshRuntimeConfigState,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 /**
@@ -553,11 +544,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
  * Will throw if used outside AuthProvider
  */
 export const useAuth = (): AuthContextType => {
-    const context = useContext(AuthContext);
-    if (!context) {
-        throw new Error('useAuth must be used within AuthProvider');
-    }
-    return context;
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
 };
 
 // Re-export types for consumers
