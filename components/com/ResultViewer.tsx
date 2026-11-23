@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { ChevronRightIcon, CopyIcon } from '../Icons';
 import { useLocalization } from '../../hooks/useLocalization';
+import { asJsonRecord, jsonTypeOf, type JsonValueType } from './jsonTreeUtils';
 
+// ⭐ US-RC-02 lot 4 : valeurs JSON arbitraires en `unknown`, typées par jsonTypeOf (plus de any)
 interface JsonNode {
   key: string;
-  value: any;
-  type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null';
+  value: unknown;
+  type: JsonValueType;
   expanded: boolean;
 }
 
 interface ResultViewerProps {
-  data: any;
+  data: unknown;
   status?: number;
   statusText?: string;
   time?: number;
@@ -22,13 +24,12 @@ interface ResultViewerProps {
 const TreeNode: React.FC<{
   node: JsonNode;
   onToggle: (key: string) => void;
-  onSelectValue: (path: string, value: any) => void;
+  onSelectValue: (path: string, value: unknown) => void;
   path: string;
 }> = ({ node, onToggle, onSelectValue, path }) => {
   const isExpandable = node.type === 'object' || node.type === 'array';
-  const entries = isExpandable && typeof node.value === 'object'
-    ? Object.entries(node.value).slice(0, 10)
-    : [];
+  const valueRecord = asJsonRecord(node.value);
+  const entries = isExpandable && valueRecord ? Object.entries(valueRecord).slice(0, 10) : [];
 
   return (
     <div className="font-mono text-sm">
@@ -36,11 +37,7 @@ const TreeNode: React.FC<{
         className="flex items-center gap-2 py-1 px-2 hover:bg-gray-700/50 rounded cursor-pointer transition-colors"
         onClick={() => isExpandable && onToggle(node.key)}
       >
-        {isExpandable && (
-          <ChevronRightIcon
-            className={`w-4 h-4 text-gray-500 transition-transform ${node.expanded ? 'rotate-90' : ''}`}
-          />
-        )}
+        {isExpandable && <ChevronRightIcon className={`w-4 h-4 text-gray-500 transition-transform ${node.expanded ? 'rotate-90' : ''}`} />}
         {!isExpandable && <span className="w-4 h-4" />}
 
         <span className="text-blue-400">{node.key}</span>
@@ -59,7 +56,7 @@ const TreeNode: React.FC<{
           </button>
         ) : (
           <span className="text-gray-500 ml-auto text-xs">
-            {node.type === 'array' ? `[${Object.keys(node.value).length}]` : '{...}'}
+            {node.type === 'array' ? `[${valueRecord ? Object.keys(valueRecord).length : 0}]` : '{...}'}
           </span>
         )}
       </div>
@@ -72,18 +69,16 @@ const TreeNode: React.FC<{
               node={{
                 key,
                 value,
-                type: Array.isArray(value) ? 'array' : typeof value === 'object' && value !== null ? 'object' : typeof value as any,
-                expanded: false
+                type: jsonTypeOf(value),
+                expanded: false,
               }}
               onToggle={onToggle}
               onSelectValue={onSelectValue}
               path={`${path}.${key}`}
             />
           ))}
-          {Object.keys(node.value).length > 10 && (
-            <div className="text-xs text-gray-600 py-1 px-2 italic">
-              ... et {Object.keys(node.value).length - 10} autres
-            </div>
+          {valueRecord && Object.keys(valueRecord).length > 10 && (
+            <div className="text-xs text-gray-600 py-1 px-2 italic">... et {Object.keys(valueRecord).length - 10} autres</div>
           )}
         </div>
       )}
@@ -98,12 +93,12 @@ export const ResultViewer: React.FC<ResultViewerProps> = ({
   time = 0,
   size = '0',
   format = 'json',
-  isLoading = false
+  isLoading = false,
 }) => {
   const { t } = useLocalization();
   const [viewMode, setViewMode] = useState<'tree' | 'table' | 'raw'>('tree');
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-  const [selectedValues, setSelectedValues] = useState<Array<{ path: string; value: any }>>([]);
+  const [selectedValues, setSelectedValues] = useState<Array<{ path: string; value: unknown }>>([]);
 
   const handleToggle = (key: string) => {
     const newExpanded = new Set(expandedNodes);
@@ -115,11 +110,11 @@ export const ResultViewer: React.FC<ResultViewerProps> = ({
     setExpandedNodes(newExpanded);
   };
 
-  const handleSelectValue = (path: string, value: any) => {
-    setSelectedValues(prev => {
-      const exists = prev.find(v => v.path === path);
+  const handleSelectValue = (path: string, value: unknown) => {
+    setSelectedValues((prev) => {
+      const exists = prev.find((v) => v.path === path);
       if (exists) {
-        return prev.filter(v => v.path !== path);
+        return prev.filter((v) => v.path !== path);
       }
       return [...prev, { path, value }];
     });
@@ -153,9 +148,7 @@ export const ResultViewer: React.FC<ResultViewerProps> = ({
           <button
             onClick={() => setViewMode('tree')}
             className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-              viewMode === 'tree'
-                ? 'bg-green-600 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              viewMode === 'tree' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
             }`}
           >
             🌳 Arborescence
@@ -174,9 +167,7 @@ export const ResultViewer: React.FC<ResultViewerProps> = ({
           <button
             onClick={() => setViewMode('raw')}
             className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-              viewMode === 'raw'
-                ? 'bg-green-600 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              viewMode === 'raw' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
             }`}
           >
             💾 Brut
@@ -194,7 +185,7 @@ export const ResultViewer: React.FC<ResultViewerProps> = ({
                   key: 'root',
                   value: data,
                   type: Array.isArray(data) ? 'array' : 'object',
-                  expanded: true
+                  expanded: true,
                 }}
                 onToggle={handleToggle}
                 onSelectValue={handleSelectValue}
@@ -213,7 +204,7 @@ export const ResultViewer: React.FC<ResultViewerProps> = ({
                 <tr className="border-b border-gray-700 bg-gray-800">
                   {data.length > 0 &&
                     typeof data[0] === 'object' &&
-                    Object.keys(data[0]).map(key => (
+                    Object.keys(data[0]).map((key) => (
                       <th key={key} className="px-3 py-2 text-left text-gray-300 font-semibold">
                         {key}
                       </th>
@@ -237,9 +228,7 @@ export const ResultViewer: React.FC<ResultViewerProps> = ({
         )}
 
         {viewMode === 'raw' && (
-          <div className="p-3 font-mono text-xs text-gray-300 whitespace-pre-wrap break-words">
-            {JSON.stringify(data, null, 2)}
-          </div>
+          <div className="p-3 font-mono text-xs text-gray-300 whitespace-pre-wrap break-words">{JSON.stringify(data, null, 2)}</div>
         )}
       </div>
 

@@ -1,31 +1,32 @@
 import React, { useState } from 'react';
 import { CopyIcon } from '../Icons';
+import { asJsonRecord, jsonTypeOf, type JsonValueType } from './jsonTreeUtils';
 
+// ⭐ US-RC-02 lot 4 : valeurs JSON arbitraires en `unknown`, typées par jsonTypeOf (plus de any)
 interface ResultExtractorProps {
-  data: any;
-  onExtract?: (selectedPath: string, value: any) => void;
+  data: unknown;
+  onExtract?: (selectedPath: string, value: unknown) => void;
 }
 
 interface JsonNode {
   path: string;
-  value: any;
-  type: 'object' | 'array' | 'string' | 'number' | 'boolean' | 'null';
+  value: unknown;
+  type: JsonValueType;
   children?: JsonNode[];
   isExpanded?: boolean;
 }
 
-const buildJsonTree = (obj: any, path = 'root'): JsonNode => {
-  const type = Array.isArray(obj) ? 'array' : typeof obj === 'object' ? 'object' : typeof obj;
+const buildJsonTree = (obj: unknown, path = 'root'): JsonNode => {
+  const type = jsonTypeOf(obj);
   const node: JsonNode = {
     path,
     value: obj,
-    type: type as any
+    type,
   };
 
-  if (type === 'object' || type === 'array') {
-    node.children = Object.entries(obj).map(([key, val]) => 
-      buildJsonTree(val, `${path}.${key}`)
-    );
+  const record = asJsonRecord(obj);
+  if ((type === 'object' || type === 'array') && record) {
+    node.children = Object.entries(record).map(([key, val]) => buildJsonTree(val, `${path}.${key}`));
     node.isExpanded = path === 'root';
   }
 
@@ -34,7 +35,7 @@ const buildJsonTree = (obj: any, path = 'root'): JsonNode => {
 
 const NodeRenderer: React.FC<{
   node: JsonNode;
-  onSelect: (path: string, value: any) => void;
+  onSelect: (path: string, value: unknown) => void;
   onToggleExpand: (path: string) => void;
   selectedPath?: string;
 }> = ({ node, onSelect, onToggleExpand, selectedPath }) => {
@@ -50,25 +51,16 @@ const NodeRenderer: React.FC<{
         }}
         className={`
           py-1 px-2 rounded cursor-pointer transition-colors flex items-center gap-2
-          ${isSelected 
-            ? 'bg-green-600/40 text-green-300 ring-1 ring-green-500/50' 
-            : 'hover:bg-gray-700/50 text-gray-300'
-          }
+          ${isSelected ? 'bg-green-600/40 text-green-300 ring-1 ring-green-500/50' : 'hover:bg-gray-700/50 text-gray-300'}
         `}
       >
-        {!isLeaf && (
-          <span className={`transition-transform ${node.isExpanded ? 'rotate-90' : ''}`}>
-            ▶
-          </span>
-        )}
+        {!isLeaf && <span className={`transition-transform ${node.isExpanded ? 'rotate-90' : ''}`}>▶</span>}
         {isLeaf && <span className="w-4"></span>}
-        
-        <span className="font-semibold text-cyan-300">
-          {node.path.split('.').pop()}
-        </span>
-        
+
+        <span className="font-semibold text-cyan-300">{node.path.split('.').pop()}</span>
+
         <span className="text-gray-500">:</span>
-        
+
         <span className="text-green-400">
           {node.type === 'object' ? '{}' : node.type === 'array' ? '[]' : JSON.stringify(node.value).substring(0, 30)}
         </span>
@@ -77,13 +69,7 @@ const NodeRenderer: React.FC<{
       {node.children && node.isExpanded && (
         <div className="ml-4 border-l border-gray-600/30 pl-2">
           {node.children.map((child) => (
-            <NodeRenderer
-              key={child.path}
-              node={child}
-              onSelect={onSelect}
-              onToggleExpand={onToggleExpand}
-              selectedPath={selectedPath}
-            />
+            <NodeRenderer key={child.path} node={child} onSelect={onSelect} onToggleExpand={onToggleExpand} selectedPath={selectedPath} />
           ))}
         </div>
       )}
@@ -95,7 +81,7 @@ export const ResultExtractor: React.FC<ResultExtractorProps> = ({ data, onExtrac
   const [isEnabled, setIsEnabled] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(['root']));
-  
+
   const jsonTree = buildJsonTree(data);
 
   const handleToggleExpand = (path: string) => {
@@ -115,7 +101,7 @@ export const ResultExtractor: React.FC<ResultExtractorProps> = ({ data, onExtrac
     updateNode(jsonTree);
   };
 
-  const handleSelect = (path: string, value: any) => {
+  const handleSelect = (path: string, value: unknown) => {
     setSelectedPath(path);
     onExtract?.(path, value);
   };
@@ -128,7 +114,7 @@ export const ResultExtractor: React.FC<ResultExtractorProps> = ({ data, onExtrac
 
   const handleCopyValue = () => {
     if (selectedPath) {
-      const selected = jsonTree.children?.find(c => c.path === selectedPath);
+      const selected = jsonTree.children?.find((c) => c.path === selectedPath);
       if (selected) {
         navigator.clipboard.writeText(JSON.stringify(selected.value, null, 2));
       }
@@ -136,11 +122,7 @@ export const ResultExtractor: React.FC<ResultExtractorProps> = ({ data, onExtrac
   };
 
   if (!data) {
-    return (
-      <div className="p-4 text-center text-gray-500 text-sm">
-        Aucune donnée à extraire
-      </div>
-    );
+    return <div className="p-4 text-center text-gray-500 text-sm">Aucune donnée à extraire</div>;
   }
 
   return (

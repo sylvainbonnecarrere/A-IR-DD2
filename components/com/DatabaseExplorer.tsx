@@ -18,33 +18,28 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({
   provider,
   host,
   status,
-  tables = [
-    'users',
-    'orders',
-    'products',
-    'transactions',
-    'analytics'
-  ],
+  tables = ['users', 'orders', 'products', 'transactions', 'analytics'],
   isLoading = false,
   onExecuteQuery,
-  onRefresh
+  onRefresh,
 }) => {
   const { t } = useLocalization();
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [queryMode, setQueryMode] = useState<'sql' | 'json'>('sql');
   const [query, setQuery] = useState('SELECT * FROM users LIMIT 10;');
-  const [queryResult, setQueryResult] = useState<any[]>([]);
+  // ⭐ US-RC-02 lot 4 : lignes de résultat SQL en Record<string, unknown> (plus de any[])
+  const [queryResult, setQueryResult] = useState<Record<string, unknown>[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
 
   const handleExecuteQuery = async () => {
     setIsExecuting(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     // Mock results
     setQueryResult([
       { id: 1, name: 'Alice', email: 'alice@example.com', created_at: '2024-01-01' },
       { id: 2, name: 'Bob', email: 'bob@example.com', created_at: '2024-01-02' },
-      { id: 3, name: 'Charlie', email: 'charlie@example.com', created_at: '2024-01-03' }
+      { id: 3, name: 'Charlie', email: 'charlie@example.com', created_at: '2024-01-03' },
     ]);
 
     setIsExecuting(false);
@@ -60,17 +55,13 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-semibold text-white">{databaseName}</h3>
-            <p className="text-xs text-gray-400">{provider} • {host}</p>
+            <p className="text-xs text-gray-400">
+              {provider} • {host}
+            </p>
           </div>
           <div className="flex items-center gap-2">
-            <div
-              className={`w-3 h-3 rounded-full ${
-                isConnected ? 'bg-green-500' : 'bg-red-500'
-              }`}
-            />
-            <span className="text-xs font-medium text-gray-300">
-              {isConnected ? 'Connecté' : 'Indisponible'}
-            </span>
+            <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-xs font-medium text-gray-300">{isConnected ? 'Connecté' : 'Indisponible'}</span>
           </div>
         </div>
 
@@ -93,7 +84,7 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({
         <div className="w-48 flex flex-col">
           <h4 className="text-xs font-semibold text-gray-300 mb-2 uppercase">📋 Tables</h4>
           <div className="flex-1 overflow-y-auto space-y-1 bg-gray-800/30 rounded-lg border border-gray-700 p-2">
-            {tables.map(table => (
+            {tables.map((table) => (
               <button
                 key={table}
                 onClick={() => setSelectedTable(table)}
@@ -123,9 +114,7 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({
                 <button
                   onClick={() => setQueryMode('sql')}
                   className={`px-2 py-1 text-xs rounded transition-colors ${
-                    queryMode === 'sql'
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    queryMode === 'sql' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
                 >
                   SQL
@@ -133,9 +122,7 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({
                 <button
                   onClick={() => setQueryMode('json')}
                   className={`px-2 py-1 text-xs rounded transition-colors ${
-                    queryMode === 'json'
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    queryMode === 'json' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
                 >
                   JSON
@@ -148,11 +135,7 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 disabled={!isConnected}
-                placeholder={
-                  queryMode === 'sql'
-                    ? 'SELECT * FROM users WHERE id = 1;'
-                    : '{"collection": "users", "query": {}}'
-                }
+                placeholder={queryMode === 'sql' ? 'SELECT * FROM users WHERE id = 1;' : '{"collection": "users", "query": {}}'}
                 className="flex-1 px-3 py-2 text-xs rounded bg-gray-700 border border-gray-600 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-green-500 font-mono disabled:opacity-50"
                 rows={4}
               />
@@ -170,15 +153,13 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({
           {/* Results Table */}
           {queryResult.length > 0 && (
             <div className="flex-1 flex flex-col min-h-0">
-              <h4 className="text-xs font-semibold text-gray-300 mb-2 uppercase">
-                📊 Résultats ({queryResult.length})
-              </h4>
+              <h4 className="text-xs font-semibold text-gray-300 mb-2 uppercase">📊 Résultats ({queryResult.length})</h4>
               <div className="flex-1 overflow-auto bg-gray-800/30 rounded-lg border border-gray-700 p-2">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-gray-700 bg-gray-800 sticky top-0">
                       {queryResult[0] &&
-                        Object.keys(queryResult[0]).map(col => (
+                        Object.keys(queryResult[0]).map((col) => (
                           <th key={col} className="px-2 py-2 text-left text-gray-300 font-semibold truncate">
                             {col}
                           </th>
