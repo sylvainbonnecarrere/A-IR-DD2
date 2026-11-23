@@ -19,9 +19,9 @@ interface ServerToClientEvents {
   'agent:position:updated': (data: { nodeId: string; position: { x: number; y: number }; userId: string }) => void;
   'agent:message:added': (data: { nodeId: string; message: ChatMessage; userId: string }) => void;
   'agent:toggle:minimized': (data: { nodeId: string; userId: string }) => void;
-  'workspace:user:joined': (data: { userId: string; userInfo: any }) => void;
+  'workspace:user:joined': (data: { userId: string; userInfo: ConnectedUser['userInfo'] }) => void;
   'workspace:user:left': (data: { userId: string }) => void;
-  'user:cursor:updated': (data: { x: number, y: number; userId: string }) => void;
+  'user:cursor:updated': (data: { x: number; y: number; userId: string }) => void;
   'runtime:event': (data: RuntimeEventEnvelope) => void;
   'connection:status': (status: 'connected' | 'disconnected' | 'error') => void;
 }
@@ -37,10 +37,11 @@ interface ClientToServerEvents {
 
 export interface ConnectedUser {
   userId: string;
+  // ⭐ US-RC-02 lot 3 : userInfo typé — name/color requis, champs additionnels autorisés
   userInfo: {
     name: string;
     color: string;
-  };
+  } & Record<string, unknown>;
 }
 
 export interface ConnectionState {
@@ -52,7 +53,8 @@ export interface ConnectionState {
   connectedUsers: ConnectedUser[];
 }
 
-type EventCallback = (...args: any[]) => void;
+// ⭐ US-RC-02 lot 3 : stockage interne en unknown[] ; on/off acceptent tout callback typé via never[]
+type EventCallback = (...args: unknown[]) => void;
 
 class WebSocketService {
   private socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
@@ -70,7 +72,7 @@ class WebSocketService {
     error: null,
     userId: null,
     workspaceId: null,
-    connectedUsers: []
+    connectedUsers: [],
   };
 
   // Event listeners
@@ -111,7 +113,7 @@ class WebSocketService {
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-        reconnectionAttempts: 5
+        reconnectionAttempts: 5,
       });
 
       this.setupEventHandlers();
@@ -133,12 +135,12 @@ class WebSocketService {
       this.connectionState.isConnecting = false;
       this.connectionState.error = null;
       this.reconnectAttempts = 0;
-      
+
       // Rejoindre le workspace si nécessaire
       if (this.currentWorkspaceId) {
         this.joinWorkspace(this.currentWorkspaceId);
       }
-      
+
       this.emit('connectionStateChanged', this.connectionState);
     });
 
@@ -147,11 +149,11 @@ class WebSocketService {
       this.connectionState.isConnected = false;
       this.connectionState.isConnecting = false;
       this.connectionState.connectedUsers = [];
-      
+
       if (!this.isManualDisconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
         this.scheduleReconnect();
       }
-      
+
       this.emit('connectionStateChanged', this.connectionState);
     });
 
@@ -175,7 +177,9 @@ class WebSocketService {
     });
 
     // === GESTION DES ERREURS DE PORT ===
-    (this.socket as any).on('error', (error: Error) => {
+    // ⭐ US-RC-02 lot 3 : cast structurel typé (événement 'error' hors de la carte typée Socket)
+    const errorSocket = this.socket as unknown as { on(event: string, listener: (error: Error) => void): void };
+    errorSocket.on('error', (error: Error) => {
       console.warn('[WebSocket] Erreur socket:', error);
       // Ne pas propager - l'erreur est gérée
     });
@@ -196,7 +200,7 @@ class WebSocketService {
     // === GESTION DES UTILISATEURS ===
     this.socket.on('workspace:user:joined', (data) => {
       try {
-        const existingUser = this.connectionState.connectedUsers.find(u => u.userId === data.userId);
+        const existingUser = this.connectionState.connectedUsers.find((u) => u.userId === data.userId);
         if (!existingUser) {
           this.connectionState.connectedUsers.push(data);
           this.emit('connectionStateChanged', this.connectionState);
@@ -209,9 +213,7 @@ class WebSocketService {
 
     this.socket.on('workspace:user:left', (data) => {
       try {
-        this.connectionState.connectedUsers = this.connectionState.connectedUsers.filter(
-          u => u.userId !== data.userId
-        );
+        this.connectionState.connectedUsers = this.connectionState.connectedUsers.filter((u) => u.userId !== data.userId);
         this.emit('connectionStateChanged', this.connectionState);
         this.emit('userLeft', data);
       } catch (error) {
@@ -265,7 +267,7 @@ class WebSocketService {
   private scheduleReconnect() {
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-    
+
     setTimeout(() => {
       console.debug(`[WebSocket] Tentative de reconnexion ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
       this.connect();
@@ -273,7 +275,7 @@ class WebSocketService {
   }
 
   // === MÉTHODES PUBLIQUES ===
-  
+
   public joinWorkspace(workspaceId: string) {
     this.currentWorkspaceId = workspaceId;
     this.connectionState.workspaceId = workspaceId;
@@ -328,26 +330,26 @@ class WebSocketService {
   }
 
   // === EVENT MANAGEMENT ===
-  
-  public on(event: string, callback: EventCallback) {
+
+  public on(event: string, callback: (...args: never[]) => void) {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, new Set());
     }
     this.eventListeners.get(event)!.add(callback);
   }
 
-  public off(event: string, callback: EventCallback) {
+  public off(event: string, callback: (...args: never[]) => void) {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
       listeners.delete(callback);
     }
   }
 
-  private emit(event: string, ...args: any[]) {
+  private emit(event: string, ...args: unknown[]) {
     try {
       const listeners = this.eventListeners.get(event);
       if (listeners) {
-        listeners.forEach(callback => {
+        listeners.forEach((callback) => {
           try {
             callback(...args);
           } catch (error) {
@@ -361,7 +363,7 @@ class WebSocketService {
   }
 
   // === ÉTAT ET NETTOYAGE ===
-  
+
   public getConnectionState(): ConnectionState {
     return { ...this.connectionState };
   }
