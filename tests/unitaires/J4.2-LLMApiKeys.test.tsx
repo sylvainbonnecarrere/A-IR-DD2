@@ -19,327 +19,352 @@ const TEST_ONLY_PASSWORD = 'test-only-password-123';
 const mockApiPost = jest.fn();
 
 jest.mock('../../utils/apiClient', () => ({
-    __esModule: true,
-    default: {
-        post: (...args: any[]) => mockApiPost(...args),
-    },
+  __esModule: true,
+  default: {
+    post: (...args: unknown[]) => mockApiPost(...args),
+  },
 }));
 
 jest.mock('../../services/localLLMProfileService', () => ({
-    __esModule: true,
-    getAllProfiles: jest.fn().mockResolvedValue([]),
+  __esModule: true,
+  getAllProfiles: jest.fn().mockResolvedValue([]),
 }));
 
 jest.mock('../../services/llmConfigService', () => ({
-    __esModule: true,
-    getAllLLMConfigs: jest.fn().mockResolvedValue([]),
+  __esModule: true,
+  getAllLLMConfigs: jest.fn().mockResolvedValue([]),
 }));
 
 /**
  * Test component to access useAuth hook
  */
-const TestComponent = ({ onInit }: { onInit?: (auth: any) => void }) => {
-    const auth = useAuth();
+const TestComponent = ({ onInit }: { onInit?: (auth: ReturnType<typeof useAuth>) => void }) => {
+  const auth = useAuth();
 
-    React.useEffect(() => {
-        onInit?.(auth);
-    }, [auth, onInit]);
+  React.useEffect(() => {
+    onInit?.(auth);
+  }, [auth, onInit]);
 
-    return (
-        <div>
-            <div data-testid="user">{auth.user?.email || 'Guest'}</div>
-            <div data-testid="authenticated">{auth.isAuthenticated ? 'Yes' : 'No'}</div>
-            <div data-testid="loading">{auth.isLoading ? 'Loading' : 'Ready'}</div>
-            <div data-testid="api-keys-count">{auth.llmApiKeys?.length ?? 'null'}</div>
-            <div data-testid="api-keys">
-                {auth.llmApiKeys?.map(key => (
-                    <span key={key.provider}>{key.provider}:***</span>
-                ))}
-            </div>
-        </div>
-    );
+  return (
+    <div>
+      <div data-testid="user">{auth.user?.email || 'Guest'}</div>
+      <div data-testid="authenticated">{auth.isAuthenticated ? 'Yes' : 'No'}</div>
+      <div data-testid="loading">{auth.isLoading ? 'Loading' : 'Ready'}</div>
+      <div data-testid="api-keys-count">{auth.llmApiKeys?.length ?? 'null'}</div>
+      <div data-testid="api-keys">
+        {auth.llmApiKeys?.map((key) => (
+          <span key={key.provider}>{key.provider}:***</span>
+        ))}
+      </div>
+    </div>
+  );
 };
 
 describe('J4.2: LLM API Keys Fetch at Login', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        localStorage.clear();
-        mockApiPost.mockResolvedValue({ data: [] });
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    mockApiPost.mockResolvedValue({ data: [] });
+  });
+
+  describe('API Key Fetch on Login', () => {
+    test('should fetch LLM API keys after successful login', async () => {
+      const mockLoginResponse = {
+        user: { id: '123', email: 'user@test.com', role: 'user' },
+        accessToken: 'access-token-123',
+        refreshToken: 'refresh-token-123',
+      };
+
+      const mockApiKeysResponse = [
+        {
+          provider: 'OpenAI',
+          apiKey: 'openai-test-key-placeholder',
+          enabled: true,
+          capabilities: { Chat: true },
+        },
+        {
+          provider: 'Anthropic',
+          apiKey: 'anthropic-test-key-placeholder',
+          enabled: true,
+          capabilities: { Chat: true },
+        },
+      ];
+
+      let authState!: ReturnType<typeof useAuth>;
+
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockLoginResponse,
+      });
+      mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
+
+      const { getByTestId } = render(
+        <AuthProvider>
+          <TestComponent
+            onInit={(auth) => {
+              authState = auth;
+            }}
+          />
+        </AuthProvider>,
+      );
+
+      // Initially guest mode
+      expect(getByTestId('authenticated')).toHaveTextContent('No');
+      expect(getByTestId('api-keys-count')).toHaveTextContent('null');
+
+      // Call login
+      await act(async () => {
+        await authState.login('user@test.com', TEST_ONLY_PASSWORD);
+      });
+
+      // Wait for API key fetch
+      await waitFor(() => {
+        expect(getByTestId('api-keys-count')).toHaveTextContent('2');
+      });
+
+      // Verify keys are set
+      expect(getByTestId('authenticated')).toHaveTextContent('Yes');
+      expect(getByTestId('user')).toHaveTextContent('user@test.com');
     });
 
-    describe('API Key Fetch on Login', () => {
-        test('should fetch LLM API keys after successful login', async () => {
-            const mockLoginResponse = {
-                user: { id: '123', email: 'user@test.com', role: 'user' },
-                accessToken: 'access-token-123',
-                refreshToken: 'refresh-token-123'
-            };
+    test('should handle API key fetch failure gracefully (non-blocking)', async () => {
+      const mockLoginResponse = {
+        user: { id: '123', email: 'user@test.com', role: 'user' },
+        accessToken: 'access-token-123',
+        refreshToken: 'refresh-token-123',
+      };
 
-            const mockApiKeysResponse = [
-                {
-                    provider: 'OpenAI',
-                    apiKey: 'openai-test-key-placeholder',
-                    enabled: true,
-                    capabilities: { Chat: true }
-                },
-                {
-                    provider: 'Anthropic',
-                    apiKey: 'anthropic-test-key-placeholder',
-                    enabled: true,
-                    capabilities: { Chat: true }
-                }
-            ];
+      let authState!: ReturnType<typeof useAuth>;
 
-            let authState: any = null;
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockLoginResponse,
+      });
+      mockApiPost.mockRejectedValueOnce(new Error('Network Error'));
 
-            global.fetch = jest.fn().mockResolvedValueOnce({
-                ok: true,
-                json: async () => mockLoginResponse
-            });
-            mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
+      const { getByTestId } = render(
+        <AuthProvider>
+          <TestComponent
+            onInit={(auth) => {
+              authState = auth;
+            }}
+          />
+        </AuthProvider>,
+      );
 
-            const { getByTestId } = render(
-                <AuthProvider>
-                    <TestComponent onInit={(auth) => { authState = auth; }} />
-                </AuthProvider>
-            );
+      await act(async () => {
+        await authState.login('user@test.com', TEST_ONLY_PASSWORD);
+      });
 
-            // Initially guest mode
-            expect(getByTestId('authenticated')).toHaveTextContent('No');
-            expect(getByTestId('api-keys-count')).toHaveTextContent('null');
+      // Login should succeed even if key fetch fails
+      await waitFor(() => {
+        expect(getByTestId('authenticated')).toHaveTextContent('Yes');
+      });
 
-            // Call login
-            await act(async () => {
-                await authState.login('user@test.com', TEST_ONLY_PASSWORD);
-            });
+      // API keys should be empty array (not null)
+      expect(getByTestId('api-keys-count')).toHaveTextContent('0');
+    });
+  });
 
-            // Wait for API key fetch
-            await waitFor(() => {
-                expect(getByTestId('api-keys-count')).toHaveTextContent('2');
-            });
+  describe('Session-Only Storage (Security)', () => {
+    test('should NOT store API keys in localStorage', async () => {
+      const mockLoginResponse = {
+        user: { id: '123', email: 'user@test.com', role: 'user' },
+        accessToken: 'access-token-123',
+        refreshToken: 'refresh-token-123',
+      };
 
-            // Verify keys are set
-            expect(getByTestId('authenticated')).toHaveTextContent('Yes');
-            expect(getByTestId('user')).toHaveTextContent('user@test.com');
-        });
+      const mockApiKeysResponse = [
+        {
+          provider: 'OpenAI',
+          apiKey: 'openai-test-key-placeholder',
+          enabled: true,
+        },
+      ];
 
-        test('should handle API key fetch failure gracefully (non-blocking)', async () => {
-            const mockLoginResponse = {
-                user: { id: '123', email: 'user@test.com', role: 'user' },
-                accessToken: 'access-token-123',
-                refreshToken: 'refresh-token-123'
-            };
+      let authState!: ReturnType<typeof useAuth>;
 
-            let authState: any = null;
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockLoginResponse,
+      });
+      mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
 
-            global.fetch = jest.fn().mockResolvedValueOnce({
-                ok: true,
-                json: async () => mockLoginResponse
-            });
-            mockApiPost.mockRejectedValueOnce(new Error('Network Error'));
+      render(
+        <AuthProvider>
+          <TestComponent
+            onInit={(auth) => {
+              authState = auth;
+            }}
+          />
+        </AuthProvider>,
+      );
 
-            const { getByTestId } = render(
-                <AuthProvider>
-                    <TestComponent onInit={(auth) => { authState = auth; }} />
-                </AuthProvider>
-            );
+      await act(async () => {
+        await authState.login('user@test.com', TEST_ONLY_PASSWORD);
+      });
 
-            await act(async () => {
-                await authState.login('user@test.com', TEST_ONLY_PASSWORD);
-            });
+      // Check localStorage
+      const authData = localStorage.getItem('auth_data_v1');
+      expect(authData).toBeTruthy();
 
-            // Login should succeed even if key fetch fails
-            await waitFor(() => {
-                expect(getByTestId('authenticated')).toHaveTextContent('Yes');
-            });
-
-            // API keys should be empty array (not null)
-            expect(getByTestId('api-keys-count')).toHaveTextContent('0');
-        });
+      const parsed = JSON.parse(authData || '{}');
+      expect(parsed.llmApiKeys).toBeUndefined();
+      expect(JSON.stringify(parsed)).not.toContain('openai-test-key-placeholder');
     });
 
-    describe('Session-Only Storage (Security)', () => {
-        test('should NOT store API keys in localStorage', async () => {
-            const mockLoginResponse = {
-                user: { id: '123', email: 'user@test.com', role: 'user' },
-                accessToken: 'access-token-123',
-                refreshToken: 'refresh-token-123'
-            };
+    test('should clear API keys on logout', async () => {
+      const mockLoginResponse = {
+        user: { id: '123', email: 'user@test.com', role: 'user' },
+        accessToken: 'access-token-123',
+        refreshToken: 'refresh-token-123',
+      };
 
-            const mockApiKeysResponse = [
-                {
-                    provider: 'OpenAI',
-                    apiKey: 'openai-test-key-placeholder',
-                    enabled: true
-                }
-            ];
+      const mockApiKeysResponse = [
+        {
+          provider: 'OpenAI',
+          apiKey: 'openai-test-key-placeholder',
+          enabled: true,
+        },
+      ];
 
-            let authState: any = null;
+      let authState!: ReturnType<typeof useAuth>;
 
-            global.fetch = jest.fn().mockResolvedValueOnce({
-                ok: true,
-                json: async () => mockLoginResponse
-            });
-            mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockLoginResponse,
+      });
+      mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
 
-            render(
-                <AuthProvider>
-                    <TestComponent onInit={(auth) => { authState = auth; }} />
-                </AuthProvider>
-            );
+      const { getByTestId } = render(
+        <AuthProvider>
+          <TestComponent
+            onInit={(auth) => {
+              authState = auth;
+            }}
+          />
+        </AuthProvider>,
+      );
 
-            await act(async () => {
-                await authState.login('user@test.com', TEST_ONLY_PASSWORD);
-            });
+      // Login and get keys
+      await act(async () => {
+        await authState.login('user@test.com', TEST_ONLY_PASSWORD);
+      });
 
-            // Check localStorage
-            const authData = localStorage.getItem('auth_data_v1');
-            expect(authData).toBeTruthy();
+      await waitFor(() => {
+        expect(getByTestId('api-keys-count')).toHaveTextContent('1');
+      });
 
-            const parsed = JSON.parse(authData || '{}');
-            expect(parsed.llmApiKeys).toBeUndefined();
-            expect(JSON.stringify(parsed)).not.toContain('openai-test-key-placeholder');
-        });
+      // Logout
+      act(() => {
+        authState.logout();
+      });
 
-        test('should clear API keys on logout', async () => {
-            const mockLoginResponse = {
-                user: { id: '123', email: 'user@test.com', role: 'user' },
-                accessToken: 'access-token-123',
-                refreshToken: 'refresh-token-123'
-            };
-
-            const mockApiKeysResponse = [
-                {
-                    provider: 'OpenAI',
-                    apiKey: 'openai-test-key-placeholder',
-                    enabled: true
-                }
-            ];
-
-            let authState: any = null;
-
-            global.fetch = jest.fn().mockResolvedValueOnce({
-                ok: true,
-                json: async () => mockLoginResponse
-            });
-            mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
-
-            const { getByTestId } = render(
-                <AuthProvider>
-                    <TestComponent onInit={(auth) => { authState = auth; }} />
-                </AuthProvider>
-            );
-
-            // Login and get keys
-            await act(async () => {
-                await authState.login('user@test.com', TEST_ONLY_PASSWORD);
-            });
-
-            await waitFor(() => {
-                expect(getByTestId('api-keys-count')).toHaveTextContent('1');
-            });
-
-            // Logout
-            act(() => {
-                authState.logout();
-            });
-
-            // API keys should be cleared
-            await waitFor(() => {
-                expect(getByTestId('api-keys-count')).toHaveTextContent('null');
-            });
-        });
+      // API keys should be cleared
+      await waitFor(() => {
+        expect(getByTestId('api-keys-count')).toHaveTextContent('null');
+      });
     });
+  });
 
-    describe('Bearer Token in API Key Request', () => {
-        test('should include Authorization header with Bearer token', async () => {
-            const mockLoginResponse = {
-                user: { id: '123', email: 'user@test.com', role: 'user' },
-                accessToken: 'mock-access-token-xyz',
-                refreshToken: 'refresh-token-123'
-            };
+  describe('Bearer Token in API Key Request', () => {
+    test('should include Authorization header with Bearer token', async () => {
+      const mockLoginResponse = {
+        user: { id: '123', email: 'user@test.com', role: 'user' },
+        accessToken: 'mock-access-token-xyz',
+        refreshToken: 'refresh-token-123',
+      };
 
-            const mockApiKeysResponse = [];
+      const mockApiKeysResponse = [];
 
-            let authState: any = null;
+      let authState!: ReturnType<typeof useAuth>;
 
-            global.fetch = jest.fn()
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockLoginResponse
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockApiKeysResponse
-                });
-
-            render(
-                <AuthProvider>
-                    <TestComponent onInit={(auth) => { authState = auth; }} />
-                </AuthProvider>
-            );
-
-            await act(async () => {
-                await authState.login('user@test.com', TEST_ONLY_PASSWORD);
-            });
-
-            await waitFor(() => {
-                expect(mockApiPost).toHaveBeenCalledWith(
-                    '/api/llm/get-all-api-keys',
-                    {},
-                    expect.objectContaining({
-                        headers: expect.objectContaining({
-                            Authorization: 'Bearer mock-access-token-xyz'
-                        })
-                    })
-                );
-            });
-
-            expect(mockApiPost).toHaveBeenCalledWith(
-                '/api/llm/get-all-api-keys',
-                {},
-                expect.objectContaining({
-                    headers: expect.objectContaining({
-                        Authorization: 'Bearer mock-access-token-xyz'
-                    })
-                })
-            );
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockLoginResponse,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockApiKeysResponse,
         });
+
+      render(
+        <AuthProvider>
+          <TestComponent
+            onInit={(auth) => {
+              authState = auth;
+            }}
+          />
+        </AuthProvider>,
+      );
+
+      await act(async () => {
+        await authState.login('user@test.com', TEST_ONLY_PASSWORD);
+      });
+
+      await waitFor(() => {
+        expect(mockApiPost).toHaveBeenCalledWith(
+          '/api/llm/get-all-api-keys',
+          {},
+          expect.objectContaining({
+            headers: expect.objectContaining({
+              Authorization: 'Bearer mock-access-token-xyz',
+            }),
+          }),
+        );
+      });
+
+      expect(mockApiPost).toHaveBeenCalledWith(
+        '/api/llm/get-all-api-keys',
+        {},
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer mock-access-token-xyz',
+          }),
+        }),
+      );
     });
+  });
 
-    describe('Register + API Key Fetch', () => {
-        test('should fetch API keys after successful registration', async () => {
-            const mockRegisterResponse = {
-                user: { id: '456', email: 'newuser@test.com', role: 'user' },
-                accessToken: 'access-token-456',
-                refreshToken: 'refresh-token-456'
-            };
+  describe('Register + API Key Fetch', () => {
+    test('should fetch API keys after successful registration', async () => {
+      const mockRegisterResponse = {
+        user: { id: '456', email: 'newuser@test.com', role: 'user' },
+        accessToken: 'access-token-456',
+        refreshToken: 'refresh-token-456',
+      };
 
-            const mockApiKeysResponse = [];
+      const mockApiKeysResponse = [];
 
-            let authState: any = null;
+      let authState!: ReturnType<typeof useAuth>;
 
-            global.fetch = jest.fn().mockResolvedValueOnce({
-                ok: true,
-                json: async () => mockRegisterResponse
-            });
-            mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockRegisterResponse,
+      });
+      mockApiPost.mockResolvedValue({ data: mockApiKeysResponse });
 
-            const { getByTestId } = render(
-                <AuthProvider>
-                    <TestComponent onInit={(auth) => { authState = auth; }} />
-                </AuthProvider>
-            );
+      const { getByTestId } = render(
+        <AuthProvider>
+          <TestComponent
+            onInit={(auth) => {
+              authState = auth;
+            }}
+          />
+        </AuthProvider>,
+      );
 
-            await act(async () => {
-                await authState.register('newuser@test.com', TEST_ONLY_PASSWORD);
-            });
+      await act(async () => {
+        await authState.register('newuser@test.com', TEST_ONLY_PASSWORD);
+      });
 
-            // Verify registration succeeded and API key fetch was called
-            await waitFor(() => {
-                expect(getByTestId('authenticated')).toHaveTextContent('Yes');
-                expect(getByTestId('api-keys-count')).toHaveTextContent('0');
-            });
-        });
+      // Verify registration succeeded and API key fetch was called
+      await waitFor(() => {
+        expect(getByTestId('authenticated')).toHaveTextContent('Yes');
+        expect(getByTestId('api-keys-count')).toHaveTextContent('0');
+      });
     });
+  });
 });
