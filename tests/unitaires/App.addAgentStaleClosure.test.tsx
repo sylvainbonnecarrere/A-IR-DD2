@@ -82,12 +82,7 @@ jest.mock('../../components/RobotPageRouter', () => ({
   RobotPageRouter: ({ onAddToWorkflow }: { onAddToWorkflow?: (agent: Agent) => void }) => (
     <div data-testid="robot-page-router">
       {mockAgentsToAdd.map((agent, index) => (
-        <button
-          key={agent.id}
-          type="button"
-          data-testid={`add-agent-${index}`}
-          onClick={() => onAddToWorkflow?.(agent)}
-        >
+        <button key={agent.id} type="button" data-testid={`add-agent-${index}`} onClick={() => onAddToWorkflow?.(agent)}>
           {`add ${agent.id}`}
         </button>
       ))}
@@ -100,9 +95,7 @@ jest.mock('../../components/Header', () => ({
 }));
 
 jest.mock('../../components/HydrationOverlay', () => ({
-  HydrationOverlay: ({ isLoading }: { isLoading: boolean }) => (
-    <div data-testid="hydration-overlay">{isLoading ? 'loading' : 'idle'}</div>
-  ),
+  HydrationOverlay: ({ isLoading }: { isLoading: boolean }) => <div data-testid="hydration-overlay">{isLoading ? 'loading' : 'idle'}</div>,
 }));
 
 jest.mock('../../components/WorkflowSwitchOverlay', () => ({ WorkflowSwitchOverlay: () => null }));
@@ -204,10 +197,7 @@ describe('US-RC-00a — stale closure addAgentToWorkflow (R1)', () => {
     const harness = resetAppHydrationHarness();
     // renameNodeRuntimeState est appelé par addAgentToWorkflow : l'ajouter au store mocké
     (harness.runtimeStore as unknown as Record<string, unknown>).renameNodeRuntimeState = jest.fn();
-    harness.designStore.addAgentInstance = jest
-      .fn()
-      .mockReturnValueOnce('local-1')
-      .mockReturnValueOnce('local-2');
+    harness.designStore.addAgentInstance = jest.fn().mockReturnValueOnce('local-1').mockReturnValueOnce('local-2');
     harness.designStore.currentWorkflowId = 'wf-1';
 
     mockUseAuth.mockReturnValue({
@@ -261,14 +251,8 @@ describe('US-RC-00a — stale closure addAgentToWorkflow (R1)', () => {
 
     // 1er ajout : local-1 -> srv-1
     fireEvent.click(screen.getByTestId('add-agent-0'));
-    await waitFor(
-      () => expect(useAppShellStore.getState().currentImageAgentInstance?.id).toBe('srv-1'),
-      { timeout: 3000 },
-    );
-    await waitFor(
-      () => expect(useAppShellStore.getState().currentVideoAgentInstance?.id).toBe('srv-1'),
-      { timeout: 3000 },
-    );
+    await waitFor(() => expect(useAppShellStore.getState().currentImageAgentInstance?.id).toBe('srv-1'), { timeout: 3000 });
+    await waitFor(() => expect(useAppShellStore.getState().currentVideoAgentInstance?.id).toBe('srv-1'), { timeout: 3000 });
 
     // Changement d'agent image/vidéo entre les deux ajouts (ex. panneau ouvert sur le 2e agent)
     act(() => {
@@ -278,13 +262,7 @@ describe('US-RC-00a — stale closure addAgentToWorkflow (R1)', () => {
 
     // 2e ajout : local-2 -> srv-2 — le remap doit viser l'instance COURANTE (local-2)
     fireEvent.click(screen.getByTestId('add-agent-1'));
-    await waitFor(
-      () => expect(useAppShellStore.getState().currentImageAgentInstance?.id).toBe('srv-2'),
-      { timeout: 3000 },
-    );
-    await waitFor(
-      () => expect(useAppShellStore.getState().currentVideoAgentInstance?.id).toBe('srv-2'),
-      { timeout: 3000 },
-    );
+    await waitFor(() => expect(useAppShellStore.getState().currentImageAgentInstance?.id).toBe('srv-2'), { timeout: 3000 });
+    await waitFor(() => expect(useAppShellStore.getState().currentVideoAgentInstance?.id).toBe('srv-2'), { timeout: 3000 });
   });
 });
