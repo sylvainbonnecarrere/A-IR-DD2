@@ -5,6 +5,7 @@ import {
   LLMProvider,
   PersistenceConfig,
   RobotId,
+  JsonSchema,
   Tool,
   ToolSelection,
   ToolVersionRef,
@@ -125,9 +126,9 @@ function normalizeLegacyIdList(value: unknown): string[] {
   }
 
   return value
-    .map((entry) => (entry && typeof entry === 'object' && 'toString' in entry)
-      ? (entry as { toString: () => string }).toString()
-      : String(entry))
+    .map((entry) =>
+      entry && typeof entry === 'object' && 'toString' in entry ? (entry as { toString: () => string }).toString() : String(entry),
+    )
     .filter((entry) => entry.length > 0);
 }
 
@@ -146,15 +147,16 @@ function readToolSelections(...values: unknown[]): ToolSelection[] | undefined {
         ? {
             versionTag: typeof candidate.versionRef.versionTag === 'string' ? candidate.versionRef.versionTag : undefined,
             versionNumber: typeof candidate.versionRef.versionNumber === 'number' ? candidate.versionRef.versionNumber : undefined,
-            workspaceId: typeof candidate.versionRef.workspaceId === 'string'
-              ? candidate.versionRef.workspaceId
-              : (candidate.versionRef.workspaceId === null ? null : undefined),
+            workspaceId:
+              typeof candidate.versionRef.workspaceId === 'string'
+                ? candidate.versionRef.workspaceId
+                : candidate.versionRef.workspaceId === null
+                  ? null
+                  : undefined,
           }
         : undefined;
 
-      const selection: ToolSelection = versionRef
-        ? { toolId: candidate.toolId, versionRef }
-        : { toolId: candidate.toolId };
+      const selection: ToolSelection = versionRef ? { toolId: candidate.toolId, versionRef } : { toolId: candidate.toolId };
 
       return [selection];
     });
@@ -187,10 +189,12 @@ function sanitizeProviderTools(rawTools: unknown): Tool[] {
     const tool: Tool = {
       name,
       description,
-      parameters: parameters && typeof parameters === 'object' && !Array.isArray(parameters)
+      parameters: (parameters && typeof parameters === 'object' && !Array.isArray(parameters)
         ? parameters
-        : { type: 'object' },
-      ...(outputSchema !== undefined ? { outputSchema } : {}),
+        : { type: 'object' }) as JsonSchema,
+      ...(outputSchema && typeof outputSchema === 'object' && !Array.isArray(outputSchema)
+        ? { outputSchema: outputSchema as JsonSchema }
+        : {}),
     };
 
     return [tool];
@@ -223,9 +227,7 @@ export function mapPersistedPrototypeToAgent(prototype: unknown, fallbackTimesta
   const record = readRecord(prototype);
   const normalizedToolReferences = normalizeAgentToolReferences(
     readToolSelections(record.toolSelections),
-    Array.isArray(record.functionIds)
-      ? normalizeLegacyIdList(record.functionIds)
-      : normalizeLegacyIdList(record.tools),
+    Array.isArray(record.functionIds) ? normalizeLegacyIdList(record.functionIds) : normalizeLegacyIdList(record.tools),
   );
 
   return {
@@ -253,10 +255,7 @@ export function mapPersistedPrototypeToAgent(prototype: unknown, fallbackTimesta
   };
 }
 
-export function buildCanonicalAgentInstanceConfiguration(
-  instance: unknown,
-  prototype?: Agent,
-): CanonicalAgentInstanceConfiguration {
+export function buildCanonicalAgentInstanceConfiguration(instance: unknown, prototype?: Agent): CanonicalAgentInstanceConfiguration {
   const defaults = createDefaultAgentInstanceConfiguration();
   const instanceRecord = readRecord(instance);
   const configuration = readRecord(instanceRecord.configuration_json);
@@ -268,16 +267,23 @@ export function buildCanonicalAgentInstanceConfiguration(
         ? normalizeLegacyIdList(instanceRecord.functionIds)
         : normalizeLegacyIdList(prototype?.functionIds),
   );
-  const resolvedProviderTools = configuration.tools !== undefined
-    ? configuration.tools
-    : (instanceRecord.tools !== undefined ? instanceRecord.tools : prototype?.tools);
+  const resolvedProviderTools =
+    configuration.tools !== undefined ? configuration.tools : instanceRecord.tools !== undefined ? instanceRecord.tools : prototype?.tools;
 
   return {
     ...defaults,
     role: readString(configuration.role, instanceRecord.role, prototype?.role) ?? defaults.role,
     model: readString(configuration.model, instanceRecord.llmModel, instanceRecord.model, prototype?.model) ?? 'gemini-2.0-flash',
-    llmProvider: resolveLLMProvider(configuration.llmProvider, instanceRecord.llmProvider, instanceRecord.provider, prototype?.llmProvider, defaults.llmProvider),
-    systemPrompt: readString(configuration.systemPrompt, instanceRecord.systemPrompt, instanceRecord.systemInstruction, prototype?.systemPrompt) ?? defaults.systemPrompt,
+    llmProvider: resolveLLMProvider(
+      configuration.llmProvider,
+      instanceRecord.llmProvider,
+      instanceRecord.provider,
+      prototype?.llmProvider,
+      defaults.llmProvider,
+    ),
+    systemPrompt:
+      readString(configuration.systemPrompt, instanceRecord.systemPrompt, instanceRecord.systemInstruction, prototype?.systemPrompt) ??
+      defaults.systemPrompt,
     tools: sanitizeProviderTools(resolvedProviderTools),
     outputConfig: readObject(configuration.outputConfig, instanceRecord.outputConfig, prototype?.outputConfig),
     webSearchParams: readObject(configuration.webSearchParams, instanceRecord.webSearchParams, prototype?.webSearchParams),
@@ -285,9 +291,10 @@ export function buildCanonicalAgentInstanceConfiguration(
     historyConfig: readObject(configuration.historyConfig, instanceRecord.historyConfig, prototype?.historyConfig),
     localLLMProfileId: readString(configuration.localLLMProfileId, instanceRecord.localLLMProfileId, prototype?.localLLMProfileId),
     functionInheritance: readObject(configuration.functionInheritance, instanceRecord.functionInheritance),
-    toolSelections: normalizedToolReferences.toolSelections.length > 0
-      ? normalizedToolReferences.toolSelections
-      : (prototype?.toolSelections ?? defaults.toolSelections),
+    toolSelections:
+      normalizedToolReferences.toolSelections.length > 0
+        ? normalizedToolReferences.toolSelections
+        : (prototype?.toolSelections ?? defaults.toolSelections),
     position: readPosition(configuration.position, instanceRecord.position),
     links: readList(configuration.links, instanceRecord.links),
     tasks: readList(configuration.tasks, instanceRecord.tasks),
@@ -296,16 +303,13 @@ export function buildCanonicalAgentInstanceConfiguration(
   };
 }
 
-export function mapPersistedInstanceToAgentInstance(
-  instance: unknown,
-  workflowId?: string,
-  prototype?: Agent,
-): AgentInstance {
+export function mapPersistedInstanceToAgentInstance(instance: unknown, workflowId?: string, prototype?: Agent): AgentInstance {
   const record = readRecord(instance);
   const configuration = buildCanonicalAgentInstanceConfiguration(record, prototype);
   const id = readString(record.id, record._id) ?? '';
   const rawPersistenceConfig = isRecord(record.persistenceConfig)
-    ? (sanitizePersistenceConfigForApi(record.persistenceConfig as Partial<PersistenceConfig>) ?? record.persistenceConfig as Partial<PersistenceConfig>)
+    ? (sanitizePersistenceConfigForApi(record.persistenceConfig as Partial<PersistenceConfig>) ??
+      (record.persistenceConfig as Partial<PersistenceConfig>))
     : undefined;
 
   return {

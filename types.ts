@@ -35,12 +35,12 @@ export enum LLMCapability {
   WebSearchGrounding = 'Web Search Grounding', // Distinct from basic WebSearch
 
   // 🆕 Anthropic Claude 4 - Core Capabilities
-  ExtendedThinking = 'Extended Thinking',        // Raisonnement étendu avec thinking blocks
-  PDFSupport = 'PDF Support',                    // Support natif des documents PDF
-  StructuredOutputs = 'Structured Outputs',      // Sorties structurées avec validation JSON Schema
+  ExtendedThinking = 'Extended Thinking', // Raisonnement étendu avec thinking blocks
+  PDFSupport = 'PDF Support', // Support natif des documents PDF
+  StructuredOutputs = 'Structured Outputs', // Sorties structurées avec validation JSON Schema
 
   // 🆕 Anthropic Claude 4 - Tools (natifs côté Anthropic)
-  WebFetchTool = 'Web Fetch Tool',               // Récupération de contenu web (Anthropic exécute)
+  WebFetchTool = 'Web Fetch Tool', // Récupération de contenu web (Anthropic exécute)
   WebSearchToolAnthropic = 'Web Search Tool (Anthropic)', // Recherche web native (Anthropic exécute)
 }
 
@@ -78,14 +78,38 @@ export interface InvisibleHistorySummaryState {
   updatedAt: string;
 }
 
+// ⭐ US-RC-02 lot 1 : contrat JSON Schema (frontière tools/providers) à la place de `any`
+export type JsonSchema = {
+  type?: string;
+  properties?: Record<string, JsonSchema>;
+  items?: JsonSchema;
+  required?: string[];
+  enum?: unknown[];
+  [key: string]: unknown;
+};
+
 export interface Tool {
   name: string;
   description: string;
-  parameters: any; // JSON Schema object
-  outputSchema?: any; // JSON Schema for the tool's return value
+  parameters: JsonSchema; // JSON Schema object
+  outputSchema?: JsonSchema; // JSON Schema for the tool's return value
 }
 
-export type OutputFormat = 'json' | 'xml' | 'yaml' | 'shell' | 'powershell' | 'python' | 'html' | 'css' | 'javascript' | 'typescript' | 'php' | 'sql' | 'mysql' | 'mongodb';
+export type OutputFormat =
+  | 'json'
+  | 'xml'
+  | 'yaml'
+  | 'shell'
+  | 'powershell'
+  | 'python'
+  | 'html'
+  | 'css'
+  | 'javascript'
+  | 'typescript'
+  | 'php'
+  | 'sql'
+  | 'mysql'
+  | 'mongodb';
 
 export interface OutputConfig {
   enabled: boolean;
@@ -167,9 +191,7 @@ export type MediaStorageType = 'db' | 'workspace' | 'cloud';
 export type LegacyMediaStorageType = 'local';
 export type AcceptedMediaStorageType = MediaStorageType | LegacyMediaStorageType;
 
-export function normalizeMediaStorageType(
-  value?: AcceptedMediaStorageType | 'database' | null,
-): MediaStorageType {
+export function normalizeMediaStorageType(value?: AcceptedMediaStorageType | 'database' | null): MediaStorageType {
   switch (value) {
     case 'workspace':
     case 'cloud':
@@ -183,9 +205,7 @@ export function normalizeMediaStorageType(
   }
 }
 
-export function toPersistedMediaStorageType(
-  value?: AcceptedMediaStorageType | 'database' | null,
-): 'db' | 'local' | 'cloud' {
+export function toPersistedMediaStorageType(value?: AcceptedMediaStorageType | 'database' | null): 'db' | 'local' | 'cloud' {
   const normalized = normalizeMediaStorageType(value);
 
   switch (normalized) {
@@ -199,9 +219,7 @@ export function toPersistedMediaStorageType(
   }
 }
 
-export function normalizePersistenceConfig(
-  config?: Partial<PersistenceConfig> | null,
-): PersistenceConfig {
+export function normalizePersistenceConfig(config?: Partial<PersistenceConfig> | null): PersistenceConfig {
   const {
     cloudConnectionProfileId: rawCloudConnectionProfileId,
     cloudStorageConfig: rawCloudStorageConfig,
@@ -212,18 +230,13 @@ export function normalizePersistenceConfig(
   };
   const saveMedia = config?.saveMedia ?? defaultPersistenceConfig.saveMedia;
   const mediaStorage = normalizeMediaStorageType(config?.mediaStorage);
-  const allowWorkspaceWrite = !saveMedia
-    ? false
-    : mediaStorage === 'workspace'
-      ? true
-      : (config?.allowWorkspaceWrite ?? true);
-  const cloudConnectionProfileId = typeof rawCloudConnectionProfileId === 'string'
-    && rawCloudConnectionProfileId.trim().length > 0
+  const allowWorkspaceWrite = !saveMedia ? false : mediaStorage === 'workspace' ? true : (config?.allowWorkspaceWrite ?? true);
+  const cloudConnectionProfileId =
+    typeof rawCloudConnectionProfileId === 'string' && rawCloudConnectionProfileId.trim().length > 0
       ? rawCloudConnectionProfileId
       : undefined;
-  const cloudStorageConfig = rawCloudStorageConfig
-    && typeof rawCloudStorageConfig === 'object'
-    && typeof rawCloudStorageConfig.provider === 'string'
+  const cloudStorageConfig =
+    rawCloudStorageConfig && typeof rawCloudStorageConfig === 'object' && typeof rawCloudStorageConfig.provider === 'string'
       ? rawCloudStorageConfig
       : undefined;
 
@@ -254,22 +267,23 @@ export interface PersistenceConfigApiPayload {
 }
 
 export function sanitizePersistenceConfigForApi(
-  config?: (Partial<PersistenceConfig> & {
-    saveChatHistory?: boolean | null;
-    saveTaskExecution?: boolean | null;
-    retentionDays?: number | null;
-    cloudConnectionProfileId?: string | null;
-    cloudStorageConfig?: CloudStorageConfig | null;
-  }) | null,
+  config?:
+    | (Partial<PersistenceConfig> & {
+        saveChatHistory?: boolean | null;
+        saveTaskExecution?: boolean | null;
+        retentionDays?: number | null;
+        cloudConnectionProfileId?: string | null;
+        cloudStorageConfig?: CloudStorageConfig | null;
+      })
+    | null,
 ): PersistenceConfigApiPayload | undefined {
   if (!config) {
     return undefined;
   }
 
   const normalized = normalizePersistenceConfig(config);
-  const retentionDays = typeof config.retentionDays === 'number'
-    && Number.isInteger(config.retentionDays)
-    && config.retentionDays > 0
+  const retentionDays =
+    typeof config.retentionDays === 'number' && Number.isInteger(config.retentionDays) && config.retentionDays > 0
       ? config.retentionDays
       : undefined;
 
@@ -289,9 +303,7 @@ export function sanitizePersistenceConfigForApi(
   };
 }
 
-export function summarizePersistenceConfig(
-  config?: Partial<PersistenceConfig> | null,
-) {
+export function summarizePersistenceConfig(config?: Partial<PersistenceConfig> | null) {
   const normalized = normalizePersistenceConfig(config);
 
   return {
@@ -314,10 +326,10 @@ export type CloudProvider = 's3' | 'gcs';
 /** Configuration Amazon S3 / MinIO */
 export interface S3StorageConfig {
   accessKeyId: string;
-  secretAccessKey: string;       // Chiffré côté backend avant stockage
+  secretAccessKey: string; // Chiffré côté backend avant stockage
   region: string;
   bucketName: string;
-  endpoint?: string;             // Pour MinIO / LocalStack
+  endpoint?: string; // Pour MinIO / LocalStack
   forcePathStyle?: boolean;
   keyPrefix?: string;
 }
@@ -326,7 +338,7 @@ export interface S3StorageConfig {
 export interface GCSStorageConfig {
   projectId: string;
   bucketName: string;
-  serviceAccountKey?: string;    // JSON stringifié, chiffré backend
+  serviceAccountKey?: string; // JSON stringifié, chiffré backend
   location?: string;
   keyPrefix?: string;
 }
@@ -402,16 +414,16 @@ export const S3_REGIONS = [
 ] as const;
 
 export interface PersistenceConfig {
-  saveChat: boolean;              // Défaut: true - Sauvegarder les messages de chat
-  saveErrors: boolean;            // Défaut: true - Sauvegarder les erreurs rencontrées
-  saveHistorySummary: boolean;    // Défaut: false - Générer et stocker un résumé périodique (économie tokens)
-  saveLinks: boolean;             // Défaut: false - Sauvegarder les liens entre agents
-  saveTasks: boolean;             // Défaut: false - Sauvegarder les tâches assignées
-  saveMedia: boolean;             // Default: false
+  saveChat: boolean; // Défaut: true - Sauvegarder les messages de chat
+  saveErrors: boolean; // Défaut: true - Sauvegarder les erreurs rencontrées
+  saveHistorySummary: boolean; // Défaut: false - Générer et stocker un résumé périodique (économie tokens)
+  saveLinks: boolean; // Défaut: false - Sauvegarder les liens entre agents
+  saveTasks: boolean; // Défaut: false - Sauvegarder les tâches assignées
+  saveMedia: boolean; // Default: false
   mediaStorage: MediaStorageType; // Défaut: 'db' - Mode de stockage des médias
-  allowWorkspaceWrite: boolean;   // Autorise aussi une publication workspace si demandée
+  allowWorkspaceWrite: boolean; // Autorise aussi une publication workspace si demandée
   cloudConnectionProfileId?: string;
-  cloudStorageConfig?: CloudStorageConfig;  // Cloud storage config
+  cloudStorageConfig?: CloudStorageConfig; // Cloud storage config
 }
 
 export type AgentDeletionMediaPolicy = 'delete_media' | 'orphan_media';
@@ -428,7 +440,7 @@ export const defaultPersistenceConfig: PersistenceConfig = {
   saveHistorySummary: false,
   saveLinks: false,
   saveTasks: false,
-  saveMedia: false,               // Disabled by default
+  saveMedia: false, // Disabled by default
   mediaStorage: 'db',
   allowWorkspaceWrite: false,
 };
@@ -454,12 +466,12 @@ export interface Agent {
   capabilities: LLMCapability[];
   historyConfig?: HistoryConfig;
   tools?: Tool[];
-  functionIds?: string[];               // Alias legacy transitoire avant convergence complète sur toolSelections
-  toolSelections?: ToolSelection[];     // Références canoniques versionnées vers user_tools
+  functionIds?: string[]; // Alias legacy transitoire avant convergence complète sur toolSelections
+  toolSelections?: ToolSelection[]; // Références canoniques versionnées vers user_tools
   outputConfig?: OutputConfig;
   webSearchParams?: WebSearchParams;
   persistenceConfig?: PersistenceConfig;
-  localLLMProfileId?: string;            // Only set when llmProvider === LLMProvider.LMStudio
+  localLLMProfileId?: string; // Only set when llmProvider === LLMProvider.LMStudio
   // V2 Governance: Robot creator validation
   creator_id: RobotId;
   created_at: string; // ISO timestamp
@@ -480,7 +492,7 @@ export interface LocalLLMProfile {
   endpoint: string;
   capabilities: { [key in LLMCapability]?: boolean };
   enabled: boolean;
-  detectedModel?: string;  // Model ID returned by last successful capability detection
+  detectedModel?: string; // Model ID returned by last successful capability detection
   createdAt?: string;
   updatedAt?: string;
 }
@@ -538,7 +550,7 @@ export interface AgentInstance {
   position: { x: number; y: number };
   isMinimized: boolean;
   isMaximized: boolean; // Mode agrandissement plein écran workflow
-  
+
   persistenceConfig?: PersistenceConfig;
 
   // 🆕 Configuration enrichie (clone du prototype au moment de l'instanciation)
@@ -554,7 +566,7 @@ export interface AgentInstance {
     webSearchParams?: WebSearchParams;
     capabilities?: LLMCapability[];
     historyConfig?: HistoryConfig;
-    localLLMProfileId?: string;  // Which local LLM profile is used for this instance
+    localLLMProfileId?: string; // Which local LLM profile is used for this instance
 
     // V2: Function Inheritance (J6)
     functionInheritance?: {
@@ -568,11 +580,11 @@ export interface AgentInstance {
     // Métadonnées d'instance
     position: { x: number; y: number };
 
-    // 🔮 Sections futures (préparation)
-    links?: any[]; // Connexions entre agents
-    tasks?: any[]; // Tâches assignées
-    logs?: any[]; // Historique d'exécution
-    errors?: any[]; // Erreurs rencontrées
+    // 🔮 Sections futures (préparation) — unknown[] : contenu non encore contractualisé
+    links?: unknown[]; // Connexions entre agents
+    tasks?: unknown[]; // Tâches assignées
+    logs?: unknown[]; // Historique d'exécution
+    errors?: unknown[]; // Erreurs rencontrées
   } | null;
 }
 
@@ -588,23 +600,22 @@ export interface ToolCall {
   arguments: string; // JSON string of arguments
 }
 
-
 // LMStudio Dynamic Route Detection
 export interface LMStudioRoutes {
-  models: boolean;              // GET /v1/models
-  chatCompletions: boolean;     // POST /v1/chat/completions
-  completions: boolean;         // POST /v1/completions
-  embeddings: boolean;          // POST /v1/embeddings
-  images: boolean;              // POST /v1/images/generations
-  audio: boolean;               // POST /v1/audio/transcriptions
+  models: boolean; // GET /v1/models
+  chatCompletions: boolean; // POST /v1/chat/completions
+  completions: boolean; // POST /v1/completions
+  embeddings: boolean; // POST /v1/embeddings
+  images: boolean; // POST /v1/images/generations
+  audio: boolean; // POST /v1/audio/transcriptions
 }
 
 export interface LMStudioModelDetection {
-  modelId: string;              // Ex: "Mistral-7B-Instruct-v0.2"
-  routes: LMStudioRoutes;       // Routes HTTP disponibles
-  capabilities: LLMCapability[];// Capacités A-IR-DD2 déduites
-  contextWindow?: number;       // Longueur contexte (tokens)
-  detectedAt: string;           // ISO timestamp de la détection
+  modelId: string; // Ex: "Mistral-7B-Instruct-v0.2"
+  routes: LMStudioRoutes; // Routes HTTP disponibles
+  capabilities: LLMCapability[]; // Capacités A-IR-DD2 déduites
+  contextWindow?: number; // Longueur contexte (tokens)
+  detectedAt: string; // ISO timestamp de la détection
 }
 
 // ─── J9 — Tool Call Record (Tools V2) ────────────────────────────────────────
@@ -614,14 +625,14 @@ export interface LMStudioModelDetection {
  * Stored in ChatMessage.toolCallRecord for sender === 'tool'.
  */
 export interface ToolCallRecord {
-  id: string;                        // UUID (generated by AgentLoop)
-  toolId?: string;                   // Canonical user_tools id
-  functionId?: string;               // Legacy compatibility alias of the executed tool
-  functionName: string;              // Denormalized for display
+  id: string; // UUID (generated by AgentLoop)
+  toolId?: string; // Canonical user_tools id
+  functionId?: string; // Legacy compatibility alias of the executed tool
+  functionName: string; // Denormalized for display
   arguments: Record<string, unknown>; // Input JSON
-  result: unknown;                   // Output from sandbox
+  result: unknown; // Output from sandbox
   status: 'success' | 'error';
-  durationMs?: number;               // Execution duration
+  durationMs?: number; // Execution duration
   executionId?: string;
   runner?: string;
   exitCode?: number;
@@ -644,7 +655,7 @@ export interface ChatMessage {
   id: string;
   sender: 'user' | 'agent' | 'tool' | 'tool_result';
   text: string;
-  timestamp: Date;  // Used for persistence and deduplication
+  timestamp: Date; // Used for persistence and deduplication
   image?: string; // base64 encoded image
   mimeType?: string;
   filename?: string;
@@ -669,8 +680,8 @@ export interface ChatMessage {
   };
 
   // 🆕 Anthropic Claude 4 fields
-  thinking?: string;              // Extended thinking content
-  document?: string;              // Base64 encoded document (PDF)
+  thinking?: string; // Extended thinking content
+  document?: string; // Base64 encoded document (PDF)
   documentType?: 'image' | 'pdf'; // Type de document uploadé
 
   // 🆕 J9 — Tools V2 function call record (sender === 'tool')
@@ -706,13 +717,14 @@ export enum RobotId {
   Bos = 'BO_002',
   Com = 'CO_003',
   Phil = 'PH_004',
-  Tim = 'TI_005'
+  Tim = 'TI_005',
 }
 
 export interface RobotMenuItem {
   id: RobotId;
   name: string;
-  iconComponent: React.ComponentType<any>;
+  // ⭐ US-RC-02 lot 1 : les icônes du menu sont des SVG recevant les props SVG standard
+  iconComponent: React.ComponentType<React.SVGProps<SVGSVGElement>>;
   path: string;
   description: string;
   nestedItems?: RobotMenuItem[];
@@ -770,28 +782,28 @@ export const ROBOT_CREATION_RIGHTS: Record<RobotId, RobotCapabilities> = {
   [RobotId.Archi]: {
     canCreate: ['agent'],
     canModify: ['agent'],
-    canDelete: ['agent']
+    canDelete: ['agent'],
   },
   [RobotId.Com]: {
     canCreate: ['connection'],
     canModify: ['connection'],
-    canDelete: ['connection']
+    canDelete: ['connection'],
   },
   [RobotId.Phil]: {
     canCreate: ['file'],
     canModify: ['file'],
-    canDelete: ['file']
+    canDelete: ['file'],
   },
   [RobotId.Tim]: {
     canCreate: ['event'],
     canModify: ['event'],
-    canDelete: ['event']
+    canDelete: ['event'],
   },
   [RobotId.Bos]: {
     canCreate: [], // Bos supervise mais ne crée pas
     canModify: [], // Seulement lecture pour monitoring
-    canDelete: [] // Pas de suppression directe
-  }
+    canDelete: [], // Pas de suppression directe
+  },
 };
 
 export interface GovernanceValidationResult {
@@ -899,11 +911,11 @@ export interface WebSearchGroundingResponse {
 /**
  * Interface UI pour les configurations LLM
  * Utilisée par le hook useLLMConfigs et les composants React
- * 
+ *
  * DUAL STORAGE MODEL:
  * - Cloud providers: use apiKey (encrypted on backend)
  * - Local providers: use localEndpoint (plaintext URL)
- * 
+ *
  * NOTE: En mode authentifié, les API keys sont chiffrées côté backend
  * En mode guest (localStorage), aucun chiffrement (mode de développement)
  */
@@ -933,7 +945,6 @@ export interface LLMConfigWithUser extends ILLMConfigUI {
   lastUsedAt?: string; // Tracking usage
 }
 
-
 // ============================================
 // BACKWARD COMPATIBILITY ALIASES
 // Mapping ancien code vers V2 types
@@ -958,4 +969,3 @@ export interface Workflow {
   createdAt?: Date;
   updatedAt?: Date;
 }
-
