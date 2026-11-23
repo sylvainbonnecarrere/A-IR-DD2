@@ -1,23 +1,24 @@
 /**
  * DatabaseInitService - Idempotent MongoDB Initialization
- * 
+ *
  * ROLE: Ensures database schema, collections, indexes, and validation
  * are properly created and maintained throughout the application lifecycle.
- * 
+ *
  * DESIGN PRINCIPLES:
  * - Idempotent: Safe to call multiple times (Phase 1: Check, Phase 2: Create if absent)
  * - Non-blocking: Errors logged but don't crash startup
  * - Code-First: All schema definitions in TypeScript, not Docker volumes
  * - Secure: Test user created only in development
- * 
+ *
  * ARCHITECTURE:
- * - Collections: users, llm_configs, user_settings, workflows, agents, 
+ * - Collections: users, llm_configs, user_settings, workflows, agents,
  *               workflow_nodes, workflow_edges, agent_prototypes, agent_instances
  * - Indexes: Performance optimization on frequently queried fields
  * - Schema Validation: JSON Schema validation on insert/update
  */
 
 import mongoose from 'mongoose';
+import { asErrorShape, errorMessageOf, isDuplicateKeyError } from '../utils/errorGuards';
 import bcrypt from 'bcrypt';
 import { backfillMediaReferenceCatalogFields } from '../migrations/006_media_reference_catalog_backfill';
 import { migrateLegacyWorkflowGraphsToV2 } from '../migrations/008_workflow_v1_to_v2_migration';
@@ -36,7 +37,18 @@ const SHARED_HELLO_TEST_TOOL_NAME = 'hello_test';
  * - additionalProperties: true allows flexible fields
  * - No 'required' arrays to allow partial documents during operations
  */
-const COLLECTION_SCHEMAS = {
+// ⭐ US-RC-03: types structurels locaux nommes pour le bootstrap (consigne 01-architecte-bdd 2d)
+interface CollectionSchemaSpec {
+  validator?: Record<string, unknown>;
+  options?: Record<string, unknown>;
+}
+
+interface IndexSpec {
+  spec: mongoose.mongo.IndexSpecification;
+  options?: Record<string, unknown>;
+}
+
+const COLLECTION_SCHEMAS: Record<string, CollectionSchemaSpec> = {
   users: {
     validator: {
       $jsonSchema: {
@@ -49,10 +61,10 @@ const COLLECTION_SCHEMAS = {
           role: { bsonType: 'string' },
           isActive: { bsonType: 'bool' },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   llm_configs: {
@@ -68,10 +80,10 @@ const COLLECTION_SCHEMAS = {
           capabilities: { bsonType: 'object' },
           isEnabled: { bsonType: 'bool' },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   user_settings: {
@@ -86,10 +98,10 @@ const COLLECTION_SCHEMAS = {
           preferences: { bsonType: 'object' },
           version: { bsonType: 'int' },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   workflows: {
@@ -110,10 +122,10 @@ const COLLECTION_SCHEMAS = {
           edges: { bsonType: 'array' },
           createdAt: { bsonType: 'date' },
           updatedAt: { bsonType: 'date' },
-          lastSavedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          lastSavedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   agents: {
@@ -127,10 +139,10 @@ const COLLECTION_SCHEMAS = {
           description: { bsonType: 'string' },
           tools: { bsonType: 'array' },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   workflow_nodes: {
@@ -143,10 +155,10 @@ const COLLECTION_SCHEMAS = {
           workflowId: { bsonType: 'objectId' },
           nodeId: { bsonType: 'string' },
           data: { bsonType: 'object' },
-          position: { bsonType: 'object' }
-        }
-      }
-    }
+          position: { bsonType: 'object' },
+        },
+      },
+    },
   },
 
   workflow_edges: {
@@ -159,10 +171,10 @@ const COLLECTION_SCHEMAS = {
           workflowId: { bsonType: 'objectId' },
           edgeId: { bsonType: 'string' },
           source: { bsonType: 'string' },
-          target: { bsonType: 'string' }
-        }
-      }
-    }
+          target: { bsonType: 'string' },
+        },
+      },
+    },
   },
 
   agent_prototypes: {
@@ -180,14 +192,14 @@ const COLLECTION_SCHEMAS = {
             bsonType: ['object', 'null'],
             properties: {
               autoFenceAndRetry: { bsonType: 'bool' },
-              maxAttempts: { bsonType: ['int', 'long'] }
-            }
+              maxAttempts: { bsonType: ['int', 'long'] },
+            },
           },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   agent_instances: {
@@ -206,14 +218,14 @@ const COLLECTION_SCHEMAS = {
             bsonType: ['object', 'null'],
             properties: {
               autoFenceAndRetry: { bsonType: 'bool' },
-              maxAttempts: { bsonType: ['int', 'long'] }
-            }
+              maxAttempts: { bsonType: ['int', 'long'] },
+            },
           },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   agent_templates: {
@@ -235,10 +247,10 @@ const COLLECTION_SCHEMAS = {
           isStarred: { bsonType: 'bool' },
           tags: { bsonType: 'array' },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   local_llm_profiles: {
@@ -254,10 +266,10 @@ const COLLECTION_SCHEMAS = {
           capabilities: { bsonType: 'object' },
           enabled: { bsonType: 'bool' },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   workspaces: {
@@ -275,10 +287,10 @@ const COLLECTION_SCHEMAS = {
           manifests: { bsonType: 'object' },
           status: { bsonType: 'string' },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   user_tools: {
@@ -300,10 +312,10 @@ const COLLECTION_SCHEMAS = {
           isEnabled: { bsonType: 'bool' },
           isReadonly: { bsonType: 'bool' },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   user_tool_runs: {
@@ -331,8 +343,8 @@ const COLLECTION_SCHEMAS = {
             bsonType: ['object', 'null'],
             properties: {
               code: { bsonType: 'string' },
-              quarantinedAt: { bsonType: 'date' }
-            }
+              quarantinedAt: { bsonType: 'date' },
+            },
           },
           reconstructionQuarantineResolution: {
             bsonType: ['object', 'null'],
@@ -341,8 +353,8 @@ const COLLECTION_SCHEMAS = {
               quarantinedAt: { bsonType: 'date' },
               resolution: { enum: ['failed'] },
               resolvedAt: { bsonType: 'date' },
-              resolvedBy: { bsonType: 'objectId' }
-            }
+              resolvedBy: { bsonType: 'objectId' },
+            },
           },
           lease: {
             bsonType: ['object', 'null'],
@@ -350,8 +362,8 @@ const COLLECTION_SCHEMAS = {
               owner: { bsonType: 'string' },
               token: { bsonType: 'string' },
               acquiredAt: { bsonType: 'date' },
-              expiresAt: { bsonType: 'date' }
-            }
+              expiresAt: { bsonType: 'date' },
+            },
           },
           launchContext: { bsonType: 'string' },
           status: { bsonType: 'string' },
@@ -359,10 +371,10 @@ const COLLECTION_SCHEMAS = {
           runner: { bsonType: 'string' },
           inputs: { bsonType: 'object' },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   gateway_fence_audit: {
@@ -380,10 +392,10 @@ const COLLECTION_SCHEMAS = {
           runId: { bsonType: 'string' },
           reason: { bsonType: 'string' },
           fenceKind: { bsonType: 'string' },
-          quiescenceProven: { bsonType: 'bool' }
-        }
-      }
-    }
+          quiescenceProven: { bsonType: 'bool' },
+        },
+      },
+    },
   },
 
   runtime_alerts: {
@@ -401,10 +413,10 @@ const COLLECTION_SCHEMAS = {
           runId: { bsonType: 'string' },
           operationId: { bsonType: ['string', 'null'] },
           createdAt: { bsonType: 'date' },
-          acknowledgedAt: { bsonType: ['date', 'null'] }
-        }
-      }
-    }
+          acknowledgedAt: { bsonType: ['date', 'null'] },
+        },
+      },
+    },
   },
 
   run_command_idempotency: {
@@ -420,10 +432,10 @@ const COLLECTION_SCHEMAS = {
           workspaceId: { bsonType: 'string' },
           runId: { bsonType: 'string' },
           response: { bsonType: 'object' },
-          createdAt: { bsonType: 'date' }
-        }
-      }
-    }
+          createdAt: { bsonType: 'date' },
+        },
+      },
+    },
   },
 
   secrets_metadata: {
@@ -440,60 +452,48 @@ const COLLECTION_SCHEMAS = {
           provider: { bsonType: ['string', 'null'] },
           status: { bsonType: 'string' },
           createdAt: { bsonType: 'date' },
-          updatedAt: { bsonType: 'date' }
-        }
-      }
-    }
-  }
+          updatedAt: { bsonType: 'date' },
+        },
+      },
+    },
+  },
 };
 
 /**
  * Index definitions for performance optimization
  */
-const INDEX_DEFINITIONS = {
-  users: [
-    { spec: { email: 1 }, options: { unique: true } }
-  ],
+const INDEX_DEFINITIONS: Record<string, IndexSpec[]> = {
+  users: [{ spec: { email: 1 }, options: { unique: true } }],
   llm_configs: [
     { spec: { userId: 1, provider: 1 }, options: { unique: true } },
-    { spec: { userId: 1 }, options: {} }
+    { spec: { userId: 1 }, options: {} },
   ],
-  user_settings: [
-    { spec: { userId: 1 }, options: { unique: true } }
-  ],
+  user_settings: [{ spec: { userId: 1 }, options: { unique: true } }],
   workflows: [
     { spec: { creator_id: 1 }, options: {} },
     { spec: { userId: 1 }, options: {} },
-    { spec: { updatedAt: -1 }, options: {} }
+    { spec: { updatedAt: -1 }, options: {} },
   ],
-  agents: [
-    { spec: { creator_id: 1 }, options: {} }
-  ],
-  workflow_nodes: [
-    { spec: { workflowId: 1 }, options: {} }
-  ],
-  workflow_edges: [
-    { spec: { workflowId: 1 }, options: {} }
-  ],
-  agent_prototypes: [
-    { spec: { creator_id: 1 }, options: {} }
-  ],
+  agents: [{ spec: { creator_id: 1 }, options: {} }],
+  workflow_nodes: [{ spec: { workflowId: 1 }, options: {} }],
+  workflow_edges: [{ spec: { workflowId: 1 }, options: {} }],
+  agent_prototypes: [{ spec: { creator_id: 1 }, options: {} }],
   agent_instances: [
     { spec: { agentId: 1, createdAt: 1 }, options: {} },
-    { spec: { workflowId: 1 }, options: {} }
+    { spec: { workflowId: 1 }, options: {} },
   ],
   agent_templates: [
     { spec: { userId: 1, createdAt: -1 }, options: {} },
     { spec: { userId: 1, category: 1 }, options: {} },
-    { spec: { userId: 1, isStarred: 1 }, options: {} }
+    { spec: { userId: 1, isStarred: 1 }, options: {} },
   ],
   local_llm_profiles: [
     { spec: { userId: 1, name: 1 }, options: { unique: true } },
-    { spec: { userId: 1 }, options: {} }
+    { spec: { userId: 1 }, options: {} },
   ],
   workspaces: [
     { spec: { ownerUserId: 1, scopeType: 1, scopeId: 1 }, options: { unique: true, name: 'uq_workspace_owner_scope' } },
-    { spec: { ownerUserId: 1, status: 1, updatedAt: -1 }, options: { name: 'idx_workspace_owner_status_updated' } }
+    { spec: { ownerUserId: 1, status: 1, updatedAt: -1 }, options: { name: 'idx_workspace_owner_status_updated' } },
   ],
   user_tools: [
     {
@@ -501,28 +501,28 @@ const INDEX_DEFINITIONS = {
       options: {
         unique: true,
         partialFilterExpression: { scopeType: 'native', ownerUserId: null },
-        name: 'uq_user_tools_native_name'
-      }
+        name: 'uq_user_tools_native_name',
+      },
     },
     {
       spec: { ownerUserId: 1, workflowId: 1, name: 1 },
       options: {
         unique: true,
         partialFilterExpression: { scopeType: 'user' },
-        name: 'uq_user_tools_owner_workflow_name'
-      }
+        name: 'uq_user_tools_owner_workflow_name',
+      },
     },
     {
       spec: { ownerUserId: 1, workflowId: 1, isEnabled: 1, status: 1, name: 1 },
-      options: { name: 'idx_user_tools_owner_workflow_enabled_status_name' }
+      options: { name: 'idx_user_tools_owner_workflow_enabled_status_name' },
     },
     {
       spec: { workspaceId: 1, updatedAt: -1 },
       options: {
         partialFilterExpression: { workspaceId: { $type: 'objectId' } },
-        name: 'idx_user_tools_workspace_updated'
-      }
-    }
+        name: 'idx_user_tools_workspace_updated',
+      },
+    },
   ],
   user_tool_runs: [
     { spec: { executionId: 1 }, options: { unique: true, name: 'uq_user_tool_runs_execution_id' } },
@@ -531,85 +531,83 @@ const INDEX_DEFINITIONS = {
       spec: { ownerUserId: 1, workflowId: 1, createdAt: -1 },
       options: {
         partialFilterExpression: { workflowId: { $type: 'objectId' } },
-        name: 'idx_user_tool_runs_owner_workflow_created'
-      }
+        name: 'idx_user_tool_runs_owner_workflow_created',
+      },
     },
     { spec: { toolId: 1, createdAt: -1 }, options: { name: 'idx_user_tool_runs_tool_created' } },
     {
       spec: { ownerUserId: 1, status: 1, updatedAt: -1 },
       options: {
         partialFilterExpression: { status: { $in: ['queued', 'running'] } },
-        name: 'idx_user_tool_runs_active_watchdog'
-      }
+        name: 'idx_user_tool_runs_active_watchdog',
+      },
     },
     {
       spec: { status: 1, 'timing.queuedAt': 1 },
       options: {
         partialFilterExpression: { status: 'queued' },
-        name: 'idx_user_tool_runs_queued_dispatch'
-      }
+        name: 'idx_user_tool_runs_queued_dispatch',
+      },
     },
     {
       spec: { status: 1, 'lease.expiresAt': 1 },
       options: {
         partialFilterExpression: { status: 'running', 'lease.expiresAt': { $type: 'date' } },
-        name: 'idx_user_tool_runs_running_lease_expiry'
-      }
+        name: 'idx_user_tool_runs_running_lease_expiry',
+      },
     },
     {
       spec: { status: 1, cancellationRequestedAt: 1 },
       options: {
         partialFilterExpression: { status: 'running', cancellationRequestedAt: { $type: 'date' } },
-        name: 'idx_user_tool_runs_cancellation_requests'
-      }
+        name: 'idx_user_tool_runs_cancellation_requests',
+      },
     },
     {
       spec: { ownerUserId: 1, retryOfExecutionId: 1, createdAt: 1 },
       options: {
         partialFilterExpression: { retryOfExecutionId: { $type: 'string' } },
-        name: 'idx_user_tool_runs_retry_lineage'
-      }
+        name: 'idx_user_tool_runs_retry_lineage',
+      },
     },
     {
       spec: { ownerUserId: 1, retryOfExecutionId: 1, recoveryAttemptCount: -1 },
       options: {
         partialFilterExpression: { retryOfExecutionId: { $type: 'string' } },
-        name: 'idx_user_tool_runs_recovery_attempts'
-      }
+        name: 'idx_user_tool_runs_recovery_attempts',
+      },
     },
     {
       spec: { status: 1, updatedAt: -1 },
       options: {
         partialFilterExpression: { status: { $in: ['worker_lost', 'quarantined'] } },
-        name: 'idx_user_tool_runs_terminal_reconcilable'
-      }
-    }
+        name: 'idx_user_tool_runs_terminal_reconcilable',
+      },
+    },
   ],
   secrets_metadata: [
     {
       spec: { ownerUserId: 1, scopeType: 1, scopeId: 1, alias: 1 },
-      options: { unique: true, name: 'uq_secrets_metadata_owner_scope_alias' }
+      options: { unique: true, name: 'uq_secrets_metadata_owner_scope_alias' },
     },
-    { spec: { ownerUserId: 1, status: 1, updatedAt: -1 }, options: { name: 'idx_secrets_metadata_owner_status_updated' } }
+    { spec: { ownerUserId: 1, status: 1, updatedAt: -1 }, options: { name: 'idx_secrets_metadata_owner_status_updated' } },
   ],
   gateway_fence_audit: [
     { spec: { operationId: 1, timestamp: -1 }, options: { name: 'idx_gateway_fence_audit_operation' } },
     { spec: { runId: 1, timestamp: -1 }, options: { name: 'idx_gateway_fence_audit_run' } },
-    { spec: { actorUserId: 1, timestamp: -1 }, options: { name: 'idx_gateway_fence_audit_actor' } }
+    { spec: { actorUserId: 1, timestamp: -1 }, options: { name: 'idx_gateway_fence_audit_actor' } },
   ],
   runtime_alerts: [
     {
       spec: { severity: 1, createdAt: -1 },
       options: {
         partialFilterExpression: { acknowledgedAt: null },
-        name: 'idx_runtime_alerts_open_severity'
-      }
+        name: 'idx_runtime_alerts_open_severity',
+      },
     },
-    { spec: { runId: 1, createdAt: -1 }, options: { name: 'idx_runtime_alerts_run' } }
+    { spec: { runId: 1, createdAt: -1 }, options: { name: 'idx_runtime_alerts_run' } },
   ],
-  run_command_idempotency: [
-    { spec: { userId: 1, command: 1, createdAt: -1 }, options: { name: 'idx_run_command_idempotency_user' } }
-  ]
+  run_command_idempotency: [{ spec: { userId: 1, command: 1, createdAt: -1 }, options: { name: 'idx_run_command_idempotency_user' } }],
 };
 
 /**
@@ -627,26 +625,24 @@ export function resolveDevSeedUserConfig(): { email: string; password: string } 
   return { email, password };
 }
 
-export async function runDatabaseBootstrap(db: any): Promise<void> {
+export async function runDatabaseBootstrap(db: mongoose.mongo.Db): Promise<void> {
   console.info('🔧 Starting database bootstrap (Phase 1: schema and index check)...');
 
   const admin = db.admin();
   void admin;
 
-  let currentDbCollections: any[] = [];
+  let currentDbCollections: mongoose.mongo.CollectionInfo[] = [];
   try {
-    currentDbCollections = await Promise.race([
+    currentDbCollections = (await Promise.race([
       db.listCollections().toArray(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('listCollections timeout')), 5000))
-    ]) as any[];
+      new Promise((_, reject) => setTimeout(() => reject(new Error('listCollections timeout')), 5000)),
+    ])) as mongoose.mongo.CollectionInfo[];
   } catch (timeoutError) {
     console.warn('[Database] listCollections timeout - proceeding with empty collection list');
     currentDbCollections = [];
   }
 
-  const existingCollectionNames = new Set(
-    Array.isArray(currentDbCollections) ? currentDbCollections.map((c: any) => c.name) : []
-  );
+  const existingCollectionNames = new Set(Array.isArray(currentDbCollections) ? currentDbCollections.map((c) => c.name) : []);
   const testUserExists = await db.collection('users').findOne({ email: 'test@example.com' });
 
   if (existingCollectionNames.size === 0) {
@@ -664,8 +660,7 @@ export async function runDatabaseBootstrap(db: any): Promise<void> {
   } else {
     console.info(`✅ Database already initialized (${existingCollectionNames.size} collections found)`);
 
-    const newCollectionNames = Object.keys(COLLECTION_SCHEMAS)
-      .filter(name => !existingCollectionNames.has(name));
+    const newCollectionNames = Object.keys(COLLECTION_SCHEMAS).filter((name) => !existingCollectionNames.has(name));
 
     if (newCollectionNames.length > 0) {
       console.info(`🆕 Detected ${newCollectionNames.length} new collection(s) not in database`);
@@ -679,8 +674,8 @@ export async function runDatabaseBootstrap(db: any): Promise<void> {
       { status: 1, 'lease.expiresAt': 1 },
       {
         partialFilterExpression: { status: 'running', 'lease.expiresAt': { $type: 'date' } },
-        name: 'idx_user_tool_runs_running_lease_expiry'
-      }
+        name: 'idx_user_tool_runs_running_lease_expiry',
+      },
     );
 
     // Index partiels US-J7-06 : recréés de façon idempotente sur une base existante.
@@ -688,15 +683,15 @@ export async function runDatabaseBootstrap(db: any): Promise<void> {
       { ownerUserId: 1, retryOfExecutionId: 1, recoveryAttemptCount: -1 },
       {
         partialFilterExpression: { retryOfExecutionId: { $type: 'string' } },
-        name: 'idx_user_tool_runs_recovery_attempts'
-      }
+        name: 'idx_user_tool_runs_recovery_attempts',
+      },
     );
     await db.collection('user_tool_runs').createIndex(
       { status: 1, updatedAt: -1 },
       {
         partialFilterExpression: { status: { $in: ['worker_lost', 'quarantined'] } },
-        name: 'idx_user_tool_runs_terminal_reconcilable'
-      }
+        name: 'idx_user_tool_runs_terminal_reconcilable',
+      },
     );
 
     if (!testUserExists && process.env.NODE_ENV === 'development') {
@@ -709,8 +704,7 @@ export async function runDatabaseBootstrap(db: any): Promise<void> {
       await verifyIndexes(db);
       console.info('✅ Indexes verified');
     } catch (indexError) {
-      console.warn('⚠️  Index verification warning (non-blocking):',
-        indexError instanceof Error ? indexError.message : String(indexError));
+      console.warn('⚠️  Index verification warning (non-blocking):', indexError instanceof Error ? indexError.message : String(indexError));
     }
   }
 }
@@ -718,14 +712,14 @@ export async function runDatabaseBootstrap(db: any): Promise<void> {
 /**
  * Migration phase: data backfills and schema evolution tasks that must be run explicitly.
  */
-export async function runDatabaseMigrations(db: any): Promise<void> {
+export async function runDatabaseMigrations(db: mongoose.mongo.Db): Promise<void> {
   console.info('🧩 Starting database migrations (Phase 2: data backfills and compatibility updates)...');
   await runMediaReferenceCatalogBackfill(db);
 
   try {
     const summary = await migrateLegacyWorkflowGraphsToV2(db);
     console.info(
-      `🧩 Workflow V1 -> V2 migration: scanned=${summary.workflowsScanned} migrated=${summary.workflowsMigrated} nodesCreated=${summary.nodesCreated} edgesCreated=${summary.edgesCreated} duplicatesPrevented=${summary.duplicatesPrevented}`
+      `🧩 Workflow V1 -> V2 migration: scanned=${summary.workflowsScanned} migrated=${summary.workflowsMigrated} nodesCreated=${summary.nodesCreated} edgesCreated=${summary.edgesCreated} duplicatesPrevented=${summary.duplicatesPrevented}`,
     );
   } catch (error) {
     console.warn('⚠️  workflow V1 -> V2 migration warning:', error instanceof Error ? error.message : String(error));
@@ -735,7 +729,7 @@ export async function runDatabaseMigrations(db: any): Promise<void> {
 /**
  * Seed phase: canonical runtime tools and local examples for the current environment.
  */
-export async function runSeedPhase(db: any): Promise<void> {
+export async function runSeedPhase(db: mongoose.mongo.Db): Promise<void> {
   console.info('🌱 Starting database seed phase (Phase 3: runtime seeders)...');
   await seedNativeFunctions(db);
   await seedSharedExampleFunctions(db);
@@ -760,15 +754,14 @@ export async function initializeDatabase(): Promise<void> {
 
     console.info('🎯 Database initialization complete!');
   } catch (error) {
-    console.error('💀 Database initialization error:',
-      error instanceof Error ? error.message : String(error));
+    console.error('💀 Database initialization error:', error instanceof Error ? error.message : String(error));
     if (process.env.NODE_ENV === 'production') {
       throw error;
     }
   }
 }
 
-export async function runMediaReferenceCatalogBackfill(db: any): Promise<void> {
+export async function runMediaReferenceCatalogBackfill(db: mongoose.mongo.Db): Promise<void> {
   try {
     const summary = await backfillMediaReferenceCatalogFields(db);
 
@@ -778,7 +771,7 @@ export async function runMediaReferenceCatalogBackfill(db: any): Promise<void> {
     }
 
     console.info(
-      `🧩 Media catalog backfill: scanned=${summary.scanned} updated=${summary.updated} compatible=${summary.alreadyCompatible} blocked=${summary.blocked}`
+      `🧩 Media catalog backfill: scanned=${summary.scanned} updated=${summary.updated} compatible=${summary.alreadyCompatible} blocked=${summary.blocked}`,
     );
   } catch (error) {
     console.warn('⚠️  media catalog backfill warning:', error instanceof Error ? error.message : String(error));
@@ -789,18 +782,18 @@ export async function runMediaReferenceCatalogBackfill(db: any): Promise<void> {
  * Update validation schemas for existing collections
  * This ensures the database stays in sync with code changes
  */
-async function updateCollectionSchemas(db: any): Promise<void> {
+async function updateCollectionSchemas(db: mongoose.mongo.Db): Promise<void> {
   for (const [collectionName, schema] of Object.entries(COLLECTION_SCHEMAS)) {
     try {
       if (schema.validator) {
         await db.command({
           collMod: collectionName,
-          validator: schema.validator
+          validator: schema.validator,
         });
         console.debug(`  ✓ Updated schema for ${collectionName}`);
       }
-    } catch (error: any) {
-      console.warn(`  ⚠️ Could not update schema for ${collectionName}:`, error.message);
+    } catch (error: unknown) {
+      console.warn(`  ⚠️ Could not update schema for ${collectionName}:`, errorMessageOf(error));
     }
   }
 }
@@ -808,7 +801,7 @@ async function updateCollectionSchemas(db: any): Promise<void> {
 /**
  * Create collections with JSON Schema validation
  */
-async function createCollectionsWithValidation(db: any): Promise<void> {
+async function createCollectionsWithValidation(db: mongoose.mongo.Db): Promise<void> {
   for (const [collectionName, schema] of Object.entries(COLLECTION_SCHEMAS)) {
     try {
       if (schema.validator) {
@@ -817,8 +810,8 @@ async function createCollectionsWithValidation(db: any): Promise<void> {
         await db.createCollection(collectionName);
       }
       console.debug(`  ✓ ${collectionName}`);
-    } catch (error: any) {
-      if (error.code === 48) {
+    } catch (error: unknown) {
+      if (asErrorShape(error).code === 48) {
         // Collection already exists - this is fine
         console.debug(`  ✓ ${collectionName} (already exists)`);
       } else {
@@ -831,15 +824,15 @@ async function createCollectionsWithValidation(db: any): Promise<void> {
 /**
  * Create indexes for query performance
  */
-async function createIndexes(db: any): Promise<void> {
+async function createIndexes(db: mongoose.mongo.Db): Promise<void> {
   for (const [collectionName, indexes] of Object.entries(INDEX_DEFINITIONS)) {
     const collection = db.collection(collectionName);
-    for (const index of indexes as any[]) {
+    for (const index of indexes) {
       try {
         await collection.createIndex(index.spec, index.options);
         console.debug(`  ✓ ${collectionName}: ${JSON.stringify(index.spec)}`);
-      } catch (error: any) {
-        if (error.code === 85) {
+      } catch (error: unknown) {
+        if (asErrorShape(error).code === 85) {
           // Index already exists with different options
           console.debug(`  ✓ ${collectionName}: ${JSON.stringify(index.spec)} (already exists)`);
         } else {
@@ -853,7 +846,7 @@ async function createIndexes(db: any): Promise<void> {
 /**
  * Verify indexes exist (for monitoring during startup)
  */
-async function verifyIndexes(db: any): Promise<void> {
+async function verifyIndexes(db: mongoose.mongo.Db): Promise<void> {
   for (const collectionName of Object.keys(INDEX_DEFINITIONS)) {
     try {
       const collection = db.collection(collectionName);
@@ -869,13 +862,13 @@ async function verifyIndexes(db: any): Promise<void> {
 /**
  * Create a development seed user for local testing
  * Email: test@example.com
- * 
- * SECURITY NOTE: 
+ *
+ * SECURITY NOTE:
  * - Only created in development mode
  * - Password is stored only as a bcrypt hash
  * - This user is for testing purposes only
  */
-async function createTestUser(db: any): Promise<void> {
+async function createTestUser(db: mongoose.mongo.Db): Promise<void> {
   try {
     const devSeedUser = resolveDevSeedUserConfig();
     if (!devSeedUser) {
@@ -898,13 +891,13 @@ async function createTestUser(db: any): Promise<void> {
       role: 'user',
       isActive: true,
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     };
 
     await collection.insertOne(testUser);
     console.info(`  ✓ Test user created: ${devSeedUser.email}`);
-  } catch (error: any) {
-    if (error.code === 11000 && error.keyPattern?.email) {
+  } catch (error: unknown) {
+    if (isDuplicateKeyError(error) && (error as { keyPattern?: Record<string, unknown> }).keyPattern?.email) {
       // Duplicate key on email - this is fine
       console.debug('  Test user email already exists (idempotent)');
     } else {
@@ -918,9 +911,8 @@ async function createTestUser(db: any): Promise<void> {
  * This allows adding new collections after the initial database setup
  * without requiring a database reset or manual schema creation
  */
-async function createNewCollections(db: any, existingNames: Set<string>): Promise<void> {
-  const newCollections = Object.keys(COLLECTION_SCHEMAS)
-    .filter(name => !existingNames.has(name));
+async function createNewCollections(db: mongoose.mongo.Db, existingNames: Set<string>): Promise<void> {
+  const newCollections = Object.keys(COLLECTION_SCHEMAS).filter((name) => !existingNames.has(name));
 
   if (newCollections.length === 0) {
     console.debug('  No new collections to create');
@@ -928,10 +920,10 @@ async function createNewCollections(db: any, existingNames: Set<string>): Promis
   }
 
   console.info(`📋 Creating ${newCollections.length} new collection(s) with schema validation...`);
-  
+
   for (const collectionName of newCollections) {
     try {
-      const schema = (COLLECTION_SCHEMAS as any)[collectionName];
+      const schema = COLLECTION_SCHEMAS[collectionName];
       if (schema.validator) {
         await db.createCollection(collectionName, { validator: schema.validator });
       } else {
@@ -945,7 +937,7 @@ async function createNewCollections(db: any, existingNames: Set<string>): Promis
       console.debug(`  ✓ ${collectionName} (created concurrently; schema will be updated)`);
     }
   }
-  
+
   console.info('✅ New collections created');
 }
 
@@ -954,41 +946,39 @@ async function createNewCollections(db: any, existingNames: Set<string>): Promis
  * Existing collections' indexes are handled separately by verifyIndexes
  * This ensures indexes are created immediately when new collections are added
  */
-async function createIndexesForNewCollections(
-  db: any,
-  newCollectionNames: string[]
-): Promise<void> {
+async function createIndexesForNewCollections(db: mongoose.mongo.Db, newCollectionNames: string[]): Promise<void> {
   if (newCollectionNames.length === 0) {
     return;
   }
 
   console.info('🗂️  Creating indexes for new collection(s)...');
-  
+
   for (const collectionName of newCollectionNames) {
-    const indexes = (INDEX_DEFINITIONS as any)[collectionName];
+    const indexes = INDEX_DEFINITIONS[collectionName];
     if (!indexes) continue;
 
     const collection = db.collection(collectionName);
-    for (const index of indexes as any[]) {
+    for (const index of indexes) {
       try {
         await collection.createIndex(index.spec, index.options);
         console.debug(`  ✓ ${collectionName}: ${JSON.stringify(index.spec)}`);
-      } catch (error: any) {
-        if (error.code !== 85) {  // 85 = index already exists
+      } catch (error: unknown) {
+        if (asErrorShape(error).code !== 85) {
+          // 85 = index already exists
           throw error;
         }
       }
     }
   }
-  
+
   console.info('✅ Indexes created for new collections');
 }
 
 async function upsertCanonicalSeedTool(
-  userToolsCol: any,
+  userToolsCol: mongoose.mongo.Collection,
   filter: Record<string, unknown>,
   legacySeed: LegacyFunctionLike,
-  overrides?: Record<string, unknown>
+  overrides?: Record<string, unknown>,
 ): Promise<{ upsertedCount: number; modifiedCount: number }> {
   const existingTool = await userToolsCol.findOne(filter, {
     projection: {
@@ -998,7 +988,8 @@ async function upsertCanonicalSeedTool(
   });
 
   const mappedFields = {
-    ...mapLegacyFunctionToUserToolFields(legacySeed as any, existingTool),
+    // existingTool vient de Mongo (WithId<Document>) : cast structurel vers la forme attendue par le mapper
+    ...mapLegacyFunctionToUserToolFields(legacySeed, existingTool as Parameters<typeof mapLegacyFunctionToUserToolFields>[1]),
     ...overrides,
   };
 
@@ -1024,18 +1015,14 @@ async function upsertCanonicalSeedTool(
  * Seed des 11 fonctions natives directement dans user_tools.
  * Idempotent : upsert par (scopeType:native, ownerUserId:null, name).
  */
-export async function seedNativeFunctions(db: any): Promise<void> {
+export async function seedNativeFunctions(db: mongoose.mongo.Db): Promise<void> {
   try {
     const userToolsCol = db.collection('user_tools');
     let upserted = 0;
     let updated = 0;
 
     for (const fn of nativeFunctionsSeed) {
-      const result = await upsertCanonicalSeedTool(
-        userToolsCol,
-        { name: fn.name, ownerUserId: null, scopeType: 'native' },
-        fn,
-      );
+      const result = await upsertCanonicalSeedTool(userToolsCol, { name: fn.name, ownerUserId: null, scopeType: 'native' }, fn);
       if (result.upsertedCount > 0) upserted++;
       else if (result.modifiedCount > 0) updated++;
     }
@@ -1053,17 +1040,14 @@ export async function seedNativeFunctions(db: any): Promise<void> {
   }
 }
 
-export async function seedSharedExampleFunctions(db: any): Promise<void> {
+export async function seedSharedExampleFunctions(db: mongoose.mongo.Db): Promise<void> {
   try {
     const userToolsCol = db.collection('user_tools');
     const helloTestInline = `// Exemple de fonction TypeScript partagée\nexport function run(\n  context: { userId: string; agentId?: string; workflowId?: string; depth: number },\n  args: { user_name?: string; name?: string }\n): unknown {\n  // Compatibilité transitoire: accepte encore args.name pour les anciens prompts déjà persistés.\n  const legacyName = typeof args.name === "string" && args.name.trim().length > 0\n    ? args.name.trim()\n    : null;\n\n  const userName = typeof args.user_name === "string" && args.user_name.trim().length > 0\n    ? args.user_name.trim()\n    : legacyName ?? "inconnu";\n\n  return { result: \`Ton nom, ${'${'}userName}, est maintenant enregistré dans ma mémoire\` };\n}\n`;
 
     const staleToolMirrors = await userToolsCol.deleteMany({
       name: SHARED_HELLO_TEST_TOOL_NAME,
-      $or: [
-        { ownerUserId: { $ne: null } },
-        { isReadonly: { $ne: true } }
-      ]
+      $or: [{ ownerUserId: { $ne: null } }, { isReadonly: { $ne: true } }],
     });
 
     if (staleToolMirrors.deletedCount > 0) {
@@ -1075,7 +1059,8 @@ export async function seedSharedExampleFunctions(db: any): Promise<void> {
       { name: SHARED_HELLO_TEST_TOOL_NAME, ownerUserId: null, scopeType: 'user' },
       {
         name: SHARED_HELLO_TEST_TOOL_NAME,
-        description: 'Exemple TypeScript partagé. Appelle cette fonction quand l\'utilisateur se présente, donne son prénom ou son nom, ou demande d\'enregistrer son nom. Extrais ce nom dans args.user_name puis laisse l\'outil confirmer l\'enregistrement.',
+        description:
+          "Exemple TypeScript partagé. Appelle cette fonction quand l'utilisateur se présente, donne son prénom ou son nom, ou demande d'enregistrer son nom. Extrais ce nom dans args.user_name puis laisse l'outil confirmer l'enregistrement.",
         language: 'typescript',
         origin: 'custom',
         userId: null,
@@ -1086,20 +1071,20 @@ export async function seedSharedExampleFunctions(db: any): Promise<void> {
           properties: {
             user_name: {
               type: 'string',
-              description: 'Nom ou prénom fourni par l\'utilisateur au moment où il se présente.',
-              example: 'Syl'
-            }
-          }
+              description: "Nom ou prénom fourni par l'utilisateur au moment où il se présente.",
+              example: 'Syl',
+            },
+          },
         },
         outputSchema: {
           type: 'object',
           properties: {
             result: {
               type: 'string',
-              description: 'Confirmation textuelle retournée à l\'utilisateur.',
-              example: 'Ton nom, Syl, est maintenant enregistré dans ma mémoire'
-            }
-          }
+              description: "Confirmation textuelle retournée à l'utilisateur.",
+              example: 'Ton nom, Syl, est maintenant enregistré dans ma mémoire',
+            },
+          },
         },
         codeInline: helloTestInline,
         codePath: null,
@@ -1135,7 +1120,7 @@ async function provisionNativePythonToolsOnStartup(): Promise<void> {
     }
 
     console.info(
-      `🐍 native python provisioning startup: attempted=${summary.attempted} succeeded=${summary.succeeded} failed=${summary.failed} skipped=${summary.skipped}`
+      `🐍 native python provisioning startup: attempted=${summary.attempted} succeeded=${summary.succeeded} failed=${summary.failed} skipped=${summary.skipped}`,
     );
   } catch (err) {
     console.warn('⚠️  native python provisioning startup warning:', err instanceof Error ? err.message : String(err));
