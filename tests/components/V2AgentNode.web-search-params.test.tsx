@@ -13,7 +13,8 @@ const mockUpdateInstanceConfig = jest.fn();
 let v2AgentNodeHarness = resetV2AgentNodeHarness();
 let runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
 let designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
-let functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> } = v2AgentNodeHarness.functionStore;
+let functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> } =
+  v2AgentNodeHarness.functionStore;
 
 jest.mock('reactflow', () => ({
   Handle: () => null,
@@ -34,9 +35,8 @@ jest.mock('../../components/workflow/ToolCallBlock', () => ({
 
 jest.mock('../../hooks/useLocalization', () => ({
   useLocalization: () => ({
-    t: (key: string, fallbackOrParams?: string | Record<string, string | number>) => (
-      typeof fallbackOrParams === 'string' ? fallbackOrParams : key
-    ),
+    t: (key: string, fallbackOrParams?: string | Record<string, string | number>) =>
+      typeof fallbackOrParams === 'string' ? fallbackOrParams : key,
   }),
 }));
 
@@ -68,10 +68,12 @@ jest.mock('../../stores/useDesignStore', () => {
 });
 
 jest.mock('../../stores/useFunctionStore', () => ({
-  useFunctionStore: jest.fn((selector?: (state: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> }) => unknown) => {
-    const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().functionStore;
-    return selector ? selector(state) : state;
-  }),
+  useFunctionStore: jest.fn(
+    (selector?: (state: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> }) => unknown) => {
+      const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().functionStore;
+      return selector ? selector(state) : state;
+    },
+  ),
 }));
 
 jest.mock('../../contexts/WorkflowCanvasContext', () => ({
@@ -207,7 +209,7 @@ describe('V2AgentNode web search params entrypoint', () => {
         zIndex={1}
         isConnectable={true}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] as any }}
-      />
+      />,
     );
 
     fireEvent.click(screen.getByTitle("Paramètres Web Search de l'agent"));
@@ -266,7 +268,7 @@ describe('V2AgentNode web search params entrypoint', () => {
         zIndex={1}
         isConnectable={true}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] as any }}
-      />
+      />,
     );
 
     await waitFor(() => {
@@ -284,7 +286,7 @@ describe('V2AgentNode web search params entrypoint', () => {
         zIndex={1}
         isConnectable={true}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] as any }}
-      />
+      />,
     );
 
     expect(screen.getByTitle("Paramètres Web Search de l'agent")).toBeInTheDocument();
@@ -297,10 +299,10 @@ describe('V2AgentNode web search params entrypoint', () => {
       functionIds: [],
     };
     const inheritedInstance = {
-      ...(designStoreState.agentInstances[0] as any),
+      ...designStoreState.agentInstances[0],
       toolSelections: [],
       configuration_json: {
-        ...(designStoreState.agentInstances[0] as any).configuration_json,
+        ...designStoreState.agentInstances[0].configuration_json,
         toolSelections: [],
       },
     };
@@ -320,7 +322,7 @@ describe('V2AgentNode web search params entrypoint', () => {
         zIndex={1}
         isConnectable={true}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent: staleNodeAgent, agentInstance: inheritedInstance }}
-      />
+      />,
     );
 
     expect(screen.queryByTitle("Paramètres Web Search de l'agent")).not.toBeInTheDocument();
@@ -339,10 +341,9 @@ describe('V2AgentNode web search params entrypoint', () => {
         zIndex={1}
         isConnectable={true}
         data={{ robotId: RobotId.Archi, label: 'Archi', agent: staleNodeAgent, agentInstance: inheritedInstance }}
-      />
+      />,
     );
 
     expect(screen.getByTitle("Paramètres Web Search de l'agent")).toBeInTheDocument();
   });
-
 });

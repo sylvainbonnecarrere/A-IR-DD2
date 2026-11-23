@@ -21,7 +21,7 @@ import { useRuntimeStore } from '../stores/useRuntimeStore';
  * - zustand stores (design, workflow, runtime) have been reset
  */
 
-const TestComponent: React.FC<{ onDone: (result: any) => void }> = ({ onDone }) => {
+const TestComponent: React.FC<{ onDone: (result: unknown) => void }> = ({ onDone }) => {
   const auth = useAuth();
   const [done, setDone] = useState(false);
 
@@ -48,7 +48,7 @@ const TestComponent: React.FC<{ onDone: (result: any) => void }> = ({ onDone }) 
         designInstances: (design.agentInstances || []).length,
         nodes: (design.nodes || []).length,
         workflowWorkflows: workflow.currentWorkflow ? 1 : 0,
-        runtimeSessions: ((runtime as any).sessions ? (runtime as any).sessions.length : undefined),
+        runtimeSessions: (runtime as unknown as { sessions?: unknown[] }).sessions?.length,
       };
 
       onDone(result);
@@ -65,29 +65,40 @@ test('J4.4 - logout clears guest storage and resets stores', async () => {
   localStorage.setItem(GUEST_STORAGE_KEYS.workflow, JSON.stringify({ _id: 'wf-guest' }));
 
   // 2) Seed some store data (simulate guest in-memory state)
-  useDesignStore.setState({ agents: [{ id: 'a1' }], agentInstances: [{ id: 'i1', prototypeId: 'a1' }], nodes: [{ id: 'node-i1', data: { agentInstance: { id: 'i1' } } } ] } as any);
+  useDesignStore.setState({
+    agents: [{ id: 'a1' }],
+    agentInstances: [{ id: 'i1', prototypeId: 'a1' }],
+    nodes: [{ id: 'node-i1', data: { agentInstance: { id: 'i1' } } }],
+  } as unknown as Parameters<typeof useDesignStore.setState>[0]);
   useWorkflowStore.setState({ currentWorkflow: { id: 'wf-1', name: 'W1', isActive: true, isDefault: false } });
   // runtime store shape is less strict — set a sessions array if present
-  try { useRuntimeStore.setState({ sessions: [{ id: 's1' }] } as any); } catch {}
+  try {
+    useRuntimeStore.setState({ sessions: [{ id: 's1' }] } as unknown as Parameters<typeof useRuntimeStore.setState>[0]);
+  } catch {}
 
   // 3) Simulate authenticated session in localStorage
-  authSessionStorage.write({ user: { id: 'u-test', email: 'test@test.fr' } as any, accessToken: 'tok', refreshToken: 'ref' });
+  authSessionStorage.write({ user: { id: 'u-test', email: 'test@test.fr' }, accessToken: 'tok', refreshToken: 'ref' });
 
   // 4) Render provider + test component and assert results
-  let finalResult: any = null;
+  let finalResult: Record<string, unknown> | null = null;
 
   render(
     <AuthProvider>
-      <TestComponent onDone={(r) => { finalResult = r; }} />
-    </AuthProvider>
+      <TestComponent
+        onDone={(r) => {
+          finalResult = r as Record<string, unknown>;
+        }}
+      />
+    </AuthProvider>,
   );
 
   await waitFor(() => expect(finalResult).not.toBeNull(), { timeout: 2000 });
+  const res = finalResult as Record<string, unknown>;
 
-  expect(finalResult.authMissing).toBe(true);
-  expect(finalResult.anyGuestKeyRemaining).toBe(false);
-  expect(finalResult.designAgents).toBe(0);
-  expect(finalResult.designInstances).toBe(0);
-  expect(finalResult.nodes).toBe(0);
-  expect(finalResult.workflowWorkflows).toBe(0);
+  expect(res.authMissing).toBe(true);
+  expect(res.anyGuestKeyRemaining).toBe(false);
+  expect(res.designAgents).toBe(0);
+  expect(res.designInstances).toBe(0);
+  expect(res.nodes).toBe(0);
+  expect(res.workflowWorkflows).toBe(0);
 });
