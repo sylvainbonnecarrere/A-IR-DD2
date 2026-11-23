@@ -24,28 +24,27 @@ const prettierBin = require.resolve('prettier/bin/prettier.cjs');
 const baseRef = process.env.GITHUB_BASE_REF?.trim() || 'main';
 
 function diffNames(range) {
-    try {
-        return execFileSync('git', ['diff', '--name-only', '--diff-filter=ACM', range], {
-            cwd: root,
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-        }).trim().split('\n').filter(Boolean);
-    } catch {
-        return null; // ref inconnue (ex. origin/main absent en local) -> on essaie le fallback
-    }
+  try {
+    return execFileSync('git', ['diff', '--name-only', '--diff-filter=ACM', range], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+  } catch {
+    return null; // ref inconnue (ex. origin/main absent en local) -> on essaie le fallback
+  }
 }
 
 const changed = diffNames(`origin/${baseRef}...HEAD`) ?? diffNames('main...HEAD') ?? [];
 
 if (changed.length === 0) {
-    console.log(`[format:changed] aucun fichier modifié vs origin/${baseRef}...HEAD (fallback main...HEAD) — OK`);
-    process.exit(0);
+  console.log(`[format:changed] aucun fichier modifié vs origin/${baseRef}...HEAD (fallback main...HEAD) — OK`);
+  process.exit(0);
 }
 
 console.log(`[format:changed] ${changed.length} fichier(s) modifié(s) vs base, prettier --check :`);
-const result = spawnSync(
-    process.execPath,
-    [prettierBin, '--check', ...changed, '--ignore-unknown'],
-    { cwd: root, stdio: 'inherit' },
-);
+const result = spawnSync(process.execPath, [prettierBin, '--check', ...changed, '--ignore-unknown'], { cwd: root, stdio: 'inherit' });
 process.exit(result.status === null ? 1 : result.status);

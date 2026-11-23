@@ -25,14 +25,19 @@ const LOG_RE = /console\.log\(/g;
 // R2 : --cached --others --exclude-standard = fichiers suivis + fichiers non suivis
 // (non ignorés), donc un nouveau fichier non commité est compté dès le run local.
 const listFiles = (pattern) =>
-  execSync(`git ls-files --cached --others --exclude-standard ${pattern}`, { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+  execSync(`git ls-files --cached --others --exclude-standard ${pattern}`, { cwd: root, encoding: 'utf8' })
+    .trim()
+    .split('\n')
+    .filter(Boolean);
 
 const SELF_TEST_FILE = path.join(root, 'ratchet-selftest.tmp.ts');
 
 function runSelfTest() {
   const self = fileURLToPath(import.meta.url);
   const run = () => spawnSync(process.execPath, [self], { cwd: root, encoding: 'utf8' });
-  const assert = (cond, message) => { if (!cond) throw new Error(`self-test failed: ${message}`); };
+  const assert = (cond, message) => {
+    if (!cond) throw new Error(`self-test failed: ${message}`);
+  };
   try {
     fs.writeFileSync(SELF_TEST_FILE, 'export const dirty = 1 as any;\n');
     const withAny = run();
