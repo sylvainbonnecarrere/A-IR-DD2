@@ -180,15 +180,16 @@ export function normalizePersistedToolTranscriptMessages(messages: ChatMessage[]
   return normalizeLegacyToolMessages(messages);
 }
 
-export const mapPersistedToolCallRecord = (record: any): ToolCallRecord | undefined => {
-  if (!record) {
+export const mapPersistedToolCallRecord = (record: unknown): ToolCallRecord | undefined => {
+  if (!record || typeof record !== 'object') {
     return undefined;
   }
 
+  const r = record as Partial<ToolCallRecord>;
   return {
-    ...record,
-    timestamp: new Date(record.timestamp || Date.now()),
-  };
+    ...r,
+    timestamp: new Date(r.timestamp || Date.now()),
+  } as ToolCallRecord;
 };
 
 // ⭐ US-RC-02 lot 7 : message persisté = ChatMessage partiel avec timestamp sérialisé (ISO)

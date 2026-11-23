@@ -50,8 +50,8 @@ async function apiRequest<T = unknown>(
   endpoint: string,
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   token: string,
-  body?: any,
-): Promise<any> {
+  body?: unknown,
+): Promise<T> {
   const options: RequestInit = {
     method,
     headers: {

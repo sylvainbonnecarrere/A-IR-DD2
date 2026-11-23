@@ -57,7 +57,7 @@ function saveLocalConfigs(configs: ILLMConfigUI[]): void {
 // PARTIE 2: API BACKEND (Authenticated)
 // ============================================================================
 
-async function apiRequest<T = unknown>(endpoint: string, method: 'GET' | 'POST' | 'DELETE', token: string, body?: any): Promise<any> {
+async function apiRequest<T = unknown>(endpoint: string, method: 'GET' | 'POST' | 'DELETE', token: string, body?: unknown): Promise<T> {
   const options: RequestInit = {
     method,
     headers: {
@@ -91,7 +91,7 @@ export async function getAllLLMConfigs(options: LLMConfigServiceOptions): Promis
   if (options.useApi && options.token) {
     // Backend API
     try {
-      const response = await apiRequest('/api/llm-configs', 'GET', options.token);
+      const response = await apiRequest<ILLMConfigUI[]>('/api/llm-configs', 'GET', options.token);
       return response;
     } catch (error) {
       throw error;
@@ -110,7 +110,7 @@ export async function getLLMConfig(provider: string, options: LLMConfigServiceOp
   if (options.useApi && options.token) {
     // Backend API
     try {
-      const response = await apiRequest(`/api/llm-configs/${provider}`, 'GET', options.token);
+      const response = await apiRequest<ILLMConfigUI>(`/api/llm-configs/${provider}`, 'GET', options.token);
       return response;
     } catch (error) {
       if ((error as Error).message.includes('404')) {
@@ -142,7 +142,7 @@ export async function upsertLLMConfig(
   if (options.useApi && options.token) {
     // Backend API
     try {
-      const response = await apiRequest('/api/llm-configs', 'POST', options.token, {
+      const response = await apiRequest<ILLMConfigUI>('/api/llm-configs', 'POST', options.token, {
         provider,
         ...data,
       });
@@ -247,7 +247,7 @@ export async function getDecryptedApiKey(provider: string, token: string): Promi
   }
 
   try {
-    const response = await apiRequest('/api/llm/get-api-key', 'POST', token, { provider });
+    const response = await apiRequest<{ apiKey: string }>('/api/llm/get-api-key', 'POST', token, { provider });
     return response.apiKey;
   } catch (error) {
     console.error('[LLMConfigService] getDecryptedApiKey failed:', error);

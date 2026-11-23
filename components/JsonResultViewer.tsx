@@ -4,7 +4,7 @@ import JsonTableViewer from './JsonTableViewer';
 import JsonSchemaViewer from './JsonSchemaViewer';
 
 interface JsonResultViewerProps {
-  data: any;
+  data: unknown;
   status?: number;
   statusText?: string;
   time?: number;
@@ -22,14 +22,17 @@ export const JsonResultViewer: React.FC<JsonResultViewerProps> = ({
   time = 0,
   size = '0',
   isLoading = false,
-  error
+  error,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('tree');
 
   const statusColor =
-    status >= 200 && status < 300 ? 'text-green-400 bg-green-900/20'
-      : status >= 300 && status < 400 ? 'text-yellow-400 bg-yellow-900/20'
-        : status >= 400 ? 'text-red-400 bg-red-900/20'
+    status >= 200 && status < 300
+      ? 'text-green-400 bg-green-900/20'
+      : status >= 300 && status < 400
+        ? 'text-yellow-400 bg-yellow-900/20'
+        : status >= 400
+          ? 'text-red-400 bg-red-900/20'
           : 'text-gray-400 bg-gray-900/20';
 
   const TabButton: React.FC<{ id: TabType; label: string; icon: string }> = ({ id, label, icon }) => (
@@ -37,9 +40,10 @@ export const JsonResultViewer: React.FC<JsonResultViewerProps> = ({
       onClick={() => setActiveTab(id)}
       className={`
         px-3 py-2 text-sm font-medium rounded-t-lg transition-all border-b-2
-        ${activeTab === id
-          ? 'bg-green-600 text-white border-b-green-400'
-          : 'bg-gray-700 text-gray-300 hover:bg-gray-600 border-b-transparent'
+        ${
+          activeTab === id
+            ? 'bg-green-600 text-white border-b-green-400'
+            : 'bg-gray-700 text-gray-300 hover:bg-gray-600 border-b-transparent'
         }
       `}
     >

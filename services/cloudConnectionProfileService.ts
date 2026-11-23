@@ -35,7 +35,7 @@ async function apiRequest<T = unknown>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   token: string,
   body?: unknown,
-): Promise<any> {
+): Promise<T> {
   const response = await fetch(`${getBackendUrl()}${endpoint}`, {
     method,
     headers: {

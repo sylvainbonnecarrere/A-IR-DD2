@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
 import type { AuthSessionStatus } from '../contexts/types/auth.types';
 import type { RuntimeBootstrapState } from '../services/runtimeBootstrapService';
+import type { WorkspaceSnapshot } from '../services/workspaceBootstrapService';
 import { useWorkspaceHydrationOrchestrator } from './useWorkspaceHydrationOrchestrator';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { useDesignStore } from '../stores/useDesignStore';
@@ -33,7 +34,7 @@ export interface UseAppWorkflowControllerResult {
   hydrationProgress: number;
   hydrationMessage: string;
   hydrateInteractiveWorkspaceState: (
-    workspace: any,
+    workspace: WorkspaceSnapshot,
     options?: { preserveRuntimeMessages?: boolean; onSnapshotApplied?: () => void },
   ) => Promise<string | null>;
   shouldShowHydrationOverlay: boolean;
@@ -98,76 +99,85 @@ export function useAppWorkflowController({
         ? 'Preparation de la carte...'
         : 'Chargement du workspace...';
 
-  const switchToWorkflow = useCallback(async (workflowId: string, workflowName?: string) => {
-    const activeWorkflowId = useDesignStore.getState().currentWorkflowId;
+  const switchToWorkflow = useCallback(
+    async (workflowId: string, workflowName?: string) => {
+      const activeWorkflowId = useDesignStore.getState().currentWorkflowId;
 
-    if (isSwitchingRef.current) {
-      console.warn('[AppWorkflowController] Switch already in progress, ignoring');
-      return;
-    }
-    if (activeWorkflowId && activeWorkflowId === workflowId) {
-      console.info('[AppWorkflowController] Workflow already active, skipping duplicate select request');
-      return;
-    }
-    if (isBlockingHydration) {
-      console.warn('[AppWorkflowController] Initial hydration in progress, ignoring');
-      return;
-    }
-    if (!accessToken) {
-      console.warn('[AppWorkflowController] No accessToken — aborting switch');
-      window.dispatchEvent(new CustomEvent('workflow:switch:error', {
-        detail: { message: t('workflow_switch_error_message').replace('{name}', workflowName || '') },
-      }));
-      return;
-    }
-
-    isSwitchingRef.current = true;
-    setIsSwitchingWorkflow(true);
-    setSwitchWorkflowName(workflowName || 'Workflow');
-    setSwitchProgress(0);
-
-    try {
-      setSwitchProgress(10);
-      useRuntimeStore.getState().resetForWorkflowSwitch();
-
-      setSwitchProgress(30);
-      const { data } = await apiClient.post(`/api/workflows/${workflowId}/select`);
-
-      if (!data.success) {
-        throw new Error(data.message || 'Switch failed');
+      if (isSwitchingRef.current) {
+        console.warn('[AppWorkflowController] Switch already in progress, ignoring');
+        return;
+      }
+      if (activeWorkflowId && activeWorkflowId === workflowId) {
+        console.info('[AppWorkflowController] Workflow already active, skipping duplicate select request');
+        return;
+      }
+      if (isBlockingHydration) {
+        console.warn('[AppWorkflowController] Initial hydration in progress, ignoring');
+        return;
+      }
+      if (!accessToken) {
+        console.warn('[AppWorkflowController] No accessToken — aborting switch');
+        window.dispatchEvent(
+          new CustomEvent('workflow:switch:error', {
+            detail: { message: t('workflow_switch_error_message').replace('{name}', workflowName || '') },
+          }),
+        );
+        return;
       }
 
-      setSwitchProgress(70);
-      await hydrateInteractiveWorkspaceState(data.reloadedData, {
-        preserveRuntimeMessages: false,
-        onSnapshotApplied: () => setSwitchProgress(85),
-      });
+      isSwitchingRef.current = true;
+      setIsSwitchingWorkflow(true);
+      setSwitchWorkflowName(workflowName || 'Workflow');
+      setSwitchProgress(0);
 
-      setSwitchProgress(95);
       try {
-        await useDesignStore.getState().loadUserWorkflows();
-      } catch (refreshErr) {
-        console.warn('[AppWorkflowController] Workflow list refresh failed (non-blocking):', refreshErr);
-      }
+        setSwitchProgress(10);
+        useRuntimeStore.getState().resetForWorkflowSwitch();
 
-      setSwitchProgress(100);
-      window.dispatchEvent(new CustomEvent('workflow:switch:success', {
-        detail: { workflowId, workflowName },
-      }));
-    } catch (error: any) {
-      console.error('[AppWorkflowController] Workflow switch failed:', error);
-      window.dispatchEvent(new CustomEvent('workflow:switch:error', {
-        detail: { message: error.message || 'Unknown error', workflowId },
-      }));
-    } finally {
-      setTimeout(() => {
-        setIsSwitchingWorkflow(false);
-        setSwitchProgress(0);
-        setSwitchWorkflowName('');
-      }, 300);
-      isSwitchingRef.current = false;
-    }
-  }, [accessToken, hydrateInteractiveWorkspaceState, isBlockingHydration, t]);
+        setSwitchProgress(30);
+        const { data } = await apiClient.post(`/api/workflows/${workflowId}/select`);
+
+        if (!data.success) {
+          throw new Error(data.message || 'Switch failed');
+        }
+
+        setSwitchProgress(70);
+        await hydrateInteractiveWorkspaceState(data.reloadedData, {
+          preserveRuntimeMessages: false,
+          onSnapshotApplied: () => setSwitchProgress(85),
+        });
+
+        setSwitchProgress(95);
+        try {
+          await useDesignStore.getState().loadUserWorkflows();
+        } catch (refreshErr) {
+          console.warn('[AppWorkflowController] Workflow list refresh failed (non-blocking):', refreshErr);
+        }
+
+        setSwitchProgress(100);
+        window.dispatchEvent(
+          new CustomEvent('workflow:switch:success', {
+            detail: { workflowId, workflowName },
+          }),
+        );
+      } catch (error: unknown) {
+        console.error('[AppWorkflowController] Workflow switch failed:', error);
+        window.dispatchEvent(
+          new CustomEvent('workflow:switch:error', {
+            detail: { message: error instanceof Error && error.message ? error.message : 'Unknown error', workflowId },
+          }),
+        );
+      } finally {
+        setTimeout(() => {
+          setIsSwitchingWorkflow(false);
+          setSwitchProgress(0);
+          setSwitchWorkflowName('');
+        }, 300);
+        isSwitchingRef.current = false;
+      }
+    },
+    [accessToken, hydrateInteractiveWorkspaceState, isBlockingHydration, t],
+  );
 
   useEffect(() => {
     const handleWorkflowSwitch = (event: Event) => {
@@ -196,13 +206,15 @@ export function useAppWorkflowController({
     completeBlockingHydrationVisualGate();
 
     try {
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        try {
-          window.dispatchEvent(new Event('hydration:components:ready'));
-        } catch {
-          // ignore
-        }
-      }));
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          try {
+            window.dispatchEvent(new Event('hydration:components:ready'));
+          } catch {
+            // ignore
+          }
+        }),
+      );
     } catch {
       // ignore
     }
@@ -234,7 +246,13 @@ export function useAppWorkflowController({
     if (!currentRouteUsesWorkflowCanvas) {
       completeBlockingHydrationVisualGate();
     }
-  }, [beginBlockingHydrationVisualGate, completeBlockingHydrationVisualGate, currentRouteUsesWorkflowCanvas, isBlockingHydration, isPreparingBlockingHydration]);
+  }, [
+    beginBlockingHydrationVisualGate,
+    completeBlockingHydrationVisualGate,
+    currentRouteUsesWorkflowCanvas,
+    isBlockingHydration,
+    isPreparingBlockingHydration,
+  ]);
 
   return {
     isSwitchingWorkflow,

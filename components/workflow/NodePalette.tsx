@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import { RobotId } from '../../types';
 import { Button } from '../UI';
-import { 
-  WrenchIcon, 
-  AntennaIcon, 
-  FileAnalysisIcon, 
-  ClockIcon, 
+import {
+  WrenchIcon,
+  AntennaIcon,
+  FileAnalysisIcon,
+  ClockIcon,
   MonitoringIcon,
   PlusIcon,
   ChevronDownIcon,
-  ChevronRightIcon
+  ChevronRightIcon,
 } from '../Icons';
 
 interface NodeTemplate {
@@ -17,7 +17,7 @@ interface NodeTemplate {
   name: string;
   description: string;
   robotId: RobotId;
-  icon: React.ComponentType<any>;
+  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
   defaultConfig: Record<string, any>;
 }
 
@@ -39,19 +39,19 @@ const NODE_TEMPLATES: NodeTemplate[] = [
     defaultConfig: {
       llmProvider: 'Gemini',
       model: 'gemini-pro',
-      systemPrompt: 'Tu es un assistant IA intelligent et utile.'
-    }
+      systemPrompt: 'Tu es un assistant IA intelligent et utile.',
+    },
   },
   {
     id: 'archi-orchestrator',
     name: 'Orchestrateur',
-    description: 'Coordonne l\'exécution de plusieurs agents',
+    description: "Coordonne l'exécution de plusieurs agents",
     robotId: RobotId.Archi,
     icon: WrenchIcon,
     defaultConfig: {
       orchestrationType: 'sequential',
-      maxConcurrency: 3
-    }
+      maxConcurrency: 3,
+    },
   },
 
   // Com Nodes
@@ -65,8 +65,8 @@ const NODE_TEMPLATES: NodeTemplate[] = [
       method: 'GET',
       url: '',
       headers: {},
-      timeout: 30000
-    }
+      timeout: 30000,
+    },
   },
   {
     id: 'com-webhook',
@@ -77,8 +77,8 @@ const NODE_TEMPLATES: NodeTemplate[] = [
     defaultConfig: {
       path: '/webhook',
       method: 'POST',
-      authentication: 'none'
-    }
+      authentication: 'none',
+    },
   },
 
   // Phil Nodes
@@ -91,8 +91,8 @@ const NODE_TEMPLATES: NodeTemplate[] = [
     defaultConfig: {
       inputFormat: 'json',
       outputFormat: 'json',
-      validationRules: {}
-    }
+      validationRules: {},
+    },
   },
   {
     id: 'phil-file-processor',
@@ -102,8 +102,8 @@ const NODE_TEMPLATES: NodeTemplate[] = [
     icon: FileAnalysisIcon,
     defaultConfig: {
       supportedFormats: ['pdf', 'txt', 'csv', 'json'],
-      maxFileSize: '10MB'
-    }
+      maxFileSize: '10MB',
+    },
   },
 
   // Tim Nodes
@@ -115,8 +115,8 @@ const NODE_TEMPLATES: NodeTemplate[] = [
     icon: ClockIcon,
     defaultConfig: {
       cronExpression: '0 9 * * *',
-      timezone: 'Europe/Paris'
-    }
+      timezone: 'Europe/Paris',
+    },
   },
   {
     id: 'tim-delay',
@@ -126,21 +126,21 @@ const NODE_TEMPLATES: NodeTemplate[] = [
     icon: ClockIcon,
     defaultConfig: {
       delaySeconds: 5,
-      delayType: 'fixed'
-    }
+      delayType: 'fixed',
+    },
   },
 
   // Bos Nodes
   {
     id: 'bos-monitor',
     name: 'Monitoring',
-    description: 'Surveille l\'exécution du workflow',
+    description: "Surveille l'exécution du workflow",
     robotId: RobotId.Bos,
     icon: MonitoringIcon,
     defaultConfig: {
       metrics: ['execution_time', 'error_rate', 'cost'],
-      alertThresholds: {}
-    }
+      alertThresholds: {},
+    },
   },
   {
     id: 'bos-error-handler',
@@ -151,41 +151,48 @@ const NODE_TEMPLATES: NodeTemplate[] = [
     defaultConfig: {
       retryAttempts: 3,
       retryDelay: 1000,
-      fallbackAction: 'log'
-    }
-  }
+      fallbackAction: 'log',
+    },
+  },
 ];
 
 const getRobotColor = (robotId: RobotId): string => {
   switch (robotId) {
-    case RobotId.Archi: return 'border-cyan-500 text-cyan-400';
-    case RobotId.Com: return 'border-orange-500 text-orange-400';
-    case RobotId.Phil: return 'border-green-500 text-green-400';
-    case RobotId.Tim: return 'border-yellow-500 text-yellow-400';
-    case RobotId.Bos: return 'border-purple-500 text-purple-400';
-    default: return 'border-gray-500 text-gray-400';
+    case RobotId.Archi:
+      return 'border-cyan-500 text-cyan-400';
+    case RobotId.Com:
+      return 'border-orange-500 text-orange-400';
+    case RobotId.Phil:
+      return 'border-green-500 text-green-400';
+    case RobotId.Tim:
+      return 'border-yellow-500 text-yellow-400';
+    case RobotId.Bos:
+      return 'border-purple-500 text-purple-400';
+    default:
+      return 'border-gray-500 text-gray-400';
   }
 };
 
 const getRobotIcon = (robotId: RobotId) => {
   switch (robotId) {
-    case RobotId.Archi: return WrenchIcon;
-    case RobotId.Com: return AntennaIcon;
-    case RobotId.Phil: return FileAnalysisIcon;
-    case RobotId.Tim: return ClockIcon;
-    case RobotId.Bos: return MonitoringIcon;
-    default: return PlusIcon;
+    case RobotId.Archi:
+      return WrenchIcon;
+    case RobotId.Com:
+      return AntennaIcon;
+    case RobotId.Phil:
+      return FileAnalysisIcon;
+    case RobotId.Tim:
+      return ClockIcon;
+    case RobotId.Bos:
+      return MonitoringIcon;
+    default:
+      return PlusIcon;
   }
 };
 
-export const NodePalette: React.FC<NodePaletteProps> = ({
-  onNodeAdd,
-  currentRobot,
-  isOpen,
-  onToggle
-}) => {
+export const NodePalette: React.FC<NodePaletteProps> = ({ onNodeAdd, currentRobot, isOpen, onToggle }) => {
   const [expandedRobots, setExpandedRobots] = useState<Set<RobotId>>(
-    new Set([RobotId.Archi]) // Archi expanded by default
+    new Set([RobotId.Archi]), // Archi expanded by default
   );
 
   const toggleRobotExpansion = (robotId: RobotId) => {
@@ -198,29 +205,32 @@ export const NodePalette: React.FC<NodePaletteProps> = ({
     setExpandedRobots(newExpanded);
   };
 
-  const groupedTemplates = NODE_TEMPLATES.reduce((acc, template) => {
-    if (!acc[template.robotId]) {
-      acc[template.robotId] = [];
-    }
-    acc[template.robotId].push(template);
-    return acc;
-  }, {} as Record<RobotId, NodeTemplate[]>);
+  const groupedTemplates = NODE_TEMPLATES.reduce(
+    (acc, template) => {
+      if (!acc[template.robotId]) {
+        acc[template.robotId] = [];
+      }
+      acc[template.robotId].push(template);
+      return acc;
+    },
+    {} as Record<RobotId, NodeTemplate[]>,
+  );
 
   const handleDragStart = (event: React.DragEvent, template: NodeTemplate) => {
-    event.dataTransfer.setData('application/reactflow', JSON.stringify({
-      type: 'nodeTemplate',
-      template
-    }));
+    event.dataTransfer.setData(
+      'application/reactflow',
+      JSON.stringify({
+        type: 'nodeTemplate',
+        template,
+      }),
+    );
     event.dataTransfer.effectAllowed = 'move';
   };
 
   if (!isOpen) {
     return (
       <div className="fixed left-4 top-20 z-50">
-        <Button
-          onClick={onToggle}
-          className="bg-gray-800 border border-gray-600 text-gray-300 hover:bg-gray-700 p-2"
-        >
+        <Button onClick={onToggle} className="bg-gray-800 border border-gray-600 text-gray-300 hover:bg-gray-700 p-2">
           <PlusIcon className="w-5 h-5" />
         </Button>
       </div>
@@ -232,11 +242,7 @@ export const NodePalette: React.FC<NodePaletteProps> = ({
       {/* Header */}
       <div className="p-4 border-b border-gray-700 flex items-center justify-between">
         <h3 className="text-white font-semibold">Palette de Nodes</h3>
-        <Button
-          onClick={onToggle}
-          variant="secondary"
-          className="p-1 text-gray-400 hover:text-white"
-        >
+        <Button onClick={onToggle} variant="secondary" className="p-1 text-gray-400 hover:text-white">
           <ChevronRightIcon className="w-4 h-4" />
         </Button>
       </div>
@@ -260,11 +266,7 @@ export const NodePalette: React.FC<NodePaletteProps> = ({
                   <span className="font-medium">{robotId}</span>
                   <span className="text-xs text-gray-500">({templates.length})</span>
                 </div>
-                {isExpanded ? (
-                  <ChevronDownIcon className="w-4 h-4" />
-                ) : (
-                  <ChevronRightIcon className="w-4 h-4" />
-                )}
+                {isExpanded ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronRightIcon className="w-4 h-4" />}
               </button>
 
               {/* Robot Nodes */}
@@ -283,12 +285,8 @@ export const NodePalette: React.FC<NodePaletteProps> = ({
                         <div className="flex items-start space-x-3">
                           <TemplateIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
                           <div className="flex-1 min-w-0">
-                            <div className="text-white text-sm font-medium truncate">
-                              {template.name}
-                            </div>
-                            <div className="text-gray-400 text-xs mt-1 leading-relaxed">
-                              {template.description}
-                            </div>
+                            <div className="text-white text-sm font-medium truncate">{template.name}</div>
+                            <div className="text-gray-400 text-xs mt-1 leading-relaxed">{template.description}</div>
                           </div>
                         </div>
                       </div>

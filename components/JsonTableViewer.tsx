@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { useLocalization } from '../hooks/useLocalization';
 
 interface JsonTableViewerProps {
-  data: any;
+  data: unknown;
 }
 
 export const JsonTableViewer: React.FC<JsonTableViewerProps> = ({ data }) => {
@@ -22,13 +22,15 @@ export const JsonTableViewer: React.FC<JsonTableViewerProps> = ({ data }) => {
       // Assume first element is object to infer columns
       const firstRow = parsed[0];
       if (typeof firstRow !== 'object' || firstRow === null) {
-        return { isArray: true, rows: parsed.map((v, i) => ({ index: i, value: String(v) })), columns: [t('json_table_index'), t('json_table_value')] };
+        return {
+          isArray: true,
+          rows: parsed.map((v, i) => ({ index: i, value: String(v) })),
+          columns: [t('json_table_index'), t('json_table_value')],
+        };
       }
 
       const cols = Object.keys(firstRow);
-      const tableRows = parsed.map((row, idx) =>
-        cols.reduce((acc, col) => ({ ...acc, [col]: row[col] }), {})
-      );
+      const tableRows = parsed.map((row, idx) => cols.reduce((acc, col) => ({ ...acc, [col]: row[col] }), {}));
 
       return { isArray: true, rows: tableRows, columns: cols };
     } catch (error) {
@@ -38,18 +40,12 @@ export const JsonTableViewer: React.FC<JsonTableViewerProps> = ({ data }) => {
 
   if (!isArray) {
     return (
-      <div className="text-gray-400 text-sm p-4 text-center">
-        ⚠️ Ce n'est pas un tableau - c'est un objet unique ou une valeur scalaire
-      </div>
+      <div className="text-gray-400 text-sm p-4 text-center">⚠️ Ce n'est pas un tableau - c'est un objet unique ou une valeur scalaire</div>
     );
   }
 
   if (rows.length === 0) {
-    return (
-      <div className="text-gray-400 text-sm p-4 text-center">
-        📊 Tableau vide
-      </div>
-    );
+    return <div className="text-gray-400 text-sm p-4 text-center">📊 Tableau vide</div>;
   }
 
   return (

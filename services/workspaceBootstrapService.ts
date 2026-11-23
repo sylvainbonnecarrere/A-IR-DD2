@@ -16,10 +16,10 @@ export interface WorkspaceSnapshot {
       panY: number;
     };
   } | null;
-  nodes?: any[];
-  edges?: any[];
-  agentInstances?: any[];
-  agentPrototypes?: any[];
+  nodes?: V2WorkflowNode[];
+  edges?: V2WorkflowEdge[];
+  agentInstances?: AgentInstance[];
+  agentPrototypes?: Agent[];
 }
 
 export interface WorkspaceBootstrapIssue {

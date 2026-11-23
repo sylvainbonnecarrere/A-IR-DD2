@@ -304,8 +304,8 @@ export const importCustomTemplates = (jsonString: string): number => {
  */
 const convertCustomTemplateToDTO = (custom: CustomTemplate, userId: string): CreateTemplatePayload => {
   // Extraire le modèle LLM (custom.model → custom.template.llmModel)
-  const llmModel = (custom as any).model || 'gpt-4o';
-  const llmProvider = (custom as any).llmProvider || 'openai';
+  const llmModel = (custom as unknown as { model?: string }).model || 'gpt-4o';
+  const llmProvider = (custom as unknown as { llmProvider?: string }).llmProvider || 'openai';
 
   return {
     name: custom.name,

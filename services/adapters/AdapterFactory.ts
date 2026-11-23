@@ -42,12 +42,12 @@ export function createAdapter(provider: LLMProvider, config: LLMConfig | null, m
     return null;
   }
 
-  const endpoint: string = (config as any)?.localEndpoint || (config as any)?.apiKey || 'http://localhost:1234';
+  const endpoint: string = config?.localEndpoint || config?.apiKey || 'http://localhost:1234';
 
   return new LocalLLMAdapter(provider, {
     endpoint,
     model,
-    apiKey: (config as any)?.apiKey,
+    apiKey: config?.apiKey,
     authToken,
   });
 }

@@ -58,7 +58,7 @@ function readObject<T>(...values: unknown[]): T | undefined {
   return undefined;
 }
 
-function readList(...values: unknown[]): any[] {
+function readList(...values: unknown[]): unknown[] {
   for (const value of values) {
     if (Array.isArray(value)) {
       return value;

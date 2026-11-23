@@ -1,6 +1,17 @@
 import React, { Suspense, lazy, useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '../UI';
-import { CloseIcon, UploadIcon, SendIcon, ImageIcon, EditIcon, ExpandIcon, ErrorIcon, HistorySynthesisIcon, ChevronUpIcon, ChevronDownIcon } from '../Icons';
+import {
+  CloseIcon,
+  UploadIcon,
+  SendIcon,
+  ImageIcon,
+  EditIcon,
+  ExpandIcon,
+  ErrorIcon,
+  HistorySynthesisIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
+} from '../Icons';
 import { ToolCallBlock } from '../workflow/ToolCallBlock';
 import { RunStatusBadge } from '../workflow/RunStatusBadge';
 import { ShieldAlertIcon } from '../Icons';
@@ -15,7 +26,11 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ChatMessage, Agent, LLMCapability, WorkflowNode, AgentInstance, MapsPanelPreloadedResults } from '../../types';
 import { ConfirmationModal } from './ConfirmationModal';
 import { WebSearchParamsModal } from './WebSearchParamsModal';
-import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages } from '../../services/persistedChatMessages';
+import {
+  mapPersistedChatMessages,
+  mergePersistedAndRuntimeMessages,
+  type PersistedChatMessage,
+} from '../../services/persistedChatMessages';
 import { persistInstanceWebSearchParams } from '../../services/webSearchParamsConfigService';
 import apiClient from '../../utils/apiClient';
 import { shouldSuppressVisualToolResult } from '../../utils/toolResultVisibility';
@@ -36,14 +51,34 @@ const LazyMapsGroundingConfigPanel = lazy(async () => {
 
 // Minimize icon
 const MinimizeIcon = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    {...props}
+  >
     <line x1="5" y1="12" x2="19" y2="12"></line>
   </svg>
 );
 
 // Video icon Arc-LLM
 const VideoIcon = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
     <polygon points="23 7 16 12 23 17 23 7"></polygon>
     <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
   </svg>
@@ -51,7 +86,18 @@ const VideoIcon = (props: React.SVGProps<SVGSVGElement>) => (
 
 // Map icon Arc-LLM
 const MapIcon = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
     <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
     <line x1="8" y1="2" x2="8" y2="18"></line>
     <line x1="16" y1="6" x2="16" y2="22"></line>
@@ -60,7 +106,18 @@ const MapIcon = (props: React.SVGProps<SVGSVGElement>) => (
 
 // Web Search icon Arc-LLM
 const WebSearchIcon = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
     <circle cx="11" cy="11" r="8"></circle>
     <path d="m21 21-4.35-4.35"></path>
     <path d="M11 1v2"></path>
@@ -76,7 +133,13 @@ interface FullscreenChatModalProps {
   onOpenVideoPanel?: (nodeId: string) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
-  onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
+  onOpenImageModificationPanel?: (
+    nodeId: string,
+    sourceImage: string,
+    agent?: Agent,
+    agentInstance?: AgentInstance,
+    mimeType?: string,
+  ) => void;
   onImageGenerated?: (nodeId: string, imageBase64: string) => void;
 }
 
@@ -87,7 +150,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   onOpenMapsPanel,
   onOpenFullscreen,
   onOpenImageModificationPanel,
-  onImageGenerated
+  onImageGenerated,
 }) => {
   const {
     fullscreenChatNodeId,
@@ -98,7 +161,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     addNodeMessage,
     setNodeMessages,
     setNodeExecuting,
-    isNodeExecuting
+    isNodeExecuting,
   } = useRuntimeStore();
 
   const { agents, agentInstances, updateInstanceConfig } = useDesignStore();
@@ -130,55 +193,57 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
       return null;
     }
 
-    const exactMatch = agentInstances.find(inst => inst.id === fullscreenChatNodeId);
+    const exactMatch = agentInstances.find((inst) => inst.id === fullscreenChatNodeId);
     if (exactMatch) {
       return exactMatch.id;
     }
 
     const normalizedNodeId = fullscreenChatNodeId.replace(/^node-/, '');
-    const prefixedMatch = agentInstances.find(inst => inst.id === normalizedNodeId);
+    const prefixedMatch = agentInstances.find((inst) => inst.id === normalizedNodeId);
     return prefixedMatch?.id ?? null;
   }, [fullscreenChatAgentInstance, fullscreenChatNodeId, agentInstances]);
 
   // Read agentInstance from store (triggers re-render when config is updated)
   const agentInstance = inferredInstanceId
-    ? agentInstances.find(inst => inst.id === inferredInstanceId) || fullscreenChatAgentInstance
+    ? agentInstances.find((inst) => inst.id === inferredInstanceId) || fullscreenChatAgentInstance
     : fullscreenChatAgentInstance;
-  
+
   const messages = fullscreenChatNodeId ? getNodeMessages(fullscreenChatNodeId) : [];
   const isLoading = fullscreenChatNodeId ? isNodeExecuting(fullscreenChatNodeId) : false;
 
-  const llmConfigs = useRuntimeStore(state => state.llmConfigs);
+  const llmConfigs = useRuntimeStore((state) => state.llmConfigs);
 
   // ⭐ US-J7-13: statut du run de l'instance dans la fenêtre agrandie + modales de commandes
   const fullscreenWorkflowId = useDesignStore((state) => state.currentWorkflowId);
   const fullscreenRunStatus = useInstanceRunStatus(inferredInstanceId);
-  const runCommandModals = useRunCommandModals(fullscreenWorkflowId, () => { /* refresh via événements workspace */ });
+  const runCommandModals = useRunCommandModals(fullscreenWorkflowId, () => {
+    /* refresh via événements workspace */
+  });
 
   // Read prototype from store to ensure it's fresh (not stale from Runtime prop)
   // This is critical: if user edits LLM capabilities, we need the latest prototype
-  const agentPrototype = agentInstance?.prototypeId
-    ? agents.find(a => a.id === agentInstance.prototypeId)
-    : fullscreenChatAgent;
+  const agentPrototype = agentInstance?.prototypeId ? agents.find((a) => a.id === agentInstance.prototypeId) : fullscreenChatAgent;
 
   // Build effective agent config from instance and prototype
-  const agent: Agent | null = agentInstance && agentPrototype
-    ? {
-        ...agentPrototype,
-        ...(agentInstance.configuration_json ?? {}),
-        webSearchParams: agentInstance.configuration_json?.webSearchParams || agentPrototype.webSearchParams,
-        historyConfig: agentInstance.configuration_json?.historyConfig 
-          || agentPrototype.historyConfig
-      }
-    : agentPrototype || null;
+  const agent: Agent | null =
+    agentInstance && agentPrototype
+      ? {
+          ...agentPrototype,
+          ...(agentInstance.configuration_json ?? {}),
+          webSearchParams: agentInstance.configuration_json?.webSearchParams || agentPrototype.webSearchParams,
+          historyConfig: agentInstance.configuration_json?.historyConfig || agentPrototype.historyConfig,
+        }
+      : agentPrototype || null;
 
-  const hasWebSearchPyTool = useDesignStore((state) => selectResolvedAgentHasToolNamed(
-    state,
-    agentPrototype ?? fullscreenChatAgent,
-    inferredInstanceId ?? undefined,
-    functions,
-    'web_search_py'
-  ));
+  const hasWebSearchPyTool = useDesignStore((state) =>
+    selectResolvedAgentHasToolNamed(
+      state,
+      agentPrototype ?? fullscreenChatAgent,
+      inferredInstanceId ?? undefined,
+      functions,
+      'web_search_py',
+    ),
+  );
 
   const handleSaveWebSearchParams = async (webSearchParams: NonNullable<Agent['webSearchParams']>) => {
     if (!agentInstance?.id || !agentInstance.configuration_json) {
@@ -193,11 +258,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
         webSearchParams,
       };
 
-      await persistInstanceWebSearchParams(
-        { ...agentInstance, configuration_json: updatedConfig },
-        webSearchParams,
-        accessToken
-      );
+      await persistInstanceWebSearchParams({ ...agentInstance, configuration_json: updatedConfig }, webSearchParams, accessToken);
 
       updateInstanceConfig(agentInstance.id, updatedConfig);
       setIsWebSearchParamsModalOpen(false);
@@ -205,10 +266,14 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
       setIsSavingWebSearchParams(false);
     }
   };
-  
+
   const instanceId = agentInstance?.id;
 
-  const { handleSendMessage: sendMessageToLLM, loadingMessage, isHistorySynthesisActive } = useAgentChat({
+  const {
+    handleSendMessage: sendMessageToLLM,
+    loadingMessage,
+    isHistorySynthesisActive,
+  } = useAgentChat({
     nodeId: fullscreenChatNodeId || '',
     agent,
     llmConfigs,
@@ -216,7 +281,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     nativeToolsConfig: { webFetch: webFetchEnabled, webSearch: webSearchEnabled },
     instanceId,
     isAuthenticated,
-    accessToken
+    accessToken,
   });
 
   // Load chat history from backend when modal opens
@@ -228,8 +293,8 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
       }
 
       try {
-        const response = await apiClient.get<{ chatMessages?: any[] }>(`/api/agent-instances/${instanceId}`);
-        const persistedMessages = mapPersistedChatMessages(response.data?.chatMessages || []);
+        const response = await apiClient.get<{ chatMessages?: unknown[] }>(`/api/agent-instances/${instanceId}`);
+        const persistedMessages = mapPersistedChatMessages((response.data?.chatMessages || []) as PersistedChatMessage[]);
 
         if (persistedMessages.length > 0) {
           const existingMessages = getNodeMessages(fullscreenChatNodeId) || [];
@@ -262,9 +327,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     const questions = Array.from(container.querySelectorAll<HTMLElement>('[data-sender="user"]'));
     if (questions.length === 0) return;
     const current = currentQuestionIndexRef.current >= 0 ? currentQuestionIndexRef.current : questions.length - 1;
-    const target = direction === 'prev'
-      ? Math.max(0, current - 1)
-      : Math.min(questions.length - 1, current + 1);
+    const target = direction === 'prev' ? Math.max(0, current - 1) : Math.min(questions.length - 1, current + 1);
     currentQuestionIndexRef.current = target;
     questions[target].scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, []);
@@ -281,7 +344,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   // ⭐ FIX: Récupérer model et provider depuis l'agent passé
   const agentModel = agent?.model || 'Unknown Model';
   const agentProvider = agent?.llmProvider || 'Unknown Provider';
-  
+
   const llmDisplayString = `${agentProvider} • ${agentModel}`;
 
   const handleClose = () => {
@@ -356,7 +419,12 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     }
 
     return (
-      <div key={message.id} data-message-id={message.id} data-sender={message.sender} className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+      <div
+        key={message.id}
+        data-message-id={message.id}
+        data-sender={message.sender}
+        className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}
+      >
         {isToolCall && message.toolCallRecord && (
           <div className="w-full mr-12">
             <ToolCallBlock toolCall={message.toolCallRecord} defaultExpanded={false} />
@@ -380,76 +448,79 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
         )}
 
         {!isToolResult && !isToolCall && (
-        <div className={`max-w-3xl px-4 py-2 rounded-lg ${isUser
-          ? 'bg-indigo-600 text-white ml-12'
-          : isError
-            ? 'bg-red-600/20 text-red-200 mr-12'
-            : 'bg-gray-700 text-gray-100 mr-12'
-          }`}>
-          {/* Extended Thinking display (collapsible) */}
-          {message.thinking && showThinking && (
-            <details className="mb-2 p-2 bg-purple-900/20 border border-purple-500/30 rounded">
-              <summary className="cursor-pointer text-xs font-semibold text-purple-400 hover:text-purple-300">
-                💭 {t('extended_thinking') || 'Extended Thinking'}
-              </summary>
-              <div className="mt-2 text-xs text-purple-200 whitespace-pre-wrap">
-                {message.thinking}
-              </div>
-            </details>
-          )}
+          <div
+            className={`max-w-3xl px-4 py-2 rounded-lg ${
+              isUser ? 'bg-indigo-600 text-white ml-12' : isError ? 'bg-red-600/20 text-red-200 mr-12' : 'bg-gray-700 text-gray-100 mr-12'
+            }`}
+          >
+            {/* Extended Thinking display (collapsible) */}
+            {message.thinking && showThinking && (
+              <details className="mb-2 p-2 bg-purple-900/20 border border-purple-500/30 rounded">
+                <summary className="cursor-pointer text-xs font-semibold text-purple-400 hover:text-purple-300">
+                  💭 {t('extended_thinking') || 'Extended Thinking'}
+                </summary>
+                <div className="mt-2 text-xs text-purple-200 whitespace-pre-wrap">{message.thinking}</div>
+              </details>
+            )}
 
-          <div className="whitespace-pre-wrap break-words">
-            {message.text}
-          </div>
-          {message.image && (
-            <div className="mt-2 relative group">
-              <img
-                src={`data:${message.mimeType};base64,${message.image}`}
-                alt="Uploaded content"
-                className="max-w-sm rounded cursor-pointer"
-              />
-              
-              {/* Overlay buttons - appear on hover with gaming style */}
-              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 
-                            transition-opacity duration-200 rounded flex items-center justify-center gap-3">
-                {/* Fullscreen button */}
-                <button
-                  onClick={() => onOpenFullscreen?.(message.image!, message.mimeType || 'image/png')}
-                  className="p-3 bg-cyan-500/20 hover:bg-cyan-500/40 border-2 border-cyan-400/50 
+            <div className="whitespace-pre-wrap break-words">{message.text}</div>
+            {message.image && (
+              <div className="mt-2 relative group">
+                <img
+                  src={`data:${message.mimeType};base64,${message.image}`}
+                  alt="Uploaded content"
+                  className="max-w-sm rounded cursor-pointer"
+                />
+
+                {/* Overlay buttons - appear on hover with gaming style */}
+                <div
+                  className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 
+                            transition-opacity duration-200 rounded flex items-center justify-center gap-3"
+                >
+                  {/* Fullscreen button */}
+                  <button
+                    onClick={() => onOpenFullscreen?.(message.image!, message.mimeType || 'image/png')}
+                    className="p-3 bg-cyan-500/20 hover:bg-cyan-500/40 border-2 border-cyan-400/50 
                            hover:border-cyan-400 rounded-lg transition-all duration-200 
                            hover:scale-110 hover:shadow-lg hover:shadow-cyan-500/50
                            text-cyan-300 hover:text-cyan-100"
-                  title={t('fullscreen')}
-                >
-                  <ExpandIcon width={20} height={20} />
-                </button>
+                    title={t('fullscreen')}
+                  >
+                    <ExpandIcon width={20} height={20} />
+                  </button>
 
-                {/* Edit button - only if agent has ImageModification capability */}
-                {agent?.capabilities?.includes(LLMCapability.ImageModification) && (
-                  <button
-                    onClick={() => {
-                      if (fullscreenChatNodeId && onOpenImageModificationPanel) {
-                        onOpenImageModificationPanel(fullscreenChatNodeId, message.image!, fullscreenChatAgent, fullscreenChatAgentInstance, message.mimeType || 'image/png');
-                      } else {
-                        console.warn('[FullscreenChatModal] Cannot call onOpenImageModificationPanel:', { 
-                          hasNodeId: !!fullscreenChatNodeId, 
-                          hasCallback: !!onOpenImageModificationPanel 
-                        });
-                      }
-                    }}
-                    className="p-3 bg-purple-500/20 hover:bg-purple-500/40 border-2 border-purple-400/50 
+                  {/* Edit button - only if agent has ImageModification capability */}
+                  {agent?.capabilities?.includes(LLMCapability.ImageModification) && (
+                    <button
+                      onClick={() => {
+                        if (fullscreenChatNodeId && onOpenImageModificationPanel) {
+                          onOpenImageModificationPanel(
+                            fullscreenChatNodeId,
+                            message.image!,
+                            fullscreenChatAgent,
+                            fullscreenChatAgentInstance,
+                            message.mimeType || 'image/png',
+                          );
+                        } else {
+                          console.warn('[FullscreenChatModal] Cannot call onOpenImageModificationPanel:', {
+                            hasNodeId: !!fullscreenChatNodeId,
+                            hasCallback: !!onOpenImageModificationPanel,
+                          });
+                        }
+                      }}
+                      className="p-3 bg-purple-500/20 hover:bg-purple-500/40 border-2 border-purple-400/50 
                              hover:border-purple-400 rounded-lg transition-all duration-200 
                              hover:scale-110 hover:shadow-lg hover:shadow-purple-500/50
                              text-purple-300 hover:text-purple-100"
-                    title={t('edit_image')}
-                  >
-                    <EditIcon width={20} height={20} />
-                  </button>
-                )}
+                      title={t('edit_image')}
+                    >
+                      <EditIcon width={20} height={20} />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
         )}
       </div>
     );
@@ -460,23 +531,20 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
       {/* ⭐ US-J7-13: modales de commandes du run (détail / reset & relance) */}
       {runCommandModals.modals}
       {/* Main container - Split-View Layout with Dynamic Expansion */}
-      <div className={`flex flex-col bg-gray-800 rounded-lg shadow-2xl transition-all duration-500 ease-in-out ${
-        activeSidePanel !== 'none' 
-          ? 'w-[98vw] h-[98vh] max-w-none' 
-          : 'w-full h-full max-w-6xl'
-      }`}>
-
+      <div
+        className={`flex flex-col bg-gray-800 rounded-lg shadow-2xl transition-all duration-500 ease-in-out ${
+          activeSidePanel !== 'none' ? 'w-[98vw] h-[98vh] max-w-none' : 'w-full h-full max-w-6xl'
+        }`}
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-700 bg-gradient-to-r from-gray-900/80 via-gray-800/60 to-gray-900/80 rounded-t-lg backdrop-blur-sm">
           <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full shadow-lg transition-all duration-200 ${isLoading ? 'bg-yellow-400 animate-pulse shadow-yellow-400/60' : 'bg-green-400 shadow-green-400/60'}`}></div>
+            <div
+              className={`w-3 h-3 rounded-full shadow-lg transition-all duration-200 ${isLoading ? 'bg-yellow-400 animate-pulse shadow-yellow-400/60' : 'bg-green-400 shadow-green-400/60'}`}
+            ></div>
             <div>
-              <h2 className="text-xl font-semibold text-white">
-                {agentName}
-              </h2>
-              <span className="text-xs text-gray-400">
-                {llmDisplayString}
-              </span>
+              <h2 className="text-xl font-semibold text-white">{agentName}</h2>
+              <span className="text-xs text-gray-400">{llmDisplayString}</span>
             </div>
             {/* ⭐ US-J7-13: badge de statut du run dans la fenêtre agrandie + Reset & Relance si quarantaine */}
             <RunStatusBadge
@@ -484,7 +552,10 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
               onOpenRunDetail={runCommandModals.openRunDetail}
               onOpenResetAndRelaunch={runCommandModals.requestResetAndRelaunch}
             />
-            {fullscreenRunStatus && (fullscreenRunStatus.status === 'worker_lost' || fullscreenRunStatus.status === 'quarantined' || fullscreenRunStatus.lockHeld) ? (
+            {fullscreenRunStatus &&
+            (fullscreenRunStatus.status === 'worker_lost' ||
+              fullscreenRunStatus.status === 'quarantined' ||
+              fullscreenRunStatus.lockHeld) ? (
               <button
                 type="button"
                 onClick={() => fullscreenRunStatus.runId && runCommandModals.requestResetAndRelaunch(fullscreenRunStatus.runId)}
@@ -520,68 +591,68 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
 
         {/* Main content area - Split-View (Chat + Side Panel) */}
         <div className={`flex flex-1 overflow-hidden`}>
-          
           {/* Chat section - Takes full width or flex-1 if panel is open */}
-          <div className={`flex flex-col ${activeSidePanel !== 'none' ? 'flex-1' : 'w-full'} border-r ${activeSidePanel !== 'none' ? 'border-cyan-500/30' : 'border-transparent'}`}>
-            
+          <div
+            className={`flex flex-col ${activeSidePanel !== 'none' ? 'flex-1' : 'w-full'} border-r ${activeSidePanel !== 'none' ? 'border-cyan-500/30' : 'border-transparent'}`}
+          >
             {/* Messages Area (contenu des inférences) — wrapper relatif pour les flèches de nav */}
             <div className="relative flex-1 min-h-0">
-            <div ref={messagesContainerRef} className="h-full overflow-y-auto p-6 space-y-4" data-testid="inference-content">
-              {messages.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-gray-400">
-                  <div className="text-center">
-                    <div className="text-4xl mb-2">💬</div>
-                    <p>Commencez une conversation avec {agentName}</p>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {messages.map(renderMessage)}
-                  <div ref={messagesEndRef} />
-                </>
-              )}
-
-              {isLoading && (
-                <div className="flex justify-start mb-4">
-                  <div className="bg-gray-700 text-gray-100 mr-12 px-4 py-2 rounded-lg">
-                    <div className="flex items-center space-x-2">
-                      <div className="animate-spin w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full"></div>
-                      {isHistorySynthesisActive && (
-                        <HistorySynthesisIcon data-testid="history-synthesis-icon" className="w-4 h-4 text-cyan-300 animate-pulse" />
-                      )}
-                      <span>{loadingMessage || 'Agent en cours de réflexion...'}</span>
+              <div ref={messagesContainerRef} className="h-full overflow-y-auto p-6 space-y-4" data-testid="inference-content">
+                {messages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-gray-400">
+                    <div className="text-center">
+                      <div className="text-4xl mb-2">💬</div>
+                      <p>Commencez une conversation avec {agentName}</p>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
+                ) : (
+                  <>
+                    {messages.map(renderMessage)}
+                    <div ref={messagesEndRef} />
+                  </>
+                )}
 
-            {/* ⭐ Flèches futuristes bleu clair (charte cyan) coin bas droite du contenu inférences :
-                ▲ = question précédente, ▼ = question suivante */}
-            {hasUserQuestions ? (
-              <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1.5" data-testid="inference-nav-arrows">
-                <button
-                  type="button"
-                  onClick={() => goToQuestion('prev')}
-                  aria-label={t('chat_inference_nav_prev')}
-                  title={t('chat_inference_nav_prev')}
-                  data-testid="inference-nav-prev"
-                  className="p-2 rounded-lg border-2 border-cyan-400/50 bg-cyan-500/20 text-cyan-300 hover:text-cyan-100 hover:border-cyan-400 hover:bg-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/50 hover:scale-110 active:scale-95 transition-all duration-200"
-                >
-                  <ChevronUpIcon width={18} height={18} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => goToQuestion('next')}
-                  aria-label={t('chat_inference_nav_next')}
-                  title={t('chat_inference_nav_next')}
-                  data-testid="inference-nav-next"
-                  className="p-2 rounded-lg border-2 border-cyan-400/50 bg-cyan-500/20 text-cyan-300 hover:text-cyan-100 hover:border-cyan-400 hover:bg-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/50 hover:scale-110 active:scale-95 transition-all duration-200"
-                >
-                  <ChevronDownIcon width={18} height={18} />
-                </button>
+                {isLoading && (
+                  <div className="flex justify-start mb-4">
+                    <div className="bg-gray-700 text-gray-100 mr-12 px-4 py-2 rounded-lg">
+                      <div className="flex items-center space-x-2">
+                        <div className="animate-spin w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full"></div>
+                        {isHistorySynthesisActive && (
+                          <HistorySynthesisIcon data-testid="history-synthesis-icon" className="w-4 h-4 text-cyan-300 animate-pulse" />
+                        )}
+                        <span>{loadingMessage || 'Agent en cours de réflexion...'}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            ) : null}
+
+              {/* ⭐ Flèches futuristes bleu clair (charte cyan) coin bas droite du contenu inférences :
+                ▲ = question précédente, ▼ = question suivante */}
+              {hasUserQuestions ? (
+                <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1.5" data-testid="inference-nav-arrows">
+                  <button
+                    type="button"
+                    onClick={() => goToQuestion('prev')}
+                    aria-label={t('chat_inference_nav_prev')}
+                    title={t('chat_inference_nav_prev')}
+                    data-testid="inference-nav-prev"
+                    className="p-2 rounded-lg border-2 border-cyan-400/50 bg-cyan-500/20 text-cyan-300 hover:text-cyan-100 hover:border-cyan-400 hover:bg-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/50 hover:scale-110 active:scale-95 transition-all duration-200"
+                  >
+                    <ChevronUpIcon width={18} height={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => goToQuestion('next')}
+                    aria-label={t('chat_inference_nav_next')}
+                    title={t('chat_inference_nav_next')}
+                    data-testid="inference-nav-next"
+                    className="p-2 rounded-lg border-2 border-cyan-400/50 bg-cyan-500/20 text-cyan-300 hover:text-cyan-100 hover:border-cyan-400 hover:bg-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/50 hover:scale-110 active:scale-95 transition-all duration-200"
+                  >
+                    <ChevronDownIcon width={18} height={18} />
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             {/* Unified Features Toolbar - All functionality buttons above the input */}
@@ -592,10 +663,11 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   <Button
                     type="button"
                     variant="ghost"
-                    className={`px-3 py-2 h-9 transition-all duration-200 rounded-md text-sm font-medium ${showThinking
+                    className={`px-3 py-2 h-9 transition-all duration-200 rounded-md text-sm font-medium ${
+                      showThinking
                         ? 'text-purple-400 bg-purple-500/20 hover:text-purple-300 hover:bg-purple-500/30'
                         : 'text-gray-400 hover:text-purple-400 hover:bg-purple-500/20'
-                      }`}
+                    }`}
                     onClick={() => setShowThinking(!showThinking)}
                     disabled={isLoading}
                     title={showThinking ? 'Masquer la pensée' : 'Afficher la pensée'}
@@ -611,7 +683,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                       type="file"
                       ref={fileInputRef}
                       onChange={handleFileUpload}
-                      accept={agent?.capabilities?.includes(LLMCapability.PDFSupport) ? "image/*,application/pdf" : "image/*"}
+                      accept={agent?.capabilities?.includes(LLMCapability.PDFSupport) ? 'image/*,application/pdf' : 'image/*'}
                       className="hidden"
                     />
 
@@ -634,10 +706,11 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   <Button
                     type="button"
                     variant="ghost"
-                    className={`px-3 py-2 h-9 transition-all duration-200 rounded-md text-sm font-medium ${webFetchEnabled
+                    className={`px-3 py-2 h-9 transition-all duration-200 rounded-md text-sm font-medium ${
+                      webFetchEnabled
                         ? 'text-teal-300 bg-teal-500/30 hover:text-teal-200 hover:bg-teal-500/40 shadow-lg shadow-teal-500/40'
                         : 'text-gray-400 hover:text-teal-400 hover:bg-teal-500/20'
-                      }`}
+                    }`}
                     onClick={() => setWebFetchEnabled(!webFetchEnabled)}
                     disabled={isLoading}
                     title={webFetchEnabled ? 'Web Fetch activé' : 'Web Fetch désactivé'}
@@ -651,10 +724,11 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                   <Button
                     type="button"
                     variant="ghost"
-                    className={`px-3 py-2 h-9 transition-all duration-200 rounded-md text-sm font-medium ${webSearchEnabled
+                    className={`px-3 py-2 h-9 transition-all duration-200 rounded-md text-sm font-medium ${
+                      webSearchEnabled
                         ? 'text-orange-300 bg-orange-500/30 hover:text-orange-200 hover:bg-orange-500/40 shadow-lg shadow-orange-500/40'
                         : 'text-gray-400 hover:text-orange-400 hover:bg-orange-500/20'
-                      }`}
+                    }`}
                     onClick={() => setWebSearchEnabled(!webSearchEnabled)}
                     disabled={isLoading}
                     title={webSearchEnabled ? 'Web Search activé' : 'Web Search désactivé'}
@@ -679,7 +753,8 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                 )}
 
                 {/* Image generation/modification button */}
-                {(agent?.capabilities?.includes(LLMCapability.ImageGeneration) || agent?.capabilities?.includes(LLMCapability.ImageModification)) && (
+                {(agent?.capabilities?.includes(LLMCapability.ImageGeneration) ||
+                  agent?.capabilities?.includes(LLMCapability.ImageModification)) && (
                   <Button
                     variant="ghost"
                     className={`px-3 py-2 h-9 text-gray-400 
@@ -773,7 +848,6 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
           {/* Side Panel - Configuration (Image, Video, Maps) */}
           {activeSidePanel !== 'none' && (
             <div className="w-96 flex flex-col border-l border-cyan-500 bg-gray-800/90 backdrop-blur-sm overflow-hidden transition-all duration-500 ease-in-out transform translate-x-0 opacity-100 shadow-[-10px_0_30px_-10px_rgba(6,182,212,0.3)]">
-              
               {/* Side Panel Content - Scrollable (No Header - let child components manage it) */}
               <div className="flex-1 overflow-y-auto">
                 {activeSidePanel === 'image' && agent?.capabilities?.includes(LLMCapability.ImageGeneration) && (
@@ -797,12 +871,18 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
                           text: t('app_generatedImageText'),
                           image: imageBase64,
                           mimeType: 'image/png',
-                          timestamp: new Date()
+                          timestamp: new Date(),
                         };
 
                         addNodeMessage(nodeId, imageMessage);
                       }}
-                      onOpenImageModificationPanel={(nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => {
+                      onOpenImageModificationPanel={(
+                        nodeId: string,
+                        sourceImage: string,
+                        agent?: Agent,
+                        agentInstance?: AgentInstance,
+                        mimeType?: string,
+                      ) => {
                         onOpenImageModificationPanel?.(nodeId, sourceImage, agent, agentInstance, mimeType);
                       }}
                       hideSlideOver={true}
@@ -812,11 +892,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
 
                 {activeSidePanel === 'video' && agent?.capabilities?.includes(LLMCapability.VideoGeneration) && (
                   <Suspense fallback={null}>
-                    <LazyVideoGenerationConfigPanel
-                      isOpen={true}
-                      onClose={handleCloseSidePanel}
-                      hideSlideOver={true}
-                    />
+                    <LazyVideoGenerationConfigPanel isOpen={true} onClose={handleCloseSidePanel} hideSlideOver={true} />
                   </Suspense>
                 )}
 

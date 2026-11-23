@@ -1,7 +1,7 @@
 /**
  * @file useJournalQueue.ts
  * @description Hook personnalisé pour gérer une queue de persistance journal robuste
- * 
+ *
  * Fonctionnalités :
  * - Queue locale pour les entrées journal en attente
  * - Retry automatique avec backoff exponentiel (max 3 tentatives)
@@ -9,7 +9,7 @@
  * - Auto-flush au changement d'état (connexion/déconnexion)
  * - Logging pour suivi des entrées
  * - ⭐ Authentification JWT automatique
- * 
+ *
  * @author ARC-1 Architecture Team
  * @version 1.1.0
  */
@@ -24,7 +24,7 @@ export interface JournalQueueItem {
   workflowId: string;
   instanceId: string;
   type: 'chat' | 'error' | 'media' | 'tool_invocation';
-  payload: any;
+  payload: unknown;
   retryCount: number;
   maxRetries: number;
   createdAt: number;
@@ -46,18 +46,18 @@ export const useJournalQueue = () => {
   // ⭐ FIX: Récupérer le token d'authentification
   const { accessToken, isAuthenticated } = useAuth();
   const accessTokenRef = useRef(accessToken);
-  
+
   // Mettre à jour la ref quand le token change
   useEffect(() => {
     accessTokenRef.current = accessToken;
   }, [accessToken]);
-  
+
   const queueRef = useRef<JournalQueueItem[]>([]);
   const statsRef = useRef<QueueStats>({
     totalQueued: 0,
     totalFailed: 0,
     totalSucceeded: 0,
-    currentQueue: []
+    currentQueue: [],
   });
   const processingRef = useRef(false);
   const flushTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -67,52 +67,55 @@ export const useJournalQueue = () => {
    * ⭐ FIX: Vérifier l'authentification ET le saveMode avant d'ajouter à la queue
    * En mode manuel, les journaux sont persistés via le bouton Save, pas automatiquement
    */
-  const enqueueEntry = useCallback((
-    workflowId: string,
-    instanceId: string,
-    type: 'chat' | 'error' | 'media' | 'tool_invocation',
-    payload: any,
-    forceImmediate: boolean = false // ⭐ NEW: Force l'envoi même en mode manuel (pour le bouton Save)
-  ) => {
-    // ⭐ FIX: Ne pas enregistrer si l'utilisateur n'est pas authentifié
-    if (!accessTokenRef.current) {
-      console.debug(`[JournalQueue] Skipping ${type} entry - user not authenticated (guest mode)`);
-      return;
-    }
-    
-    // ⭐ FIX: En mode MANUEL, ne pas envoyer automatiquement (sauf si forcé par le bouton Save)
-    const saveMode = useSaveModeStore.getState().saveMode;
-    if (saveMode === 'manual' && !forceImmediate) {
-      console.debug(`[JournalQueue] Skipping ${type} entry - save mode is 'manual' (use Save button)`);
-      return;
-    }
-    
-    // Validation des paramètres requis
-    if (!workflowId || !instanceId) {
-      console.warn(`[JournalQueue] Skipping ${type} entry - missing workflowId or instanceId`);
-      return;
-    }
-    
-    const entry: JournalQueueItem = {
-      id: `queue-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      workflowId,
-      instanceId,
-      type,
-      payload,
-      retryCount: 0,
-      maxRetries: MAX_RETRIES,
-      createdAt: Date.now()
-    };
+  const enqueueEntry = useCallback(
+    (
+      workflowId: string,
+      instanceId: string,
+      type: 'chat' | 'error' | 'media' | 'tool_invocation',
+      payload: unknown,
+      forceImmediate: boolean = false, // ⭐ NEW: Force l'envoi même en mode manuel (pour le bouton Save)
+    ) => {
+      // ⭐ FIX: Ne pas enregistrer si l'utilisateur n'est pas authentifié
+      if (!accessTokenRef.current) {
+        console.debug(`[JournalQueue] Skipping ${type} entry - user not authenticated (guest mode)`);
+        return;
+      }
 
-    queueRef.current.push(entry);
-    statsRef.current.totalQueued++;
-    statsRef.current.currentQueue = [...queueRef.current];
+      // ⭐ FIX: En mode MANUEL, ne pas envoyer automatiquement (sauf si forcé par le bouton Save)
+      const saveMode = useSaveModeStore.getState().saveMode;
+      if (saveMode === 'manual' && !forceImmediate) {
+        console.debug(`[JournalQueue] Skipping ${type} entry - save mode is 'manual' (use Save button)`);
+        return;
+      }
 
-    console.debug(`[JournalQueue] ✅ Enqueued ${type} entry (queue size: ${queueRef.current.length})`);
+      // Validation des paramètres requis
+      if (!workflowId || !instanceId) {
+        console.warn(`[JournalQueue] Skipping ${type} entry - missing workflowId or instanceId`);
+        return;
+      }
 
-    // Déclencher le traitement
-    flushQueue();
-  }, []);
+      const entry: JournalQueueItem = {
+        id: `queue-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        workflowId,
+        instanceId,
+        type,
+        payload,
+        retryCount: 0,
+        maxRetries: MAX_RETRIES,
+        createdAt: Date.now(),
+      };
+
+      queueRef.current.push(entry);
+      statsRef.current.totalQueued++;
+      statsRef.current.currentQueue = [...queueRef.current];
+
+      console.debug(`[JournalQueue] ✅ Enqueued ${type} entry (queue size: ${queueRef.current.length})`);
+
+      // Déclencher le traitement
+      flushQueue();
+    },
+    [],
+  );
 
   /**
    * Persister une entrée unique
@@ -122,26 +125,26 @@ export const useJournalQueue = () => {
     try {
       const backendUrl = getBackendUrl();
       const url = `${backendUrl}/api/workflows/${entry.workflowId}/instances/${entry.instanceId}/journal`;
-      
+
       // ⭐ FIX: Construire les headers avec authentification
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       };
-      
+
       // Ajouter le token si disponible
       if (accessTokenRef.current) {
         headers['Authorization'] = `Bearer ${accessTokenRef.current}`;
       } else {
         console.warn('[JournalQueue] No access token available - request may fail with 401');
       }
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           type: entry.type,
-          payload: entry.payload
-        })
+          payload: entry.payload,
+        }),
       });
 
       if (!response.ok) {
@@ -174,10 +177,7 @@ export const useJournalQueue = () => {
    * Calculer le délai de retry avec backoff exponentiel
    */
   const calculateRetryDelay = (retryCount: number): number => {
-    const delay = Math.min(
-      INITIAL_RETRY_DELAY * Math.pow(2, retryCount),
-      MAX_RETRY_DELAY
-    );
+    const delay = Math.min(INITIAL_RETRY_DELAY * Math.pow(2, retryCount), MAX_RETRY_DELAY);
     // Ajouter un jitter aléatoire (±20%) pour éviter les "thundering herds"
     const jitter = delay * (0.8 + Math.random() * 0.4);
     return Math.round(jitter);
@@ -223,19 +223,14 @@ export const useJournalQueue = () => {
           if (entry.retryCount < entry.maxRetries) {
             entry.retryCount++;
             entry.nextRetryAt = Date.now() + calculateRetryDelay(entry.retryCount);
-            console.debug(
-              `[JournalQueue] Retry scheduled for entry ${entry.id} ` +
-              `(attempt ${entry.retryCount}/${entry.maxRetries})`
-            );
+            console.debug(`[JournalQueue] Retry scheduled for entry ${entry.id} ` + `(attempt ${entry.retryCount}/${entry.maxRetries})`);
             break; // Attendre le prochain cycle
           } else {
             // Max retries atteint
             queueRef.current.shift();
             statsRef.current.totalFailed++;
             statsRef.current.currentQueue = [...queueRef.current];
-            console.error(
-              `[JournalQueue] ❌ Entry ${entry.id} discarded after ${entry.maxRetries} retries`
-            );
+            console.error(`[JournalQueue] ❌ Entry ${entry.id} discarded after ${entry.maxRetries} retries`);
           }
         }
       }
@@ -247,9 +242,7 @@ export const useJournalQueue = () => {
       // Programmer le prochain flush si la queue n'est pas vide
       if (queueRef.current.length > 0) {
         const nextEntry = queueRef.current[0];
-        const delay = nextEntry.nextRetryAt 
-          ? Math.max(0, nextEntry.nextRetryAt - Date.now())
-          : 1000; // Default 1s
+        const delay = nextEntry.nextRetryAt ? Math.max(0, nextEntry.nextRetryAt - Date.now()) : 1000; // Default 1s
 
         if (flushTimeoutRef.current) clearTimeout(flushTimeoutRef.current);
         flushTimeoutRef.current = setTimeout(() => flushQueue(), delay);
@@ -308,7 +301,7 @@ export const useJournalQueue = () => {
     enqueueEntry,
     flushQueue,
     getStats,
-    clearQueue
+    clearQueue,
   };
 };
 

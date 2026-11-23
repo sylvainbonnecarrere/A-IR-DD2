@@ -58,7 +58,7 @@ function saveLocalLocale(locale: Locale): void {
 // PARTIE 2: API BACKEND (Authenticated)
 // ============================================================================
 
-async function apiRequest(endpoint: string, method: 'GET' | 'PUT', token: string, body?: any): Promise<any> {
+async function apiRequest<T = unknown>(endpoint: string, method: 'GET' | 'PUT', token: string, body?: unknown): Promise<T> {
   const options: RequestInit = {
     method,
     headers: {
@@ -82,7 +82,7 @@ async function apiRequest(endpoint: string, method: 'GET' | 'PUT', token: string
 
 async function getApiLocale(token: string): Promise<Locale> {
   try {
-    const data = await apiRequest('/api/user-settings', 'GET', token);
+    const data = await apiRequest<{ preferences?: { language?: string } }>('/api/user-settings', 'GET', token);
     const locale = data.preferences?.language || DEFAULT_LOCALE;
 
     if (['fr', 'en', 'de', 'es', 'pt'].includes(locale)) {
