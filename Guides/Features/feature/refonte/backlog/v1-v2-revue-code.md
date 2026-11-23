@@ -163,6 +163,26 @@ Les réserves R1–R4 sont découpées en **trois US à agent unique**, exécut�
 **Impacts codebase et tests :** `backend/src/routes|repositories|services|websocket|models` ; `cd backend && npx tsc --noEmit` 0.
 **Critères d'acceptation :** idem US-RC-02 côté backend + `ci:node25:runtime` PASS.
 
+**État d'avancement (2026-11-23, agent `03-backend`, branche `main`) : EN COURS — anyBackend 433 → 405 (lot 1 committé).**
+
+| Lot | Commit | anyBackend | Fichiers | Contenu |
+|---|---|---|---|---|
+| 1 | voir `git log` | 433 → 405 | `domain/workflow/workspaceSnapshot.contract.ts` (créé), `utils/workspaceSnapshot.ts`, `utils/transforms.ts`, `utils/chatMessageProjection.ts`, `types/persistence.ts`, `routes/agent-instances.routes.ts` (1 site) | contrat domaine snapshot (docs lean nommés, `snapshotIdToString`, statuts depuis `domain/execution/userToolRun.contract.ts`) ; `as any` retirés, docs Mongoose assignés directement (aucun cast sur chemin Mongo) ; `canvasState` gardé hors du contrat domaine (audit strict: token non classé sous `domain/`) |
+
+Validation lot 1 : `tsc --noEmit` back 0, `eslint --quiet` 0, ratchet exit 0 (433→405), `prettier` + `format:changed` OK, `test:j6:backend` 126/126, `ci:node25:runtime` OK, `audit:workflow-architecture:strict` OK, suites snapshot/instances 19/19, baseline recalée à 405.
+
+**Consignes `01-architecte-bdd` (2026-11-23) — réponses aux questions de `03-backend` :**
+
+1. **Source de vérité contrat — étendre `domain/` autorisé** (dans le même lot que la consommation, pas de PR séparée) : un seul contrat par concept. Si un contrat existant (`domain/execution/*.contract.ts`, `domain/workflow/*`) couvre la forme, il est la source de vérité unique — ne pas le dupliquer. Si aucun ne couvre, créer `domain/<agrégat>/<concept>.contract.ts` (Zod `.strict()` + type-guards, même style que `userToolRun.contract.ts` / `workspaceCollaboration.contract.ts`) plutôt que `any` ou interfaces Mongoose seules. Règle de couches : interfaces Mongoose (`IXxxDocument`) = typage **interne** models/repositories (persistance) ; contrat Zod = **frontières** (routes, socket, événements, documents échangés). Conflit entre contrats → remonter à l'architecte-bdd, ne pas trancher seul.
+2. **Stores Mongo sans contrat — contrat par store prioritaire**, règle exacte anti-régression silencieuse :
+   - (a) signatures de repositories typées par les interfaces document (`Promise<IWorkflowDocument>`, jamais `Promise<any>`) ; `lean()` → type de projection nommé ou `LeanDocument<...>` ;
+   - (b) frontière du store = schéma Zod du contrat : `safeParse` en lecture, échec = log + **rejet fail-closed** (jamais passage tel quel) ; type du contrat en écriture ;
+   - (c) valeur non typée venant de Mongo → `unknown` + type-guard, jamais `any` ; `any` neutralisés sans contrat = interdit ;
+   - (d) `databaseInit.ts` (bootstrap, 27 `any`) → types structurels locaux nommés (`CollectionSpec`, `IndexSpec`, `SeedUser`…), pas de contrat métier ;
+   - (e) aucun `as any` / `as unknown as X` sur un chemin Mongo ; cast inévitable = commenté (raison) + test qui le couvre ;
+   - garde-fous par lot : `tsc` back 0, `test:j6:backend` + `ci:node25:runtime` + `audit:workflow-architecture:strict` + ratchet verts, suites jest des modules touchés ; tout changement de forme de document couvert par un test de contrat (existant ou nouveau).
+3. **Baseline — recale après chaque lot validé** (mi-campagne + clôture), jamais à la hausse. Rationale : le ratchet ne bloque que les augmentations vs baseline ; sans recale lot par lot, une remontée restant sous l'ancienne baseline passerait inaperçue. Procédure par lot : baisse constatée → tsc/tests/ratchet verts → `npm run hygiene:update-baseline` → commit du lot.
+
 ### US-RC-04 — `console.log` restants → `console.debug` / logger (depuis US-HYG-04)
 
 **Agent responsable :** `06-frontend` (front) + `03-backend` (back)

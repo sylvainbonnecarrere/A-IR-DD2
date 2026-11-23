@@ -25,76 +25,78 @@
  */
 import { sanitizePersistenceConfigForInstanceEgress } from '../types/persistence';
 
-export function transformAgentInstanceForFrontend(instance: any) {
-    const instanceObj = instance.toObject?.() || instance;
-    const {
-        _id,
-        role,
-        llmProvider,
-        llmModel,
-        systemPrompt,
-        capabilities,
-        tools,
-        legacyTools,
-        toolSelections,
-        historyConfig,
-        outputConfig,
-        functionInheritance,
-        localLLMProfileId,
-        robotId,
-        position,
-        content: _legacyContent,
-        ...rest
-    } = instanceObj;
+import type { SnapshotAgentInstanceDoc } from '../domain/workflow/workspaceSnapshot.contract';
 
-    // ⭐ FIX QA: Extract persistenceConfig from rest to include explicitly
-    const { persistenceConfig, ...remaining } = rest;
-    const projectedProviderTools = Array.isArray(legacyTools) ? legacyTools : undefined;
-    
-    return {
-        id: _id?.toString(),
-        role,
-        llmProvider,
-        llmModel,
-        systemPrompt,
-        capabilities: capabilities || [],
-        tools: projectedProviderTools || [],
-        toolSelections: toolSelections || [],
-        historyConfig: historyConfig || {},
-        outputConfig: outputConfig || {},
-        robotId,
-        position,
-        // ⭐ FIX QA: Include persistenceConfig for media storage options
-        persistenceConfig: persistenceConfig
-            ? sanitizePersistenceConfigForInstanceEgress(persistenceConfig)
-            : {
-                saveChat: true,
-                saveErrors: true,
-                saveHistorySummary: false,
-                saveLinks: false,
-                saveTasks: false,
-                saveMedia: false,
-                allowWorkspaceWrite: false,
-                mediaStorage: 'db'
-                // cloudStorageConfig: intentionally omitted (null would fail Zod validation)
-            },
-        // ⭐ CRITICAL: Reconstruct configuration_json for frontend
-        configuration_json: {
-            role: role || 'assistant',
-            model: llmModel || 'gpt-4o-mini',
-            llmProvider: llmProvider || 'openai',
-            systemPrompt: systemPrompt || '',
-            capabilities: Array.isArray(capabilities) ? capabilities : [],
-            ...(projectedProviderTools !== undefined ? { tools: projectedProviderTools } : {}),
-            toolSelections: Array.isArray(toolSelections) ? toolSelections : [],
-            historyConfig: historyConfig || {},
-            outputConfig: outputConfig || {},
-            ...(remaining.webSearchParams !== undefined && { webSearchParams: remaining.webSearchParams }),
-            position: position || { x: 0, y: 0 },
-            functionInheritance: functionInheritance || { inheritFromPrototype: true, overrideFunctionIds: [], overrideToolSelections: [] },
-            // ⭐ LOCAL LLM: Include localLLMProfileId for correct endpoint resolution after reload
-            ...(localLLMProfileId != null && { localLLMProfileId })
+export function transformAgentInstanceForFrontend(instance: SnapshotAgentInstanceDoc) {
+  const instanceObj: SnapshotAgentInstanceDoc = typeof instance.toObject === 'function' ? instance.toObject() : instance;
+  const {
+    _id,
+    role,
+    llmProvider,
+    llmModel,
+    systemPrompt,
+    capabilities,
+    tools,
+    legacyTools,
+    toolSelections,
+    historyConfig,
+    outputConfig,
+    functionInheritance,
+    localLLMProfileId,
+    robotId,
+    position,
+    content: _legacyContent,
+    ...rest
+  } = instanceObj;
+
+  // ⭐ FIX QA: Extract persistenceConfig from rest to include explicitly
+  const { persistenceConfig, ...remaining } = rest;
+  const projectedProviderTools = Array.isArray(legacyTools) ? legacyTools : undefined;
+
+  return {
+    id: _id?.toString(),
+    role,
+    llmProvider,
+    llmModel,
+    systemPrompt,
+    capabilities: capabilities || [],
+    tools: projectedProviderTools || [],
+    toolSelections: toolSelections || [],
+    historyConfig: historyConfig || {},
+    outputConfig: outputConfig || {},
+    robotId,
+    position,
+    // ⭐ FIX QA: Include persistenceConfig for media storage options
+    persistenceConfig: persistenceConfig
+      ? sanitizePersistenceConfigForInstanceEgress(persistenceConfig)
+      : {
+          saveChat: true,
+          saveErrors: true,
+          saveHistorySummary: false,
+          saveLinks: false,
+          saveTasks: false,
+          saveMedia: false,
+          allowWorkspaceWrite: false,
+          mediaStorage: 'db',
+          // cloudStorageConfig: intentionally omitted (null would fail Zod validation)
         },
-        ...remaining
-    };
+    // ⭐ CRITICAL: Reconstruct configuration_json for frontend
+    configuration_json: {
+      role: role || 'assistant',
+      model: llmModel || 'gpt-4o-mini',
+      llmProvider: llmProvider || 'openai',
+      systemPrompt: systemPrompt || '',
+      capabilities: Array.isArray(capabilities) ? capabilities : [],
+      ...(projectedProviderTools !== undefined ? { tools: projectedProviderTools } : {}),
+      toolSelections: Array.isArray(toolSelections) ? toolSelections : [],
+      historyConfig: historyConfig || {},
+      outputConfig: outputConfig || {},
+      ...(remaining.webSearchParams !== undefined && { webSearchParams: remaining.webSearchParams }),
+      position: position || { x: 0, y: 0 },
+      functionInheritance: functionInheritance || { inheritFromPrototype: true, overrideFunctionIds: [], overrideToolSelections: [] },
+      // ⭐ LOCAL LLM: Include localLLMProfileId for correct endpoint resolution after reload
+      ...(localLLMProfileId != null && { localLLMProfileId }),
+    },
+    ...remaining,
+  };
 }
