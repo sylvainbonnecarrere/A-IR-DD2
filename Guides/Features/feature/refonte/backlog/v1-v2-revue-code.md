@@ -106,6 +106,8 @@ Les réserves R1–R4 sont découpées en **trois US à agent unique**, exécut�
 - commentaire d'en-tête en première ligne : « reference only — en conteneur mongo, remplacer par un hash `$2b$` précalculé, `require` indisponible » ;
 - aucun changement de code, `tsc` back 0, suites backend non impactées.
 
+**Etat d'avancement (2026-11-23, agent `03-backend`, branche `feat/j7-02-quarantine-exit-fencing`) : IMPLEMENTEE ET VALIDEE (commit voir `git log`).** R3 : commentaire d'en-tête ajouté en première ligne de `backend/docker/init-collections.js` (« reference only — en conteneur mongo, remplacer par un hash `$2b$` précalculé, `require` indisponible » + rappel du montage `/docker-entrypoint-initdb.d/`, de SETUP_NOTES « Reference only » et de la logique active `databaseInit.ts`) ; BOM et CRLF conservés. Aucun changement de code (seul le formatage prettier du fichier touché, exigé par le gate `format:changed` R4 — `prettier --check` OK, `node --check` OK). Validations : `tsc --noEmit` backend 0 erreur, `eslint` sur le fichier 0 erreur, `node scripts/ci/hygiene-ratchet.mjs` exit 0 (baseline stable 376/433/126/2), aucune référence au script depuis `backend/src`. **Handoff :** commit de clôture de la série US-RC-00a/b/c (responsable projet), puis `US-RC-01` (gate CI `hygiene-gate`, `04-cicd-installation`) — lire la note de US-RC-00b (checkout `fetch-depth: 0` + env `GITHUB_BASE_REF`) et la section US-RC-01.
+
 ### US-RC-01 — Câblage CI du gate hygiène (depuis US-HYG-01)
 
 **Agent responsable :** `04-cicd-installation.agent.md`

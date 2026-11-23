@@ -1,4 +1,6 @@
-﻿// MongoDB Collections & Schema Initialization
+﻿// reference only — en conteneur mongo, remplacer par un hash `$2b$` précalculé, `require` indisponible
+// (monté dans /docker-entrypoint-initdb.d/ du conteneur mongo:6.0 où le module natif bcrypt n'est pas installé — voir SETUP_NOTES.md « Reference only » ; la logique active est backend/src/services/databaseInit.ts)
+// MongoDB Collections & Schema Initialization
 // This script creates all required collections and indexes for A-IR-DD2 J4.3
 
 // Switch to application database
@@ -15,27 +17,27 @@ db.createCollection('users', {
         email: {
           bsonType: 'string',
           pattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-          description: 'User email address (unique)'
+          description: 'User email address (unique)',
         },
         passwordHash: {
           bsonType: 'string',
-          description: 'Bcrypt hashed password'
+          description: 'Bcrypt hashed password',
         },
         createdAt: {
           bsonType: 'date',
-          description: 'Account creation timestamp'
+          description: 'Account creation timestamp',
         },
         updatedAt: {
           bsonType: 'date',
-          description: 'Last update timestamp'
+          description: 'Last update timestamp',
         },
         isActive: {
           bsonType: 'bool',
-          description: 'Account status'
-        }
-      }
-    }
-  }
+          description: 'Account status',
+        },
+      },
+    },
+  },
 });
 
 // Create index on email for faster lookups and uniqueness
@@ -52,33 +54,33 @@ db.createCollection('llm_configs', {
         _id: { bsonType: 'objectId' },
         userId: {
           bsonType: 'objectId',
-          description: 'Reference to user'
+          description: 'Reference to user',
         },
         provider: {
           bsonType: 'string',
-          description: 'LLM provider name (gemini, openai, etc.)'
+          description: 'LLM provider name (gemini, openai, etc.)',
         },
         apiKeyEncrypted: {
           bsonType: 'string',
-          description: 'AES-256-GCM encrypted API key'
+          description: 'AES-256-GCM encrypted API key',
         },
         capabilities: {
           bsonType: 'object',
-          description: 'Available capabilities for this provider'
+          description: 'Available capabilities for this provider',
         },
         isEnabled: {
           bsonType: 'bool',
-          description: 'Whether this provider is active'
+          description: 'Whether this provider is active',
         },
         createdAt: {
-          bsonType: 'date'
+          bsonType: 'date',
         },
         updatedAt: {
-          bsonType: 'date'
-        }
-      }
-    }
-  }
+          bsonType: 'date',
+        },
+      },
+    },
+  },
 });
 
 // Create compound index on userId and provider
@@ -96,33 +98,33 @@ db.createCollection('user_settings', {
         _id: { bsonType: 'objectId' },
         userId: {
           bsonType: 'objectId',
-          description: 'Reference to user'
+          description: 'Reference to user',
         },
         llmConfigs: {
           bsonType: 'object',
-          description: 'Per-user LLM provider configurations with encrypted keys'
+          description: 'Per-user LLM provider configurations with encrypted keys',
         },
         preferences: {
           bsonType: 'object',
           properties: {
             language: { bsonType: 'string' },
-            theme: { bsonType: 'string' }
+            theme: { bsonType: 'string' },
           },
-          description: 'User UI preferences'
+          description: 'User UI preferences',
         },
         version: {
           bsonType: 'int',
-          description: 'Settings version for optimistic concurrency'
+          description: 'Settings version for optimistic concurrency',
         },
         createdAt: {
-          bsonType: 'date'
+          bsonType: 'date',
         },
         updatedAt: {
-          bsonType: 'date'
-        }
-      }
-    }
-  }
+          bsonType: 'date',
+        },
+      },
+    },
+  },
 });
 
 // Create index on userId for fast lookups
@@ -142,10 +144,10 @@ db.createCollection('workflows', {
         creator_id: { bsonType: 'string', description: 'Robot creator ID' },
         status: { bsonType: 'string' },
         createdAt: { bsonType: 'date' },
-        updatedAt: { bsonType: 'date' }
-      }
-    }
-  }
+        updatedAt: { bsonType: 'date' },
+      },
+    },
+  },
 });
 
 db.workflows.createIndex({ creator_id: 1 });
@@ -164,10 +166,10 @@ db.createCollection('agents', {
         creator_id: { bsonType: 'string', description: 'Robot creator ID (Archi for agents)' },
         tools: { bsonType: 'array' },
         createdAt: { bsonType: 'date' },
-        updatedAt: { bsonType: 'date' }
-      }
-    }
-  }
+        updatedAt: { bsonType: 'date' },
+      },
+    },
+  },
 });
 
 db.agents.createIndex({ creator_id: 1 });
@@ -207,10 +209,10 @@ db.createCollection('local_llm_profiles', {
         capabilities: { bsonType: 'object' },
         enabled: { bsonType: 'bool' },
         createdAt: { bsonType: 'date' },
-        updatedAt: { bsonType: 'date' }
-      }
-    }
-  }
+        updatedAt: { bsonType: 'date' },
+      },
+    },
+  },
 });
 db.local_llm_profiles.createIndex({ userId: 1, name: 1 }, { unique: true });
 db.local_llm_profiles.createIndex({ userId: 1 });
@@ -231,7 +233,7 @@ if (seedPassword) {
     role: 'user',
     isActive: true,
     createdAt: new Date(),
-    updatedAt: new Date()
+    updatedAt: new Date(),
   });
   console.log('Ô£ô Created test user account');
   console.log(`  Email: ${seedEmail}`);
@@ -243,7 +245,7 @@ if (seedPassword) {
 // Verify collections
 const collections = db.getCollectionNames();
 console.log('Collections in database:');
-collections.forEach(col => console.log(`  - ${col}`));
+collections.forEach((col) => console.log(`  - ${col}`));
 
 // Verify test user created
 const testUser = db.users.findOne({ email: 'test@example.com' });
