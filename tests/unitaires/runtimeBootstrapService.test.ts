@@ -1,9 +1,6 @@
 import apiClient from '../../utils/apiClient';
 import * as localLLMProfileService from '../../services/localLLMProfileService';
-import {
-  loadAuthenticatedRuntimeBootstrap,
-  resetRuntimeBootstrapLoadCacheForTests,
-} from '../../services/runtimeBootstrapService';
+import { loadAuthenticatedRuntimeBootstrap, resetRuntimeBootstrapLoadCacheForTests } from '../../services/runtimeBootstrapService';
 
 jest.mock('../../utils/apiClient', () => ({
   __esModule: true,
@@ -38,8 +35,8 @@ describe('runtimeBootstrapService', () => {
     const keysDeferred = createDeferred<{ data: Array<{ provider: string; enabled: boolean; apiKey: string }> }>();
     const profilesDeferred = createDeferred<Array<{ id: string; name: string; provider: string; endpoint: string }>>();
 
-    jest.spyOn(apiClient, 'post').mockImplementationOnce(() => keysDeferred.promise as any);
-    jest.spyOn(localLLMProfileService, 'getAllProfiles').mockImplementationOnce(() => profilesDeferred.promise as any);
+    jest.spyOn(apiClient, 'post').mockImplementationOnce(() => keysDeferred.promise as never);
+    jest.spyOn(localLLMProfileService, 'getAllProfiles').mockImplementationOnce(() => profilesDeferred.promise as never);
 
     const firstLoadPromise = loadAuthenticatedRuntimeBootstrap('shared-token');
     const secondLoadPromise = loadAuthenticatedRuntimeBootstrap('shared-token');
@@ -50,9 +47,7 @@ describe('runtimeBootstrapService', () => {
     keysDeferred.resolve({
       data: [{ provider: 'openai', enabled: true, apiKey: 'secret' }],
     });
-    profilesDeferred.resolve([
-      { id: 'profile-1', name: 'Local profile', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' },
-    ]);
+    profilesDeferred.resolve([{ id: 'profile-1', name: 'Local profile', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }]);
 
     const [firstState, secondState] = await Promise.all([firstLoadPromise, secondLoadPromise]);
 

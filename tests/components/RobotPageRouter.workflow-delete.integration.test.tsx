@@ -19,7 +19,15 @@ jest.mock('reactflow', () => {
 
   return {
     __esModule: true,
-    default: ({ children, nodes = [], nodeTypes = {} }: { children?: React.ReactNode; nodes?: any[]; nodeTypes?: Record<string, React.ComponentType<any>> }) => (
+    default: ({
+      children,
+      nodes = [],
+      nodeTypes = {},
+    }: {
+      children?: React.ReactNode;
+      nodes?: { id: string; type: string; data?: unknown; position?: { x: number; y: number } }[];
+      nodeTypes?: Record<string, React.ComponentType<Record<string, unknown>>>;
+    }) => (
       <div data-testid="workflow-canvas-root">
         {nodes.map((node) => {
           const NodeComponent = nodeTypes[node.type];
@@ -67,9 +75,8 @@ jest.mock('reactflow', () => {
 
 jest.mock('../../hooks/useLocalization', () => ({
   useLocalization: () => ({
-    t: (key: string, fallbackOrParams?: string | Record<string, string | number>) => (
-      typeof fallbackOrParams === 'string' ? fallbackOrParams : key
-    ),
+    t: (key: string, fallbackOrParams?: string | Record<string, string | number>) =>
+      typeof fallbackOrParams === 'string' ? fallbackOrParams : key,
   }),
 }));
 
@@ -103,12 +110,15 @@ jest.mock('../../stores/useRuntimeStore', () => {
   const actual = jest.requireActual('../../stores/useRuntimeStore');
   return {
     ...actual, // ⭐ US-J7-13: sélecteurs purs (getWorkflowLatestRunId, getInstanceRunStatus)
-    useRuntimeStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => {
-      const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore;
-      return selector ? selector(state) : state;
-    }, {
-      getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore,
-    }),
+    useRuntimeStore: Object.assign(
+      (selector?: (state: Record<string, any>) => unknown) => {
+        const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore;
+        return selector ? selector(state) : state;
+      },
+      {
+        getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore,
+      },
+    ),
   };
 });
 
@@ -117,31 +127,40 @@ jest.mock('../../stores/useDesignStore', () => {
 
   return {
     ...actual,
-    useDesignStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => {
-      const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().designStore;
-      return selector ? selector(state) : state;
-    }, {
-      getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().designStore,
-    }),
+    useDesignStore: Object.assign(
+      (selector?: (state: Record<string, any>) => unknown) => {
+        const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().designStore;
+        return selector ? selector(state) : state;
+      },
+      {
+        getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().designStore,
+      },
+    ),
   };
 });
 
 jest.mock('../../stores/useWorkflowStore', () => ({
-  useWorkflowStore: Object.assign((selector?: (state: Record<string, any>) => unknown) => {
-    const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().workflowStore;
-    return selector ? selector(state) : state;
-  }, {
-    getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().workflowStore,
-  }),
+  useWorkflowStore: Object.assign(
+    (selector?: (state: Record<string, any>) => unknown) => {
+      const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().workflowStore;
+      return selector ? selector(state) : state;
+    },
+    {
+      getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().workflowStore,
+    },
+  ),
 }));
 
 jest.mock('../../stores/useFunctionStore', () => ({
-  useFunctionStore: Object.assign((selector?: (state: typeof functionStoreState) => unknown) => {
-    const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().functionStore;
-    return selector ? selector(state) : state;
-  }, {
-    getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().functionStore,
-  }),
+  useFunctionStore: Object.assign(
+    (selector?: (state: typeof functionStoreState) => unknown) => {
+      const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().functionStore;
+      return selector ? selector(state) : state;
+    },
+    {
+      getState: () => require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().functionStore,
+    },
+  ),
 }));
 
 jest.mock('../../components/OptimizedWorkflowBackground', () => ({
@@ -170,7 +189,19 @@ jest.mock('../../components/modals/BosMediaModal', () => ({
 }));
 
 jest.mock('../../components/modals/ConfirmationModal', () => ({
-  ConfirmationModal: ({ isOpen, title, confirmText, onConfirm, onCancel }: any) => (
+  ConfirmationModal: ({
+    isOpen,
+    title,
+    confirmText,
+    onConfirm,
+    onCancel,
+  }: {
+    isOpen?: boolean;
+    title?: React.ReactNode;
+    confirmText?: React.ReactNode;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  }) =>
     isOpen ? (
       <div data-testid="delete-confirm-modal">
         <div>{title}</div>
@@ -181,8 +212,7 @@ jest.mock('../../components/modals/ConfirmationModal', () => ({
           cancel
         </button>
       </div>
-    ) : null
-  ),
+    ) : null,
 }));
 
 jest.mock('../../components/panels/WebSearchGroundingPanel', () => ({
@@ -347,14 +377,7 @@ describe('RobotPageRouter BOS/canvas delete integration', () => {
   it('propagates a real BOS workflow node delete click from the canvas UI to the delete callback', async () => {
     const onDeleteNode = jest.fn();
 
-    render(
-      <RobotPageRouter
-        currentPath="/bos/dashboard"
-        llmConfigs={[]}
-        agents={[baseAgent]}
-        onDeleteNode={onDeleteNode}
-      />,
-    );
+    render(<RobotPageRouter currentPath="/bos/dashboard" llmConfigs={[]} agents={[baseAgent]} onDeleteNode={onDeleteNode} />);
 
     const node = await screen.findByTestId('workflow-node-node-instance-1');
     fireEvent.click(within(node).getByRole('button', { name: 'confirm_delete' }));

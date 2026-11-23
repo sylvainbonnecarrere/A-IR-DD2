@@ -11,7 +11,7 @@ describe('appWorkflowPersistenceService', () => {
     const saveSpy = jest.spyOn(PersistenceService, 'saveAgentInstance').mockResolvedValue({
       success: true,
       error: null,
-    } as any);
+    });
     const updateNode = jest.fn();
     const updateAgentInstance = jest.fn();
 
@@ -28,14 +28,11 @@ describe('appWorkflowPersistenceService', () => {
     expect(result).toBe(true);
     expect(updateNode).not.toHaveBeenCalled();
     expect(updateAgentInstance).not.toHaveBeenCalled();
-    expect(saveSpy).toHaveBeenCalledWith(
-      { id: 'abc', position: { x: 12, y: 34 } },
-      { isAuthenticated: true, accessToken: 'token-123' },
-    );
+    expect(saveSpy).toHaveBeenCalledWith({ id: 'abc', position: { x: 12, y: 34 } }, { isAuthenticated: true, accessToken: 'token-123' });
   });
 
   it('deletes a workflow instance through the workspace-scoped API route', async () => {
-    const deleteSpy = jest.spyOn(apiClient, 'delete').mockResolvedValue({} as any);
+    const deleteSpy = jest.spyOn(apiClient, 'delete').mockResolvedValue({} as never);
 
     const result = await deleteWorkflowInstance({
       workflowId: 'workflow-123',
