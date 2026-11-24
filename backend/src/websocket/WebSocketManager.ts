@@ -9,6 +9,7 @@ import {
   WorkspaceJoinSchema,
   WorkspaceLeaveSchema,
   WorkspaceRoomIdSchema,
+  type AgentMessageAdd,
 } from '../domain/workflow/workspaceCollaboration.contract';
 import { RuntimeEventEnvelopeSchema, type RuntimeEventEnvelope } from '../domain/execution/runtimeEvent.contract';
 import { Workflow } from '../models/Workflow.model';
@@ -23,13 +24,13 @@ import {
 interface ClientToServerEvents {
   // Synchronisation des agents
   'agent:position:update': (data: { nodeId: string; position: { x: number; y: number } }) => void;
-  'agent:message:add': (data: { nodeId: string; message: any }) => void;
+  'agent:message:add': (data: AgentMessageAdd) => void;
   'agent:toggle:minimize': (data: { nodeId: string }) => void;
-  
+
   // Gestion des rooms/workspaces
   'workspace:join': (workspaceId: string) => void;
   'workspace:leave': (workspaceId: string) => void;
-  
+
   // Présence utilisateur
   'user:cursor:update': (data: { x: number; y: number; userId: string }) => void;
 }
@@ -37,15 +38,15 @@ interface ClientToServerEvents {
 interface ServerToClientEvents {
   // Synchronisation des agents
   'agent:position:updated': (data: { nodeId: string; position: { x: number; y: number }; userId: string }) => void;
-  'agent:message:added': (data: { nodeId: string; message: any; userId: string }) => void;
+  'agent:message:added': (data: AgentMessageAdd & { userId: string }) => void;
   'agent:toggle:minimized': (data: { nodeId: string; userId: string }) => void;
-  
+
   // Feedback utilisateur
-  'workspace:user:joined': (data: { userId: string; userInfo: any }) => void;
+  'workspace:user:joined': (data: { userId: string; userInfo: AuthenticatedSocketData['userInfo'] }) => void;
   'workspace:user:left': (data: { userId: string }) => void;
   'user:cursor:updated': (data: { x: number; y: number; userId: string }) => void;
   'runtime:event': (data: RuntimeEventEnvelope) => void;
-  
+
   // État de connexion
   'connection:status': (status: 'connected' | 'disconnected' | 'error') => void;
 }
@@ -79,7 +80,7 @@ export class WebSocketManager {
           const isLocalhost = origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
           const isProduction = process.env.NODE_ENV === 'production';
           const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4000';
-          
+
           if (isProduction) {
             if (origin === frontendUrl) {
               callback(null, true);
@@ -94,9 +95,9 @@ export class WebSocketManager {
             }
           }
         },
-        credentials: true
+        credentials: true,
       },
-      transports: ['websocket', 'polling']
+      transports: ['websocket', 'polling'],
     });
 
     // US-J7-12 — Authentification JWT stricte au handshake.
@@ -116,7 +117,7 @@ export class WebSocketManager {
   private setupEventHandlers() {
     this.io.on('connection', (socket) => {
       console.debug(`[WebSocket] Client connecté: ${socket.id} (user: ${socket.data.userId})`);
-      
+
       // Envoyer confirmation de connexion
       socket.emit('connection:status', 'connected');
 
@@ -134,7 +135,7 @@ export class WebSocketManager {
         this.handleValidatedWorkspaceEvent(socket, 'agent:position:update', data, AgentPositionUpdateSchema, (payload) => {
           this.broadcastToWorkspace(socket, 'agent:position:updated', {
             ...payload,
-            userId: socket.data.userId
+            userId: socket.data.userId,
           });
         });
       });
@@ -143,7 +144,7 @@ export class WebSocketManager {
         this.handleValidatedWorkspaceEvent(socket, 'agent:message:add', data, AgentMessageAddSchema, (payload) => {
           this.broadcastToWorkspace(socket, 'agent:message:added', {
             ...payload,
-            userId: socket.data.userId
+            userId: socket.data.userId,
           });
         });
       });
@@ -152,7 +153,7 @@ export class WebSocketManager {
         this.handleValidatedWorkspaceEvent(socket, 'agent:toggle:minimize', data, AgentToggleMinimizeSchema, (payload) => {
           this.broadcastToWorkspace(socket, 'agent:toggle:minimized', {
             ...payload,
-            userId: socket.data.userId
+            userId: socket.data.userId,
           });
         });
       });
@@ -163,7 +164,7 @@ export class WebSocketManager {
           this.broadcastToWorkspace(socket, 'user:cursor:updated', {
             x: payload.x,
             y: payload.y,
-            userId: socket.data.userId
+            userId: socket.data.userId,
           });
         });
       });
@@ -227,7 +228,7 @@ export class WebSocketManager {
     // Rejoindre le nouveau workspace
     socket.join(workspaceId);
     socket.data.workspaceId = workspaceId;
-    
+
     // Ajouter à la liste des utilisateurs connectés
     if (!this.connectedUsers.has(workspaceId)) {
       this.connectedUsers.set(workspaceId, new Set());
@@ -237,7 +238,7 @@ export class WebSocketManager {
     // Notifier les autres utilisateurs
     socket.to(workspaceId).emit('workspace:user:joined', {
       userId: socket.data.userId,
-      userInfo: socket.data.userInfo || { name: socket.data.userId, color: generateUserColor(socket.data.userId) }
+      userInfo: socket.data.userInfo || { name: socket.data.userId, color: generateUserColor(socket.data.userId) },
     });
 
     console.debug(`[WebSocket] User ${socket.data.userId} rejoint workspace ${workspaceId}`);
@@ -251,7 +252,7 @@ export class WebSocketManager {
     }
 
     socket.leave(workspaceId);
-    
+
     // Retirer de la liste des utilisateurs connectés
     if (this.connectedUsers.has(workspaceId)) {
       this.connectedUsers.get(workspaceId)!.delete(socket.data.userId);
@@ -262,7 +263,7 @@ export class WebSocketManager {
 
     // Notifier les autres utilisateurs
     socket.to(workspaceId).emit('workspace:user:left', {
-      userId: socket.data.userId
+      userId: socket.data.userId,
     });
 
     console.debug(`[WebSocket] User ${socket.data.userId} quitte workspace ${workspaceId}`);
@@ -274,9 +275,17 @@ export class WebSocketManager {
     }
   }
 
-  private broadcastToWorkspace(socket: WorkspaceSocket, event: keyof ServerToClientEvents, data: any) {
+  private broadcastToWorkspace<E extends keyof ServerToClientEvents>(
+    socket: WorkspaceSocket,
+    event: E,
+    data: Parameters<ServerToClientEvents[E]>[0],
+  ) {
     if (socket.data.workspaceId) {
-      socket.to(socket.data.workspaceId).emit(event, data);
+      // La paire (event, data) est contrainte par la signature générique de cette
+      // méthode ; on caste `emit` car son type conditionnel interne (socket.io)
+      // n'est pas résoluble pour un paramètre de type générique.
+      const emit = socket.to(socket.data.workspaceId).emit as unknown as (ev: string, ...args: unknown[]) => boolean;
+      emit(event, data);
     }
   }
 
@@ -311,12 +320,7 @@ export class WebSocketManager {
     return true;
   }
 
-  private denySocketAction(
-    socket: WorkspaceSocket,
-    eventName: string,
-    reason: string,
-    metadata: Record<string, unknown> = {},
-  ) {
+  private denySocketAction(socket: WorkspaceSocket, eventName: string, reason: string, metadata: Record<string, unknown> = {}) {
     console.warn('[WebSocket][Denied]', {
       socketId: socket.id,
       eventName,
