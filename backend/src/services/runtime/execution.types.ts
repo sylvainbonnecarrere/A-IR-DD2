@@ -1,117 +1,114 @@
 import type { IUserToolPolicy } from '../../models/UserTool.model';
 
 import type {
-    IUserToolRunArtifact,
-    IUserToolRunPolicySnapshot,
-    IUserToolRunResourceUsage,
-    UserToolRunLaunchContext,
-    UserToolRunRunner,
-    UserToolRunRuntime,
-    UserToolRunStatus,
+  IUserToolRunArtifact,
+  IUserToolRunPolicySnapshot,
+  IUserToolRunResourceUsage,
+  UserToolRunLaunchContext,
+  UserToolRunRunner,
+  UserToolRunRuntime,
+  UserToolRunStatus,
 } from '../../models/UserToolRun.model';
 import type { WorkspaceProvisioningResult } from '../workspace/types';
 
 export type SandboxExecutionMode = 'python-native' | 'python-custom' | 'typescript-custom';
 export type SandboxExecutionFailureKind =
-    | 'timeout'
-    | 'runner_unavailable'
-    | 'runner_spawn_failed'
-    | 'runner_image_missing'
-    | 'runner_mount_failed'
-    | 'runner_permission_denied'
-    | 'wrapper_syntax_error'
-    | 'user_code_syntax_error'
-    | 'dependency_missing'
-    | 'sandbox_runtime_error'
-    | 'sandbox_invalid_output'
-    | 'sandbox_non_zero_exit'
-    | 'cancelled'
-    | 'unknown';
+  | 'timeout'
+  | 'runner_unavailable'
+  | 'runner_spawn_failed'
+  | 'runner_image_missing'
+  | 'runner_mount_failed'
+  | 'runner_permission_denied'
+  | 'wrapper_syntax_error'
+  | 'user_code_syntax_error'
+  | 'dependency_missing'
+  | 'sandbox_runtime_error'
+  | 'sandbox_invalid_output'
+  | 'sandbox_non_zero_exit'
+  | 'cancelled'
+  | 'unknown';
 
-export type SandboxExecutionFailureSubsystem =
-    | 'runner'
-    | 'wrapper'
-    | 'user_code'
-    | 'dependency'
-    | 'sandbox_runtime'
-    | 'unknown';
+export type SandboxExecutionFailureSubsystem = 'runner' | 'wrapper' | 'user_code' | 'dependency' | 'sandbox_runtime' | 'unknown';
 
 export interface SandboxExecutionMetadata {
-    exitCode?: number;
-    containerWorkspaceDir?: string;
-    timeoutMs?: number;
-    maxMemoryMb?: number;
-    failureKind?: SandboxExecutionFailureKind;
-    failureSubsystem?: SandboxExecutionFailureSubsystem;
-    cancellationConfirmed?: boolean;
-    runnerTerminationConfirmed?: boolean;
-    errorType?: string;
-    traceback?: string;
-    artifacts?: IUserToolRunArtifact[];
+  exitCode?: number;
+  containerWorkspaceDir?: string;
+  timeoutMs?: number;
+  maxMemoryMb?: number;
+  failureKind?: SandboxExecutionFailureKind;
+  failureSubsystem?: SandboxExecutionFailureSubsystem;
+  cancellationConfirmed?: boolean;
+  runnerTerminationConfirmed?: boolean;
+  errorType?: string;
+  traceback?: string;
+  artifacts?: IUserToolRunArtifact[];
 }
 
-export interface SandboxExecutionResourceUsage extends IUserToolRunResourceUsage {}
+export type SandboxExecutionResourceUsage = IUserToolRunResourceUsage;
 
 export interface SandboxSyntaxCheckResult {
-    valid: boolean;
-    errors: Array<{ line?: number; message: string }>;
+  valid: boolean;
+  errors: Array<{ line?: number; message: string }>;
 }
 
 export interface LegacyExecutionFunctionRef {
-    _id: string | { toString(): string };
-    name: string;
-    language: 'python' | 'typescript';
-    origin: 'native' | 'custom';
-    codeInline?: string | null;
-    codePath?: string | null;
-    workflowId?: string | { toString(): string } | null;
+  _id: string | { toString(): string };
+  name: string;
+  language: 'python' | 'typescript';
+  origin: 'native' | 'custom';
+  codeInline?: string | null;
+  codePath?: string | null;
+  workflowId?: string | { toString(): string } | null;
 }
 
 export interface ExecutionFunctionRef extends LegacyExecutionFunctionRef {
-    dependencies?: {
+  dependencies?:
+    | {
         python?: string[];
         npm?: string[];
-    } | string[] | null;
-    version?: number | string;
-    toolVersionTag?: string;
-    toolContentHash?: string;
-    policySnapshot?: IUserToolPolicy;
+      }
+    | string[]
+    | null;
+  version?: number | string;
+  toolVersionTag?: string;
+  toolContentHash?: string;
+  policySnapshot?: IUserToolPolicy;
 }
 
 export interface SandboxExecutionRequest {
-    executionId: string;
-    userId: string;
-    function: LegacyExecutionFunctionRef;
-    toolVersionTag?: string;
-    runtime: UserToolRunRuntime;
-    launchContext: UserToolRunLaunchContext;
-    args: Record<string, unknown>;
-    privateContext?: Record<string, unknown>;
-    signal?: AbortSignal;
-    policySnapshot: IUserToolRunPolicySnapshot;
-    workspace: WorkspaceProvisioningResult | null;
-    sourceCode?: string;
-    sourcePath?: string | null;
-    mode: SandboxExecutionMode;
+  executionId: string;
+  userId: string;
+  function: LegacyExecutionFunctionRef;
+  toolVersionTag?: string;
+  runtime: UserToolRunRuntime;
+  launchContext: UserToolRunLaunchContext;
+  args: Record<string, unknown>;
+  privateContext?: Record<string, unknown>;
+  signal?: AbortSignal;
+  policySnapshot: IUserToolRunPolicySnapshot;
+  workspace: WorkspaceProvisioningResult | null;
+  sourceCode?: string;
+  sourcePath?: string | null;
+  mode: SandboxExecutionMode;
 }
 
 export interface SandboxExecutionResult {
-    success: boolean;
-    output: unknown;
-    stdout?: string;
-    stderr?: string;
-    durationMs: number;
-    timedOut?: boolean;
-    exitCode: number;
-    runner: UserToolRunRunner;
-    metadata?: SandboxExecutionMetadata;
-    resourceUsage?: SandboxExecutionResourceUsage;
+  success: boolean;
+  output: unknown;
+  stdout?: string;
+  stderr?: string;
+  durationMs: number;
+  timedOut?: boolean;
+  exitCode: number;
+  runner: UserToolRunRunner;
+  metadata?: SandboxExecutionMetadata;
+  resourceUsage?: SandboxExecutionResourceUsage;
 }
 
 export interface OrchestratedExecutionResult extends SandboxExecutionResult {
-    executionId: string;
-    replayed?: boolean;
-    status?: UserToolRunStatus;
-    retryOfExecutionId?: string | null;
-    cancellationRequested?: boolean;
+  executionId: string;
+  replayed?: boolean;
+  status?: UserToolRunStatus;
+  retryOfExecutionId?: string | null;
+  cancellationRequested?: boolean;
 }

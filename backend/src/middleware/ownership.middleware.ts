@@ -13,6 +13,7 @@ export interface AuthenticatedRequest extends Request {
 
 // Filtre d'ownership attaché par `filterByOwnership` et consommé par les contrôleurs.
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- augmentation standard d'Express via declare global
   namespace Express {
     interface Request {
       ownershipFilter?: Record<string, unknown>;

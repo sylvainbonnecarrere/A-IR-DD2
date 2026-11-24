@@ -8,7 +8,9 @@ import config from '../config/environment';
 
 // Étendre Request d'Express pour inclure user
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- augmentation standard d'Express via declare global
   namespace Express {
+    // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- interface d'augmentation (fusion de déclarations) ; alias interdit ici
     interface User extends IUser {}
   }
 }
