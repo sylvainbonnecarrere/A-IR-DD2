@@ -47,9 +47,14 @@ import { MongoExpiredRunReconciler } from './services/runtime/MongoExpiredRunRec
 import { AgentAutoRecoveryService } from './services/runtime/agentAutoRecovery.service';
 import { MongoRunVisibilityService } from './services/runtime/runVisibility.service';
 import { FenceAndRetryService } from './services/fenceAndRetry.service';
+import { configureLogger, logger } from './services/logger';
 
 // SOLID: Valider la configuration au démarrage (fail-fast pattern)
 validateConfig();
+
+// US-RC-06: wiring du logger structuré (LOG_LEVEL / NODE_ENV) avant tout log
+configureLogger();
+logger.info('Logger configuré', { level: logger.level, nodeEnv: process.env.NODE_ENV ?? 'development' });
 
 const isTestEnvironment = process.env.NODE_ENV === 'test';
 
@@ -94,10 +99,12 @@ const corsOrigin = (origin: string | undefined, callback: (err: Error | null, al
   }
 };
 
-app.use(cors({
-  origin: corsOrigin,
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: corsOrigin,
+    credentials: true,
+  }),
+);
 
 // ⭐ FIX 413: Augmenter la limite pour les images base64 (jusqu'à 50MB)
 // Les images en base64 peuvent facilement dépasser la limite par défaut de 100KB
@@ -212,7 +219,7 @@ async function startServer() {
     // Tentative connexion MongoDB (non-bloquante pour Jalon 1)
     try {
       await connectDatabase();
-      
+
       // Initialize database schema, collections, and indexes (Code-First approach)
       // This runs AFTER successful MongoDB connection
       await initializeDatabase();
@@ -231,10 +238,7 @@ async function startServer() {
         throw new Error('DOCKER_GATEWAY_SOCKET is required in production; direct Docker access is disabled');
       }
       if (gatewaySocket) {
-        await activateDockerGatewayWorker(
-          gatewaySocket,
-          `backend:${os.hostname()}:${process.pid}:${randomUUID()}`,
-        );
+        await activateDockerGatewayWorker(gatewaySocket, `backend:${os.hostname()}:${process.pid}:${randomUUID()}`);
         const gatewayAdmission = new MongoDockerGatewayAdmission();
         const gatewayControl = new DockerGatewayControlClient({ socketPath: gatewaySocket });
         const runVisibility = new MongoRunVisibilityService();
