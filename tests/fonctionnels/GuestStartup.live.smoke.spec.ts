@@ -66,7 +66,7 @@ test.describe('Guest startup smoke', () => {
     await page.waitForTimeout(3000);
 
     const registerProbe = await describeTopElement(page, 'Inscription');
-    console.log('[GuestStartup] Register probe:', JSON.stringify(registerProbe));
+    console.debug('[GuestStartup] Register probe:', JSON.stringify(registerProbe));
 
     await settingsButton.click({ trial: true, timeout: 5000 });
     await loginButton.click({ trial: true, timeout: 5000 });
