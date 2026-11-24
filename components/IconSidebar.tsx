@@ -6,7 +6,6 @@ import { BosSubMenu } from './BosSubMenu';
 import { ComSubMenu } from './ComSubMenu';
 import { PhilSubMenu } from './PhilSubMenu';
 import { TimSubMenu } from './TimSubMenu';
-import { useLocalization } from '../hooks/useLocalization';
 
 interface IconSidebarProps {
   robotMenuData: RobotMenuItem[];
@@ -15,16 +14,11 @@ interface IconSidebarProps {
   className?: string;
 }
 
-export const IconSidebar: React.FC<IconSidebarProps> = ({
-  robotMenuData,
-  currentPath,
-  onNavigate,
-  className = ''
-}) => {
+export const IconSidebar: React.FC<IconSidebarProps> = ({ robotMenuData, currentPath, onNavigate, className = '' }) => {
   const [activeSubMenuRobot, setActiveSubMenuRobot] = useState<RobotId | null>(null);
 
   const handleItemClick = (robotId: RobotId, path: string) => {
-    const robot = robotMenuData.find(r => r.id === robotId);
+    const robot = robotMenuData.find((r) => r.id === robotId);
 
     // Check if robot has nested items for submenu
     if (robot && robot.nestedItems && robot.nestedItems.length > 0) {
@@ -46,11 +40,13 @@ export const IconSidebar: React.FC<IconSidebarProps> = ({
   };
 
   return (
-    <aside className={`
+    <aside
+      className={`
       relative w-16 bg-gray-800 border-r border-gray-700/50 
       flex flex-col items-center py-4 space-y-3
       ${className}
-    `}>
+    `}
+    >
       {robotMenuData.map((robot, index) => {
         const isActive = currentPath.startsWith(robot.path);
         const hasSubMenu = robot.nestedItems && robot.nestedItems.length > 0;
@@ -58,12 +54,7 @@ export const IconSidebar: React.FC<IconSidebarProps> = ({
 
         return (
           <div key={robot.id} className="relative">
-            <IconMenuItem
-              item={robot}
-              isActive={isActive}
-              isSubMenuOpen={isSubMenuOpen}
-              onItemClick={handleItemClick}
-            />
+            <IconMenuItem item={robot} isActive={isActive} isSubMenuOpen={isSubMenuOpen} onItemClick={handleItemClick} />
 
             {/* ARCHI SPECIALIZED SUBMENU */}
             {robot.id === RobotId.Archi && isSubMenuOpen && hasSubMenu && (
@@ -74,7 +65,7 @@ export const IconSidebar: React.FC<IconSidebarProps> = ({
                 onClose={closeSubMenu}
                 position={{
                   top: index * 56 + 16,
-                  left: 64
+                  left: 64,
                 }}
               />
             )}
@@ -88,7 +79,7 @@ export const IconSidebar: React.FC<IconSidebarProps> = ({
                 onClose={closeSubMenu}
                 position={{
                   top: index * 56 + 16,
-                  left: 64
+                  left: 64,
                 }}
               />
             )}
@@ -102,7 +93,7 @@ export const IconSidebar: React.FC<IconSidebarProps> = ({
                 onClose={closeSubMenu}
                 position={{
                   top: index * 56 + 16,
-                  left: 64
+                  left: 64,
                 }}
               />
             )}
@@ -116,7 +107,7 @@ export const IconSidebar: React.FC<IconSidebarProps> = ({
                 onClose={closeSubMenu}
                 position={{
                   top: index * 56 + 16,
-                  left: 64
+                  left: 64,
                 }}
               />
             )}
@@ -130,7 +121,7 @@ export const IconSidebar: React.FC<IconSidebarProps> = ({
                 onClose={closeSubMenu}
                 position={{
                   top: index * 56 + 16,
-                  left: 64
+                  left: 64,
                 }}
               />
             )}
@@ -139,12 +130,7 @@ export const IconSidebar: React.FC<IconSidebarProps> = ({
       })}
 
       {/* Click outside to close submenu */}
-      {activeSubMenuRobot && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={closeSubMenu}
-        />
-      )}
+      {activeSubMenuRobot && <div className="fixed inset-0 z-40" onClick={closeSubMenu} />}
     </aside>
   );
 };

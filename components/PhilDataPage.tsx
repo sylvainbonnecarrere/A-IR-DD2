@@ -5,7 +5,7 @@ import { useProvisionalPrototypeCollection } from '../hooks/useProvisionalProtot
 import { Button, Card } from './UI';
 import { RobotIndicator } from './RobotPageChrome';
 import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
-import { PlusIcon, FileAnalysisIcon, SettingsIcon, CloseIcon } from './Icons';
+import { PlusIcon, FileAnalysisIcon, CloseIcon } from './Icons';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useLocalization } from '../hooks/useLocalization';
 
@@ -31,9 +31,7 @@ function createInitialFileDraft(): FileDraft {
   };
 }
 
-export const PhilDataPage: React.FC<PhilDataPageProps> = ({
-  onNavigateToWorkflow
-}) => {
+export const PhilDataPage: React.FC<PhilDataPageProps> = ({ onNavigateToWorkflow }) => {
   const { t } = useLocalization();
   const { addNotification } = useNotifications();
   const {
@@ -44,7 +42,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
     prefix: 'file',
     creatorId: RobotId.Phil,
   });
-  const { currentRobotId } = useDesignStore();
+  const { currentRobotId: _currentRobotId } = useDesignStore();
 
   const [isCreating, setIsCreating] = useState(false);
   const [newFile, setNewFile] = useState<FileDraft>(createInitialFileDraft());
@@ -55,7 +53,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
         type: 'error',
         title: t('validation_error'),
         message: t('phil_file_name_required'),
-        duration: 3000
+        duration: 3000,
       });
       return;
     }
@@ -65,7 +63,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
       type: newFile.type,
       format: newFile.format,
       validation_rules: newFile.validationRules,
-      transformation_config: newFile.type === 'transformation' ? {} : undefined
+      transformation_config: newFile.type === 'transformation' ? {} : undefined,
     });
 
     if (result.success) {
@@ -73,7 +71,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
         type: 'success',
         title: t('phil_file_prototype_created'),
         message: t('phil_file_created_success', { name: newFile.name }),
-        duration: 3000
+        duration: 3000,
       });
       setNewFile(createInitialFileDraft());
       setIsCreating(false);
@@ -87,40 +85,57 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
         type: 'success',
         title: t('prototype_deleted'),
         message: t('phil_file_deleted_success', { name }),
-        duration: 3000
+        duration: 3000,
       });
     }
   };
 
   const getFileTypeColor = (type: FilePrototypeType) => {
     switch (type) {
-      case 'upload': return 'bg-green-500/20 text-green-300 border-green-500/30';
-      case 'transformation': return 'bg-purple-500/20 text-purple-300 border-purple-500/30';
-      case 'validation': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
-      case 'output': return 'bg-orange-500/20 text-orange-300 border-orange-500/30';
-      default: return 'bg-gray-500/20 text-gray-300 border-gray-500/30';
+      case 'upload':
+        return 'bg-green-500/20 text-green-300 border-green-500/30';
+      case 'transformation':
+        return 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+      case 'validation':
+        return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+      case 'output':
+        return 'bg-orange-500/20 text-orange-300 border-orange-500/30';
+      default:
+        return 'bg-gray-500/20 text-gray-300 border-gray-500/30';
     }
   };
 
   const getFormatIcon = (format: string) => {
     switch (format.toLowerCase()) {
-      case 'json': return '📄';
-      case 'csv': return '📊';
-      case 'pdf': return '📋';
-      case 'xml': return '🗂️';
-      case 'txt': return '📝';
-      case 'image': return '🖼️';
-      default: return '📁';
+      case 'json':
+        return '📄';
+      case 'csv':
+        return '📊';
+      case 'pdf':
+        return '📋';
+      case 'xml':
+        return '🗂️';
+      case 'txt':
+        return '📝';
+      case 'image':
+        return '🖼️';
+      default:
+        return '📁';
     }
   };
 
   const getFileTypeIcon = (type: FilePrototypeType) => {
     switch (type) {
-      case 'upload': return '⬆️';
-      case 'transformation': return '🔄';
-      case 'validation': return '✅';
-      case 'output': return '⬇️';
-      default: return '📄';
+      case 'upload':
+        return '⬆️';
+      case 'transformation':
+        return '🔄';
+      case 'validation':
+        return '✅';
+      case 'output':
+        return '⬇️';
+      default:
+        return '📄';
     }
   };
 
@@ -145,26 +160,15 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
       {/* Actions Bar */}
       <div className="p-6 border-b border-gray-700/50">
         <div className="flex items-center justify-between">
-          <div className="text-sm text-gray-400">
-            {t('phil_file_prototypes_count', { count: files.length })}
-          </div>
+          <div className="text-sm text-gray-400">{t('phil_file_prototypes_count', { count: files.length })}</div>
           <div className="flex space-x-3">
             {onNavigateToWorkflow && (
-              <Button
-                onClick={onNavigateToWorkflow}
-                className="flex items-center space-x-2"
-                variant="secondary"
-              >
+              <Button onClick={onNavigateToWorkflow} className="flex items-center space-x-2" variant="secondary">
                 <span>🗺️</span>
                 <span>{t('view_workflows')}</span>
               </Button>
             )}
-            <Button
-              onClick={() => setIsCreating(true)}
-              className="flex items-center space-x-2"
-              variant="primary"
-              tone="blue"
-            >
+            <Button onClick={() => setIsCreating(true)} className="flex items-center space-x-2" variant="primary" tone="blue">
               <PlusIcon className="w-4 h-4" />
               <span>{t('phil_new_prototype')}</span>
             </Button>
@@ -177,7 +181,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
         <ProvisionalSurfaceNotice
           description={t(
             'phil_provisional_notice',
-            'Cette page conserve des prototypes localement dans la session UI. Aucun service canonique de fichiers Phil n est encore branche a ce flux.'
+            'Cette page conserve des prototypes localement dans la session UI. Aucun service canonique de fichiers Phil n est encore branche a ce flux.',
           )}
         />
 
@@ -234,9 +238,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
 
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1">{t('phil_validation_rules')}</label>
-                <select
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-green-500"
-                >
+                <select className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-green-500">
                   <option value="">{t('phil_none')}</option>
                   <option value="schema">{t('phil_schema_validation')}</option>
                   <option value="format">{t('phil_format_validation')}</option>
@@ -262,10 +264,7 @@ export const PhilDataPage: React.FC<PhilDataPageProps> = ({
             <FileAnalysisIcon className="w-16 h-16 mx-auto mb-4 text-gray-600" />
             <h3 className="text-lg font-medium text-gray-300 mb-2">{t('phil_no_file_prototype')}</h3>
             <p className="mb-4">{t('phil_create_first_prototype')}</p>
-            <Button
-              onClick={() => setIsCreating(true)}
-              className="bg-green-600 hover:bg-green-700"
-            >
+            <Button onClick={() => setIsCreating(true)} className="bg-green-600 hover:bg-green-700">
               <PlusIcon className="w-4 h-4 mr-2" />
               {t('phil_first_prototype')}
             </Button>

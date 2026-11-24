@@ -30,13 +30,13 @@ export const JsonTableViewer: React.FC<JsonTableViewerProps> = ({ data }) => {
       }
 
       const cols = Object.keys(firstRow);
-      const tableRows = parsed.map((row, idx) => cols.reduce((acc, col) => ({ ...acc, [col]: row[col] }), {}));
+      const tableRows = parsed.map((row, _idx) => cols.reduce((acc, col) => ({ ...acc, [col]: row[col] }), {}));
 
       return { isArray: true, rows: tableRows, columns: cols };
-    } catch (error) {
+    } catch {
       return { isArray: false, rows: [], columns: [] };
     }
-  }, [data]);
+  }, [data, t]);
 
   if (!isArray) {
     return (

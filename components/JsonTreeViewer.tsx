@@ -67,7 +67,7 @@ const TreeNode: React.FC<{ node: JsonTreeNode; level: number }> = ({ node, level
 
       {isExpandable && isExpanded && (
         <div>
-          {entries.map((entry, idx) => (
+          {entries.map((entry, _idx) => (
             <TreeNode key={`${level}-${entry.key}`} node={entry} level={level + 1} />
           ))}
         </div>
@@ -76,7 +76,7 @@ const TreeNode: React.FC<{ node: JsonTreeNode; level: number }> = ({ node, level
   );
 };
 
-export const JsonTreeViewer: React.FC<JsonTreeViewerProps> = ({ data, defaultExpanded = true }) => {
+export const JsonTreeViewer: React.FC<JsonTreeViewerProps> = ({ data, defaultExpanded: _defaultExpanded = true }) => {
   let rootNode: JsonTreeNode;
 
   try {

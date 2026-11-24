@@ -28,7 +28,7 @@ const SchemaField: React.FC<{ name: string; type: string; level: number }> = ({ 
   );
 };
 
-const SchemaObject: React.FC<{ data: Record<string, any>; level: number }> = ({ data, level }) => {
+const SchemaObject: React.FC<{ data: Record<string, unknown>; level: number }> = ({ data, level }) => {
   return (
     <>
       {Object.entries(data).map(([key, value]) => {
@@ -36,7 +36,9 @@ const SchemaObject: React.FC<{ data: Record<string, any>; level: number }> = ({ 
         return (
           <div key={key}>
             <SchemaField name={key} type={type} level={level} />
-            {typeof value === 'object' && value !== null && !Array.isArray(value) && <SchemaObject data={value} level={level + 1} />}
+            {typeof value === 'object' && value !== null && !Array.isArray(value) && (
+              <SchemaObject data={value as Record<string, unknown>} level={level + 1} />
+            )}
           </div>
         );
       })}
@@ -49,7 +51,7 @@ export const JsonSchemaViewer: React.FC<JsonSchemaViewerProps> = ({ data }) => {
     try {
       const parsed = typeof data === 'string' ? JSON.parse(data) : data;
       return parsed;
-    } catch (error) {
+    } catch {
       return null;
     }
   }, [data]);

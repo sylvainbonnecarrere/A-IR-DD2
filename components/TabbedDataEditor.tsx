@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import JsonTreeViewer from './JsonTreeViewer';
+
 import JsonTableViewer from './JsonTableViewer';
 import JsonSchemaViewer from './JsonSchemaViewer';
 
@@ -12,12 +12,7 @@ interface TabbedDataEditorProps {
 
 type TabType = 'editor' | 'table' | 'schema';
 
-export const TabbedDataEditor: React.FC<TabbedDataEditorProps> = ({
-  value,
-  onChange,
-  placeholder = '{}',
-  readOnly = false
-}) => {
+export const TabbedDataEditor: React.FC<TabbedDataEditorProps> = ({ value, onChange, placeholder = '{}', readOnly = false }) => {
   const [activeTab, setActiveTab] = useState<TabType>('editor');
 
   const isValidJson = (() => {
@@ -34,9 +29,10 @@ export const TabbedDataEditor: React.FC<TabbedDataEditorProps> = ({
       onClick={() => setActiveTab(id)}
       className={`
         px-3 py-2 text-sm font-medium rounded-t-lg transition-all border-b-2
-        ${activeTab === id
-          ? 'bg-green-600 text-white border-b-green-400'
-          : 'bg-gray-700 text-gray-300 hover:bg-gray-600 border-b-transparent'
+        ${
+          activeTab === id
+            ? 'bg-green-600 text-white border-b-green-400'
+            : 'bg-gray-700 text-gray-300 hover:bg-gray-600 border-b-transparent'
         }
       `}
     >
@@ -72,10 +68,7 @@ export const TabbedDataEditor: React.FC<TabbedDataEditorProps> = ({
               text-gray-200 placeholder-gray-500 text-sm font-mono
               transition-all resize-none
               focus:outline-none
-              ${isValidJson
-                ? 'border-green-500 focus:border-green-400'
-                : 'border-red-500 focus:border-red-400'
-              }
+              ${isValidJson ? 'border-green-500 focus:border-green-400' : 'border-red-500 focus:border-red-400'}
               ${readOnly ? 'opacity-75 cursor-not-allowed' : 'cursor-text'}
             `}
           />
@@ -86,9 +79,7 @@ export const TabbedDataEditor: React.FC<TabbedDataEditorProps> = ({
 
       {/* Validation indicator */}
       {value && !isValidJson && (
-        <div className="px-4 py-2 bg-red-900/20 border-t border-red-700 text-xs text-red-400">
-          ⚠️ JSON invalide - Corrigez le format
-        </div>
+        <div className="px-4 py-2 bg-red-900/20 border-t border-red-700 text-xs text-red-400">⚠️ JSON invalide - Corrigez le format</div>
       )}
     </div>
   );

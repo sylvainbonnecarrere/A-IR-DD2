@@ -5,7 +5,7 @@ import { useProvisionalPrototypeCollection } from '../hooks/useProvisionalProtot
 import { Button, Card } from './UI';
 import { RobotIndicator } from './RobotPageChrome';
 import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
-import { PlusIcon, AntennaIcon, SettingsIcon, CloseIcon } from './Icons';
+import { PlusIcon, AntennaIcon, CloseIcon } from './Icons';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useLocalization } from '../hooks/useLocalization';
 import { LLMConfigsList } from './LLMConfigsList';
@@ -25,10 +25,7 @@ type ConnectionDraft = {
   authType: ConnectionAuthenticationType;
 };
 
-export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
-  llmConfigs,
-  onNavigateToWorkflow
-}) => {
+export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({ llmConfigs: _llmConfigs, onNavigateToWorkflow }) => {
   const { t } = useLocalization();
   const { addNotification } = useNotifications();
   const {
@@ -39,14 +36,14 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
     prefix: 'conn',
     creatorId: RobotId.Com,
   });
-  const { currentRobotId } = useDesignStore();
+  const { currentRobotId: _currentRobotId } = useDesignStore();
 
   const [isCreating, setIsCreating] = useState(false);
   const [newConnection, setNewConnection] = useState<ConnectionDraft>({
     name: '',
     type: 'api' as const,
     endpoint: '',
-    authType: 'bearer' as const
+    authType: 'bearer' as const,
   });
 
   const handleCreateConnection = () => {
@@ -55,7 +52,7 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
         type: 'error',
         title: t('validation_error'),
         message: t('com_name_endpoint_required'),
-        duration: 3000
+        duration: 3000,
       });
       return;
     }
@@ -66,9 +63,9 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
       endpoint: newConnection.endpoint,
       authentication: {
         type: newConnection.authType,
-        credentials: {}
+        credentials: {},
       },
-      configuration: {}
+      configuration: {},
     });
 
     if (result.success) {
@@ -76,7 +73,7 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
         type: 'success',
         title: t('com_connection_created'),
         message: t('com_connection_created_success', { name: newConnection.name }),
-        duration: 3000
+        duration: 3000,
       });
       setNewConnection({ name: '', type: 'api', endpoint: '', authType: 'bearer' });
       setIsCreating(false);
@@ -90,28 +87,38 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
         type: 'success',
         title: t('com_connection_deleted'),
         message: t('com_connection_deleted_success', { name }),
-        duration: 3000
+        duration: 3000,
       });
     }
   };
 
   const getAuthTypeColor = (type: ConnectionAuthenticationType) => {
     switch (type) {
-      case 'bearer': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
-      case 'api_key': return 'bg-green-500/20 text-green-300 border-green-500/30';
-      case 'oauth': return 'bg-purple-500/20 text-purple-300 border-purple-500/30';
-      case 'basic': return 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30';
-      default: return 'bg-gray-500/20 text-gray-300 border-gray-500/30';
+      case 'bearer':
+        return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+      case 'api_key':
+        return 'bg-green-500/20 text-green-300 border-green-500/30';
+      case 'oauth':
+        return 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+      case 'basic':
+        return 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30';
+      default:
+        return 'bg-gray-500/20 text-gray-300 border-gray-500/30';
     }
   };
 
   const getConnectionTypeIcon = (type: ConnectionPrototypeType) => {
     switch (type) {
-      case 'api': return '🔌';
-      case 'webhook': return '🪝';
-      case 'database': return '🗄️';
-      case 'external_service': return '🌐';
-      default: return '🔗';
+      case 'api':
+        return '🔌';
+      case 'webhook':
+        return '🪝';
+      case 'database':
+        return '🗄️';
+      case 'external_service':
+        return '🌐';
+      default:
+        return '🔗';
     }
   };
 
@@ -136,26 +143,15 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
       {/* Actions Bar */}
       <div className="p-6 border-b border-gray-700/50">
         <div className="flex items-center justify-between">
-          <div className="text-sm text-gray-400">
-            {t('com_connections_count', { count: connections.length })}
-          </div>
+          <div className="text-sm text-gray-400">{t('com_connections_count', { count: connections.length })}</div>
           <div className="flex space-x-3">
             {onNavigateToWorkflow && (
-              <Button
-                onClick={onNavigateToWorkflow}
-                className="flex items-center space-x-2"
-                variant="secondary"
-              >
+              <Button onClick={onNavigateToWorkflow} className="flex items-center space-x-2" variant="secondary">
                 <span>🗺️</span>
                 <span>{t('view_workflows')}</span>
               </Button>
             )}
-            <Button
-              onClick={() => setIsCreating(true)}
-              className="flex items-center space-x-2"
-              variant="primary"
-              tone="green"
-            >
+            <Button onClick={() => setIsCreating(true)} className="flex items-center space-x-2" variant="primary" tone="green">
               <PlusIcon className="w-4 h-4" />
               <span>{t('com_new_connection')}</span>
             </Button>
@@ -168,7 +164,7 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
         <ProvisionalSurfaceNotice
           description={t(
             'com_connections_provisional_notice',
-            'Cette page conserve les connexions localement dans la session UI. Elle reste un support provisoire tant que le service canonique COM n est pas branche a cette surface.'
+            'Cette page conserve les connexions localement dans la session UI. Elle reste un support provisoire tant que le service canonique COM n est pas branche a cette surface.',
           )}
         />
 
@@ -179,7 +175,6 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
               <PlusIcon className="w-5 h-5" />
               <span>{t('com_new_connection')}</span>
             </h3>
-
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1">{t('name')}</label>
@@ -231,7 +226,8 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
                   <option value="none">{t('com_no_auth')}</option>
                 </select>
               </div>
-            </div>            <div className="flex justify-end space-x-3">
+            </div>{' '}
+            <div className="flex justify-end space-x-3">
               <Button variant="secondary" onClick={() => setIsCreating(false)}>
                 {t('cancel')}
               </Button>
@@ -248,10 +244,7 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
             <AntennaIcon className="w-16 h-16 mx-auto mb-4 text-gray-600" />
             <h3 className="text-lg font-medium text-gray-300 mb-2">{t('com_no_connection_configured')}</h3>
             <p className="mb-4">{t('com_create_first_api_connection')}</p>
-            <Button
-              onClick={() => setIsCreating(true)}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
+            <Button onClick={() => setIsCreating(true)} className="bg-blue-600 hover:bg-blue-700">
               <PlusIcon className="w-4 h-4 mr-2" />
               {t('com_first_connection')}
             </Button>
@@ -317,7 +310,7 @@ export const ComConnectionsPage: React.FC<ComConnectionsPageProps> = ({
               type: 'success',
               title: t('com_llm_config_added', 'Configuration LLM ajoutée'),
               message: t('com_llm_config_added_desc', 'Votre configuration LLM a été sauvegardée de manière sécurisée.'),
-              duration: 3000
+              duration: 3000,
             });
           }}
         />

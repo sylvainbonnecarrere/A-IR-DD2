@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useLocalization } from '../hooks/useLocalization';
 import { useNotifications } from '../contexts/NotificationContext';
 import { PlusIcon, CloseIcon, LoaderIcon, ElectricPlugIcon, XIcon } from './Icons';
-import JsonResultViewer from './JsonResultViewer';
+
 import TabbedDataEditor from './TabbedDataEditor';
 import ConnectionListItem, { IConnectionItem } from './com/ConnectionListItem';
 import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
@@ -288,8 +288,8 @@ export const ComApiPage: React.FC = () => {
   const [response, setResponse] = useState<ApiResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body'>('params');
-  const [responseView, setResponseView] = useState<ResponseView>('json');
-  const [extractedResult, setExtractedResult] = useState<{ path: string; value: unknown } | null>(null);
+  const [_responseView, _setResponseView] = useState<ResponseView>('json');
+  const [_extractedResult, setExtractedResult] = useState<{ path: string; value: unknown } | null>(null);
 
   // ============== HANDLERS ==============
 

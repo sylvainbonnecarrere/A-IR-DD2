@@ -591,6 +591,9 @@ export const FunctionEditorTab: React.FC = () => {
   const { addNotification } = useNotifications();
   const { t } = useLocalization();
   const fn = getSelectedFunction();
+  // Ref pour lire fn dans l'effet de reset sans dépendre de ses champs (évite de reset à chaque frappe)
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
   const resolvedToolId = fn ? getFunctionCommandId(fn) : null;
   const isWorkflowScopedFunction = Boolean(fn?.workflowId);
   const preparationSummary = fn ? getPreparationSummary(fn, t) : null;
@@ -623,8 +626,8 @@ export const FunctionEditorTab: React.FC = () => {
 
   // Charger le code de la fonction sélectionnée
   useEffect(() => {
-    if (fn?.codeInline != null) {
-      setCode(fn.codeInline);
+    if (fnRef.current?.codeInline != null) {
+      setCode(fnRef.current.codeInline);
     } else {
       setCode('');
     }
@@ -634,8 +637,16 @@ export const FunctionEditorTab: React.FC = () => {
     setSyntaxErrors([]);
     setTestArgsErrorMessage(null);
     // Synchroniser les schémas
-    setInputSchemaStr(fn?.inputSchema && Object.keys(fn.inputSchema).length > 0 ? JSON.stringify(fn.inputSchema, null, 2) : '{}');
-    setOutputSchemaStr(fn?.outputSchema && Object.keys(fn.outputSchema).length > 0 ? JSON.stringify(fn.outputSchema, null, 2) : '{}');
+    setInputSchemaStr(
+      fnRef.current?.inputSchema && Object.keys(fnRef.current.inputSchema).length > 0
+        ? JSON.stringify(fnRef.current.inputSchema, null, 2)
+        : '{}',
+    );
+    setOutputSchemaStr(
+      fnRef.current?.outputSchema && Object.keys(fnRef.current.outputSchema).length > 0
+        ? JSON.stringify(fnRef.current.outputSchema, null, 2)
+        : '{}',
+    );
     setRunPage(1);
     setRunStatusFilter('all');
     setRunSortBy('createdAt');
@@ -647,7 +658,17 @@ export const FunctionEditorTab: React.FC = () => {
       void loadFunctionRuns(resolvedToolId, { page: 1, limit: functionRunsPagination.limit, sortBy: 'createdAt', sortOrder: 'desc' });
     }
     void loadRuntimeHealth();
-  }, [resolvedToolId, isWorkflowScopedFunction]);
+  }, [
+    resolvedToolId,
+    isWorkflowScopedFunction,
+    clearSandboxResult,
+    clearBuildResult,
+    clearArtifactPreview,
+    loadBuildStatus,
+    loadFunctionRuns,
+    loadRuntimeHealth,
+    functionRunsPagination.limit,
+  ]);
 
   useEffect(() => {
     if (resolvedToolId && sandboxResult?.executionId) {
@@ -659,7 +680,16 @@ export const FunctionEditorTab: React.FC = () => {
         sortOrder: runSortOrder,
       });
     }
-  }, [resolvedToolId, sandboxResult?.executionId, runPage, runStatusFilter, runSortBy, runSortOrder, functionRunsPagination.limit]);
+  }, [
+    resolvedToolId,
+    sandboxResult?.executionId,
+    runPage,
+    runStatusFilter,
+    runSortBy,
+    runSortOrder,
+    functionRunsPagination.limit,
+    loadFunctionRuns,
+  ]);
 
   // Vérification syntaxique en temps réel (debounce 800ms)
   const handleCodeChange: OnChange = useCallback(
@@ -940,7 +970,7 @@ export const FunctionEditorTab: React.FC = () => {
         });
       }
     },
-    [resolvedToolId, addNotification],
+    [resolvedToolId, addNotification, t],
   );
 
   const handleChangeRunPage = useCallback(
