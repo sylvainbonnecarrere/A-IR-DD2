@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { migrateLegacyUserFunctionsToUserToolsAndDropCollection } from '../migrations/005_user_functions_eol';
 
 class FakeCollection {
-  private readonly docs = new Map<string, any>();
+  private readonly docs = new Map<string, Record<string, unknown>>();
 
   constructor(initialDocs: Array<Record<string, unknown>> = []) {
     initialDocs.forEach((doc) => {
@@ -45,7 +45,7 @@ class FakeCollection {
     return Array.from(this.docs.values()).map((doc) => this.clone(doc));
   }
 
-  private matches(doc: Record<string, any>, filter: Record<string, unknown>): boolean {
+  private matches(doc: Record<string, unknown>, filter: Record<string, unknown>): boolean {
     return Object.entries(filter).every(([key, value]) => {
       return this.toComparable(doc[key]) === this.toComparable(value);
     });

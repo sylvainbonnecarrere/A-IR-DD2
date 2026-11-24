@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import mongoose from 'mongoose';
 import express from 'express';
 import passport from 'passport';
 import request from 'supertest';
@@ -46,10 +47,10 @@ describe('Function run routes', () => {
       username: `functionruns${Date.now()}`,
     });
 
-    const workflowId = new (require('mongoose').Types.ObjectId)();
+    const workflowId = new mongoose.Types.ObjectId();
     const sourceInline = 'function run() { return { ok: true }; }';
     const fn = await UserTool.create({
-      _id: new (require('mongoose').Types.ObjectId)(),
+      _id: new mongoose.Types.ObjectId(),
       ownerUserId: user._id,
       workspaceId: null,
       scopeType: 'user',

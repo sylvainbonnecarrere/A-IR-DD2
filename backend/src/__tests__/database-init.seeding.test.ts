@@ -1,10 +1,8 @@
 import mongoose from 'mongoose';
-import * as workflowMigrationModule from '../migrations/008_workflow_v1_to_v2_migration';
 import { nativeFunctionsSeed } from '../seeds/nativeFunctions.seed';
 import * as databaseInitModule from '../services/databaseInit';
 
-const { initializeDatabase, runDatabaseBootstrap, runDatabaseMigrations, runSeedPhase, seedNativeFunctions, seedSharedExampleFunctions } =
-  databaseInitModule;
+const { runDatabaseBootstrap, runDatabaseMigrations, runSeedPhase, seedNativeFunctions, seedSharedExampleFunctions } = databaseInitModule;
 
 describe('databaseInit canonical tool seeding', () => {
   it('seeds native startup tools directly into user_tools without touching legacy persistence', async () => {

@@ -1,6 +1,6 @@
 // Tests unitaires - Workflow Model
 import mongoose from 'mongoose';
-import { Workflow, IWorkflow } from '../models/Workflow.model';
+import { Workflow } from '../models/Workflow.model';
 import { User } from '../models/User.model';
 
 describe('Workflow Model', () => {

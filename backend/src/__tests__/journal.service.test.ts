@@ -1,6 +1,5 @@
 import fs from 'fs/promises';
 import path from 'path';
-import mongoose from 'mongoose';
 import { User } from '../models/User.model';
 import { Workflow } from '../models/Workflow.model';
 import { AgentInstance } from '../models/AgentInstance.model';

@@ -1,6 +1,6 @@
 // Tests unitaires - LLMConfig Model + Encryption
 import mongoose from 'mongoose';
-import { LLMConfig, ILLMConfig } from '../models/LLMConfig.model';
+import { LLMConfig } from '../models/LLMConfig.model';
 import { User } from '../models/User.model';
 
 describe('LLMConfig Model', () => {

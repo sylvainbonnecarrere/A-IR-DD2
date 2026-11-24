@@ -12,6 +12,7 @@ import runsRoutes from '../routes/runs.routes';
 import toolsRoutes from '../routes/tools.routes';
 import workspacesRoutes from '../routes/workspaces.routes';
 import { RuntimeHealthService } from '../services/runtimeHealth.service';
+import { NativePythonProvisioningService } from '../services/nativePythonProvisioning.service';
 import { generateAccessToken } from '../utils/jwt';
 
 const app = express();
@@ -543,19 +544,17 @@ describe('J8 transition routes', () => {
     });
 
     const accessToken = generateAccessToken({ sub: user.id, email: user.email, role: user.role });
-    const provisionSpy = jest
-      .spyOn(require('../services/nativePythonProvisioning.service').NativePythonProvisioningService.prototype, 'provisionToolVersion')
-      .mockResolvedValue({
-        toolId: tool.id,
-        toolName: 'web_fetch_py',
-        toolVersionTag: 'v-provision',
-        status: 'ready',
-        provisionedAt: '2026-03-31T12:00:00.000Z',
-        dependencies: ['requests==2.32.3'],
-        criticalModules: ['requests'],
-        sitePackagesPath: '/tmp/site-packages',
-        reportPath: '/tmp/provision-report.json',
-      });
+    const provisionSpy = jest.spyOn(NativePythonProvisioningService.prototype, 'provisionToolVersion').mockResolvedValue({
+      toolId: tool.id,
+      toolName: 'web_fetch_py',
+      toolVersionTag: 'v-provision',
+      status: 'ready',
+      provisionedAt: '2026-03-31T12:00:00.000Z',
+      dependencies: ['requests==2.32.3'],
+      criticalModules: ['requests'],
+      sitePackagesPath: '/tmp/site-packages',
+      reportPath: '/tmp/provision-report.json',
+    });
 
     const response = await request(app)
       .post(`/api/tools/${tool.id}/provision?versionTag=v-provision`)

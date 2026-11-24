@@ -2,11 +2,11 @@ import mongoose from 'mongoose';
 import { ensureSecurityOwnershipIndexes } from '../migrations/007_security_ownership_indexes';
 
 class FakeCollection {
-  private readonly indexes = new Map<string, { keys: Record<string, number>; options: Record<string, any> }>();
+  private readonly indexes = new Map<string, { keys: Record<string, number>; options: Record<string, unknown> }>();
 
-  async createIndex(keys: Record<string, number>, options: Record<string, any> = {}) {
-    this.indexes.set(options.name || JSON.stringify(keys), { keys: { ...keys }, options: { ...options } });
-    return options.name || JSON.stringify(keys);
+  async createIndex(keys: Record<string, number>, options: Record<string, unknown> = {}) {
+    this.indexes.set(String(options.name ?? JSON.stringify(keys)), { keys: { ...keys }, options: { ...options } });
+    return String(options.name ?? JSON.stringify(keys));
   }
 
   listIndexes() {

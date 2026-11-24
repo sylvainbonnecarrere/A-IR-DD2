@@ -3,7 +3,6 @@ import { CreateWorkflowUseCase } from '../createWorkflow.usecase';
 import { IUserRepository } from '../../../repositories/IUserRepository';
 import { IWorkflowRepository } from '../../../repositories/IWorkflowRepository';
 import type { IWorkflow } from '../../../models/Workflow.model';
-import type { IUser } from '../../../models/User.model';
 
 describe('CreateWorkflowUseCase', () => {
   const workflowRepository: jest.Mocked<IWorkflowRepository> = {

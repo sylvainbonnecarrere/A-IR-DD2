@@ -3,15 +3,11 @@
 
 import request from 'supertest';
 import express from 'express';
-import mongoose from 'mongoose';
 import passport from 'passport';
 import '../middleware/auth.middleware'; // Importer pour initialiser JWT strategy
 import { User, type IUser } from '../models/User.model';
-import { Workflow } from '../models/Workflow.model';
-import { AgentPrototype } from '../models/AgentPrototype.model';
 import { AgentInstance } from '../models/AgentInstance.model';
 import { AgentJournal } from '../models/AgentJournal.model';
-import { WorkflowEdge } from '../models/WorkflowEdge.model';
 import workflowsRoutes from '../routes/workflows.routes';
 import agentPrototypesRoutes from '../routes/agent-prototypes.routes';
 import agentInstancesRoutes from '../routes/agent-instances.routes';
@@ -36,7 +32,6 @@ describe('Workflow CRUD Flow - Cycle de vie complet', () => {
   let workflowId: string;
   let prototypeId: string;
   let instance1Id: string;
-  let instance2Id: string;
 
   beforeAll(async () => {
     // Créer utilisateur test

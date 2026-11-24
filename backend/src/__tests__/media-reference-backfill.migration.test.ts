@@ -2,8 +2,8 @@ import mongoose from 'mongoose';
 import { backfillMediaReferenceCatalogFields } from '../migrations/006_media_reference_catalog_backfill';
 
 class FakeCollection {
-  private readonly docs = new Map<string, any>();
-  private readonly indexes: Array<{ keys: Record<string, number>; options: Record<string, any> }> = [];
+  private readonly docs = new Map<string, Record<string, unknown>>();
+  private readonly indexes: Array<{ keys: Record<string, number>; options: Record<string, unknown> }> = [];
 
   constructor(initialDocs: Array<Record<string, unknown>> = []) {
     initialDocs.forEach((doc) => {
@@ -11,7 +11,7 @@ class FakeCollection {
     });
   }
 
-  find(filter: Record<string, any> = {}) {
+  find(filter: Record<string, unknown> = {}) {
     return {
       toArray: async () =>
         Array.from(this.docs.values())
@@ -20,7 +20,7 @@ class FakeCollection {
     };
   }
 
-  async updateOne(filter: Record<string, unknown>, update: Record<string, any>) {
+  async updateOne(filter: Record<string, unknown>, update: Record<string, unknown>) {
     const match = Array.from(this.docs.values()).find((doc) => this.matches(doc, filter));
     if (!match) {
       return { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
@@ -30,7 +30,7 @@ class FakeCollection {
       Object.assign(match, this.clone(update.$set));
     }
     if (update.$unset) {
-      Object.keys(update.$unset).forEach((field) => {
+      Object.keys(update.$unset as Record<string, unknown>).forEach((field) => {
         delete match[field];
       });
     }
@@ -39,7 +39,7 @@ class FakeCollection {
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
   }
 
-  async createIndex(index: Record<string, number>, options: Record<string, any> = {}) {
+  async createIndex(index: Record<string, number>, options: Record<string, unknown> = {}) {
     this.indexes.push({
       keys: this.clone(index),
       options: this.clone(options),
@@ -51,11 +51,11 @@ class FakeCollection {
     return Array.from(this.docs.values()).map((doc) => this.clone(doc));
   }
 
-  indexSnapshot(): Array<{ keys: Record<string, number>; options: Record<string, any> }> {
+  indexSnapshot(): Array<{ keys: Record<string, number>; options: Record<string, unknown> }> {
     return this.indexes.map((index) => this.clone(index));
   }
 
-  private matches(doc: Record<string, any>, filter: Record<string, unknown>): boolean {
+  private matches(doc: Record<string, unknown>, filter: Record<string, unknown>): boolean {
     return Object.entries(filter).every(([key, value]) => {
       const docValue = doc[key];
 
