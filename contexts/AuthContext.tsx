@@ -13,7 +13,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
-import { User, AuthContextType, StoredAuthData, AuthResponse, AuthLoadingState, LLMApiKey, AuthSessionStatus } from './types/auth.types';
+import { User, AuthContextType, StoredAuthData, AuthResponse, LLMApiKey, AuthSessionStatus } from './types/auth.types';
 import { LLMConfig, LocalLLMProfile } from '../types';
 import { wipeGuestData, checkGuestDataExists } from '../utils/guestDataUtils';
 import { useDesignStore } from '../stores/useDesignStore';
@@ -83,7 +83,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       useRuntimeStore.getState().resetAll();
       useLocalizationStore.getState().resetAll();
       useFunctionStore.getState().resetStore();
-    } catch (err) {
+    } catch {
       // Silent fail - stores may not be initialized
     }
   }, []);
@@ -156,7 +156,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           nextSessionStatus = 'degraded';
           nextError = 'Session locale invalide. Veuillez vous reconnecter.';
         }
-      } catch (err) {
+      } catch {
         authSessionStorage.clear();
         nextSessionStatus = 'degraded';
         nextError = 'Session locale invalide. Veuillez vous reconnecter.';
@@ -309,7 +309,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // This prevents guest session data from bleeding into auth session
         const guestCheck = checkGuestDataExists();
         if (guestCheck.totalKeys > 0) {
-          const wipeResult = wipeGuestData();
+          const _wipeResult = wipeGuestData();
         }
 
         // ⭐ NEW: Reset localization store on login to prevent data leak
@@ -360,7 +360,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // ⭐ CRITICAL: Wipe guest data BEFORE setting auth state
         const guestCheck = checkGuestDataExists();
         if (guestCheck.totalKeys > 0) {
-          const wipeResult = wipeGuestData();
+          const _wipeResult = wipeGuestData();
         }
 
         saveAuthData(userData, accessToken, refreshToken);
@@ -420,7 +420,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       if (typeof indexedDB !== 'undefined' && typeof indexedDB.databases === 'function') {
         // browsers that support indexedDB.databases()
-        // eslint-disable-next-line @typescript-eslint/no-floating-promises
         (async () => {
           try {
             const dbs = await (indexedDB as IDBFactory & { databases(): Promise<IDBDatabaseInfo[]> }).databases();
@@ -446,7 +445,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // 5) Emit logout event for other parts of the app to react (if needed)
     try {
       window.dispatchEvent(new CustomEvent('auth:logout', { detail: { reason: 'manual_logout' } }));
-    } catch (e) {
+    } catch {
       // ignore
     }
   }, [clearAuthState]);

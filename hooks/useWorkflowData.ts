@@ -12,14 +12,10 @@
  * ```
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import type { V2WorkflowNode, V2WorkflowEdge, Workflow, WorkflowEdge } from '../types';
-import {
-  WorkflowService,
-  WorkflowNodeService,
-  WorkflowEdgeService
-} from '../services/workflowService';
+import type { V2WorkflowNode, V2WorkflowEdge, Workflow } from '../types';
+import { WorkflowService, WorkflowNodeService, WorkflowEdgeService } from '../services/workflowService';
 
 interface UseWorkflowDataState {
   workflows: Workflow[];
@@ -66,91 +62,88 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
     nodes: [],
     edges: [],
     loading: false,
-    error: null
+    error: null,
   });
 
   /**
    * Options de persistance basées sur l'état d'authentification
    */
-  const persistenceOptions = {
-    isAuthenticated,
-    token: accessToken
-  };
+  const persistenceOptions = useMemo(() => ({ isAuthenticated, token: accessToken }), [isAuthenticated, accessToken]);
 
   /**
    * Charger tous les workflows
    */
   const loadWorkflows = useCallback(async () => {
-    setState(s => ({ ...s, loading: true, error: null }));
+    setState((s) => ({ ...s, loading: true, error: null }));
     try {
       const workflows = await WorkflowService.getAllWorkflows(persistenceOptions);
-      setState(s => ({ ...s, workflows, loading: false }));
+      setState((s) => ({ ...s, workflows, loading: false }));
     } catch (err: unknown) {
-      setState(s => ({
+      setState((s) => ({
         ...s,
         error: errorMessageOf(err) || 'Failed to load workflows',
-        loading: false
+        loading: false,
       }));
     }
-  }, [isAuthenticated, accessToken]);
+  }, [persistenceOptions]);
 
   /**
    * Charger un workflow spécifique et ses nœuds/edges
    */
-  const loadWorkflow = useCallback(async (workflowId: string) => {
-    setState(s => ({ ...s, loading: true, error: null }));
-    try {
-      const workflow = await WorkflowService.getWorkflow(workflowId, persistenceOptions);
-      const nodes = await WorkflowNodeService.getNodesByWorkflow(workflowId, persistenceOptions);
-      const edges = await WorkflowEdgeService.getEdgesByWorkflow(workflowId, persistenceOptions);
+  const loadWorkflow = useCallback(
+    async (workflowId: string) => {
+      setState((s) => ({ ...s, loading: true, error: null }));
+      try {
+        const workflow = await WorkflowService.getWorkflow(workflowId, persistenceOptions);
+        const nodes = await WorkflowNodeService.getNodesByWorkflow(workflowId, persistenceOptions);
+        const edges = await WorkflowEdgeService.getEdgesByWorkflow(workflowId, persistenceOptions);
 
-      if (!workflow) {
-        throw new Error('Workflow not found');
+        if (!workflow) {
+          throw new Error('Workflow not found');
+        }
+
+        setState((s) => ({
+          ...s,
+          currentWorkflow: workflow,
+          nodes,
+          edges,
+          loading: false,
+        }));
+      } catch (err: unknown) {
+        setState((s) => ({
+          ...s,
+          error: errorMessageOf(err) || 'Failed to load workflow',
+          loading: false,
+        }));
       }
-
-      setState(s => ({
-        ...s,
-        currentWorkflow: workflow,
-        nodes,
-        edges,
-        loading: false
-      }));
-    } catch (err: unknown) {
-      setState(s => ({
-        ...s,
-        error: errorMessageOf(err) || 'Failed to load workflow',
-        loading: false
-      }));
-    }
-  }, [isAuthenticated, accessToken]);
+    },
+    [persistenceOptions],
+  );
 
   /**
    * Créer un nouveau workflow
    */
   const createWorkflow = useCallback(
     async (name: string, description?: string): Promise<Workflow> => {
-      setState(s => ({ ...s, loading: true, error: null }));
+      setState((s) => ({ ...s, loading: true, error: null }));
       try {
-        const workflow = await WorkflowService.createWorkflow(
-          { name, description } as Partial<Workflow>,
-          persistenceOptions
-        );
-        setState(s => ({
+        const workflow = await WorkflowService.createWorkflow({ name, description } as Partial<Workflow>, persistenceOptions);
+        setState((s) => ({
           ...s,
           workflows: [...s.workflows, workflow],
-          loading: false
+          loading: false,
         }));
         return workflow;
       } catch (err: unknown) {
-        setState(s => ({
+        setState((s) => ({
           ...s,
           error: errorMessageOf(err) || 'Failed to create workflow',
-          loading: false
+          loading: false,
         }));
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [persistenceOptions],
   );
 
   /**
@@ -158,27 +151,23 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
    */
   const updateWorkflow = useCallback(
     async (workflowId: string, updates: Partial<Workflow>) => {
-      setState(s => ({ ...s, error: null }));
+      setState((s) => ({ ...s, error: null }));
       try {
-        const updated = await WorkflowService.updateWorkflow(
-          workflowId,
-          updates,
-          persistenceOptions
-        );
-        setState(s => ({
+        const updated = await WorkflowService.updateWorkflow(workflowId, updates, persistenceOptions);
+        setState((s) => ({
           ...s,
-          workflows: s.workflows.map(w => w._id === workflowId ? updated : w),
-          currentWorkflow: s.currentWorkflow?._id === workflowId ? updated : s.currentWorkflow
+          workflows: s.workflows.map((w) => (w._id === workflowId ? updated : w)),
+          currentWorkflow: s.currentWorkflow?._id === workflowId ? updated : s.currentWorkflow,
         }));
       } catch (err: unknown) {
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          error: errorMessageOf(err) || 'Failed to update workflow'
+          error: errorMessageOf(err) || 'Failed to update workflow',
         }));
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [persistenceOptions],
   );
 
   /**
@@ -186,23 +175,23 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
    */
   const deleteWorkflow = useCallback(
     async (workflowId: string) => {
-      setState(s => ({ ...s, error: null }));
+      setState((s) => ({ ...s, error: null }));
       try {
         await WorkflowService.deleteWorkflow(workflowId, persistenceOptions);
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          workflows: s.workflows.filter(w => w._id !== workflowId),
-          currentWorkflow: s.currentWorkflow?._id === workflowId ? null : s.currentWorkflow
+          workflows: s.workflows.filter((w) => w._id !== workflowId),
+          currentWorkflow: s.currentWorkflow?._id === workflowId ? null : s.currentWorkflow,
         }));
       } catch (err: unknown) {
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          error: errorMessageOf(err) || 'Failed to delete workflow'
+          error: errorMessageOf(err) || 'Failed to delete workflow',
         }));
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [persistenceOptions],
   );
 
   /**
@@ -210,30 +199,26 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
    */
   const setActiveWorkflow = useCallback(
     async (workflowId: string) => {
-      setState(s => ({ ...s, error: null }));
+      setState((s) => ({ ...s, error: null }));
       try {
-        const updated = await WorkflowService.setActiveWorkflow(
-          workflowId,
-          true,
-          persistenceOptions
-        );
-        setState(s => ({
+        const updated = await WorkflowService.setActiveWorkflow(workflowId, true, persistenceOptions);
+        setState((s) => ({
           ...s,
-          workflows: s.workflows.map(w => ({
+          workflows: s.workflows.map((w) => ({
             ...w,
-            isActive: w._id === workflowId
+            isActive: w._id === workflowId,
           })),
-          currentWorkflow: s.currentWorkflow?._id === workflowId ? updated : s.currentWorkflow
+          currentWorkflow: s.currentWorkflow?._id === workflowId ? updated : s.currentWorkflow,
         }));
       } catch (err: unknown) {
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          error: errorMessageOf(err) || 'Failed to set active workflow'
+          error: errorMessageOf(err) || 'Failed to set active workflow',
         }));
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [persistenceOptions],
   );
 
   /**
@@ -241,31 +226,28 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
    */
   const addNode = useCallback(
     async (workflowId: string, data: Partial<V2WorkflowNode> & Record<string, unknown>): Promise<V2WorkflowNode> => {
-      setState(s => ({ ...s, error: null }));
+      setState((s) => ({ ...s, error: null }));
       try {
         // Adapter les données au format V2WorkflowNode
         const nodeData: Partial<V2WorkflowNode> = {
           ...data,
-          position: data?.position || { x: 0, y: 0 }
+          position: data?.position || { x: 0, y: 0 },
         };
-        const node = await WorkflowNodeService.createNode(
-          nodeData,
-          persistenceOptions
-        );
-        setState(s => ({
+        const node = await WorkflowNodeService.createNode(nodeData, persistenceOptions);
+        setState((s) => ({
           ...s,
-          nodes: [...s.nodes, node]
+          nodes: [...s.nodes, node],
         }));
         return node;
       } catch (err: unknown) {
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          error: errorMessageOf(err) || 'Failed to add node'
+          error: errorMessageOf(err) || 'Failed to add node',
         }));
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [persistenceOptions],
   );
 
   /**
@@ -273,26 +255,22 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
    */
   const updateNode = useCallback(
     async (nodeId: string, updates: Partial<V2WorkflowNode>) => {
-      setState(s => ({ ...s, error: null }));
+      setState((s) => ({ ...s, error: null }));
       try {
-        const updated = await WorkflowNodeService.updateNode(
-          nodeId,
-          updates,
-          persistenceOptions
-        );
-        setState(s => ({
+        const updated = await WorkflowNodeService.updateNode(nodeId, updates, persistenceOptions);
+        setState((s) => ({
           ...s,
-          nodes: s.nodes.map(n => n.id === nodeId ? updated : n)
+          nodes: s.nodes.map((n) => (n.id === nodeId ? updated : n)),
         }));
       } catch (err: unknown) {
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          error: errorMessageOf(err) || 'Failed to update node'
+          error: errorMessageOf(err) || 'Failed to update node',
         }));
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [persistenceOptions],
   );
 
   /**
@@ -300,49 +278,46 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
    */
   const deleteNode = useCallback(
     async (nodeId: string) => {
-      setState(s => ({ ...s, error: null }));
+      setState((s) => ({ ...s, error: null }));
       try {
         await WorkflowNodeService.deleteNode(nodeId, persistenceOptions);
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          nodes: s.nodes.filter(n => n.id !== nodeId)
+          nodes: s.nodes.filter((n) => n.id !== nodeId),
         }));
       } catch (err: unknown) {
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          error: errorMessageOf(err) || 'Failed to delete node'
+          error: errorMessageOf(err) || 'Failed to delete node',
         }));
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [persistenceOptions],
   );
 
   /**
    * Ajouter une connexion (edge)
    */
   const addEdge = useCallback(
-    async (source: string, target: string, workflowId: string): Promise<V2WorkflowEdge> => {
-      setState(s => ({ ...s, error: null }));
+    async (source: string, target: string, _workflowId: string): Promise<V2WorkflowEdge> => {
+      setState((s) => ({ ...s, error: null }));
       try {
-        const edge = await WorkflowEdgeService.createEdge(
-          { source, target } as Partial<V2WorkflowEdge>,
-          persistenceOptions
-        );
-        setState(s => ({
+        const edge = await WorkflowEdgeService.createEdge({ source, target } as Partial<V2WorkflowEdge>, persistenceOptions);
+        setState((s) => ({
           ...s,
-          edges: [...s.edges, edge]
+          edges: [...s.edges, edge],
         }));
         return edge;
       } catch (err: unknown) {
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          error: errorMessageOf(err) || 'Failed to add edge'
+          error: errorMessageOf(err) || 'Failed to add edge',
         }));
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [persistenceOptions],
   );
 
   /**
@@ -350,30 +325,30 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
    */
   const deleteEdge = useCallback(
     async (edgeId: string) => {
-      setState(s => ({ ...s, error: null }));
+      setState((s) => ({ ...s, error: null }));
       try {
         await WorkflowEdgeService.deleteEdge(edgeId, persistenceOptions);
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          edges: s.edges.filter(e => e.id !== edgeId)
+          edges: s.edges.filter((e) => e.id !== edgeId),
         }));
       } catch (err: unknown) {
-        setState(s => ({
+        setState((s) => ({
           ...s,
-          error: errorMessageOf(err) || 'Failed to delete edge'
+          error: errorMessageOf(err) || 'Failed to delete edge',
         }));
         throw err;
       }
     },
-    [isAuthenticated, accessToken]
+    [persistenceOptions],
   );
 
   /**
    * Effacer le message d'erreur
    */
   const clearError = useCallback(() => {
-    setState(s => ({ ...s, error: null }));
-  }, []);
+    setState((s) => ({ ...s, error: null }));
+  }, [persistenceOptions]);
 
   /**
    * Charger les workflows au montage ou lors du changement d'authentification
@@ -382,7 +357,7 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
     if (!authLoading) {
       loadWorkflows();
     }
-  }, [isAuthenticated, authLoading]);
+  }, [isAuthenticated, authLoading, loadWorkflows]);
 
   return {
     ...state,
@@ -397,7 +372,7 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
     deleteNode,
     addEdge,
     deleteEdge,
-    clearError
+    clearError,
   };
 };
 

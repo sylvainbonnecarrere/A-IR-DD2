@@ -23,7 +23,7 @@ import { useFunctionStore } from '../../stores/useFunctionStore';
 import { useAgentChat } from '../../hooks/useAgentChat';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../contexts/AuthContext';
-import { ChatMessage, Agent, LLMCapability, WorkflowNode, AgentInstance, MapsPanelPreloadedResults } from '../../types';
+import { ChatMessage, Agent, LLMCapability, AgentInstance, MapsPanelPreloadedResults } from '../../types';
 import { ConfirmationModal } from './ConfirmationModal';
 import { WebSearchParamsModal } from './WebSearchParamsModal';
 import {
@@ -145,9 +145,6 @@ interface FullscreenChatModalProps {
 
 export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
   onDeleteNode,
-  onOpenImagePanel,
-  onOpenVideoPanel,
-  onOpenMapsPanel,
   onOpenFullscreen,
   onOpenImageModificationPanel,
   onImageGenerated,
@@ -160,7 +157,6 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     getNodeMessages,
     addNodeMessage,
     setNodeMessages,
-    setNodeExecuting,
     isNodeExecuting,
   } = useRuntimeStore();
 
@@ -208,7 +204,10 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     ? agentInstances.find((inst) => inst.id === inferredInstanceId) || fullscreenChatAgentInstance
     : fullscreenChatAgentInstance;
 
-  const messages = fullscreenChatNodeId ? getNodeMessages(fullscreenChatNodeId) : [];
+  const messages = React.useMemo(
+    () => (fullscreenChatNodeId ? getNodeMessages(fullscreenChatNodeId) : []),
+    [fullscreenChatNodeId, getNodeMessages],
+  );
   const isLoading = fullscreenChatNodeId ? isNodeExecuting(fullscreenChatNodeId) : false;
 
   const llmConfigs = useRuntimeStore((state) => state.llmConfigs);
@@ -354,7 +353,7 @@ export const FullscreenChatModal: React.FC<FullscreenChatModalProps> = ({
     setFullscreenChatAgentInstance(null);
   };
 
-  const handleDelete = () => {
+  const _handleDelete = () => {
     setShowDeleteConfirm(true);
   };
 

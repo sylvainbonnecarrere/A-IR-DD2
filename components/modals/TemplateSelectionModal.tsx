@@ -1,12 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import {
-  AgentTemplate,
-  AGENT_TEMPLATES,
-  getTemplatesByRobot,
-  getCompatibleTemplates,
-  getCompatibleTemplatesByCategory,
-  createAgentFromTemplate,
-} from '../../data/agentTemplates';
+import React, { useState, useEffect } from 'react';
+import { AgentTemplate, AGENT_TEMPLATES } from '../../data/agentTemplates';
 import { RobotId, LLMConfig, LLMCapability } from '../../types';
 import { Button } from '../UI';
 import { CloseIcon } from '../Icons';
@@ -37,12 +30,12 @@ export const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
 
   // State pour charger les templates hybrides
   const [allTemplates, setAllTemplates] = useState<AgentTemplate[]>(AGENT_TEMPLATES);
-  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+  const [_isLoadingTemplates, setIsLoadingTemplates] = useState(false);
 
   // État pour la modale de confirmation de suppression
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<{ id: string; name: string } | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [_isDeleting, setIsDeleting] = useState(false);
 
   // Charger tous les templates (prédéfinis + personnalisés) au démarrage et quand accessToken change
   useEffect(() => {

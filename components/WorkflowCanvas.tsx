@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, memo } from 'react';
 import ReactFlow, {
-  Background,
   Controls,
   MiniMap,
   useNodesState,
@@ -433,7 +432,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     };
 
     viewportFitTimerRef.current = window.setTimeout(() => applyViewportFit(0), 120);
-  }, [markInitialViewportSettled, markWorkflowViewportFit, reactFlowInstance]);
+  }, [markInitialViewportSettled, markWorkflowViewportFit, reactFlowInstance, reactFlowLookup]);
 
   // useRef pour TOUT stocker sans déclencher de re-render
   const stableRefs = useRef({
@@ -813,7 +812,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
               (onUpdateNodePosition || (() => {}))(nodeId, resolved, { persist: false });
             }
           } catch (err) {
-            // eslint-disable-next-line no-console
             console.warn('[WorkflowCanvas] perimeter-check/restore correction failed:', err);
           }
         };
@@ -896,7 +894,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
         // Secours si transitionend ne se déclenche pas (transitions désactivées, onglet caché, etc.)
         fallbackTimer = window.setTimeout(finish, 600);
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error('[WorkflowCanvas] onToggleNodeMinimize wrapper error:', err);
       }
     },
@@ -1028,7 +1025,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
     } else if (stableRefs.current.reactFlowNodes.length > 0) {
       setReactFlowNodes((currentNodes) => (currentNodes.length > 0 ? [] : currentNodes));
     }
-  }, [actualNodes, agentInstances, agents, getResolvedInstance, reactFlowInstance, workflowId]);
+  }, [actualNodes, agentInstances, agents, getResolvedInstance, reactFlowInstance, workflowId, setReactFlowNodes]);
 
   // Do not auto-pan the canvas on hydration. Existing workflow positions are authoritative;
   // any viewport adjustment should be a user-driven action or a deliberate explicit fit action.
@@ -1108,12 +1105,12 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new Event('hydration:components:ready'));
             }
-          } catch (e) {
+          } catch {
             // ignore
           }
         }),
       );
-    } catch (e) {
+    } catch {
       // ignore
     }
   }, [onAddToWorkflow, onNavigate]);
@@ -1266,7 +1263,6 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
       handleEditPrototype,
       onNavigate,
       onDeleteNode,
-      onToggleNodeMinimize,
       onUpdateNodePosition,
       onOpenImagePanel,
       onOpenImageModificationPanel,
@@ -1336,7 +1332,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
             <MiniMap
               key="minimap-unique"
               position="bottom-right"
-              nodeStrokeColor={(node) => {
+              nodeStrokeColor={(_node) => {
                 // ⭐ REMOVED: isMinimized check - now managed by useRuntimeStore
                 // Utiliser la couleur primaire du thème actuel
                 return theme.particleColors[0] || '#00ffff';
@@ -1364,7 +1360,7 @@ const WorkflowCanvasInner = memo(function WorkflowCanvasInner(props: WorkflowCan
 
                 return 'rgba(26, 26, 26, 0.9)';
               }}
-              nodeClassName={(node) => {
+              nodeClassName={(_node) => {
                 return 'minimap-node-striped';
               }}
               nodeBorderRadius={8}

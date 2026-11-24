@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
-import { Handle, Position, NodeProps } from 'reactflow';
+import { Handle, NodeProps } from 'reactflow';
 import {
   Agent,
   ChatMessage,
@@ -7,7 +7,6 @@ import {
   LLMProvider,
   Tool,
   ToolCall,
-  AgentInstance,
   ToolCallRecord,
   MapSource,
   MapsPanelPreloadedResults,
@@ -32,8 +31,8 @@ import { ToolCallBlock } from './workflow/ToolCallBlock';
 import { RunStatusBadge } from './workflow/RunStatusBadge';
 import { useRunCommandModals } from '../hooks/useRunCommandModals';
 import { fileToBase64, fileToText } from '../utils/fileUtils';
-import { executeTool } from '../utils/toolExecutor';
-import { getEffectiveCredential, isLLMConfigured, isLocalProvider } from '../utils/llmProviderUtils';
+
+import { getEffectiveCredential, isLLMConfigured } from '../utils/llmProviderUtils';
 import { useLocalization } from '../hooks/useLocalization';
 import { useAgentJournalPersistence } from '../hooks/useAgentJournalPersistence';
 import { useAuth } from '../hooks/useAuth';
@@ -403,10 +402,8 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
 
   // WorkflowCanvas context for navigation and node operations
   const {
-    navigationHandler,
     onDeleteNode,
     onToggleNodeMinimize,
-    onUpdateNodePosition,
     onOpenImagePanel,
     onOpenImageModificationPanel,
     onOpenVideoPanel,
@@ -415,7 +412,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   } = useWorkflowCanvasContext();
 
   // Design store for agent data (not node operations)
-  const selectAgent = useDesignStore((state) => state.selectAgent);
+  const _selectAgent = useDesignStore((state) => state.selectAgent);
   const updateInstanceConfig = useDesignStore((state) => state.updateInstanceConfig);
   const designAgents = useDesignStore((state) => state.agents);
   const designAgentInstances = useDesignStore((state) => state.agentInstances);
@@ -424,7 +421,6 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   const allFunctions = useFunctionStore((state) => state.functions);
   const loadFunctions = useFunctionStore((state) => state.loadFunctions);
   const {
-    storedPrototype,
     resolvedAgent,
     agentInstance,
     workflowId: resolvedWorkflowId,
@@ -1085,7 +1081,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
         );
 
         let currentResponse = '';
-        let agentMessageId = generateMessageId('agent');
+        const agentMessageId = generateMessageId('agent');
         let toolCalls: ToolCall[] = [];
 
         for await (const chunk of stream) {
@@ -1284,7 +1280,7 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
           );
 
           let followUpResponse = '';
-          let followUpMessageId = generateMessageId('followup');
+          const followUpMessageId = generateMessageId('followup');
           let followUpErrored = false;
 
           for await (const chunk of followUpStream) {

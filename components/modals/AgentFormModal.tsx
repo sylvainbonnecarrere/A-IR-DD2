@@ -72,7 +72,7 @@ export const AgentFormModal = ({
 }: AgentFormModalProps) => {
   const { t } = useLocalization();
   const { user, accessToken } = useAuth();
-  const isAuthenticated = user !== null;
+  const _isAuthenticated = user !== null;
 
   // Use store as canonical source, fallback to props
   // This prevents T0 blank dropdown: if store already has data (previous navigation), use it immediately
@@ -154,7 +154,7 @@ export const AgentFormModal = ({
     };
   });
   const [activeTab, setActiveTab] = useState<'description' | 'historique' | 'fonctions' | 'formatage'>('description');
-  const [schemaErrors, setSchemaErrors] = useState<Record<string, string | null>>({});
+  const [schemaErrors, _setSchemaErrors] = useState<Record<string, string | null>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [lmStudioValidation, setLmStudioValidation] = useState<CapabilityValidationResult | null>(null);
   const [capabilitiesExpanded, setCapabilitiesExpanded] = useState(false);
@@ -219,7 +219,7 @@ export const AgentFormModal = ({
             setModel((currentModel) => currentModel || models[0].id);
           }
         })
-        .catch((error) => {
+        .catch((_error) => {
           setLmStudioDynamicModels([]);
         })
         .finally(() => setIsLoadingLMStudioModels(false));
@@ -308,7 +308,7 @@ export const AgentFormModal = ({
       setSelectedToolSelections(normalizeToolSelections(existingAgent.toolSelections, existingAgent.functionIds, availableFunctions));
       setOutputConfig(existingAgent.outputConfig || defaultOutputConfig);
     }
-  }, [isEditing, existingAgent, localLLMProfiles]);
+  }, [isEditing, existingAgent, localLLMProfiles, availableFunctions]);
 
   // Reactive auto-assignment for new agents when localLLMProfiles loads asynchronously.
   // useState only runs once at mount; if profiles aren't loaded yet, localLLMProfileId stays ''
@@ -327,7 +327,7 @@ export const AgentFormModal = ({
       .map(([k]) => k as LLMCapability)
       .filter((cap) => Object.values(LLMCapability).includes(cap as LLMCapability));
     setSelectedCapabilities([...new Set([LLMCapability.Chat, ...profileCaps])]);
-  }, [hasEnabledLocalProfiles]); // Stable boolean memo — fires only when profiles go from 0→N or N→0, not on each array reference change
+  }, [hasEnabledLocalProfiles, isEditing, llmProvider, localLLMProfileId, localLLMProfiles]); // Stable boolean memo — fires only when profiles go from 0→N or N→0, not on each array reference change
   // Synchronize llmProvider with available providers
   // If current provider becomes disabled, switch to first enabled provider
   useEffect(() => {
@@ -393,7 +393,7 @@ export const AgentFormModal = ({
 
           const validation = await validateAgentCapabilities(mockAgent, endpoint);
           setLmStudioValidation(validation);
-        } catch (_error) {
+        } catch {
           setLmStudioValidation(null);
         }
       }, 500);
@@ -418,7 +418,7 @@ export const AgentFormModal = ({
 
   const availableCapabilities = useMemo(() => {
     return getAvailableCapabilities(llmProvider, model);
-  }, [llmProvider, model, llmConfigs, lmStudioDetection, getAvailableCapabilities]);
+  }, [llmProvider, model, getAvailableCapabilities]);
 
   // Composite select value: 'local:<id>' for local profiles, provider enum for cloud
   const providerSelectValue = isLMStudio(llmProvider) && localLLMProfileId ? `local:${localLLMProfileId}` : llmProvider;

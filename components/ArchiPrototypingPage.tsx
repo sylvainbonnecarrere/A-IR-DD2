@@ -12,51 +12,46 @@ import { Button, Card } from './UI';
 import { PlusIcon, EditIcon, CloseIcon, WrenchIcon } from './Icons';
 import { useLocalization } from '../hooks/useLocalization';
 import { useNotifications } from '../contexts/NotificationContext';
-import { AgentTemplate, createAgentFromTemplate, createAgentFromTemplateObject } from '../data/agentTemplates';
+import { AgentTemplate, createAgentFromTemplateObject } from '../data/agentTemplates';
 import { GovernanceTestModal } from './modals/GovernanceTestModal';
 import { TodoModal } from './modals/TodoModal';
-import { savePrototypeAsTemplateHybrid, loadAllTemplatesHybrid } from '../services/templateService';
-import { createAgentPrototype, updateAgentPrototype, fetchAgentPrototypes, fetchAgentPrototypeImpact, mergeAgentPrototypeImpacts, type AgentPrototypeImpact } from '../services/agentPrototypeAPI';
+import { savePrototypeAsTemplateHybrid } from '../services/templateService';
+import {
+  createAgentPrototype,
+  updateAgentPrototype,
+  fetchAgentPrototypes,
+  fetchAgentPrototypeImpact,
+  mergeAgentPrototypeImpacts,
+  type AgentPrototypeImpact,
+} from '../services/agentPrototypeAPI';
 
 interface ArchiPrototypingPageProps {
   llmConfigs: LLMConfig[];
   onNavigateToWorkflow?: () => void;
   onAddToWorkflow?: (agent: Agent) => void;
-  onDeleteNodes?: (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Callback to delete nodes by instanceId
+  onDeleteNodes?: (
+    instanceIds: string[],
+    mediaPolicy: AgentDeletionMediaPolicy,
+  ) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Callback to delete nodes by instanceId
 }
 
 export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
   llmConfigs,
   onNavigateToWorkflow,
   onAddToWorkflow,
-  onDeleteNodes
+  onDeleteNodes,
 }) => {
   const { t } = useLocalization();
   const { addNotification } = useNotifications();
-  
 
-  
   // ⭐ Auth context pour persistence MongoDB (users connectés uniquement)
   const { isAuthenticated, accessToken } = useAuth();
-  
-  // ⭐ V2: current workflow identity comes exclusively from the design store
-  const currentWorkflowId = useDesignStore(state => state.currentWorkflowId);
 
-  const {
-    agents,
-    currentRobotId,
-    setCurrentRobot,
-    setAgents,
-    addAgent,
-    updateAgent,
-    updateAgentId,
-    deleteAgent,
-    selectAgent,
-    selectedAgentId,
-    addNode,
-    addAgentInstance,
-    getPrototypeImpact
-  } = useDesignStore();
+  // ⭐ V2: current workflow identity comes exclusively from the design store
+  const currentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
+
+  const { agents, currentRobotId, setAgents, addAgent, updateAgent, updateAgentId, selectAgent, selectedAgentId, getPrototypeImpact } =
+    useDesignStore();
 
   const [agentModalOpen, setAgentModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
@@ -126,7 +121,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
       // ⭐ V2: Pass workflowId to scope prototypes to current workflow
       const result = await fetchAgentPrototypes(accessToken, currentWorkflowId || undefined);
-      
+
       if (isMounted && result.success && result.data) {
         // Remplacer les agents locaux par les agents persistés
         setAgents(result.data);
@@ -135,39 +130,47 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
     loadPersistedPrototypes();
 
-    return () => { isMounted = false; }; // ⭐ Cleanup on unmount
-  }, [isAuthenticated, accessToken, currentWorkflowId]);
+    return () => {
+      isMounted = false;
+    }; // ⭐ Cleanup on unmount
+  }, [isAuthenticated, accessToken, currentWorkflowId, setAgents]);
 
-  const buildLocalPrototypeImpact = useCallback((prototypeId: string): AgentPrototypeImpact => {
-    const impact = getPrototypeImpact(prototypeId);
+  const buildLocalPrototypeImpact = useCallback(
+    (prototypeId: string): AgentPrototypeImpact => {
+      const impact = getPrototypeImpact(prototypeId);
 
-    return {
-      instanceCount: impact.instanceCount,
-      nodeCount: impact.nodeCount,
-      instances: impact.instances.map((instance) => ({
-        id: instance.id,
-        name: instance.name,
-        position: instance.position,
-      })),
-      nodeIds: impact.nodes.map((node) => node.id),
-    };
-  }, [getPrototypeImpact]);
+      return {
+        instanceCount: impact.instanceCount,
+        nodeCount: impact.nodeCount,
+        instances: impact.instances.map((instance) => ({
+          id: instance.id,
+          name: instance.name,
+          position: instance.position,
+        })),
+        nodeIds: impact.nodes.map((node) => node.id),
+      };
+    },
+    [getPrototypeImpact],
+  );
 
-  const resolvePrototypeImpact = useCallback(async (prototypeId: string): Promise<AgentPrototypeImpact> => {
-    const fallbackImpact = buildLocalPrototypeImpact(prototypeId);
+  const resolvePrototypeImpact = useCallback(
+    async (prototypeId: string): Promise<AgentPrototypeImpact> => {
+      const fallbackImpact = buildLocalPrototypeImpact(prototypeId);
 
-    if (!isAuthenticated || !accessToken) {
+      if (!isAuthenticated || !accessToken) {
+        return fallbackImpact;
+      }
+
+      const apiResult = await fetchAgentPrototypeImpact(prototypeId, accessToken, currentWorkflowId || undefined);
+      if (apiResult.success && apiResult.data) {
+        return mergeAgentPrototypeImpacts(apiResult.data, fallbackImpact);
+      }
+
+      console.warn('[ArchiPrototypingPage] prototype impact fallback to local store:', apiResult.error);
       return fallbackImpact;
-    }
-
-    const apiResult = await fetchAgentPrototypeImpact(prototypeId, accessToken, currentWorkflowId || undefined);
-    if (apiResult.success && apiResult.data) {
-      return mergeAgentPrototypeImpacts(apiResult.data, fallbackImpact);
-    }
-
-    console.warn('[ArchiPrototypingPage] prototype impact fallback to local store:', apiResult.error);
-    return fallbackImpact;
-  }, [accessToken, buildLocalPrototypeImpact, currentWorkflowId, isAuthenticated]);
+    },
+    [accessToken, buildLocalPrototypeImpact, currentWorkflowId, isAuthenticated],
+  );
 
   const handleCreateAgent = () => {
     setEditingAgent(null);
@@ -192,14 +195,14 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
         type: 'info',
         title: t('archi_template_loaded'),
         message: `Template "${template.name}" prêt à personnaliser.`,
-        duration: 3000
+        duration: 3000,
       });
     } else {
       addNotification({
         type: 'error',
         title: t('archi_error'),
         message: `Impossible de créer un agent depuis ce template.`,
-        duration: 3000
+        duration: 3000,
       });
     }
   };
@@ -223,7 +226,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       ...agentToAdd,
       instanceName: instanceName || agentToAdd.name,
       // ⭐ Include persistenceConfig override if provided from modal
-      ...(persistenceConfig && { persistenceConfig })
+      ...(persistenceConfig && { persistenceConfig }),
     };
 
     // Use the global onAddToWorkflow prop instead of local store
@@ -235,7 +238,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
         type: 'success',
         title: t('archi_agent_added_workflow'),
         message: `${instanceName || agentToAdd.name} a été ajouté au workflow global`,
-        duration: 3000
+        duration: 3000,
       });
 
       // Auto-navigate to workflow to show the newly added agent
@@ -249,7 +252,8 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
   };
 
   const handleSaveAgent = async (agentData: AgentDraft, agentId?: string) => {
-    if (agentId && agentId !== 'temp') { // Exclure l'ID temporaire des templates
+    if (agentId && agentId !== 'temp') {
+      // Exclure l'ID temporaire des templates
       // Check impact before updating existing agent
       const impact = await resolvePrototypeImpact(agentId);
 
@@ -273,7 +277,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
             type: 'error',
             title: t('archi_creation_refused'),
             message: apiResult.error || 'Erreur de gouvernance backend',
-            duration: 5000
+            duration: 5000,
           });
           return;
         }
@@ -282,7 +286,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       }
 
       const result = addAgent(agentData);
-      
+
       if (result.success && result.agentId) {
         if (createdBackendPrototype) {
           const backendObjectId = createdBackendPrototype.id;
@@ -290,19 +294,19 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
             updateAgentId(result.agentId, backendObjectId);
           }
         }
-        
+
         addNotification({
           type: 'success',
           title: t('archi_agent_created'),
           message: `"${agentData.name}" a été créé avec succès.`,
-          duration: 3000
+          duration: 3000,
         });
       } else {
         addNotification({
           type: 'error',
           title: t('archi_creation_refused'),
           message: result.error || 'Erreur de gouvernance',
-          duration: 5000
+          duration: 5000,
         });
         return; // Don't close modal on error
       }
@@ -319,7 +323,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
           type: 'error',
           title: t('archi_modification_refused'),
           message: apiResult.error || 'Erreur de gouvernance backend',
-          duration: 5000
+          duration: 5000,
         });
         return;
       }
@@ -332,14 +336,14 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
         type: 'success',
         title: t('archi_prototype_modified'),
         message: `Les modifications ont été appliquées avec succès. Seules les nouvelles instances de ce prototype seront concernées.`,
-        duration: 4000
+        duration: 4000,
       });
     } else {
       addNotification({
         type: 'error',
         title: t('archi_modification_refused'),
         message: result.error || 'Erreur de gouvernance',
-        duration: 5000
+        duration: 5000,
       });
     }
   };
@@ -363,7 +367,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
   // PHASE 2A: Enhanced deletion with confirmation
   const handleDeleteAgent = async (agentId: string) => {
-    const agent = agents.find(a => a.id === agentId);
+    const agent = agents.find((a) => a.id === agentId);
     if (agent) {
       const impact = await resolvePrototypeImpact(agentId);
       setDeletionImpact(impact);
@@ -409,7 +413,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
         agentToAddAsTemplate,
         accessToken,
         undefined, // Utiliser le nom par défaut
-        undefined  // Utiliser la description par défaut
+        undefined, // Utiliser la description par défaut
       );
 
       if (result) {
@@ -417,29 +421,30 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
           type: 'success',
           title: t('archi_template_created'),
           message: `Le prototype "${agentToAddAsTemplate.name}" a été ajouté aux templates avec succès.`,
-          duration: 3000
+          duration: 3000,
         });
       } else {
         addNotification({
           type: 'error',
           title: t('archi_creation_failed'),
           message: `Impossible de créer le template.`,
-          duration: 4000
+          duration: 4000,
         });
       }
     } catch (error) {
       console.error('[confirmAddToTemplates] Error:', error);
-      
+
       // Vérifier si c'est un problème de doublon ou autre
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
+
       addNotification({
         type: 'warning',
         title: t('archi_error'),
-        message: errorMessage.includes('doublon') || errorMessage.includes('duplicate')
-          ? 'Un template existe déjà pour ce prototype.'
-          : 'Impossible de créer le template.',
-        duration: 4000
+        message:
+          errorMessage.includes('doublon') || errorMessage.includes('duplicate')
+            ? 'Un template existe déjà pour ce prototype.'
+            : 'Impossible de créer le template.',
+        duration: 4000,
       });
     }
 
@@ -486,20 +491,11 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
                 <span>🔒</span>
                 <span>Gouvernance (interne)</span>
               </Button>
-              <Button
-                onClick={handleCreateFromTemplate}
-                className="flex items-center space-x-2 text-xs"
-                variant="secondary"
-              >
+              <Button onClick={handleCreateFromTemplate} className="flex items-center space-x-2 text-xs" variant="secondary">
                 <span>📋</span>
                 <span>Template</span>
               </Button>
-              <Button
-                onClick={handleCreateAgent}
-                className="flex items-center space-x-2 text-xs"
-                variant="primary"
-                tone="indigo"
-              >
+              <Button onClick={handleCreateAgent} className="flex items-center space-x-2 text-xs" variant="primary" tone="indigo">
                 <PlusIcon className="w-4 h-4" />
                 <span>Créer</span>
               </Button>
@@ -513,18 +509,13 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
       {/* Prototypes Grid - Scrollable Container */}
       <div className="relative flex-1">
-        <div
-          ref={scrollContainerRef}
-          className="absolute inset-0 overflow-y-auto"
-        >
+        <div ref={scrollContainerRef} className="absolute inset-0 overflow-y-auto">
           <div className="p-6 min-h-full">
             {agents.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-64 text-center">
                 <WrenchIcon className="w-16 h-16 text-gray-600 mb-4" />
                 <h3 className="text-xl font-semibold text-gray-400 mb-2">{t('no_prototype_empty_title')}</h3>
-                <p className="text-gray-500 mb-6 max-w-md">
-                  {t('no_prototype_empty_description')}
-                </p>
+                <p className="text-gray-500 mb-6 max-w-md">{t('no_prototype_empty_description')}</p>
                 <div className="flex space-x-3">
                   <Button onClick={handleCreateFromTemplate} className="flex items-center space-x-2" variant="secondary">
                     <span>📋</span>
@@ -541,8 +532,9 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
                 {agents.map((agent) => (
                   <Card
                     key={agent.id}
-                    className={`p-4 hover:border-indigo-500/50 transition-colors cursor-pointer relative ${selectedAgentId === agent.id ? 'border-indigo-500 bg-indigo-900/20' : ''
-                      }`}
+                    className={`p-4 hover:border-indigo-500/50 transition-colors cursor-pointer relative ${
+                      selectedAgentId === agent.id ? 'border-indigo-500 bg-indigo-900/20' : ''
+                    }`}
                     onClick={() => selectAgent(agent.id)}
                   >
                     {/* Actions */}
@@ -571,15 +563,9 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
 
                     {/* Content */}
                     <div className="pr-12">
-                      <h3 className="font-semibold text-lg text-indigo-400 mb-1 truncate">
-                        {agent.name}
-                      </h3>
-                      <p className="text-xs text-gray-400 mb-3 truncate">
-                        {agent.role}
-                      </p>
-                      <p className="text-sm text-gray-300 line-clamp-3 mb-4">
-                        {agent.systemPrompt}
-                      </p>
+                      <h3 className="font-semibold text-lg text-indigo-400 mb-1 truncate">{agent.name}</h3>
+                      <p className="text-xs text-gray-400 mb-3 truncate">{agent.role}</p>
+                      <p className="text-sm text-gray-300 line-clamp-3 mb-4">{agent.systemPrompt}</p>
 
                       {/* Metadata */}
                       <div className="space-y-2 mb-4">
@@ -631,9 +617,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
         {/* Scroll Indicator - Gradient fade at bottom */}
         {showScrollIndicator && (
           <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-gray-900 via-gray-900/80 to-transparent pointer-events-none flex items-end justify-center pb-2">
-            <div className="text-indigo-400 text-xs animate-bounce">
-              ⬇ Défilez pour voir plus
-            </div>
+            <div className="text-indigo-400 text-xs animate-bounce">⬇ Défilez pour voir plus</div>
           </div>
         )}
       </div>
@@ -655,19 +639,13 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       {addedAgentPopup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 border border-gray-600 rounded-lg p-6 max-w-md mx-4">
-            <h3 className="text-lg font-semibold text-white mb-3">
-              ✅ Agent ajouté au workflow
-            </h3>
+            <h3 className="text-lg font-semibold text-white mb-3">✅ Agent ajouté au workflow</h3>
             <p className="text-gray-300 mb-4">
-              L'agent <span className="font-semibold text-indigo-400">"{addedAgentPopup.agent.name}"</span> a été
-              ajouté au workflow avec succès !
+              L'agent <span className="font-semibold text-indigo-400">"{addedAgentPopup.agent.name}"</span> a été ajouté au workflow avec
+              succès !
             </p>
             <div className="flex gap-3">
-              <Button
-                variant="secondary"
-                onClick={() => setAddedAgentPopup(null)}
-                className="flex-1"
-              >
+              <Button variant="secondary" onClick={() => setAddedAgentPopup(null)} className="flex-1">
                 Continuer ici
               </Button>
               <Button
@@ -718,23 +696,17 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
       {/* Prototype Impact Confirmation Modal */}
       <PrototypeImpactModal
         isOpen={impactConfirmOpen}
-        prototype={pendingUpdate ? agents.find(a => a.id === pendingUpdate.agentId) : null}
+        prototype={pendingUpdate ? agents.find((a) => a.id === pendingUpdate.agentId) : null}
         impact={pendingImpact}
         onConfirm={handleConfirmImpactUpdate}
         onCancel={handleCancelImpactUpdate}
       />
 
       {/* Governance Test Modal */}
-      <GovernanceTestModal
-        isOpen={governanceTestOpen}
-        onClose={() => setGovernanceTestOpen(false)}
-      />
+      <GovernanceTestModal isOpen={governanceTestOpen} onClose={() => setGovernanceTestOpen(false)} />
 
       {/* Todo Modal */}
-      <TodoModal
-        isOpen={todoModalOpen}
-        onClose={() => setTodoModalOpen(false)}
-      />
+      <TodoModal isOpen={todoModalOpen} onClose={() => setTodoModalOpen(false)} />
 
       {/* Add to Templates Confirmation Modal */}
       {addToTemplatesOpen && agentToAddAsTemplate && (
@@ -744,15 +716,9 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center space-x-3">
                 <span className="text-3xl">💾</span>
-                <h2 className="text-xl font-semibold text-white">
-                  Ajouter aux Templates
-                </h2>
+                <h2 className="text-xl font-semibold text-white">Ajouter aux Templates</h2>
               </div>
-              <Button
-                variant="ghost"
-                onClick={cancelAddToTemplates}
-                className="p-2 h-8 w-8 text-gray-400 hover:text-white"
-              >
+              <Button variant="ghost" onClick={cancelAddToTemplates} className="p-2 h-8 w-8 text-gray-400 hover:text-white">
                 <CloseIcon width={16} height={16} />
               </Button>
             </div>
@@ -763,9 +729,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
                 <p className="text-purple-200 mb-3">
                   <strong>Prototype :</strong> {agentToAddAsTemplate.name}
                 </p>
-                <p className="text-gray-300 text-sm">
-                  Ce prototype sera converti en template réutilisable.
-                </p>
+                <p className="text-gray-300 text-sm">Ce prototype sera converti en template réutilisable.</p>
               </div>
 
               <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-4">
@@ -779,8 +743,8 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
               </div>
 
               <div className="bg-gray-700/50 rounded-lg p-3 text-xs text-gray-400">
-                💡 <strong>Note :</strong> Le template sera une copie complète de ce prototype.
-                Les modifications futures du prototype n'affecteront pas le template.
+                💡 <strong>Note :</strong> Le template sera une copie complète de ce prototype. Les modifications futures du prototype
+                n'affecteront pas le template.
               </div>
             </div>
 
@@ -793,10 +757,7 @@ export const ArchiPrototypingPage: React.FC<ArchiPrototypingPageProps> = ({
               >
                 Annuler
               </Button>
-              <Button
-                onClick={confirmAddToTemplates}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white"
-              >
+              <Button onClick={confirmAddToTemplates} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white">
                 Créer le Template
               </Button>
             </div>
