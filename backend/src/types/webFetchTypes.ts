@@ -5,7 +5,8 @@ export interface RunnerOptions {
 
 export interface RunResult {
   success: boolean;
-  exitCode?: number;
+  /** `null` = processus tué sans code de sortie (ex: timeout SIGKILL). */
+  exitCode?: number | null;
   stdout?: string;
   stderr?: string;
   artifacts?: Array<{ path: string; kind: string; metadata?: Record<string, unknown> }>;
@@ -16,9 +17,18 @@ export interface IRunner {
 }
 
 export interface IWebFetchService {
-  runFetch(url: string, options: { privateContext?: Record<string, unknown>; workflowId?: string; instanceId?: string }): Promise<RunResult>;
+  runFetch(
+    url: string,
+    options: { privateContext?: Record<string, unknown>; workflowId?: string; instanceId?: string },
+  ): Promise<RunResult>;
 }
 
 export interface IArtifactRepository {
-  saveArtifact(params: { workflowId?: string; instanceId?: string; path: string; kind: string; metadata?: Record<string, unknown> }): Promise<void>;
+  saveArtifact(params: {
+    workflowId?: string;
+    instanceId?: string;
+    path: string;
+    kind: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void>;
 }

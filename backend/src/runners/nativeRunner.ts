@@ -23,14 +23,20 @@ export class NativeRunner implements IRunner {
 
       const timer = setTimeout(() => {
         if (!finished) {
-          try { child.kill('SIGKILL'); } catch (e) {}
+          try {
+            child.kill('SIGKILL');
+          } catch (e) {}
           finished = true;
-          resolve({ success: false, exitCode: null as any, stdout, stderr: stderr + '\nTimeout' });
+          resolve({ success: false, exitCode: null, stdout, stderr: stderr + '\nTimeout' });
         }
       }, timeoutMs);
 
-      child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-      child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
 
       child.on('error', (err) => {
         if (finished) return;
@@ -55,7 +61,9 @@ export class NativeRunner implements IRunner {
           // ignore
         }
       }
-      try { child.stdin.end(); } catch (e) {}
+      try {
+        child.stdin.end();
+      } catch (e) {}
     });
   }
 }

@@ -1,6 +1,6 @@
 /**
  * Type-guards sur les erreurs `unknown` des blocs catch (US-RC-03) :
- * aucun `catch (error: any)`, aucun `as any` sur une erreur.
+ * lecture typée des champs d'erreur, jamais de cast lâche sur une erreur.
  */
 
 export interface ErrorShape {
@@ -8,6 +8,10 @@ export interface ErrorShape {
   name?: string;
   stack?: string;
   code?: unknown;
+  /** Code d'erreur AWS SDK v3 (S3 utilise `Code` en plus de `name`). */
+  Code?: string;
+  /** Métadonnées HTTP des erreurs AWS SDK v3. */
+  $metadata?: { httpStatusCode?: number };
   errors?: Record<string, { message: string; value?: unknown }>;
 }
 

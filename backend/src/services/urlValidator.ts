@@ -1,3 +1,5 @@
+import { asErrorShape } from '../utils/errorGuards';
+
 const INTERNAL_HOSTS = ['127.0.0.1', 'localhost'];
 
 export function isIpAddress(host: string): boolean {
@@ -12,8 +14,8 @@ export function validateUrl(inputUrl: string) {
     if (INTERNAL_HOSTS.includes(host) || isIpAddress(host)) throw new Error('Internal hosts are not allowed');
     // basic allowed - further checks can be added
     return true;
-  } catch (err: any) {
-    const msg = err && err.message ? err.message : String(err);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`Invalid target URL: ${msg}`);
   }
 }
@@ -26,7 +28,7 @@ export async function validateFinalRedirects(initialUrl: string, maxRedirects = 
     const timeout = setTimeout(() => ac.abort(), 5000);
     try {
       // follow redirects manually
-      const res = await (global as any).fetch(current, { method: 'HEAD', redirect: 'manual', signal: ac.signal });
+      const res = await globalThis.fetch(current, { method: 'HEAD', redirect: 'manual', signal: ac.signal });
       clearTimeout(timeout);
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get('location');
@@ -41,7 +43,7 @@ export async function validateFinalRedirects(initialUrl: string, maxRedirects = 
     } catch (e) {
       clearTimeout(timeout);
       // treat fetch errors as validation failure
-      throw new Error(`Failed to validate redirects: ${String((e as any)?.message || e)}`);
+      throw new Error(`Failed to validate redirects: ${String(asErrorShape(e).message || e)}`);
     }
   }
   return true;
