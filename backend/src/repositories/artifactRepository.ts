@@ -15,10 +15,10 @@ export default class ArtifactRepository {
       kind: params.kind,
       metadata: params.metadata ?? {},
       createdAt: new Date(),
-    } as any;
+    };
 
-    const db = this.db as any;
-    if (!db || !db.collection) throw new Error('Database connection not ready');
+    const db = this.db;
+    if (!db) throw new Error('Database connection not ready');
     await db.collection('media_references').insertOne(doc);
   }
 }
