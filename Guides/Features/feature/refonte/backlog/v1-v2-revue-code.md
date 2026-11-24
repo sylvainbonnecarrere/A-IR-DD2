@@ -265,6 +265,25 @@ Tous les `console.log(` étaient des appels simples (aucun espion `console.log` 
 
 **Handoff `06-frontend` :** prendre le relais sur `main` @ `104e911` pour la campagne front (`lintWarningsFrontend: 627` — `no-unused-vars` ~majoritaire, `no-require-imports` 102, `no-explicit-any` ~46, `react-hooks/*` ~97 dont les faux positifs `rules-of-hooks` v6/React19 de US-RC-08, `prefer-const`, 3 directives `eslint-disable` inutilisées à nettoyer) : lots de 5–10 fichiers, un commit par lot, `npm run hygiene:update-baseline` après chaque baisse vérifiée (ne jamais recaler à la hausse) ; le ratchet bloque désormais toute augmentation des deux compteurs warnings en local comme en CI (`hygiene-gate`). Note : `eslint . --quiet` restant à 0 erreur est le critère dur ; les warnings front baissent au fil des lots de `06-frontend`.
 
+
+---
+
+**État d’avancement (2026-11-24, agent `06-frontend`, branche `main`) — partie FRONTEND TERMINÉE, `lintWarningsFrontend` 627 → 55 ; les 55 warnings restants sont **100 % des faux positifs `react-hooks/rules-of-hooks`** (`V2AgentNode.tsx` 54, `AutoSaveIndicator.tsx` 1) réservés à US-RC-08.**
+
+| Lot | Commit | lintWarningsFrontend | Périmètre |
+|---|---|---|---|
+| 1 | `0dfd664` | 627 → 526 | 10 gros composants/hooks (V2AgentNode, App, useWorkflowData, WorkflowCanvas, HyperspaceReveal, FullscreenChatModal, ArchiPrototypingPage, AgentFormModal, TemplateSelectionModal, AuthContext) — reste = 55 rules-of-hooks |
+| 2 | `9eaa35e` | 526 → 383 | 7 services providers LLM (mistral, futureImageStrategies, anthropic, grok, kimi, openAI, qwen) |
+| 3 | `449e4f6` | 383 → 326 | 10 fichiers services (perplexity, lmStudio, mockLLM, deepSeek, arcLLM, templateService, AgentLoop, imageCapabilities) + `Record<string,any>`/`<T=any>` (agentPrototypeAPI, persistenceService, workspacePersistenceService) |
+| 4 | `3c2b709` | 326 → 162 | ~40 fichiers tests/ + hooks/ + `eslint.config.mjs` (override `no-require-imports: off` pour `tests/**` — les factories `jest.mock` nécessitent `require`) ; deps exhaustives corrigées par refs/réordonnancement (useJournalQueue, useLMStudioDetection, useWorkflowData, useWorkflowPersistence, J4.4) |
+| 5 | `e2e8d5d` | 162 → 129 | data/stores/utils/types/scripts/contexts — `apiClient` `<T = any>` → `<T = unknown>` + types explicites aux appels (useDesignStore, useAppWorkflowController), `LLMConfigEntry` nommé, interface vide → type alias |
+| 6a | `2a764b2` | 129 → 93 | 13 composants (Com*, Json*, ArchiSubMenu, …) — unused-vars (forme alias pour les destructures), `catch {`, deps exhaustives (FunctionEditorTab via `fnRef`, FunctionSelector, JsonTableViewer), 1 `any` |
+| 6b | `0953f10` | 93 → 55 | 20 composants restants — `@ts-ignore` → `@ts-expect-error`, `mapInstanceRef` (MapsGroundingConfigPanel), 3 `Record<string,any>` → `unknown` |
+
+**Validations de clôture front (2026-11-24)** : `npx tsc --noEmit` racine **0** ; `npm run lint` **0 erreur**, 55 warnings (tous `rules-of-hooks`, US-RC-08) ; ratchet exit 0 (`any` 0/0, `consoleLog` 0/0, `lintWarningsFrontend` 55 / `lintWarningsBackend` 0 stable) + `--self-test` OK ; `GITHUB_BASE_REF=main npm run format:changed` OK ; `npm run audit:workflow-architecture:strict` OK ; **`npm test -- --runInBand` : 95 suites / 589 tests PASS** ; baseline finale recalée à la baisse après chaque lot : `lintWarningsFrontend: 55`. Aucun test affaibli, aucune baseline recalée à la hausse.
+
+**Handoff :** US-RC-07 **clôturée** des deux côtés (backend `lintWarningsBackend: 0` @ `104e911`, front `lintWarningsFrontend: 55` = 100 % rules-of-hooks @ `0953f10`). Suite : **US-RC-08** (`06-frontend`) — éliminer les 55 faux positifs `rules-of-hooks` v6/React 19 (pin du plugin ou config) puis repasser la règle en `error` ; le ratchet `hygiene-gate` bloque désormais toute augmentation des 4 compteurs + des 2 warnings en local comme en CI.
+
 ### US-RC-08 — `rules-of-hooks` en error (depuis US-HYG-08)
 
 **Agent responsable :** `06-frontend`
