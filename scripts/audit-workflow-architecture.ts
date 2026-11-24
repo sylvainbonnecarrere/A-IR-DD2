@@ -8,21 +8,11 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 
 const strictMode = process.argv.includes('--strict');
-const targetPattern = /Workflow\.nodes|Workflow\.edges|workflowNodes|workflowEdges|agentInstances|canvasState|saveWorkflow|hydrateWorkspace|persistWorkflow/g;
+const targetPattern =
+  /Workflow\.nodes|Workflow\.edges|workflowNodes|workflowEdges|agentInstances|canvasState|saveWorkflow|hydrateWorkspace|persistWorkflow/g;
 const allowedExtensions = new Set(['.ts', '.tsx', '.js', '.md']);
-const ignoredDirectories = new Set([
-  '.git',
-  'node_modules',
-  'dist',
-  'coverage',
-  'test-results',
-  'playwright-report',
-  'screenshots'
-]);
-const protectedLegacyWriteFiles = new Set([
-  'backend/src/routes/workflows.routes.ts',
-  'services/workspacePersistenceService.ts'
-]);
+const ignoredDirectories = new Set(['.git', 'node_modules', 'dist', 'coverage', 'test-results', 'playwright-report', 'screenshots']);
+const protectedLegacyWriteFiles = new Set(['backend/src/routes/workflows.routes.ts', 'services/workspacePersistenceService.ts']);
 
 /** @typedef {'V1_READ' | 'V1_WRITE' | 'V2_READ' | 'V2_WRITE' | 'COMPATIBILITY' | 'MIGRATION' | 'TEST_ONLY' | 'UNKNOWN'} Classification */
 
@@ -30,20 +20,24 @@ const protectedLegacyWriteFiles = new Set([
  * @param {string} relPath
  */
 function isTestOnlyPath(relPath) {
-  return relPath.startsWith('tests/')
-    || relPath.startsWith('backend/src/__tests__/')
-    || relPath.startsWith('backend/__tests__/')
-    || relPath.includes('.test.');
+  return (
+    relPath.startsWith('tests/') ||
+    relPath.startsWith('backend/src/__tests__/') ||
+    relPath.startsWith('backend/__tests__/') ||
+    relPath.includes('.test.')
+  );
 }
 
 /**
  * @param {string} relPath
  */
 function isDocumentationPath(relPath) {
-  return relPath === 'README.md'
-    || relPath === 'DOCUMENTATION_MAP.md'
-    || relPath.startsWith('Guides/')
-    || relPath.startsWith('backend/documentation/');
+  return (
+    relPath === 'README.md' ||
+    relPath === 'DOCUMENTATION_MAP.md' ||
+    relPath.startsWith('Guides/') ||
+    relPath.startsWith('backend/documentation/')
+  );
 }
 
 /**
@@ -56,19 +50,18 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'TEST_ONLY',
       surface: 'tests-fixtures',
-      reason: 'Fixture, test, or regression harness only.'
+      reason: 'Fixture, test, or regression harness only.',
     };
   }
 
   if (isDocumentationPath(relPath)) {
-    const classification = relPath.includes('/refonte/') || relPath.includes('architecture-v1-v2-migration-plan')
-      ? 'MIGRATION'
-      : 'COMPATIBILITY';
+    const classification =
+      relPath.includes('/refonte/') || relPath.includes('architecture-v1-v2-migration-plan') ? 'MIGRATION' : 'COMPATIBILITY';
 
     return {
       classification,
       surface: 'documentation',
-      reason: 'Versioned architecture or compatibility documentation.'
+      reason: 'Versioned architecture or compatibility documentation.',
     };
   }
 
@@ -77,7 +70,7 @@ function classifyOccurrence(relPath, lineText) {
       return {
         classification: 'V1_WRITE',
         surface: 'legacy-workflow-route',
-        reason: 'Legacy workflow node mutation on Workflow.nodes[].'
+        reason: 'Legacy workflow node mutation on Workflow.nodes[].',
       };
     }
 
@@ -85,7 +78,7 @@ function classifyOccurrence(relPath, lineText) {
       return {
         classification: 'V1_WRITE',
         surface: 'legacy-workflow-route',
-        reason: 'Legacy workflow edge mutation on Workflow.edges[].'
+        reason: 'Legacy workflow edge mutation on Workflow.edges[].',
       };
     }
 
@@ -93,14 +86,14 @@ function classifyOccurrence(relPath, lineText) {
       return {
         classification: 'COMPATIBILITY',
         surface: 'workflow-route-mixed-surface',
-        reason: 'Mixed workflow route surface bridging V2 and transitional payloads.'
+        reason: 'Mixed workflow route surface bridging V2 and transitional payloads.',
       };
     }
 
     return {
       classification: 'COMPATIBILITY',
       surface: 'workflow-route-mixed-surface',
-      reason: 'Workflow route still mixes V2 and transitional workflow payload handling.'
+      reason: 'Workflow route still mixes V2 and transitional workflow payload handling.',
     };
   }
 
@@ -108,7 +101,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: /agentInstances/.test(lineText) ? 'V2_READ' : 'V2_WRITE',
       surface: 'agent-instance-route',
-      reason: 'Agent instance CRUD is the canonical V2 workflow-instance persistence surface.'
+      reason: 'Agent instance CRUD is the canonical V2 workflow-instance persistence surface.',
     };
   }
 
@@ -116,7 +109,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'V2_READ',
       surface: 'runs-route',
-      reason: 'Runs route reads V2 runtime state bound to workflow and agent instance identifiers.'
+      reason: 'Runs route reads V2 runtime state bound to workflow and agent instance identifiers.',
     };
   }
 
@@ -124,7 +117,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'V2_READ',
       surface: 'workspace-hydration-route',
-      reason: 'Authoritative authenticated workspace hydration read path.'
+      reason: 'Authoritative authenticated workspace hydration read path.',
     };
   }
 
@@ -132,7 +125,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'workflow-controller',
-      reason: 'Controller still projects transitional workflow payload fields while V2 extraction is pending.'
+      reason: 'Controller still projects transitional workflow payload fields while V2 extraction is pending.',
     };
   }
 
@@ -140,7 +133,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'application-workflow-usecase',
-      reason: 'Application-layer use case still creates or reads workflow payloads that carry transitional canvas metadata.'
+      reason: 'Application-layer use case still creates or reads workflow payloads that carry transitional canvas metadata.',
     };
   }
 
@@ -148,7 +141,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'backend-route-registration',
-      reason: 'Route registration exposes workflow instance surfaces without owning workflow persistence semantics.'
+      reason: 'Route registration exposes workflow instance surfaces without owning workflow persistence semantics.',
     };
   }
 
@@ -156,7 +149,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'MIGRATION',
       surface: 'database-bootstrap',
-      reason: 'Schema/bootstrap compatibility layer still carrying legacy workflow fields.'
+      reason: 'Schema/bootstrap compatibility layer still carrying legacy workflow fields.',
     };
   }
 
@@ -166,7 +159,7 @@ function classifyOccurrence(relPath, lineText) {
       surface: relPath.includes('phase4-tests') ? 'backend-script-test-support' : 'backend-script-maintenance',
       reason: relPath.includes('phase4-tests')
         ? 'Backend helper script used as test support only.'
-        : 'Backend maintenance script reading workflow collections during migration or diagnosis.'
+        : 'Backend maintenance script reading workflow collections during migration or diagnosis.',
     };
   }
 
@@ -174,7 +167,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'workspace-snapshot',
-      reason: 'Aggregates persisted entities into a transitional workspace DTO.'
+      reason: 'Aggregates persisted entities into a transitional workspace DTO.',
     };
   }
 
@@ -182,7 +175,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'workflow-self-healing',
-      reason: 'Repair path around workflow hydration and default workflow invariants.'
+      reason: 'Repair path around workflow hydration and default workflow invariants.',
     };
   }
 
@@ -190,7 +183,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'backend-schema-model',
-      reason: 'Schema/model layer exposing transitional workflow fields or identifiers.'
+      reason: 'Schema/model layer exposing transitional workflow fields or identifiers.',
     };
   }
 
@@ -198,7 +191,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'app-hydration-orchestration',
-      reason: 'App-level orchestration rehydrates interactive state but must not become the persistence authority.'
+      reason: 'App-level orchestration rehydrates interactive state but must not become the persistence authority.',
     };
   }
 
@@ -206,7 +199,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'frontend-shared-types',
-      reason: 'Shared frontend types still carry transitional workflow shapes.'
+      reason: 'Shared frontend types still carry transitional workflow shapes.',
     };
   }
 
@@ -214,7 +207,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'MIGRATION',
       surface: 'contract-adapter',
-      reason: 'Adapts persisted data into the V2 frontend shape during migration.'
+      reason: 'Adapts persisted data into the V2 frontend shape during migration.',
     };
   }
 
@@ -222,7 +215,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: /saveWorkflow/.test(lineText) ? 'V2_WRITE' : 'COMPATIBILITY',
       surface: 'frontend-persistence-service',
-      reason: 'Dual-mode persistence service spanning authenticated V2 writes and compatibility payload shaping.'
+      reason: 'Dual-mode persistence service spanning authenticated V2 writes and compatibility payload shaping.',
     };
   }
 
@@ -231,14 +224,14 @@ function classifyOccurrence(relPath, lineText) {
       return {
         classification: 'V1_WRITE',
         surface: 'workspace-persistence-legacy-edge-write',
-        reason: 'Legacy edge persistence still targets the deprecated workflow edges route.'
+        reason: 'Legacy edge persistence still targets the deprecated workflow edges route.',
       };
     }
 
     return {
       classification: 'COMPATIBILITY',
       surface: 'workspace-persistence-service',
-      reason: 'Transitional workspace persistence facade with guest/auth branching.'
+      reason: 'Transitional workspace persistence facade with guest/auth branching.',
     };
   }
 
@@ -246,7 +239,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'frontend-service',
-      reason: 'Frontend service still participates in transitional workflow read/write orchestration.'
+      reason: 'Frontend service still participates in transitional workflow read/write orchestration.',
     };
   }
 
@@ -254,7 +247,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'frontend-store',
-      reason: 'Frontend store contains local transitional workflow state.'
+      reason: 'Frontend store contains local transitional workflow state.',
     };
   }
 
@@ -262,7 +255,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'frontend-hook',
-      reason: 'Frontend hook reconstructs or routes workflow data during the transition.'
+      reason: 'Frontend hook reconstructs or routes workflow data during the transition.',
     };
   }
 
@@ -270,7 +263,7 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: /saveWorkflow|persistWorkflow/.test(lineText) ? 'V2_WRITE' : 'V2_READ',
       surface: 'frontend-component',
-      reason: 'Frontend component reads or triggers canonical workflow UI persistence behavior.'
+      reason: 'Frontend component reads or triggers canonical workflow UI persistence behavior.',
     };
   }
 
@@ -278,14 +271,14 @@ function classifyOccurrence(relPath, lineText) {
     return {
       classification: 'COMPATIBILITY',
       surface: 'frontend-utility',
-      reason: 'Utility layer exposes guest-mode or compatibility workflow keys.'
+      reason: 'Utility layer exposes guest-mode or compatibility workflow keys.',
     };
   }
 
   return {
     classification: 'UNKNOWN',
     surface: 'unclassified',
-    reason: 'No classification rule matched this workflow architecture occurrence.'
+    reason: 'No classification rule matched this workflow architecture occurrence.',
   };
 }
 
@@ -304,7 +297,7 @@ async function collectFiles(currentDir) {
 
     const absolutePath = path.join(currentDir, entry.name);
     if (entry.isDirectory()) {
-      files.push(...await collectFiles(absolutePath));
+      files.push(...(await collectFiles(absolutePath)));
       continue;
     }
 
@@ -386,35 +379,33 @@ async function main() {
   const occurrences: AuditResult[] = [];
 
   for (const filePath of files) {
-    occurrences.push(...await scanFile(filePath));
+    occurrences.push(...(await scanFile(filePath)));
   }
 
   const unknownOccurrences = occurrences.filter((entry) => entry.classification === 'UNKNOWN');
   const legacyWrites = occurrences.filter((entry) => entry.classification === 'V1_WRITE');
-  const strictViolations = strictMode
-    ? legacyWrites.filter((entry) => !protectedLegacyWriteFiles.has(entry.relPath))
-    : [];
+  const strictViolations = strictMode ? legacyWrites.filter((entry) => !protectedLegacyWriteFiles.has(entry.relPath)) : [];
 
   const { byClassification, byFile } = summarize(occurrences);
 
-  console.log('# Workflow architecture audit');
-  console.log(`mode=${strictMode ? 'strict' : 'standard'}`);
-  console.log(`occurrences=${occurrences.length}`);
-  console.log('');
-  console.log('## Counts by classification');
+  console.debug('# Workflow architecture audit');
+  console.debug(`mode=${strictMode ? 'strict' : 'standard'}`);
+  console.debug(`occurrences=${occurrences.length}`);
+  console.debug('');
+  console.debug('## Counts by classification');
   for (const classification of ['V1_READ', 'V1_WRITE', 'V2_READ', 'V2_WRITE', 'COMPATIBILITY', 'MIGRATION', 'TEST_ONLY', 'UNKNOWN']) {
-    console.log(`- ${classification}: ${byClassification.get(classification) || 0}`);
+    console.debug(`- ${classification}: ${byClassification.get(classification) || 0}`);
   }
 
-  console.log('');
-  console.log('## Inventory');
+  console.debug('');
+  console.debug('## Inventory');
   for (const [relPath, entries] of [...byFile.entries()].sort((left, right) => left[0].localeCompare(right[0]))) {
     const first = entries[0];
     const lineNumbers = [...new Set(entries.map((entry) => Number(entry.lineNumber)))].sort((a, b) => a - b).join(', ');
     const tokens = [...new Set(entries.map((entry) => entry.token))].join(', ');
-    console.log(`- ${relPath}`);
-    console.log(`  classification=${first.classification}; lines=${lineNumbers}; tokens=${tokens}; surface=${first.surface}`);
-    console.log(`  reason=${first.reason}`);
+    console.debug(`- ${relPath}`);
+    console.debug(`  classification=${first.classification}; lines=${lineNumbers}; tokens=${tokens}; surface=${first.surface}`);
+    console.debug(`  reason=${first.reason}`);
   }
 
   if (unknownOccurrences.length > 0) {
@@ -438,8 +429,8 @@ async function main() {
     return;
   }
 
-  console.log('');
-  console.log('Audit result: OK');
+  console.debug('');
+  console.debug('Audit result: OK');
 }
 
 main().catch((error) => {
