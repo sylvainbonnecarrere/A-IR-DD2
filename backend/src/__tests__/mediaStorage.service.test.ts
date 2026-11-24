@@ -6,6 +6,7 @@
  * @see backend/src/services/mediaStorage.service.ts
  */
 
+import { logger } from '../services/logger';
 import path from 'path';
 import fs from 'fs/promises';
 import { MediaStorageService, MediaStorageError } from '../services/mediaStorage.service';
@@ -36,7 +37,7 @@ describe('MediaStorageService - Validation et stockage', () => {
     try {
       await fs.rm(TEST_STORAGE_ROOT, { recursive: true, force: true });
     } catch (error) {
-      console.warn('Cleanup warning:', error);
+      logger.warn('Cleanup warning:', error);
     }
   });
 

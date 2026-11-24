@@ -2,6 +2,7 @@ jest.mock('../migrations/006_media_reference_catalog_backfill', () => ({
   backfillMediaReferenceCatalogFields: jest.fn(),
 }));
 
+import { logger } from '../services/logger';
 import { backfillMediaReferenceCatalogFields } from '../migrations/006_media_reference_catalog_backfill';
 import mongoose from 'mongoose';
 import { runMediaReferenceCatalogBackfill } from '../services/databaseInit';
@@ -12,9 +13,9 @@ describe('databaseInit media catalog backfill bootstrap', () => {
   });
 
   it('runs the additive media catalog backfill when media_references exist', async () => {
-    const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => undefined);
-    const debugSpy = jest.spyOn(console, 'debug').mockImplementation(() => undefined);
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 
     (backfillMediaReferenceCatalogFields as jest.Mock).mockResolvedValue({
       collectionFound: true,
@@ -40,9 +41,9 @@ describe('databaseInit media catalog backfill bootstrap', () => {
   });
 
   it('stays non-blocking when the media catalog collection is absent', async () => {
-    const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => undefined);
-    const debugSpy = jest.spyOn(console, 'debug').mockImplementation(() => undefined);
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 
     (backfillMediaReferenceCatalogFields as jest.Mock).mockResolvedValue({
       collectionFound: false,
@@ -65,9 +66,9 @@ describe('databaseInit media catalog backfill bootstrap', () => {
   });
 
   it('swallows backfill failures and logs a warning instead of blocking startup', async () => {
-    const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => undefined);
-    const debugSpy = jest.spyOn(console, 'debug').mockImplementation(() => undefined);
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 
     (backfillMediaReferenceCatalogFields as jest.Mock).mockRejectedValue(new Error('boom'));
 

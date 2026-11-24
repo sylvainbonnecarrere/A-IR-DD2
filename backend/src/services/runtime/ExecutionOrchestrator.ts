@@ -1,3 +1,4 @@
+import { logger } from '../logger';
 import { Dirent, promises as fs } from 'fs';
 import crypto from 'crypto';
 import path from 'path';
@@ -344,7 +345,7 @@ export class ExecutionOrchestrator {
       throw new RuntimeNotReadyError(readiness.reason ?? runtimeReport.summary);
     }
 
-    console.info('[ExecutionOrchestrator] queue execution', {
+    logger.info('[ExecutionOrchestrator] queue execution', {
       executionId,
       userId: request.userId,
       functionName: request.fn.name,
@@ -375,7 +376,7 @@ export class ExecutionOrchestrator {
       assertLeaseMonitorActive();
     } catch (error) {
       if (request.lease) {
-        console.error('[ExecutionOrchestrator] Leased preparation outcome is unknown', {
+        logger.error('[ExecutionOrchestrator] Leased preparation outcome is unknown', {
           executionId,
           errorType: error instanceof Error ? error.name : 'UnknownError',
         });
@@ -572,7 +573,7 @@ export class ExecutionOrchestrator {
               outputArtifacts,
             });
 
-            console.info('[ExecutionOrchestrator] finished execution', {
+            logger.info('[ExecutionOrchestrator] finished execution', {
               executionId,
               success: executionResult.success,
               timedOut: executionResult.timedOut ?? false,
@@ -604,7 +605,7 @@ export class ExecutionOrchestrator {
               throw error;
             }
             if (request.lease && !runnerCompleted) {
-              console.error('[ExecutionOrchestrator] Leased runner outcome is unknown', {
+              logger.error('[ExecutionOrchestrator] Leased runner outcome is unknown', {
                 executionId,
                 runner: selectedRunnerId,
                 errorType: error instanceof Error ? error.name : 'UnknownError',
@@ -632,7 +633,7 @@ export class ExecutionOrchestrator {
             }
             const message = error instanceof Error ? error.message : String(error);
             const outputArtifacts = await this.collectOutputArtifacts(executionRequest.workspace, artifactBaseline);
-            console.error('[ExecutionOrchestrator] failed execution', {
+            logger.error('[ExecutionOrchestrator] failed execution', {
               executionId,
               runner: selectedRunnerId,
               message,
@@ -705,7 +706,7 @@ export class ExecutionOrchestrator {
         artifacts: params.outputArtifacts,
       });
     } catch (error) {
-      console.warn('[ExecutionOrchestrator] Runtime artifact catalog projection skipped after error:', error);
+      logger.warn('[ExecutionOrchestrator] Runtime artifact catalog projection skipped after error:', error);
     }
   }
 

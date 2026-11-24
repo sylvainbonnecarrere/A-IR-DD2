@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router } from 'express';
 import { z } from 'zod';
 import { User } from '../models/User.model';
@@ -58,7 +59,7 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
 
     // ⭐ SELF-HEALING: Créer le workflow par défaut pour le nouvel utilisateur
     const defaultWorkflow = await WorkflowSelfHealingService.createDefaultWorkflowForNewUser(user.id);
-    console.debug(`✅ [Auth] Default workflow created for user ${user.email}:`, defaultWorkflow.id);
+    logger.debug(`✅ [Auth] Default workflow created for user ${user.email}:`, defaultWorkflow.id);
 
     // Générer tokens JWT
     const payload = {
@@ -69,7 +70,7 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
 
-    console.debug(`✅ [Auth] User registered: ${user.email}`);
+    logger.debug(`✅ [Auth] User registered: ${user.email}`);
 
     res.status(201).json({
       user: {
@@ -82,7 +83,7 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
       refreshToken,
     });
   } catch (error) {
-    console.error('[Auth] Register error:', error);
+    logger.error('[Auth] Register error:', error);
     res.status(500).json({
       error: "Erreur lors de l'inscription",
       code: 'REGISTER_ERROR',
@@ -129,7 +130,7 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
 
-    console.debug(`✅ [Auth] User logged in: ${user.email}`);
+    logger.debug(`✅ [Auth] User logged in: ${user.email}`);
 
     res.json({
       user: {
@@ -142,7 +143,7 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
       refreshToken,
     });
   } catch (error) {
-    console.error('[Auth] Login error:', error);
+    logger.error('[Auth] Login error:', error);
     res.status(500).json({
       error: 'Erreur lors de la connexion',
       code: 'LOGIN_ERROR',
@@ -177,11 +178,11 @@ router.post('/refresh', validateRequest(refreshSchema), async (req, res) => {
       role: payload.role,
     });
 
-    console.debug(`🔄 [Auth] Token refreshed for: ${user.email}`);
+    logger.debug(`🔄 [Auth] Token refreshed for: ${user.email}`);
 
     res.json({ accessToken: newAccessToken });
   } catch (error) {
-    console.error('[Auth] Refresh error:', error);
+    logger.error('[Auth] Refresh error:', error);
     res.status(401).json({
       error: 'Refresh token invalide ou expiré',
       code: 'INVALID_REFRESH_TOKEN',
@@ -196,7 +197,7 @@ router.post('/refresh', validateRequest(refreshSchema), async (req, res) => {
 router.post('/logout', (req, res) => {
   // Note: Avec JWT, la déconnexion est principalement côté client
   // Le frontend doit supprimer les tokens du storage
-  console.debug('👋 [Auth] User logged out');
+  logger.debug('👋 [Auth] User logged out');
   res.json({ message: 'Déconnexion réussie' });
 });
 

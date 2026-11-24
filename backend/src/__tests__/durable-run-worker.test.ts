@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import mongoose from 'mongoose';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { DurableRunWorker } from '../services/runtime/DurableRunWorker';
@@ -54,7 +55,7 @@ describe('DurableRunWorker', () => {
     });
 
     it.each(['rejected', 'unconfirmed'] as const)('reports a %s release of an unstarted claim', async (outcome) => {
-        jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         let finish!: (value: RunLease) => void;
         const claimQueued = jest.fn().mockReturnValue(new Promise<RunLease>((resolve) => { finish = resolve; }));
         const releaseQueued = outcome === 'rejected'
@@ -106,7 +107,7 @@ describe('DurableRunWorker', () => {
     });
 
     it.each(['claim', 'dispatch'])('stops visibly after a %s error without retrying', async (failure) => {
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         const claimQueued = failure === 'claim' ? jest.fn().mockRejectedValue(new Error('private data')) : jest.fn().mockResolvedValue(lease);
         const dispatch = jest.fn().mockRejectedValue(new Error('private data'));
         const worker = new DurableRunWorker('worker', { claimQueued, releaseQueued: jest.fn() }, { dispatch }, 100);
@@ -121,7 +122,7 @@ describe('DurableRunWorker', () => {
     });
 
     it('never dispatches when a committed claim response is lost', async () => {
-        jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         const runs = new UserToolRunService();
         await runs.createQueuedRun({
             executionId: 'lost-claim-response', ownerUserId: new mongoose.Types.ObjectId(), toolId: new mongoose.Types.ObjectId(),
@@ -193,7 +194,7 @@ describe('DurableRunWorker', () => {
     });
 
     it('does not release another claim when cancellation races with an unstarted claim', async () => {
-        jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         const owner = new mongoose.Types.ObjectId();
         const runs = new UserToolRunService();
         await runs.createQueuedRun({
@@ -258,7 +259,7 @@ describe('DurableRunWorker', () => {
         ['missing status', { ...completed, status: undefined }],
         ['different execution', { ...completed, executionId: 'other' }],
     ])('stops before claiming further work on %s outcome', async (_label, result) => {
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         const claimQueued = jest.fn().mockResolvedValue(lease);
         const dispatch = jest.fn().mockResolvedValue(result);
         const worker = new DurableRunWorker('worker', { claimQueued, releaseQueued: jest.fn() }, { dispatch }, 100);

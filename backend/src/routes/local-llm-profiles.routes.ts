@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
@@ -47,7 +48,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const profiles = await LocalLLMProfile.find({ userId: user.id }).sort({ name: 1 });
     res.json(profiles.map(toProfileDTO));
   } catch (error) {
-    console.error('[LocalLLMProfiles] GET error:', error);
+    logger.error('[LocalLLMProfiles] GET error:', error);
     res.status(500).json({ error: 'Erreur récupération des profils LLM local' });
   }
 });
@@ -73,7 +74,7 @@ router.post('/', requireAuth, validateRequest(profileSchema), async (req: Reques
     await profile.save();
     res.status(201).json(toProfileDTO(profile));
   } catch (error: unknown) {
-    console.error('[LocalLLMProfiles] POST error:', error);
+    logger.error('[LocalLLMProfiles] POST error:', error);
 
     if (isDuplicateKeyError(error)) {
       return res.status(409).json({ error: 'Un profil avec ce nom existe déjà' });
@@ -115,7 +116,7 @@ router.put('/:id', requireAuth, validateRequest(profileSchema), async (req: Requ
     await profile.save();
     res.json(toProfileDTO(profile));
   } catch (error: unknown) {
-    console.error('[LocalLLMProfiles] PUT error:', error);
+    logger.error('[LocalLLMProfiles] PUT error:', error);
 
     if (isDuplicateKeyError(error)) {
       return res.status(409).json({ error: 'Un profil avec ce nom existe déjà' });
@@ -147,7 +148,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     await profile.deleteOne();
     res.json({ message: 'Profil supprimé' });
   } catch (error) {
-    console.error('[LocalLLMProfiles] DELETE error:', error);
+    logger.error('[LocalLLMProfiles] DELETE error:', error);
     res.status(500).json({ error: 'Erreur suppression du profil LLM local' });
   }
 });

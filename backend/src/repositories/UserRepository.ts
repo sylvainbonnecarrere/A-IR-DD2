@@ -1,10 +1,11 @@
 /**
  * UserRepository - Implémentation de l'accès aux données utilisateur
  * Applique: Single Responsibility Principle (SOLID)
- * 
+ *
  * Responsabilité unique: Translater les opérations métier en requêtes MongoDB
  */
 
+import { logger } from '../services/logger';
 import { User, IUser } from '../models/User.model';
 import { IUserRepository } from './IUserRepository';
 
@@ -13,7 +14,7 @@ export class UserRepository implements IUserRepository {
     try {
       return await User.findById(userId).exec();
     } catch (error) {
-      console.error(`[UserRepository] findById error for ${userId}:`, error);
+      logger.error(`[UserRepository] findById error for ${userId}:`, error);
       throw error;
     }
   }
@@ -22,7 +23,7 @@ export class UserRepository implements IUserRepository {
     try {
       return await User.findOne({ email }).exec();
     } catch (error) {
-      console.error(`[UserRepository] findByEmail error for ${email}:`, error);
+      logger.error(`[UserRepository] findByEmail error for ${email}:`, error);
       throw error;
     }
   }
@@ -35,20 +36,20 @@ export class UserRepository implements IUserRepository {
           $set: {
             defaultWorkflowId,
             lastActiveWorkflowId: defaultWorkflowId,
-            updatedAt: new Date()
-          }
+            updatedAt: new Date(),
+          },
         },
-        { new: true }
+        { new: true },
       ).exec();
 
       if (!user) {
         throw new Error(`User ${userId} not found`);
       }
 
-      console.debug(`[UserRepository] Default workflow set for user ${userId}: ${defaultWorkflowId}`);
+      logger.debug(`[UserRepository] Default workflow set for user ${userId}: ${defaultWorkflowId}`);
       return user;
     } catch (error) {
-      console.error(`[UserRepository] setDefaultWorkflow error:`, error);
+      logger.error(`[UserRepository] setDefaultWorkflow error:`, error);
       throw error;
     }
   }
@@ -60,20 +61,20 @@ export class UserRepository implements IUserRepository {
         {
           $set: {
             lastActiveWorkflowId: workflowId,
-            updatedAt: new Date()
-          }
+            updatedAt: new Date(),
+          },
         },
-        { new: true }
+        { new: true },
       ).exec();
 
       if (!user) {
         throw new Error(`User ${userId} not found`);
       }
 
-      console.debug(`[UserRepository] Last active workflow set for user ${userId}: ${workflowId}`);
+      logger.debug(`[UserRepository] Last active workflow set for user ${userId}: ${workflowId}`);
       return user;
     } catch (error) {
-      console.error(`[UserRepository] setLastActiveWorkflow error:`, error);
+      logger.error(`[UserRepository] setLastActiveWorkflow error:`, error);
       throw error;
     }
   }
@@ -85,20 +86,20 @@ export class UserRepository implements IUserRepository {
         {
           $set: {
             workflowCount,
-            updatedAt: new Date()
-          }
+            updatedAt: new Date(),
+          },
         },
-        { new: true }
+        { new: true },
       ).exec();
 
       if (!user) {
         throw new Error(`User ${userId} not found`);
       }
 
-      console.debug(`[UserRepository] Workflow count synced for user ${userId}: ${workflowCount}`);
+      logger.debug(`[UserRepository] Workflow count synced for user ${userId}: ${workflowCount}`);
       return user;
     } catch (error) {
-      console.error(`[UserRepository] syncWorkflowCount error:`, error);
+      logger.error(`[UserRepository] syncWorkflowCount error:`, error);
       throw error;
     }
   }
@@ -108,7 +109,7 @@ export class UserRepository implements IUserRepository {
       const user = await User.findById(userId).select('defaultWorkflowId').exec();
       return user?.defaultWorkflowId?.toString() || null;
     } catch (error) {
-      console.error(`[UserRepository] getDefaultWorkflowId error:`, error);
+      logger.error(`[UserRepository] getDefaultWorkflowId error:`, error);
       throw error;
     }
   }

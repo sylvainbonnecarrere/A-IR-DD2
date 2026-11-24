@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router } from 'express';
 import { z } from 'zod';
 import { AgentTemplate } from '../models/AgentTemplate.model';
@@ -102,7 +103,7 @@ router.get('/', requireAuth, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('[AgentTemplates] GET error:', error);
+    logger.error('[AgentTemplates] GET error:', error);
     res.status(500).json({ success: false, error: 'Erreur récupération templates' });
   }
 });
@@ -130,7 +131,7 @@ router.get(
 
       res.json({ success: true, data: template });
     } catch (error) {
-      console.error('[AgentTemplates] GET/:id error:', error);
+      logger.error('[AgentTemplates] GET/:id error:', error);
       res.status(500).json({ success: false, error: 'Erreur récupération template' });
     }
   },
@@ -158,7 +159,7 @@ router.post('/', requireAuth, validateRequest(createAgentTemplateSchema), async 
 
     res.status(201).json({ success: true, data: template });
   } catch (error) {
-    console.error('[AgentTemplates] POST error:', error);
+    logger.error('[AgentTemplates] POST error:', error);
     res.status(500).json({ success: false, error: 'Erreur création template' });
   }
 });
@@ -194,7 +195,7 @@ router.put(
 
       res.json({ success: true, data: template });
     } catch (error) {
-      console.error('[AgentTemplates] PUT error:', error);
+      logger.error('[AgentTemplates] PUT error:', error);
       res.status(500).json({ success: false, error: 'Erreur mise à jour template' });
     }
   },
@@ -229,7 +230,7 @@ router.delete(
 
       res.json({ success: true, message: 'Template supprimé avec succès' });
     } catch (error) {
-      console.error('[AgentTemplates] DELETE error:', error);
+      logger.error('[AgentTemplates] DELETE error:', error);
       res.status(500).json({ success: false, error: 'Erreur suppression template' });
     }
   },
@@ -269,7 +270,7 @@ router.patch(
 
       res.json({ success: true, data: template });
     } catch (error) {
-      console.error('[AgentTemplates] STAR error:', error);
+      logger.error('[AgentTemplates] STAR error:', error);
       res.status(500).json({ success: false, error: 'Erreur star/unstar template' });
     }
   },
@@ -305,7 +306,7 @@ router.patch(
 
       res.json({ success: true, data: template });
     } catch (error) {
-      console.error('[AgentTemplates] USAGE error:', error);
+      logger.error('[AgentTemplates] USAGE error:', error);
       res.status(500).json({ success: false, error: 'Erreur update usage count' });
     }
   },

@@ -1,3 +1,4 @@
+import { logger } from '../logger';
 import { spawn } from 'child_process';
 import path from 'path';
 import type { RuntimeHealthReport } from '../../types/runtimeHealth.types';
@@ -238,7 +239,7 @@ export class DockerSandboxRunner implements SandboxRunnerPort {
           return inspectResult?.exitCode === 0 && inspectResult.stdout.trim() === 'false';
         })
         .catch(() => {
-          console.warn('[DockerSandboxRunner] Container cancellation could not be confirmed', { executionId: request.executionId });
+          logger.warn('[DockerSandboxRunner] Container cancellation could not be confirmed', { executionId: request.executionId });
           return false;
         });
       return containerKill;

@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
@@ -170,7 +171,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const profiles = await CloudConnectionProfile.find({ userId: user.id }).sort({ displayName: 1 });
     res.json(profiles.map(toProfileDTO));
   } catch (error) {
-    console.error('[CloudConnectionProfiles] GET error:', error);
+    logger.error('[CloudConnectionProfiles] GET error:', error);
     res.status(500).json({ error: 'Erreur récupération des profils cloud' });
   }
 });
@@ -191,7 +192,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 
     res.json(toProfileDTO(profile));
   } catch (error) {
-    console.error('[CloudConnectionProfiles] GET :id error:', error);
+    logger.error('[CloudConnectionProfiles] GET :id error:', error);
     res.status(500).json({ error: 'Erreur récupération du profil cloud' });
   }
 });
@@ -221,7 +222,7 @@ router.post('/', requireAuth, validateRequest(createProfileSchema), async (req: 
     await profile.save();
     res.status(201).json(toProfileDTO(profile));
   } catch (error: unknown) {
-    console.error('[CloudConnectionProfiles] POST error:', error);
+    logger.error('[CloudConnectionProfiles] POST error:', error);
 
     if (isDuplicateKeyError(error)) {
       return res.status(409).json({ error: 'Un profil cloud avec ce nom existe déjà' });
@@ -272,7 +273,7 @@ router.put('/:id', requireAuth, validateRequest(updateProfileSchema), async (req
     await profile.save();
     res.json(toProfileDTO(profile));
   } catch (error: unknown) {
-    console.error('[CloudConnectionProfiles] PUT error:', error);
+    logger.error('[CloudConnectionProfiles] PUT error:', error);
 
     if (isDuplicateKeyError(error)) {
       return res.status(409).json({ error: 'Un profil cloud avec ce nom existe déjà' });
@@ -303,7 +304,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     await profile.deleteOne();
     res.json({ message: 'Profil cloud supprimé' });
   } catch (error) {
-    console.error('[CloudConnectionProfiles] DELETE error:', error);
+    logger.error('[CloudConnectionProfiles] DELETE error:', error);
     res.status(500).json({ error: 'Erreur suppression du profil cloud' });
   }
 });
@@ -347,7 +348,7 @@ router.post('/:id/test', requireAuth, async (req: Request, res: Response) => {
       profile: toProfileDTO(profile),
     });
   } catch (error: unknown) {
-    console.error('[CloudConnectionProfiles] TEST error:', error);
+    logger.error('[CloudConnectionProfiles] TEST error:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Erreur test du profil cloud',
     });

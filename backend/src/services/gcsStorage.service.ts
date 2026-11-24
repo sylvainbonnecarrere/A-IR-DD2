@@ -12,6 +12,7 @@
  * @see backend/src/services/mediaStorage.service.ts
  */
 
+import { logger } from './logger';
 import { Storage, Bucket, File, GetSignedUrlConfig, StorageOptions } from '@google-cloud/storage';
 import { asErrorShape } from '../utils/errorGuards';
 import { Readable } from 'stream';
@@ -33,7 +34,7 @@ import {
 
 const DEBUG = process.env.DEBUG_CLOUD_STORAGE === 'true' || process.env.NODE_ENV === 'development';
 const debugLog = (message: string) => {
-  if (DEBUG) console.debug(`[GCSStorage] ${message}`);
+  if (DEBUG) logger.debug(`[GCSStorage] ${message}`);
 };
 
 // Durées par défaut
@@ -146,7 +147,7 @@ export class GCSStorageStrategy implements ICloudStorageStrategy {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[GCSStorage] Upload failed for ${fullKey}:`, errorMessage);
+      logger.error(`[GCSStorage] Upload failed for ${fullKey}:`, errorMessage);
 
       return {
         success: false,
@@ -204,7 +205,7 @@ export class GCSStorageStrategy implements ICloudStorageStrategy {
         return true;
       }
 
-      console.error(`[GCSStorage] Delete failed for ${fullKey}:`, error);
+      logger.error(`[GCSStorage] Delete failed for ${fullKey}:`, error);
       return false;
     }
   }
@@ -222,7 +223,7 @@ export class GCSStorageStrategy implements ICloudStorageStrategy {
       const [exists] = await file.exists();
       return exists;
     } catch (error) {
-      console.error(`[GCSStorage] Exists check failed for ${fullKey}:`, error);
+      logger.error(`[GCSStorage] Exists check failed for ${fullKey}:`, error);
       return false;
     }
   }
@@ -357,7 +358,7 @@ export class GCSStorageStrategy implements ICloudStorageStrategy {
         result.message = 'Clé de service account invalide ou expirée';
       }
 
-      console.error('[GCSStorage] Connection test failed:', errorMessage);
+      logger.error('[GCSStorage] Connection test failed:', errorMessage);
     }
 
     return result;
@@ -390,7 +391,7 @@ export class GCSStorageStrategy implements ICloudStorageStrategy {
         truncated: files.length >= maxKeys,
       };
     } catch (error) {
-      console.error('[GCSStorage] List failed:', error);
+      logger.error('[GCSStorage] List failed:', error);
       return { keys: [], truncated: false };
     }
   }

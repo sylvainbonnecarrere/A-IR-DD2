@@ -17,6 +17,7 @@
  * - Schema Validation: JSON Schema validation on insert/update
  */
 
+import { logger } from './logger';
 import mongoose from 'mongoose';
 import { asErrorShape, errorMessageOf, isDuplicateKeyError } from '../utils/errorGuards';
 import bcrypt from 'bcrypt';
@@ -626,7 +627,7 @@ export function resolveDevSeedUserConfig(): { email: string; password: string } 
 }
 
 export async function runDatabaseBootstrap(db: mongoose.mongo.Db): Promise<void> {
-  console.info('🔧 Starting database bootstrap (Phase 1: schema and index check)...');
+  logger.info('🔧 Starting database bootstrap (Phase 1: schema and index check)...');
 
   const admin = db.admin();
   void admin;
@@ -638,7 +639,7 @@ export async function runDatabaseBootstrap(db: mongoose.mongo.Db): Promise<void>
       new Promise((_, reject) => setTimeout(() => reject(new Error('listCollections timeout')), 5000)),
     ])) as mongoose.mongo.CollectionInfo[];
   } catch (timeoutError) {
-    console.warn('[Database] listCollections timeout - proceeding with empty collection list');
+    logger.warn('[Database] listCollections timeout - proceeding with empty collection list');
     currentDbCollections = [];
   }
 
@@ -646,29 +647,29 @@ export async function runDatabaseBootstrap(db: mongoose.mongo.Db): Promise<void>
   const testUserExists = await db.collection('users').findOne({ email: 'test@example.com' });
 
   if (existingCollectionNames.size === 0) {
-    console.info('📋 Creating collections with schema validation...');
+    logger.info('📋 Creating collections with schema validation...');
     await createCollectionsWithValidation(db);
-    console.info('✅ Collections created');
+    logger.info('✅ Collections created');
 
-    console.info('🗂️  Creating indexes for performance...');
+    logger.info('🗂️  Creating indexes for performance...');
     await createIndexes(db);
-    console.info('✅ Indexes created');
+    logger.info('✅ Indexes created');
 
-    console.info('👤 Creating test user...');
+    logger.info('👤 Creating test user...');
     await createTestUser(db);
-    console.info('✅ Test user created');
+    logger.info('✅ Test user created');
   } else {
-    console.info(`✅ Database already initialized (${existingCollectionNames.size} collections found)`);
+    logger.info(`✅ Database already initialized (${existingCollectionNames.size} collections found)`);
 
     const newCollectionNames = Object.keys(COLLECTION_SCHEMAS).filter((name) => !existingCollectionNames.has(name));
 
     if (newCollectionNames.length > 0) {
-      console.info(`🆕 Detected ${newCollectionNames.length} new collection(s) not in database`);
+      logger.info(`🆕 Detected ${newCollectionNames.length} new collection(s) not in database`);
       await createNewCollections(db, existingCollectionNames);
       await createIndexesForNewCollections(db, newCollectionNames);
     }
 
-    console.info('🔄 Ensuring collection schemas are up to date...');
+    logger.info('🔄 Ensuring collection schemas are up to date...');
     await updateCollectionSchemas(db);
     await db.collection('user_tool_runs').createIndex(
       { status: 1, 'lease.expiresAt': 1 },
@@ -695,16 +696,16 @@ export async function runDatabaseBootstrap(db: mongoose.mongo.Db): Promise<void>
     );
 
     if (!testUserExists && process.env.NODE_ENV === 'development') {
-      console.info('👤 Injecting test user...');
+      logger.info('👤 Injecting test user...');
       await createTestUser(db);
-      console.info('✅ Test user injected');
+      logger.info('✅ Test user injected');
     }
 
     try {
       await verifyIndexes(db);
-      console.info('✅ Indexes verified');
+      logger.info('✅ Indexes verified');
     } catch (indexError) {
-      console.warn('⚠️  Index verification warning (non-blocking):', indexError instanceof Error ? indexError.message : String(indexError));
+      logger.warn('⚠️  Index verification warning (non-blocking):', indexError instanceof Error ? indexError.message : String(indexError));
     }
   }
 }
@@ -713,16 +714,16 @@ export async function runDatabaseBootstrap(db: mongoose.mongo.Db): Promise<void>
  * Migration phase: data backfills and schema evolution tasks that must be run explicitly.
  */
 export async function runDatabaseMigrations(db: mongoose.mongo.Db): Promise<void> {
-  console.info('🧩 Starting database migrations (Phase 2: data backfills and compatibility updates)...');
+  logger.info('🧩 Starting database migrations (Phase 2: data backfills and compatibility updates)...');
   await runMediaReferenceCatalogBackfill(db);
 
   try {
     const summary = await migrateLegacyWorkflowGraphsToV2(db);
-    console.info(
+    logger.info(
       `🧩 Workflow V1 -> V2 migration: scanned=${summary.workflowsScanned} migrated=${summary.workflowsMigrated} nodesCreated=${summary.nodesCreated} edgesCreated=${summary.edgesCreated} duplicatesPrevented=${summary.duplicatesPrevented}`,
     );
   } catch (error) {
-    console.warn('⚠️  workflow V1 -> V2 migration warning:', error instanceof Error ? error.message : String(error));
+    logger.warn('⚠️  workflow V1 -> V2 migration warning:', error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -730,7 +731,7 @@ export async function runDatabaseMigrations(db: mongoose.mongo.Db): Promise<void
  * Seed phase: canonical runtime tools and local examples for the current environment.
  */
 export async function runSeedPhase(db: mongoose.mongo.Db): Promise<void> {
-  console.info('🌱 Starting database seed phase (Phase 3: runtime seeders)...');
+  logger.info('🌱 Starting database seed phase (Phase 3: runtime seeders)...');
   await seedNativeFunctions(db);
   await seedSharedExampleFunctions(db);
   await provisionNativePythonToolsOnStartup();
@@ -743,7 +744,7 @@ export async function runSeedPhase(db: mongoose.mongo.Db): Promise<void> {
 export async function initializeDatabase(): Promise<void> {
   try {
     if (!mongoose.connection.db) {
-      console.warn('🔌 MongoDB not connected yet, skipping database initialization');
+      logger.warn('🔌 MongoDB not connected yet, skipping database initialization');
       return;
     }
 
@@ -752,9 +753,9 @@ export async function initializeDatabase(): Promise<void> {
     await runDatabaseMigrations(db);
     await runSeedPhase(db);
 
-    console.info('🎯 Database initialization complete!');
+    logger.info('🎯 Database initialization complete!');
   } catch (error) {
-    console.error('💀 Database initialization error:', error instanceof Error ? error.message : String(error));
+    logger.error('💀 Database initialization error:', error instanceof Error ? error.message : String(error));
     if (process.env.NODE_ENV === 'production') {
       throw error;
     }
@@ -766,15 +767,15 @@ export async function runMediaReferenceCatalogBackfill(db: mongoose.mongo.Db): P
     const summary = await backfillMediaReferenceCatalogFields(db);
 
     if (!summary.collectionFound) {
-      console.debug('  • media_references absent, backfill catalogue media ignoré');
+      logger.debug('  • media_references absent, backfill catalogue media ignoré');
       return;
     }
 
-    console.info(
+    logger.info(
       `🧩 Media catalog backfill: scanned=${summary.scanned} updated=${summary.updated} compatible=${summary.alreadyCompatible} blocked=${summary.blocked}`,
     );
   } catch (error) {
-    console.warn('⚠️  media catalog backfill warning:', error instanceof Error ? error.message : String(error));
+    logger.warn('⚠️  media catalog backfill warning:', error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -790,10 +791,10 @@ async function updateCollectionSchemas(db: mongoose.mongo.Db): Promise<void> {
           collMod: collectionName,
           validator: schema.validator,
         });
-        console.debug(`  ✓ Updated schema for ${collectionName}`);
+        logger.debug(`  ✓ Updated schema for ${collectionName}`);
       }
     } catch (error: unknown) {
-      console.warn(`  ⚠️ Could not update schema for ${collectionName}:`, errorMessageOf(error));
+      logger.warn(`  ⚠️ Could not update schema for ${collectionName}:`, errorMessageOf(error));
     }
   }
 }
@@ -809,11 +810,11 @@ async function createCollectionsWithValidation(db: mongoose.mongo.Db): Promise<v
       } else {
         await db.createCollection(collectionName);
       }
-      console.debug(`  ✓ ${collectionName}`);
+      logger.debug(`  ✓ ${collectionName}`);
     } catch (error: unknown) {
       if (asErrorShape(error).code === 48) {
         // Collection already exists - this is fine
-        console.debug(`  ✓ ${collectionName} (already exists)`);
+        logger.debug(`  ✓ ${collectionName} (already exists)`);
       } else {
         throw error;
       }
@@ -830,11 +831,11 @@ async function createIndexes(db: mongoose.mongo.Db): Promise<void> {
     for (const index of indexes) {
       try {
         await collection.createIndex(index.spec, index.options);
-        console.debug(`  ✓ ${collectionName}: ${JSON.stringify(index.spec)}`);
+        logger.debug(`  ✓ ${collectionName}: ${JSON.stringify(index.spec)}`);
       } catch (error: unknown) {
         if (asErrorShape(error).code === 85) {
           // Index already exists with different options
-          console.debug(`  ✓ ${collectionName}: ${JSON.stringify(index.spec)} (already exists)`);
+          logger.debug(`  ✓ ${collectionName}: ${JSON.stringify(index.spec)} (already exists)`);
         } else {
           throw error;
         }
@@ -851,10 +852,10 @@ async function verifyIndexes(db: mongoose.mongo.Db): Promise<void> {
     try {
       const collection = db.collection(collectionName);
       const indexes = await collection.listIndexes().toArray();
-      console.debug(`  ${collectionName}: ${indexes.length} index(es)`);
+      logger.debug(`  ${collectionName}: ${indexes.length} index(es)`);
     } catch (error) {
       // Non-critical: Just log
-      console.debug(`  ${collectionName}: Could not verify indexes`);
+      logger.debug(`  ${collectionName}: Could not verify indexes`);
     }
   }
 }
@@ -872,7 +873,7 @@ async function createTestUser(db: mongoose.mongo.Db): Promise<void> {
   try {
     const devSeedUser = resolveDevSeedUserConfig();
     if (!devSeedUser) {
-      console.warn('  ⚠️ Skipping development seed user: set DEV_TEST_USER_PASSWORD to enable a local test account.');
+      logger.warn('  ⚠️ Skipping development seed user: set DEV_TEST_USER_PASSWORD to enable a local test account.');
       return;
     }
 
@@ -880,7 +881,7 @@ async function createTestUser(db: mongoose.mongo.Db): Promise<void> {
     const existingUser = await collection.findOne({ email: devSeedUser.email });
 
     if (existingUser) {
-      console.info('  Test user already exists');
+      logger.info('  Test user already exists');
       return;
     }
 
@@ -895,11 +896,11 @@ async function createTestUser(db: mongoose.mongo.Db): Promise<void> {
     };
 
     await collection.insertOne(testUser);
-    console.info(`  ✓ Test user created: ${devSeedUser.email}`);
+    logger.info(`  ✓ Test user created: ${devSeedUser.email}`);
   } catch (error: unknown) {
     if (isDuplicateKeyError(error) && (error as { keyPattern?: Record<string, unknown> }).keyPattern?.email) {
       // Duplicate key on email - this is fine
-      console.debug('  Test user email already exists (idempotent)');
+      logger.debug('  Test user email already exists (idempotent)');
     } else {
       throw error;
     }
@@ -915,11 +916,11 @@ async function createNewCollections(db: mongoose.mongo.Db, existingNames: Set<st
   const newCollections = Object.keys(COLLECTION_SCHEMAS).filter((name) => !existingNames.has(name));
 
   if (newCollections.length === 0) {
-    console.debug('  No new collections to create');
+    logger.debug('  No new collections to create');
     return;
   }
 
-  console.info(`📋 Creating ${newCollections.length} new collection(s) with schema validation...`);
+  logger.info(`📋 Creating ${newCollections.length} new collection(s) with schema validation...`);
 
   for (const collectionName of newCollections) {
     try {
@@ -929,16 +930,16 @@ async function createNewCollections(db: mongoose.mongo.Db, existingNames: Set<st
       } else {
         await db.createCollection(collectionName);
       }
-      console.debug(`  ✓ ${collectionName}`);
+      logger.debug(`  ✓ ${collectionName}`);
     } catch (error: unknown) {
       if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 48) {
         throw error;
       }
-      console.debug(`  ✓ ${collectionName} (created concurrently; schema will be updated)`);
+      logger.debug(`  ✓ ${collectionName} (created concurrently; schema will be updated)`);
     }
   }
 
-  console.info('✅ New collections created');
+  logger.info('✅ New collections created');
 }
 
 /**
@@ -951,7 +952,7 @@ async function createIndexesForNewCollections(db: mongoose.mongo.Db, newCollecti
     return;
   }
 
-  console.info('🗂️  Creating indexes for new collection(s)...');
+  logger.info('🗂️  Creating indexes for new collection(s)...');
 
   for (const collectionName of newCollectionNames) {
     const indexes = INDEX_DEFINITIONS[collectionName];
@@ -961,7 +962,7 @@ async function createIndexesForNewCollections(db: mongoose.mongo.Db, newCollecti
     for (const index of indexes) {
       try {
         await collection.createIndex(index.spec, index.options);
-        console.debug(`  ✓ ${collectionName}: ${JSON.stringify(index.spec)}`);
+        logger.debug(`  ✓ ${collectionName}: ${JSON.stringify(index.spec)}`);
       } catch (error: unknown) {
         if (asErrorShape(error).code !== 85) {
           // 85 = index already exists
@@ -971,7 +972,7 @@ async function createIndexesForNewCollections(db: mongoose.mongo.Db, newCollecti
     }
   }
 
-  console.info('✅ Indexes created for new collections');
+  logger.info('✅ Indexes created for new collections');
 }
 
 async function upsertCanonicalSeedTool(
@@ -1028,15 +1029,15 @@ export async function seedNativeFunctions(db: mongoose.mongo.Db): Promise<void> 
     }
 
     if (upserted > 0) {
-      console.info(`🌱 ${upserted} outil(s) natif(s) seedé(s) dans user_tools`);
+      logger.info(`🌱 ${upserted} outil(s) natif(s) seedé(s) dans user_tools`);
     } else if (updated > 0) {
-      console.info(`🔁 ${updated} outil(s) natif(s) mis à jour dans user_tools`);
+      logger.info(`🔁 ${updated} outil(s) natif(s) mis à jour dans user_tools`);
     } else {
-      console.debug('  ✓ Outils natifs déjà convergents dans user_tools');
+      logger.debug('  ✓ Outils natifs déjà convergents dans user_tools');
     }
   } catch (err) {
     // Non-bloquant : log mais ne crashe pas le démarrage
-    console.warn('⚠️  seedNativeFunctions warning:', err instanceof Error ? err.message : String(err));
+    logger.warn('⚠️  seedNativeFunctions warning:', err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -1051,7 +1052,7 @@ export async function seedSharedExampleFunctions(db: mongoose.mongo.Db): Promise
     });
 
     if (staleToolMirrors.deletedCount > 0) {
-      console.info(`🧹 Nettoyage hello_test: ${staleToolMirrors.deletedCount} miroir(s) orphelin(s) user_tools supprimé(s)`);
+      logger.info(`🧹 Nettoyage hello_test: ${staleToolMirrors.deletedCount} miroir(s) orphelin(s) user_tools supprimé(s)`);
     }
 
     const result = await upsertCanonicalSeedTool(
@@ -1100,14 +1101,14 @@ export async function seedSharedExampleFunctions(db: mongoose.mongo.Db): Promise
     );
 
     if (result.upsertedCount > 0) {
-      console.info('🌱 Exemple partagé hello_test seedé dans user_tools');
+      logger.info('🌱 Exemple partagé hello_test seedé dans user_tools');
     } else if (result.modifiedCount > 0) {
-      console.info('🔁 Exemple partagé hello_test mis à jour dans user_tools');
+      logger.info('🔁 Exemple partagé hello_test mis à jour dans user_tools');
     } else {
-      console.debug('  ✓ Exemple partagé hello_test déjà convergent');
+      logger.debug('  ✓ Exemple partagé hello_test déjà convergent');
     }
   } catch (err) {
-    console.warn('⚠️  seedSharedExampleFunctions warning:', err instanceof Error ? err.message : String(err));
+    logger.warn('⚠️  seedSharedExampleFunctions warning:', err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -1119,11 +1120,11 @@ async function provisionNativePythonToolsOnStartup(): Promise<void> {
       return;
     }
 
-    console.info(
+    logger.info(
       `🐍 native python provisioning startup: attempted=${summary.attempted} succeeded=${summary.succeeded} failed=${summary.failed} skipped=${summary.skipped}`,
     );
   } catch (err) {
-    console.warn('⚠️  native python provisioning startup warning:', err instanceof Error ? err.message : String(err));
+    logger.warn('⚠️  native python provisioning startup warning:', err instanceof Error ? err.message : String(err));
   }
 }
 

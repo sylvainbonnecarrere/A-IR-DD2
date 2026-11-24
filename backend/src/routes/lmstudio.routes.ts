@@ -1,4 +1,5 @@
 // Routes proxy sécurisé pour LMStudio
+import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import {
   checkLMStudioHealth,
@@ -48,12 +49,12 @@ router.get('/health', async (req: Request, res: Response) => {
   try {
     const endpoint = (req.query.endpoint as string) || 'http://localhost:1234';
 
-    console.debug(`[LMStudio Proxy] Health check for endpoint: ${endpoint}`);
+    logger.debug(`[LMStudio Proxy] Health check for endpoint: ${endpoint}`);
     const health = await checkLMStudioHealth(endpoint);
 
     res.json(health);
   } catch (error) {
-    console.error('[LMStudio Proxy] Health check error:', error);
+    logger.error('[LMStudio Proxy] Health check error:', error);
     res.status(500).json({
       healthy: false,
       error: error instanceof Error ? error.message : 'Health check failed',
@@ -70,13 +71,13 @@ router.get('/models', async (req: Request, res: Response) => {
   try {
     const endpoint = (req.query.endpoint as string) || 'http://localhost:1234';
 
-    console.debug(`[LMStudio Proxy] Fetching models from: ${endpoint}`);
+    logger.debug(`[LMStudio Proxy] Fetching models from: ${endpoint}`);
     const models = await fetchLMStudioModels(endpoint);
 
-    console.debug(`[LMStudio Proxy] Found ${models.data?.length || 0} models`);
+    logger.debug(`[LMStudio Proxy] Found ${models.data?.length || 0} models`);
     res.json(models);
   } catch (error) {
-    console.error('[LMStudio Proxy] Fetch models error:', error);
+    logger.error('[LMStudio Proxy] Fetch models error:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to fetch models',
     });
@@ -90,14 +91,14 @@ router.get('/models', async (req: Request, res: Response) => {
  */
 router.get('/detect-endpoint', async (req: Request, res: Response) => {
   try {
-    console.debug('[LMStudio Proxy] Auto-detecting endpoint...');
+    logger.debug('[LMStudio Proxy] Auto-detecting endpoint...');
     const endpoint = await detectAvailableEndpoint();
 
     // Récupérer la liste des modèles pour enrichir la réponse
     const modelsData = await fetchLMStudioModels(endpoint);
     const modelsList = modelsData.data?.map((m) => m.id) || [];
 
-    console.debug(`[LMStudio Proxy] Detected endpoint: ${endpoint} with ${modelsList.length} models`);
+    logger.debug(`[LMStudio Proxy] Detected endpoint: ${endpoint} with ${modelsList.length} models`);
 
     res.json({
       healthy: true,
@@ -106,7 +107,7 @@ router.get('/detect-endpoint', async (req: Request, res: Response) => {
       detected: true,
     });
   } catch (error) {
-    console.error('[LMStudio Proxy] Endpoint detection failed:', error);
+    logger.error('[LMStudio Proxy] Endpoint detection failed:', error);
     res.status(404).json({
       healthy: false,
       detected: false,
@@ -130,7 +131,7 @@ router.post('/embeddings', async (req: Request, res: Response) => {
       });
     }
 
-    console.debug(`[LMStudio Proxy] Embeddings request - Model: ${model}`);
+    logger.debug(`[LMStudio Proxy] Embeddings request - Model: ${model}`);
 
     const response = await fetch(`${endpoint}/v1/embeddings`, {
       method: 'POST',
@@ -146,7 +147,7 @@ router.post('/embeddings', async (req: Request, res: Response) => {
     const result = await response.json();
     res.json(result);
   } catch (error) {
-    console.error('[LMStudio Proxy] Embeddings error:', error);
+    logger.error('[LMStudio Proxy] Embeddings error:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Embeddings failed',
     });
@@ -168,7 +169,7 @@ router.post('/completions', async (req: Request, res: Response) => {
       });
     }
 
-    console.debug(`[LMStudio Proxy] Completion request - Model: ${model}`);
+    logger.debug(`[LMStudio Proxy] Completion request - Model: ${model}`);
 
     const response = await fetch(`${endpoint}/v1/completions`, {
       method: 'POST',
@@ -184,7 +185,7 @@ router.post('/completions', async (req: Request, res: Response) => {
     const result = await response.json();
     res.json(result);
   } catch (error) {
-    console.error('[LMStudio Proxy] Completion error:', error);
+    logger.error('[LMStudio Proxy] Completion error:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Completion failed',
     });
@@ -206,7 +207,7 @@ router.post(
     try {
       const { endpoint = 'http://localhost:1234', ...requestBody } = req.body as ChatCompletionRequest & { endpoint?: string };
 
-      console.debug(`[LMStudio Proxy] Chat completion request - Model: ${requestBody.model}, Stream: ${requestBody.stream}`);
+      logger.debug(`[LMStudio Proxy] Chat completion request - Model: ${requestBody.model}, Stream: ${requestBody.stream}`);
 
       // Mode streaming (SSE)
       if (requestBody.stream) {
@@ -232,7 +233,7 @@ router.post(
 
           res.end();
         } catch (streamError) {
-          console.error('[LMStudio Proxy] Streaming error:', streamError);
+          logger.error('[LMStudio Proxy] Streaming error:', streamError);
           const errorResponse = toLMStudioErrorResponse(streamError);
 
           if (!res.headersSent) {
@@ -249,10 +250,10 @@ router.post(
         res.json(result);
       }
     } catch (error) {
-      console.error('[LMStudio Proxy] Chat completion error:', error);
+      logger.error('[LMStudio Proxy] Chat completion error:', error);
       // Log full error details for debugging
       if (error instanceof Error) {
-        console.error('[LMStudio Proxy] Error stack:', error.stack);
+        logger.error('[LMStudio Proxy] Error stack:', error.stack);
       }
       const errorResponse = toLMStudioErrorResponse(error);
       res.status(errorResponse.statusCode).json(errorResponse.body);

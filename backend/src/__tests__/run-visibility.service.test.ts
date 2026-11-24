@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { MongoRunVisibilityService, type RunVisibilityEntry } from '../services/runtime/runVisibility.service';
 import { RuntimeEventPublisher } from '../services/runtimeEventPublisher.service';
 import type { RuntimeEventEnvelope } from '../domain/execution/runtimeEvent.contract';
@@ -133,7 +134,7 @@ describe('MongoRunVisibilityService (US-J7-09)', () => {
   it('never throws when the journal write fails (fail-safe)', async () => {
     mockJournalCreate.mockRejectedValue(new Error('mongo down'));
     const { service, emitted } = createHarness();
-    const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 
     try {
       await expect(service.record(createEntry())).resolves.toBeUndefined();
@@ -154,7 +155,7 @@ describe('MongoRunVisibilityService (US-J7-09)', () => {
       typeof AgentJournal,
       'create'
     >);
-    const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 
     try {
       await expect(service.record(createEntry())).resolves.toBeUndefined();

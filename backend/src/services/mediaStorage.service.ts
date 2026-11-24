@@ -1,37 +1,38 @@
 /**
  * @fileoverview Service de stockage média flexible - Jalon 1
- * 
+ *
  * Gère le stockage des fichiers générés par les agents selon le mode configuré :
  * - database: Stockage inline MongoDB (< 16MB, pour petits fichiers)
  * - local: Stockage sur disque (volume Docker persistant)
  * - cloud: Stockage externe S3/GCS (future implémentation)
- * 
+ *
  * Arborescence Local:
  * storage/users/{userId}/workflows/{workflowId}/agents/{agentInstanceId}/{year}-{month}/{filename}
- * 
+ *
  * @see backend/src/types/persistence.ts
  * @see Guides/WIP/PLAN_CORRECTIF_PERSISTANCE_WORKFLOW.md
  */
 
+import { logger } from './logger';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import {
-    MediaPayload,
-    FileMetadata,
-    PersistenceConfig,
-    MAX_DATABASE_MEDIA_SIZE,
-    ALLOWED_MIME_TYPES,
-    MediaStorageMode
+  MediaPayload,
+  FileMetadata,
+  PersistenceConfig,
+  MAX_DATABASE_MEDIA_SIZE,
+  ALLOWED_MIME_TYPES,
+  MediaStorageMode,
 } from '../types/persistence';
 import { CloudConnectionProfile } from '../models/CloudConnectionProfile.model';
 import {
-    CloudStorageConfig,
-    CloudStorageError,
-    CloudStorageErrorCodes,
-    ICloudStorageStrategy,
-    generateCloudKey,
-    validateCloudConfig,
+  CloudStorageConfig,
+  CloudStorageError,
+  CloudStorageErrorCodes,
+  ICloudStorageStrategy,
+  generateCloudKey,
+  validateCloudConfig,
 } from '../types/cloudStorage';
 import { S3StorageStrategy } from './s3Storage.service';
 import { GCSStorageStrategy } from './gcsStorage.service';
@@ -42,7 +43,7 @@ import { GCSStorageStrategy } from './gcsStorage.service';
 
 const DEBUG = process.env.DEBUG_MEDIA_STORAGE === 'true' || process.env.NODE_ENV === 'development';
 const debugLog = (message: string) => {
-    if (DEBUG) console.debug(message);
+  if (DEBUG) logger.debug(message);
 };
 
 // ============================================
@@ -59,17 +60,17 @@ const STORAGE_ROOT = process.env.MEDIA_STORAGE_PATH || path.join(process.cwd(), 
  * Options de configuration du service
  */
 export interface MediaStorageOptions {
-    storageRoot?: string;
-    createDirectories?: boolean;
-    validateMimeTypes?: boolean;
-    generateChecksums?: boolean;
+  storageRoot?: string;
+  createDirectories?: boolean;
+  validateMimeTypes?: boolean;
+  generateChecksums?: boolean;
 }
 
 const DEFAULT_OPTIONS: MediaStorageOptions = {
-    storageRoot: STORAGE_ROOT,
-    createDirectories: true,
-    validateMimeTypes: true,
-    generateChecksums: true
+  storageRoot: STORAGE_ROOT,
+  createDirectories: true,
+  validateMimeTypes: true,
+  generateChecksums: true,
 };
 
 // ============================================
@@ -77,14 +78,14 @@ const DEFAULT_OPTIONS: MediaStorageOptions = {
 // ============================================
 
 export class MediaStorageError extends Error {
-    constructor(
-        message: string,
-        public code: string,
-        public details?: Record<string, unknown>
-    ) {
-        super(message);
-        this.name = 'MediaStorageError';
-    }
+  constructor(
+    message: string,
+    public code: string,
+    public details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = 'MediaStorageError';
+  }
 }
 
 // ============================================
@@ -92,789 +93,708 @@ export class MediaStorageError extends Error {
 // ============================================
 
 export class MediaStorageService {
-    private options: MediaStorageOptions;
+  private options: MediaStorageOptions;
 
-    constructor(options: Partial<MediaStorageOptions> = {}) {
-        this.options = { ...DEFAULT_OPTIONS, ...options };
+  constructor(options: Partial<MediaStorageOptions> = {}) {
+    this.options = { ...DEFAULT_OPTIONS, ...options };
+  }
+
+  private resolveStorageMode(config: PersistenceConfig & { mediaStorageMode?: 'database' | 'local' | 'cloud' }): 'db' | 'local' | 'cloud' {
+    if (config.mediaStorage === 'db' || config.mediaStorage === 'local' || config.mediaStorage === 'cloud') {
+      return config.mediaStorage;
     }
 
-    private resolveStorageMode(config: PersistenceConfig & { mediaStorageMode?: 'database' | 'local' | 'cloud' }): 'db' | 'local' | 'cloud' {
-        if (config.mediaStorage === 'db' || config.mediaStorage === 'local' || config.mediaStorage === 'cloud') {
-            return config.mediaStorage;
-        }
-
-        if (config.mediaStorage === 'workspace') {
-            return 'local';
-        }
-
-        switch (config.mediaStorageMode) {
-            case 'database':
-                return 'db';
-            case 'local':
-                return 'local';
-            case 'cloud':
-                return 'cloud';
-            default:
-                return 'db';
-        }
+    if (config.mediaStorage === 'workspace') {
+      return 'local';
     }
 
-    // ============================================
-    // MÉTHODE PRINCIPALE
-    // ============================================
+    switch (config.mediaStorageMode) {
+      case 'database':
+        return 'db';
+      case 'local':
+        return 'local';
+      case 'cloud':
+        return 'cloud';
+      default:
+        return 'db';
+    }
+  }
 
-    /**
-     * Sauvegarder un fichier média selon la configuration de persistance
-     * 
-     * @param file Buffer du fichier à sauvegarder
-     * @param metadata Métadonnées du fichier
-     * @param config Configuration de persistance de l'agent
-     * @param context Contexte pour construction du chemin
-     * @returns MediaPayload avec les infos de stockage
-     */
-    async saveMedia(
-        file: Buffer,
-        metadata: FileMetadata,
-        config: PersistenceConfig & { mediaStorageMode?: 'database' | 'local' | 'cloud' },
-        context: {
-            userId: string;
-            workflowId: string;
-            agentInstanceId: string;
-        }
-    ): Promise<MediaPayload> {
-        // Validation du MIME type si activée
-        if (this.options.validateMimeTypes) {
-            this.validateMimeType(metadata.mimeType);
-        }
+  // ============================================
+  // MÉTHODE PRINCIPALE
+  // ============================================
 
-        // Génération checksum si activée
-        const checksum = this.options.generateChecksums
-            ? this.generateChecksum(file)
-            : undefined;
-
-        const storageMode = this.resolveStorageMode(config);
-
-        // Routage selon le mode de stockage
-        switch (storageMode) {
-            case 'db':
-                return this.saveToDatabase(file, metadata, checksum);
-            
-            case 'local':
-                return this.saveToLocal(file, metadata, context, checksum);
-            
-            case 'cloud':
-                return this.saveToCloud(file, metadata, config, context, checksum);
-            
-            default:
-                throw new MediaStorageError(
-                    `Mode de stockage non supporté: ${storageMode}`,
-                    'INVALID_STORAGE_MODE'
-                );
-        }
+  /**
+   * Sauvegarder un fichier média selon la configuration de persistance
+   *
+   * @param file Buffer du fichier à sauvegarder
+   * @param metadata Métadonnées du fichier
+   * @param config Configuration de persistance de l'agent
+   * @param context Contexte pour construction du chemin
+   * @returns MediaPayload avec les infos de stockage
+   */
+  async saveMedia(
+    file: Buffer,
+    metadata: FileMetadata,
+    config: PersistenceConfig & { mediaStorageMode?: 'database' | 'local' | 'cloud' },
+    context: {
+      userId: string;
+      workflowId: string;
+      agentInstanceId: string;
+    },
+  ): Promise<MediaPayload> {
+    // Validation du MIME type si activée
+    if (this.options.validateMimeTypes) {
+      this.validateMimeType(metadata.mimeType);
     }
 
-    // ============================================
-    // STOCKAGE BASE DE DONNÉES
-    // ============================================
+    // Génération checksum si activée
+    const checksum = this.options.generateChecksums ? this.generateChecksum(file) : undefined;
 
-    /**
-     * Stocker le fichier inline dans le document MongoDB
-     * Limité à 16MB (limite BSON)
-     */
-    private async saveToDatabase(
-        file: Buffer,
-        metadata: FileMetadata,
-        checksum?: string
-    ): Promise<MediaPayload> {
-        // Vérification de la taille
-        if (file.length > MAX_DATABASE_MEDIA_SIZE) {
-            throw new MediaStorageError(
-                `Fichier trop volumineux pour stockage en base: ${this.formatSize(file.length)} > ${this.formatSize(MAX_DATABASE_MEDIA_SIZE)}`,
-                'FILE_TOO_LARGE',
-                {
-                    fileSize: file.length,
-                    maxSize: MAX_DATABASE_MEDIA_SIZE,
-                    recommendation: 'Utiliser le mode "local" ou "cloud" pour les fichiers > 16MB'
-                }
-            );
-        }
+    const storageMode = this.resolveStorageMode(config);
 
-        const fileName = this.sanitizeFileName(metadata.originalName);
+    // Routage selon le mode de stockage
+    switch (storageMode) {
+      case 'db':
+        return this.saveToDatabase(file, metadata, checksum);
 
-        return {
-            mimeType: metadata.mimeType,
-            fileName,
-            size: file.length,
-            storageMode: 'database',
-            data: file,
-            checksum,
-            metadata: {
-                generatedBy: metadata.generatedBy,
-                prompt: metadata.prompt,
-                storedAt: new Date().toISOString()
-            }
-        };
+      case 'local':
+        return this.saveToLocal(file, metadata, context, checksum);
+
+      case 'cloud':
+        return this.saveToCloud(file, metadata, config, context, checksum);
+
+      default:
+        throw new MediaStorageError(`Mode de stockage non supporté: ${storageMode}`, 'INVALID_STORAGE_MODE');
     }
+  }
 
-    // ============================================
-    // STOCKAGE LOCAL (DISQUE)
-    // ============================================
+  // ============================================
+  // STOCKAGE BASE DE DONNÉES
+  // ============================================
 
-    /**
-     * Stocker le fichier sur le disque serveur
-     * Arborescence: storage/users/{userId}/workflows/{workflowId}/agents/{agentInstanceId}/{YYYY-MM}/{filename}
-     */
-    private async saveToLocal(
-        file: Buffer,
-        metadata: FileMetadata,
-        context: {
-            userId: string;
-            workflowId: string;
-            agentInstanceId: string;
+  /**
+   * Stocker le fichier inline dans le document MongoDB
+   * Limité à 16MB (limite BSON)
+   */
+  private async saveToDatabase(file: Buffer, metadata: FileMetadata, checksum?: string): Promise<MediaPayload> {
+    // Vérification de la taille
+    if (file.length > MAX_DATABASE_MEDIA_SIZE) {
+      throw new MediaStorageError(
+        `Fichier trop volumineux pour stockage en base: ${this.formatSize(file.length)} > ${this.formatSize(MAX_DATABASE_MEDIA_SIZE)}`,
+        'FILE_TOO_LARGE',
+        {
+          fileSize: file.length,
+          maxSize: MAX_DATABASE_MEDIA_SIZE,
+          recommendation: 'Utiliser le mode "local" ou "cloud" pour les fichiers > 16MB',
         },
-        checksum?: string
-    ): Promise<MediaPayload> {
-        // Construction du chemin
-        const now = new Date();
-        const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        
-        const relativePath = path.join(
-            'users',
-            context.userId,
-            'workflows',
-            context.workflowId,
-            'agents',
-            context.agentInstanceId,
-            yearMonth
-        );
-        
-        const absoluteDir = path.join(this.options.storageRoot!, relativePath);
-        
-        // Création du répertoire si nécessaire
-        if (this.options.createDirectories) {
-            await fs.mkdir(absoluteDir, { recursive: true });
-        }
-
-        // Génération du nom de fichier unique
-        const uniqueFileName = this.generateUniqueFileName(metadata.originalName);
-        const absolutePath = path.join(absoluteDir, uniqueFileName);
-        const relativeFilePath = path.join(relativePath, uniqueFileName);
-
-        // Écriture du fichier
-        try {
-            await fs.writeFile(absolutePath, file);
-            debugLog(`[MediaStorage] Fichier sauvegardé: ${relativeFilePath}`);
-        } catch (error) {
-            throw new MediaStorageError(
-                `Erreur d'écriture du fichier: ${error instanceof Error ? error.message : 'Unknown'}`,
-                'WRITE_ERROR',
-                { path: absolutePath }
-            );
-        }
-
-        return {
-            mimeType: metadata.mimeType,
-            fileName: uniqueFileName,
-            size: file.length,
-            storageMode: 'local',
-            path: relativeFilePath.replace(/\\/g, '/'), // Normalisation des séparateurs
-            checksum,
-            metadata: {
-                generatedBy: metadata.generatedBy,
-                prompt: metadata.prompt,
-                storedAt: new Date().toISOString()
-            }
-        };
+      );
     }
 
-    // ============================================
-    // STOCKAGE CLOUD (FUTURE IMPLÉMENTATION)
-    // ============================================
+    const fileName = this.sanitizeFileName(metadata.originalName);
 
-    /**
-     * Stocker le fichier dans un service cloud (S3, GCS, etc.)
-     * TODO: Implémenter lors du Jalon Cloud
-     */
-    private async saveToCloud(
-        file: Buffer,
-        metadata: FileMetadata,
-        config: PersistenceConfig & { mediaStorageMode?: 'database' | 'local' | 'cloud' },
-        context: {
-            userId: string;
-            workflowId: string;
-            agentInstanceId: string;
+    return {
+      mimeType: metadata.mimeType,
+      fileName,
+      size: file.length,
+      storageMode: 'database',
+      data: file,
+      checksum,
+      metadata: {
+        generatedBy: metadata.generatedBy,
+        prompt: metadata.prompt,
+        storedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  // ============================================
+  // STOCKAGE LOCAL (DISQUE)
+  // ============================================
+
+  /**
+   * Stocker le fichier sur le disque serveur
+   * Arborescence: storage/users/{userId}/workflows/{workflowId}/agents/{agentInstanceId}/{YYYY-MM}/{filename}
+   */
+  private async saveToLocal(
+    file: Buffer,
+    metadata: FileMetadata,
+    context: {
+      userId: string;
+      workflowId: string;
+      agentInstanceId: string;
+    },
+    checksum?: string,
+  ): Promise<MediaPayload> {
+    // Construction du chemin
+    const now = new Date();
+    const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const relativePath = path.join('users', context.userId, 'workflows', context.workflowId, 'agents', context.agentInstanceId, yearMonth);
+
+    const absoluteDir = path.join(this.options.storageRoot!, relativePath);
+
+    // Création du répertoire si nécessaire
+    if (this.options.createDirectories) {
+      await fs.mkdir(absoluteDir, { recursive: true });
+    }
+
+    // Génération du nom de fichier unique
+    const uniqueFileName = this.generateUniqueFileName(metadata.originalName);
+    const absolutePath = path.join(absoluteDir, uniqueFileName);
+    const relativeFilePath = path.join(relativePath, uniqueFileName);
+
+    // Écriture du fichier
+    try {
+      await fs.writeFile(absolutePath, file);
+      debugLog(`[MediaStorage] Fichier sauvegardé: ${relativeFilePath}`);
+    } catch (error) {
+      throw new MediaStorageError(`Erreur d'écriture du fichier: ${error instanceof Error ? error.message : 'Unknown'}`, 'WRITE_ERROR', {
+        path: absolutePath,
+      });
+    }
+
+    return {
+      mimeType: metadata.mimeType,
+      fileName: uniqueFileName,
+      size: file.length,
+      storageMode: 'local',
+      path: relativeFilePath.replace(/\\/g, '/'), // Normalisation des séparateurs
+      checksum,
+      metadata: {
+        generatedBy: metadata.generatedBy,
+        prompt: metadata.prompt,
+        storedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  // ============================================
+  // STOCKAGE CLOUD (FUTURE IMPLÉMENTATION)
+  // ============================================
+
+  /**
+   * Stocker le fichier dans un service cloud (S3, GCS, etc.)
+   * TODO: Implémenter lors du Jalon Cloud
+   */
+  private async saveToCloud(
+    file: Buffer,
+    metadata: FileMetadata,
+    config: PersistenceConfig & { mediaStorageMode?: 'database' | 'local' | 'cloud' },
+    context: {
+      userId: string;
+      workflowId: string;
+      agentInstanceId: string;
+    },
+    checksum?: string,
+  ): Promise<MediaPayload> {
+    const profileId = typeof config.cloudConnectionProfileId === 'string' ? config.cloudConnectionProfileId.trim() : '';
+
+    if (!profileId) {
+      throw new MediaStorageError('Aucun profil cloud configure pour cette sauvegarde media.', 'CLOUD_NOT_CONFIGURED', {
+        recommendation: 'Renseigner cloudConnectionProfileId dans la persistenceConfig.',
+      });
+    }
+
+    const profile = await CloudConnectionProfile.findOne({
+      _id: profileId,
+      userId: context.userId,
+    });
+
+    if (!profile) {
+      throw new MediaStorageError('Profil cloud introuvable pour cet utilisateur.', 'CLOUD_PROFILE_NOT_FOUND', {
+        cloudConnectionProfileId: profileId,
+      });
+    }
+
+    if (!profile.enabled) {
+      throw new MediaStorageError('Le profil cloud selectionne est desactive.', 'CLOUD_PROFILE_DISABLED', {
+        cloudConnectionProfileId: profileId,
+        statusState: profile.statusState,
+      });
+    }
+
+    const cloudConfig = profile.toDecryptedCloudStorageConfig();
+    if (!cloudConfig) {
+      throw new MediaStorageError('Le profil cloud ne contient pas de secret exploitable.', 'CLOUD_NOT_CONFIGURED', {
+        cloudConnectionProfileId: profileId,
+        statusState: profile.statusState,
+      });
+    }
+
+    const validation = validateCloudConfig(cloudConfig);
+    if (!validation.valid) {
+      throw new MediaStorageError('Configuration cloud invalide.', CloudStorageErrorCodes.INVALID_CONFIG, {
+        cloudConnectionProfileId: profileId,
+        errors: validation.errors,
+      });
+    }
+
+    const strategy = this.buildCloudStrategy(cloudConfig);
+    try {
+      await strategy.initialize(cloudConfig);
+    } catch (error) {
+      throw this.toMediaStorageError(error, 'Initialisation du stockage cloud impossible.', {
+        cloudConnectionProfileId: profileId,
+        provider: cloudConfig.provider,
+      });
+    }
+
+    const uniqueFileName = this.generateUniqueFileName(metadata.originalName);
+    const uploadKey = generateCloudKey({
+      userId: context.userId,
+      workflowId: context.workflowId,
+      agentInstanceId: context.agentInstanceId,
+      fileName: uniqueFileName,
+    });
+
+    const uploadResult = await strategy.upload(
+      uploadKey,
+      file,
+      metadata.mimeType,
+      this.buildCloudUploadMetadata(metadata, checksum, context),
+    );
+
+    if (!uploadResult.success || !uploadResult.key) {
+      throw new MediaStorageError(
+        `Echec de l'upload cloud: ${uploadResult.error || 'Unknown error'}`,
+        uploadResult.errorCode || CloudStorageErrorCodes.UPLOAD_FAILED,
+        {
+          cloudConnectionProfileId: profileId,
+          provider: cloudConfig.provider,
+          uploadKey,
         },
-        checksum?: string
-    ): Promise<MediaPayload> {
-        const profileId = typeof config.cloudConnectionProfileId === 'string'
-            ? config.cloudConnectionProfileId.trim()
-            : '';
-
-        if (!profileId) {
-            throw new MediaStorageError(
-                'Aucun profil cloud configure pour cette sauvegarde media.',
-                'CLOUD_NOT_CONFIGURED',
-                {
-                    recommendation: 'Renseigner cloudConnectionProfileId dans la persistenceConfig.',
-                },
-            );
-        }
-
-        const profile = await CloudConnectionProfile.findOne({
-            _id: profileId,
-            userId: context.userId,
-        });
-
-        if (!profile) {
-            throw new MediaStorageError(
-                'Profil cloud introuvable pour cet utilisateur.',
-                'CLOUD_PROFILE_NOT_FOUND',
-                {
-                    cloudConnectionProfileId: profileId,
-                },
-            );
-        }
-
-        if (!profile.enabled) {
-            throw new MediaStorageError(
-                'Le profil cloud selectionne est desactive.',
-                'CLOUD_PROFILE_DISABLED',
-                {
-                    cloudConnectionProfileId: profileId,
-                    statusState: profile.statusState,
-                },
-            );
-        }
-
-        const cloudConfig = profile.toDecryptedCloudStorageConfig();
-        if (!cloudConfig) {
-            throw new MediaStorageError(
-                'Le profil cloud ne contient pas de secret exploitable.',
-                'CLOUD_NOT_CONFIGURED',
-                {
-                    cloudConnectionProfileId: profileId,
-                    statusState: profile.statusState,
-                },
-            );
-        }
-
-        const validation = validateCloudConfig(cloudConfig);
-        if (!validation.valid) {
-            throw new MediaStorageError(
-                'Configuration cloud invalide.',
-                CloudStorageErrorCodes.INVALID_CONFIG,
-                {
-                    cloudConnectionProfileId: profileId,
-                    errors: validation.errors,
-                },
-            );
-        }
-
-        const strategy = this.buildCloudStrategy(cloudConfig);
-        try {
-            await strategy.initialize(cloudConfig);
-        } catch (error) {
-            throw this.toMediaStorageError(error, 'Initialisation du stockage cloud impossible.', {
-                cloudConnectionProfileId: profileId,
-                provider: cloudConfig.provider,
-            });
-        }
-
-        const uniqueFileName = this.generateUniqueFileName(metadata.originalName);
-        const uploadKey = generateCloudKey({
-            userId: context.userId,
-            workflowId: context.workflowId,
-            agentInstanceId: context.agentInstanceId,
-            fileName: uniqueFileName,
-        });
-
-        const uploadResult = await strategy.upload(
-            uploadKey,
-            file,
-            metadata.mimeType,
-            this.buildCloudUploadMetadata(metadata, checksum, context),
-        );
-
-        if (!uploadResult.success || !uploadResult.key) {
-            throw new MediaStorageError(
-                `Echec de l'upload cloud: ${uploadResult.error || 'Unknown error'}`,
-                uploadResult.errorCode || CloudStorageErrorCodes.UPLOAD_FAILED,
-                {
-                    cloudConnectionProfileId: profileId,
-                    provider: cloudConfig.provider,
-                    uploadKey,
-                },
-            );
-        }
-
-        return {
-            mimeType: metadata.mimeType,
-            fileName: uniqueFileName,
-            size: file.length,
-            storageMode: 'cloud',
-            checksum,
-            url: uploadResult.url,
-            metadata: {
-                generatedBy: metadata.generatedBy,
-                prompt: metadata.prompt,
-                storedAt: new Date().toISOString(),
-                cloudConnectionProfileId: profileId,
-                cloudKey: uploadResult.key,
-                cloudProvider: cloudConfig.provider,
-                cloudBucket: this.resolveCloudBucketName(cloudConfig),
-                etag: uploadResult.etag,
-            }
-        };
+      );
     }
 
-    // ============================================
-    // RÉCUPÉRATION DE MÉDIA
-    // ============================================
+    return {
+      mimeType: metadata.mimeType,
+      fileName: uniqueFileName,
+      size: file.length,
+      storageMode: 'cloud',
+      checksum,
+      url: uploadResult.url,
+      metadata: {
+        generatedBy: metadata.generatedBy,
+        prompt: metadata.prompt,
+        storedAt: new Date().toISOString(),
+        cloudConnectionProfileId: profileId,
+        cloudKey: uploadResult.key,
+        cloudProvider: cloudConfig.provider,
+        cloudBucket: this.resolveCloudBucketName(cloudConfig),
+        etag: uploadResult.etag,
+      },
+    };
+  }
 
-    /**
-     * Valide un chemin relatif contre les attaques path-traversal
-     * 
-     * @param relativePath Chemin à valider
-     * @param expectedUserId UserId attendu dans le chemin (optionnel)
-     * @returns true si le chemin est sécurisé
-     */
-    validatePath(relativePath: string, expectedUserId?: string): boolean {
-        // Normaliser le chemin
-        const normalized = path.normalize(relativePath).replace(/\\/g, '/');
-        
-        // ⚠️ SÉCURITÉ: Bloquer les remontées de directory
-        if (normalized.includes('..')) {
-            debugLog(`[MediaStorage] Path-traversal attempt blocked: ${relativePath}`);
-            return false;
-        }
-        
-        // ⚠️ SÉCURITÉ: Bloquer les chemins absolus
-        if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
-            debugLog(`[MediaStorage] Absolute path blocked: ${relativePath}`);
-            return false;
-        }
-        
-        // Vérifier la structure attendue: users/{userId}/...
-        const parts = normalized.split('/');
-        if (parts.length < 2 || parts[0] !== 'users') {
-            debugLog(`[MediaStorage] Invalid path structure: ${relativePath}`);
-            return false;
-        }
-        
-        // Si un userId est fourni, vérifier qu'il correspond
-        if (expectedUserId && parts[1] !== expectedUserId) {
-            debugLog(`[MediaStorage] UserId mismatch: expected ${expectedUserId}, got ${parts[1]}`);
-            return false;
-        }
-        
-        return true;
+  // ============================================
+  // RÉCUPÉRATION DE MÉDIA
+  // ============================================
+
+  /**
+   * Valide un chemin relatif contre les attaques path-traversal
+   *
+   * @param relativePath Chemin à valider
+   * @param expectedUserId UserId attendu dans le chemin (optionnel)
+   * @returns true si le chemin est sécurisé
+   */
+  validatePath(relativePath: string, expectedUserId?: string): boolean {
+    // Normaliser le chemin
+    const normalized = path.normalize(relativePath).replace(/\\/g, '/');
+
+    // ⚠️ SÉCURITÉ: Bloquer les remontées de directory
+    if (normalized.includes('..')) {
+      debugLog(`[MediaStorage] Path-traversal attempt blocked: ${relativePath}`);
+      return false;
     }
 
-    /**
-     * Récupérer un fichier stocké localement avec validation de sécurité
-     * 
-     * ⚠️ SÉCURITÉ: Valide le chemin contre path-traversal avant lecture
-     * 
-     * @param relativePath Chemin relatif du fichier
-     * @param expectedUserId UserId attendu pour validation (recommandé)
-     * @returns Buffer contenant le fichier
-     */
-    async getLocalMedia(relativePath: string, expectedUserId?: string): Promise<Buffer> {
-        // ⚠️ SÉCURITÉ CRITIQUE: Valider le chemin AVANT toute opération
-        if (!this.validatePath(relativePath, expectedUserId)) {
-            throw new MediaStorageError(
-                'Chemin de fichier invalide ou non autorisé',
-                'PATH_TRAVERSAL_BLOCKED',
-                { path: relativePath.substring(0, 50) + '...' } // Tronquer pour sécurité logs
-            );
-        }
-        
-        const absolutePath = path.join(this.options.storageRoot!, relativePath);
-        
-        try {
-            const exists = await this.fileExists(absolutePath);
-            if (!exists) {
-                throw new MediaStorageError(
-                    `Fichier introuvable: ${relativePath}`,
-                    'FILE_NOT_FOUND',
-                    { path: relativePath }
-                );
-            }
-            
-            return await fs.readFile(absolutePath);
-        } catch (error) {
-            if (error instanceof MediaStorageError) throw error;
-            throw new MediaStorageError(
-                `Erreur de lecture: ${error instanceof Error ? error.message : 'Unknown'}`,
-                'READ_ERROR',
-                { path: relativePath }
-            );
-        }
+    // ⚠️ SÉCURITÉ: Bloquer les chemins absolus
+    if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
+      debugLog(`[MediaStorage] Absolute path blocked: ${relativePath}`);
+      return false;
     }
 
-    /**
-     * Obtenir les stats d'un fichier local pour streaming
-     * 
-     * @param relativePath Chemin relatif du fichier
-     * @param expectedUserId UserId pour validation
-     * @returns Stats du fichier (taille, mtime, etc.)
-     */
-    async getLocalMediaStats(relativePath: string, expectedUserId?: string): Promise<{
-        size: number;
-        mtime: Date;
-        absolutePath: string;
-    }> {
-        if (!this.validatePath(relativePath, expectedUserId)) {
-            throw new MediaStorageError(
-                'Chemin de fichier invalide',
-                'PATH_TRAVERSAL_BLOCKED'
-            );
-        }
-        
-        const absolutePath = path.join(this.options.storageRoot!, relativePath);
-        const stats = await fs.stat(absolutePath);
-        
-        return {
-            size: stats.size,
-            mtime: stats.mtime,
-            absolutePath
-        };
+    // Vérifier la structure attendue: users/{userId}/...
+    const parts = normalized.split('/');
+    if (parts.length < 2 || parts[0] !== 'users') {
+      debugLog(`[MediaStorage] Invalid path structure: ${relativePath}`);
+      return false;
     }
 
-    /**
-     * Vérifier si un fichier existe
-     */
-    async fileExists(absolutePath: string): Promise<boolean> {
-        try {
-            await fs.access(absolutePath);
-            return true;
-        } catch {
-            return false;
-        }
+    // Si un userId est fourni, vérifier qu'il correspond
+    if (expectedUserId && parts[1] !== expectedUserId) {
+      debugLog(`[MediaStorage] UserId mismatch: expected ${expectedUserId}, got ${parts[1]}`);
+      return false;
     }
 
-    // ============================================
-    // SUPPRESSION DE MÉDIA
-    // ============================================
+    return true;
+  }
 
-    /**
-     * Supprimer un fichier stocké localement
-     */
-    async deleteLocalMedia(relativePath: string): Promise<boolean> {
-        const absolutePath = path.join(this.options.storageRoot!, relativePath);
-        
-        try {
-            await fs.unlink(absolutePath);
-            debugLog(`[MediaStorage] Fichier supprimé: ${relativePath}`);
-            return true;
-        } catch (error) {
-            console.warn(`[MediaStorage] Échec suppression ${relativePath}:`, error);
-            return false;
-        }
+  /**
+   * Récupérer un fichier stocké localement avec validation de sécurité
+   *
+   * ⚠️ SÉCURITÉ: Valide le chemin contre path-traversal avant lecture
+   *
+   * @param relativePath Chemin relatif du fichier
+   * @param expectedUserId UserId attendu pour validation (recommandé)
+   * @returns Buffer contenant le fichier
+   */
+  async getLocalMedia(relativePath: string, expectedUserId?: string): Promise<Buffer> {
+    // ⚠️ SÉCURITÉ CRITIQUE: Valider le chemin AVANT toute opération
+    if (!this.validatePath(relativePath, expectedUserId)) {
+      throw new MediaStorageError(
+        'Chemin de fichier invalide ou non autorisé',
+        'PATH_TRAVERSAL_BLOCKED',
+        { path: relativePath.substring(0, 50) + '...' }, // Tronquer pour sécurité logs
+      );
     }
 
-    /**
-     * Supprimer tous les médias d'un agent
-     */
-    async deleteAgentMedia(
-        userId: string,
-        workflowId: string,
-        agentInstanceId: string
-    ): Promise<number> {
-        const agentDir = path.join(
-            this.options.storageRoot!,
-            'users',
-            userId,
-            'workflows',
-            workflowId,
-            'agents',
-            agentInstanceId
-        );
+    const absolutePath = path.join(this.options.storageRoot!, relativePath);
 
-        try {
-            const exists = await this.fileExists(agentDir);
-            if (!exists) return 0;
+    try {
+      const exists = await this.fileExists(absolutePath);
+      if (!exists) {
+        throw new MediaStorageError(`Fichier introuvable: ${relativePath}`, 'FILE_NOT_FOUND', { path: relativePath });
+      }
 
-            const deletedCount = await this.deleteDirectoryRecursive(agentDir);
-            debugLog(`[MediaStorage] Dossier agent supprimé: ${agentDir} (${deletedCount} fichiers)`);
-            return deletedCount;
-        } catch (error) {
-            console.error(`[MediaStorage] Erreur suppression dossier agent:`, error);
-            return 0;
-        }
+      return await fs.readFile(absolutePath);
+    } catch (error) {
+      if (error instanceof MediaStorageError) throw error;
+      throw new MediaStorageError(`Erreur de lecture: ${error instanceof Error ? error.message : 'Unknown'}`, 'READ_ERROR', {
+        path: relativePath,
+      });
+    }
+  }
+
+  /**
+   * Obtenir les stats d'un fichier local pour streaming
+   *
+   * @param relativePath Chemin relatif du fichier
+   * @param expectedUserId UserId pour validation
+   * @returns Stats du fichier (taille, mtime, etc.)
+   */
+  async getLocalMediaStats(
+    relativePath: string,
+    expectedUserId?: string,
+  ): Promise<{
+    size: number;
+    mtime: Date;
+    absolutePath: string;
+  }> {
+    if (!this.validatePath(relativePath, expectedUserId)) {
+      throw new MediaStorageError('Chemin de fichier invalide', 'PATH_TRAVERSAL_BLOCKED');
     }
 
-    /**
-     * Supprimer tous les médias d'un workflow
-     */
-    async deleteWorkflowMedia(userId: string, workflowId: string): Promise<number> {
-        const workflowDir = path.join(
-            this.options.storageRoot!,
-            'users',
-            userId,
-            'workflows',
-            workflowId
-        );
+    const absolutePath = path.join(this.options.storageRoot!, relativePath);
+    const stats = await fs.stat(absolutePath);
 
-        try {
-            const exists = await this.fileExists(workflowDir);
-            if (!exists) return 0;
+    return {
+      size: stats.size,
+      mtime: stats.mtime,
+      absolutePath,
+    };
+  }
 
-            const deletedCount = await this.deleteDirectoryRecursive(workflowDir);
-            debugLog(`[MediaStorage] Dossier workflow supprimé: ${workflowDir} (${deletedCount} fichiers)`);
-            return deletedCount;
-        } catch (error) {
-            console.error(`[MediaStorage] Erreur suppression dossier workflow:`, error);
-            return 0;
-        }
+  /**
+   * Vérifier si un fichier existe
+   */
+  async fileExists(absolutePath: string): Promise<boolean> {
+    try {
+      await fs.access(absolutePath);
+      return true;
+    } catch {
+      return false;
     }
+  }
 
-    // ============================================
-    // UTILITAIRES PRIVÉS
-    // ============================================
+  // ============================================
+  // SUPPRESSION DE MÉDIA
+  // ============================================
 
-    /**
-     * Valider le MIME type contre la whitelist
-     */
-    private validateMimeType(mimeType: string): void {
-        if (!ALLOWED_MIME_TYPES.includes(mimeType as typeof ALLOWED_MIME_TYPES[number])) {
-            throw new MediaStorageError(
-                `MIME type non autorisé: ${mimeType}`,
-                'INVALID_MIME_TYPE',
-                {
-                    received: mimeType,
-                    allowed: ALLOWED_MIME_TYPES
-                }
-            );
-        }
+  /**
+   * Supprimer un fichier stocké localement
+   */
+  async deleteLocalMedia(relativePath: string): Promise<boolean> {
+    const absolutePath = path.join(this.options.storageRoot!, relativePath);
+
+    try {
+      await fs.unlink(absolutePath);
+      debugLog(`[MediaStorage] Fichier supprimé: ${relativePath}`);
+      return true;
+    } catch (error) {
+      logger.warn(`[MediaStorage] Échec suppression ${relativePath}:`, error);
+      return false;
     }
+  }
 
-    private buildCloudStrategy(config: CloudStorageConfig): ICloudStorageStrategy {
-        switch (config.provider) {
-            case 's3':
-                return new S3StorageStrategy();
-            case 'gcs':
-                return new GCSStorageStrategy();
-            default:
-                throw new MediaStorageError(
-                    `Provider cloud non supporte: ${(config as { provider?: string }).provider || 'unknown'}`,
-                    CloudStorageErrorCodes.PROVIDER_NOT_SUPPORTED,
-                );
-        }
+  /**
+   * Supprimer tous les médias d'un agent
+   */
+  async deleteAgentMedia(userId: string, workflowId: string, agentInstanceId: string): Promise<number> {
+    const agentDir = path.join(this.options.storageRoot!, 'users', userId, 'workflows', workflowId, 'agents', agentInstanceId);
+
+    try {
+      const exists = await this.fileExists(agentDir);
+      if (!exists) return 0;
+
+      const deletedCount = await this.deleteDirectoryRecursive(agentDir);
+      debugLog(`[MediaStorage] Dossier agent supprimé: ${agentDir} (${deletedCount} fichiers)`);
+      return deletedCount;
+    } catch (error) {
+      logger.error(`[MediaStorage] Erreur suppression dossier agent:`, error);
+      return 0;
     }
+  }
 
-    private buildCloudUploadMetadata(
-        metadata: FileMetadata,
-        checksum: string | undefined,
-        context: {
-            userId: string;
-            workflowId: string;
-            agentInstanceId: string;
-        },
-    ): Record<string, string> {
-        const uploadMetadata: Record<string, string> = {
-            originalName: metadata.originalName,
-            workflowId: context.workflowId,
-            agentInstanceId: context.agentInstanceId,
-            userId: context.userId,
-        };
+  /**
+   * Supprimer tous les médias d'un workflow
+   */
+  async deleteWorkflowMedia(userId: string, workflowId: string): Promise<number> {
+    const workflowDir = path.join(this.options.storageRoot!, 'users', userId, 'workflows', workflowId);
 
-        if (metadata.generatedBy) {
-            uploadMetadata.generatedBy = metadata.generatedBy;
-        }
+    try {
+      const exists = await this.fileExists(workflowDir);
+      if (!exists) return 0;
 
-        if (metadata.prompt) {
-            uploadMetadata.prompt = metadata.prompt;
-        }
-
-        if (checksum) {
-            uploadMetadata.checksum = checksum;
-        }
-
-        return uploadMetadata;
+      const deletedCount = await this.deleteDirectoryRecursive(workflowDir);
+      debugLog(`[MediaStorage] Dossier workflow supprimé: ${workflowDir} (${deletedCount} fichiers)`);
+      return deletedCount;
+    } catch (error) {
+      logger.error(`[MediaStorage] Erreur suppression dossier workflow:`, error);
+      return 0;
     }
+  }
 
-    private resolveCloudBucketName(config: CloudStorageConfig): string | undefined {
-        if (config.provider === 's3') {
-            return config.s3?.bucketName;
-        }
+  // ============================================
+  // UTILITAIRES PRIVÉS
+  // ============================================
 
-        return config.gcs?.bucketName;
+  /**
+   * Valider le MIME type contre la whitelist
+   */
+  private validateMimeType(mimeType: string): void {
+    if (!ALLOWED_MIME_TYPES.includes(mimeType as (typeof ALLOWED_MIME_TYPES)[number])) {
+      throw new MediaStorageError(`MIME type non autorisé: ${mimeType}`, 'INVALID_MIME_TYPE', {
+        received: mimeType,
+        allowed: ALLOWED_MIME_TYPES,
+      });
     }
+  }
 
-    private toMediaStorageError(
-        error: unknown,
-        fallbackMessage: string,
-        details?: Record<string, unknown>,
-    ): MediaStorageError {
-        if (error instanceof MediaStorageError) {
-            return error;
-        }
-
-        if (error instanceof CloudStorageError) {
-            return new MediaStorageError(error.message, error.code, {
-                ...(details || {}),
-                provider: error.provider,
-                ...error.details,
-            });
-        }
-
-        return new MediaStorageError(
-            error instanceof Error ? error.message : fallbackMessage,
-            'CLOUD_STORAGE_ERROR',
-            details,
+  private buildCloudStrategy(config: CloudStorageConfig): ICloudStorageStrategy {
+    switch (config.provider) {
+      case 's3':
+        return new S3StorageStrategy();
+      case 'gcs':
+        return new GCSStorageStrategy();
+      default:
+        throw new MediaStorageError(
+          `Provider cloud non supporte: ${(config as { provider?: string }).provider || 'unknown'}`,
+          CloudStorageErrorCodes.PROVIDER_NOT_SUPPORTED,
         );
     }
+  }
 
-    /**
-     * Générer un checksum SHA-256
-     */
-    private generateChecksum(data: Buffer): string {
-        return crypto.createHash('sha256').update(data).digest('hex');
+  private buildCloudUploadMetadata(
+    metadata: FileMetadata,
+    checksum: string | undefined,
+    context: {
+      userId: string;
+      workflowId: string;
+      agentInstanceId: string;
+    },
+  ): Record<string, string> {
+    const uploadMetadata: Record<string, string> = {
+      originalName: metadata.originalName,
+      workflowId: context.workflowId,
+      agentInstanceId: context.agentInstanceId,
+      userId: context.userId,
+    };
+
+    if (metadata.generatedBy) {
+      uploadMetadata.generatedBy = metadata.generatedBy;
     }
 
-    /**
-     * Générer un nom de fichier unique
-     */
-    private generateUniqueFileName(originalName: string): string {
-        const ext = path.extname(originalName);
-        const base = path.basename(originalName, ext);
-        const sanitized = this.sanitizeFileName(base);
-        const timestamp = Date.now();
-        const random = crypto.randomBytes(4).toString('hex');
-        
-        return `${sanitized}-${timestamp}-${random}${ext}`;
+    if (metadata.prompt) {
+      uploadMetadata.prompt = metadata.prompt;
     }
 
-    /**
-     * Nettoyer un nom de fichier
-     */
-    private sanitizeFileName(fileName: string): string {
-        const sanitized = fileName
-            .replace(/[\\/]+/g, '_')
-            .replace(/\.{2,}/g, '_')
-            .replace(/[^a-zA-Z0-9._-]/g, '_')
-            .replace(/_{2,}/g, '_')
-            .replace(/^\.+/, '')
-            .substring(0, 100);
-
-        return sanitized || 'file';
+    if (checksum) {
+      uploadMetadata.checksum = checksum;
     }
 
-    /**
-     * Formater une taille de fichier pour affichage
-     */
-    private formatSize(bytes: number): string {
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
-        return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    return uploadMetadata;
+  }
+
+  private resolveCloudBucketName(config: CloudStorageConfig): string | undefined {
+    if (config.provider === 's3') {
+      return config.s3?.bucketName;
     }
 
-    /**
-     * Supprimer un répertoire récursivement
-     */
-    private async deleteDirectoryRecursive(dirPath: string): Promise<number> {
-        let count = 0;
-        
-        try {
-            const entries = await fs.readdir(dirPath, { withFileTypes: true });
-            
-            for (const entry of entries) {
-                const fullPath = path.join(dirPath, entry.name);
-                
-                if (entry.isDirectory()) {
-                    count += await this.deleteDirectoryRecursive(fullPath);
-                } else {
-                    await fs.unlink(fullPath);
-                    count++;
-                }
-            }
-            
-            await fs.rmdir(dirPath);
-            return count;
-        } catch (error) {
-            console.warn(`[MediaStorage] Erreur suppression ${dirPath}:`, error);
-            return count;
+    return config.gcs?.bucketName;
+  }
+
+  private toMediaStorageError(error: unknown, fallbackMessage: string, details?: Record<string, unknown>): MediaStorageError {
+    if (error instanceof MediaStorageError) {
+      return error;
+    }
+
+    if (error instanceof CloudStorageError) {
+      return new MediaStorageError(error.message, error.code, {
+        ...(details || {}),
+        provider: error.provider,
+        ...error.details,
+      });
+    }
+
+    return new MediaStorageError(error instanceof Error ? error.message : fallbackMessage, 'CLOUD_STORAGE_ERROR', details);
+  }
+
+  /**
+   * Générer un checksum SHA-256
+   */
+  private generateChecksum(data: Buffer): string {
+    return crypto.createHash('sha256').update(data).digest('hex');
+  }
+
+  /**
+   * Générer un nom de fichier unique
+   */
+  private generateUniqueFileName(originalName: string): string {
+    const ext = path.extname(originalName);
+    const base = path.basename(originalName, ext);
+    const sanitized = this.sanitizeFileName(base);
+    const timestamp = Date.now();
+    const random = crypto.randomBytes(4).toString('hex');
+
+    return `${sanitized}-${timestamp}-${random}${ext}`;
+  }
+
+  /**
+   * Nettoyer un nom de fichier
+   */
+  private sanitizeFileName(fileName: string): string {
+    const sanitized = fileName
+      .replace(/[\\/]+/g, '_')
+      .replace(/\.{2,}/g, '_')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .replace(/_{2,}/g, '_')
+      .replace(/^\.+/, '')
+      .substring(0, 100);
+
+    return sanitized || 'file';
+  }
+
+  /**
+   * Formater une taille de fichier pour affichage
+   */
+  private formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  /**
+   * Supprimer un répertoire récursivement
+   */
+  private async deleteDirectoryRecursive(dirPath: string): Promise<number> {
+    let count = 0;
+
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+
+        if (entry.isDirectory()) {
+          count += await this.deleteDirectoryRecursive(fullPath);
+        } else {
+          await fs.unlink(fullPath);
+          count++;
         }
+      }
+
+      await fs.rmdir(dirPath);
+      return count;
+    } catch (error) {
+      logger.warn(`[MediaStorage] Erreur suppression ${dirPath}:`, error);
+      return count;
     }
+  }
 
-    // ============================================
-    // MÉTHODES UTILITAIRES PUBLIQUES
-    // ============================================
+  // ============================================
+  // MÉTHODES UTILITAIRES PUBLIQUES
+  // ============================================
 
-    /**
-     * Obtenir les statistiques de stockage d'un utilisateur
-     */
-    async getUserStorageStats(userId: string): Promise<{
-        totalFiles: number;
-        totalSize: number;
-        byWorkflow: Record<string, { files: number; size: number }>;
-    }> {
-        const userDir = path.join(this.options.storageRoot!, 'users', userId);
-        
-        try {
-            const exists = await this.fileExists(userDir);
-            if (!exists) {
-                return { totalFiles: 0, totalSize: 0, byWorkflow: {} };
-            }
+  /**
+   * Obtenir les statistiques de stockage d'un utilisateur
+   */
+  async getUserStorageStats(userId: string): Promise<{
+    totalFiles: number;
+    totalSize: number;
+    byWorkflow: Record<string, { files: number; size: number }>;
+  }> {
+    const userDir = path.join(this.options.storageRoot!, 'users', userId);
 
-            const stats = { totalFiles: 0, totalSize: 0, byWorkflow: {} as Record<string, { files: number; size: number }> };
-            
-            const workflowsDir = path.join(userDir, 'workflows');
-            const workflowsExist = await this.fileExists(workflowsDir);
-            if (!workflowsExist) {
-                return stats;
-            }
+    try {
+      const exists = await this.fileExists(userDir);
+      if (!exists) {
+        return { totalFiles: 0, totalSize: 0, byWorkflow: {} };
+      }
 
-            const workflows = await fs.readdir(workflowsDir);
-            
-            for (const workflowId of workflows) {
-                const workflowStats = await this.getDirectoryStats(
-                    path.join(workflowsDir, workflowId)
-                );
-                stats.byWorkflow[workflowId] = workflowStats;
-                stats.totalFiles += workflowStats.files;
-                stats.totalSize += workflowStats.size;
-            }
-            
-            return stats;
-        } catch (error) {
-            console.error(`[MediaStorage] Erreur stats utilisateur:`, error);
-            return { totalFiles: 0, totalSize: 0, byWorkflow: {} };
+      const stats = { totalFiles: 0, totalSize: 0, byWorkflow: {} as Record<string, { files: number; size: number }> };
+
+      const workflowsDir = path.join(userDir, 'workflows');
+      const workflowsExist = await this.fileExists(workflowsDir);
+      if (!workflowsExist) {
+        return stats;
+      }
+
+      const workflows = await fs.readdir(workflowsDir);
+
+      for (const workflowId of workflows) {
+        const workflowStats = await this.getDirectoryStats(path.join(workflowsDir, workflowId));
+        stats.byWorkflow[workflowId] = workflowStats;
+        stats.totalFiles += workflowStats.files;
+        stats.totalSize += workflowStats.size;
+      }
+
+      return stats;
+    } catch (error) {
+      logger.error(`[MediaStorage] Erreur stats utilisateur:`, error);
+      return { totalFiles: 0, totalSize: 0, byWorkflow: {} };
+    }
+  }
+
+  /**
+   * Calculer les stats d'un répertoire
+   */
+  private async getDirectoryStats(dirPath: string): Promise<{ files: number; size: number }> {
+    let files = 0;
+    let size = 0;
+
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+
+        if (entry.isDirectory()) {
+          const subStats = await this.getDirectoryStats(fullPath);
+          files += subStats.files;
+          size += subStats.size;
+        } else {
+          const stat = await fs.stat(fullPath);
+          files++;
+          size += stat.size;
         }
+      }
+    } catch {
+      // Ignorer les erreurs silencieusement
     }
 
-    /**
-     * Calculer les stats d'un répertoire
-     */
-    private async getDirectoryStats(
-        dirPath: string
-    ): Promise<{ files: number; size: number }> {
-        let files = 0;
-        let size = 0;
-        
-        try {
-            const entries = await fs.readdir(dirPath, { withFileTypes: true });
-            
-            for (const entry of entries) {
-                const fullPath = path.join(dirPath, entry.name);
-                
-                if (entry.isDirectory()) {
-                    const subStats = await this.getDirectoryStats(fullPath);
-                    files += subStats.files;
-                    size += subStats.size;
-                } else {
-                    const stat = await fs.stat(fullPath);
-                    files++;
-                    size += stat.size;
-                }
-            }
-        } catch {
-            // Ignorer les erreurs silencieusement
-        }
-        
-        return { files, size };
-    }
+    return { files, size };
+  }
 }
 
 // ============================================
@@ -886,18 +806,16 @@ let instance: MediaStorageService | null = null;
 /**
  * Obtenir l'instance singleton du service
  */
-export function getMediaStorageService(
-    options?: Partial<MediaStorageOptions>
-): MediaStorageService {
-    if (!instance || options) {
-        instance = new MediaStorageService(options);
-    }
-    return instance;
+export function getMediaStorageService(options?: Partial<MediaStorageOptions>): MediaStorageService {
+  if (!instance || options) {
+    instance = new MediaStorageService(options);
+  }
+  return instance;
 }
 
 /**
  * Réinitialiser le singleton (pour tests)
  */
 export function resetMediaStorageService(): void {
-    instance = null;
+  instance = null;
 }

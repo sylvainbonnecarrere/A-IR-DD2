@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import request from 'supertest';
 
@@ -16,7 +17,7 @@ describe('sandbox durable run acknowledgement', () => {
     afterEach(() => jest.restoreAllMocks());
 
     it('returns HTTP 202 and the run status URL when synchronous waiting times out', async () => {
-        const errorLog = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const errorLog = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         jest.spyOn(SandboxService.prototype, 'runFunction')
             .mockRejectedValue(new RunCompletionTimeoutError('execution-123'));
         const app = express();

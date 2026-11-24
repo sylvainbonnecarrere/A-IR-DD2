@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import mongoose from 'mongoose';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { UserToolRunService } from '../services/userToolRun.service';
@@ -24,7 +25,7 @@ describe('queued run reconstruction quarantine', () => {
     afterEach(() => jest.restoreAllMocks());
 
     it('quarantines only the rejected run, exposes its reason, and executes the next run', async () => {
-        jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
         await create('first-rejected');
         await create('second-ready');
         let notify!: () => void;
@@ -85,7 +86,7 @@ describe('queued run reconstruction quarantine', () => {
     });
 
     it.each(['error', 'unconfirmed', 'lost-response'] as const)('does not continue after a %s quarantine write', async (failure) => {
-        jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         await create('quarantine-write-failed');
         const dispatch = new MonitoredRunDispatch(leases, {
             reconstructQueuedRun: async () => { throw new RunReconstructionRejection('RUN_TARGET_CHANGED'); },

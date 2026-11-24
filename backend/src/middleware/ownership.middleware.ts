@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Request, Response, NextFunction } from 'express';
 import { Model, Types } from 'mongoose';
 import { IUser } from '../models/User.model';
@@ -101,7 +102,7 @@ export const requireOwnership = <T>(model: Model<T>, idParamName: string, userId
       // L'utilisateur est bien le propriétaire, la requête peut continuer
       next();
     } catch (error) {
-      console.error('Erreur dans le middleware de propriété:', error);
+      logger.error('Erreur dans le middleware de propriété:', error);
       res.status(500).json({
         message: 'Erreur interne du serveur.',
         code: 'INTERNAL_SERVER_ERROR',
@@ -141,7 +142,7 @@ export const filterByOwnership = (userIdField: string = 'userId') => {
 
       next();
     } catch (error) {
-      console.error('Erreur dans le middleware de filtrage:', error);
+      logger.error('Erreur dans le middleware de filtrage:', error);
       res.status(500).json({
         message: 'Erreur interne du serveur.',
         code: 'INTERNAL_SERVER_ERROR',

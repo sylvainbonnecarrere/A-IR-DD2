@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { DockerSandboxRunner, type DockerProcessRunner } from '../services/runtime/DockerSandboxRunner';
 import type { SandboxExecutionRequest } from '../services/runtime/execution.types';
 import { DockerSupervisedAttemptLauncher } from '../services/runtime/DockerSupervisedAttemptLauncher';
@@ -254,10 +255,10 @@ describe('DockerSandboxRunner', () => {
   it('does not log sandbox inputs, source code, or private context', async () => {
     const processRunner = new FakeDockerProcessRunner();
     const runner = new DockerSandboxRunner(processRunner, 'C:/repo/backend/python');
-    const debug = jest.spyOn(console, 'debug').mockImplementation(() => undefined);
-    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const debug = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
+    const log = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 
     try {
       const result = await runner.execute(

@@ -6,6 +6,7 @@
  * Architecture: Une seule route proxy (SRP)
  */
 
+import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import { detectLocalLLMCapabilities } from '../services/localLLMService';
 import { lmstudioRateLimiter } from '../middleware/rateLimiter';
@@ -71,7 +72,7 @@ router.get('/detect-capabilities', async (req: Request, res: Response) => {
       });
     }
 
-    console.debug(`[Local-LLM-Routes] Detecting capabilities for endpoint: ${endpoint}`);
+    logger.debug(`[Local-LLM-Routes] Detecting capabilities for endpoint: ${endpoint}`);
 
     // Appeler le service de détection
     const result = await detectLocalLLMCapabilities(endpoint);
@@ -79,7 +80,7 @@ router.get('/detect-capabilities', async (req: Request, res: Response) => {
     // Status 200 même si unhealthy (utile pour afficher erreur au frontend)
     res.json(result);
   } catch (error) {
-    console.error('[Local-LLM-Routes] Unexpected error:', error);
+    logger.error('[Local-LLM-Routes] Unexpected error:', error);
     res.status(500).json({
       healthy: false,
       capabilities: [],

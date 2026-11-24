@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { LLMConfig } from '../models/LLMConfig.model';
@@ -88,7 +89,7 @@ router.post('/get-api-key', requireAuth, validateRequest(getApiKeySchema), async
     // Déchiffrer API key côté serveur (SÉCURITÉ)
     const apiKey = config.getDecryptedApiKey();
 
-    console.debug(`[LLMProxy] API key retrieved for user ${user.id}, provider ${provider}`);
+    logger.debug(`[LLMProxy] API key retrieved for user ${user.id}, provider ${provider}`);
 
     res.json({
       provider: config.provider,
@@ -97,7 +98,7 @@ router.post('/get-api-key', requireAuth, validateRequest(getApiKeySchema), async
       enabled: config.enabled,
     });
   } catch (error) {
-    console.error('[LLMProxy] POST /get-api-key error:', error);
+    logger.error('[LLMProxy] POST /get-api-key error:', error);
     res.status(500).json({
       error: 'Erreur récupération API key',
       details: error instanceof Error ? error.message : 'Erreur inconnue',
@@ -166,7 +167,7 @@ router.post('/get-all-api-keys', requireAuth, async (req: Request, res: Response
             isLocalProvider: false,
           };
         } catch (decryptError: unknown) {
-          console.warn(
+          logger.warn(
             `[LLMProxy] ⚠️  Could not decrypt API key for provider ${config.provider} (user ${user.id}):`,
             errorMessageOf(decryptError),
           );
@@ -185,14 +186,14 @@ router.post('/get-all-api-keys', requireAuth, async (req: Request, res: Response
 
     const failedCount = decryptedConfigs.filter((c) => 'needsReconfig' in c && Boolean(c.needsReconfig)).length;
     if (failedCount > 0) {
-      console.warn(
+      logger.warn(
         `[LLMProxy] ⚠️ ${failedCount}/${configs.length} API keys need reconfiguration (encryption key mismatch) for user ${user.id}`,
       );
     }
 
     res.json(decryptedConfigs);
   } catch (error) {
-    console.error('[LLMProxy] POST /get-all-api-keys error:', error);
+    logger.error('[LLMProxy] POST /get-all-api-keys error:', error);
     res.status(500).json({
       error: 'Erreur récupération API keys',
       details: error instanceof Error ? error.message : 'Erreur inconnue',
@@ -246,7 +247,7 @@ router.post('/validate-provider', requireAuth, validateRequest(getApiKeySchema),
       capabilities: config.capabilities,
     });
   } catch (error) {
-    console.error('[LLMProxy] POST /validate-provider error:', error);
+    logger.error('[LLMProxy] POST /validate-provider error:', error);
     res.status(500).json({
       error: 'Erreur validation provider',
     });

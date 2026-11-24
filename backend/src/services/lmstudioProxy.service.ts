@@ -1,4 +1,5 @@
 // Service de proxy sécurisé pour LMStudio
+import { logger } from './logger';
 import { LMSTUDIO_CONFIG } from '../config/lmstudio.config';
 import { isAllowedLocalEndpoint, LOCAL_ENDPOINT_POLICY_ERROR } from '../utils/localEndpointPolicy';
 import type {
@@ -116,7 +117,7 @@ export async function fetchWithTimeout(url: string, options: RequestInit, timeou
   const startedAt = Date.now();
 
   try {
-    console.info('[LMStudio Proxy] fetchWithTimeout start', {
+    logger.info('[LMStudio Proxy] fetchWithTimeout start', {
       url,
       timeoutMs: hasTimeout ? timeout : 0,
       timeoutDisabled: !hasTimeout,
@@ -128,7 +129,7 @@ export async function fetchWithTimeout(url: string, options: RequestInit, timeou
     if (timeoutId) {
       clearTimeout(timeoutId);
     }
-    console.info('[LMStudio Proxy] fetchWithTimeout success', {
+    logger.info('[LMStudio Proxy] fetchWithTimeout success', {
       url,
       durationMs: Date.now() - startedAt,
       timeoutMs: hasTimeout ? timeout : 0,
@@ -273,7 +274,7 @@ export async function detectAvailableEndpoint(): Promise<string> {
       const health = await checkLMStudioHealth(endpoint);
 
       if (health.healthy) {
-        console.debug(`[LMStudio Proxy] Detected available endpoint: ${endpoint} (${health.models} models)`);
+        logger.debug(`[LMStudio Proxy] Detected available endpoint: ${endpoint} (${health.models} models)`);
         return endpoint;
       }
 
@@ -285,7 +286,7 @@ export async function detectAvailableEndpoint(): Promise<string> {
     }
   }
 
-  console.warn('[LMStudio Proxy] No server detected. Tried:', errors.join('; '));
+  logger.warn('[LMStudio Proxy] No server detected. Tried:', errors.join('; '));
   throw new Error('No LMStudio server detected. Please start LM Studio, Jan, or Ollama on a supported port.');
 }
 
@@ -404,7 +405,7 @@ export async function fetchChatCompletion(
   };
 
   try {
-    console.info('[LMStudio Proxy] fetchChatCompletion start', {
+    logger.info('[LMStudio Proxy] fetchChatCompletion start', {
       endpoint,
       model: requestBody.model,
       messagesCount: Array.isArray(requestBody.messages) ? requestBody.messages.length : 0,
@@ -428,7 +429,7 @@ export async function fetchChatCompletion(
 
     // frontière réseau : le JSON upstream est validé par contrat (ChatCompletionResponse)
     const payload = (await response.json()) as ChatCompletionResponse;
-    console.info('[LMStudio Proxy] fetchChatCompletion success', {
+    logger.info('[LMStudio Proxy] fetchChatCompletion success', {
       endpoint,
       model: requestBody.model,
       timeoutMs,

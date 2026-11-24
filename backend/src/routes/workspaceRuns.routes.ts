@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router, type Response } from 'express';
 import { z } from 'zod';
 
@@ -46,7 +47,7 @@ function sendFenceAndRetryError(res: Response, error: unknown) {
       });
     }
   }
-  console.error('[WorkspaceRunsRoute] fence-and-retry failed', {
+  logger.error('[WorkspaceRunsRoute] fence-and-retry failed', {
     errorType: error instanceof Error ? error.name : 'UnknownError',
   });
   return res.status(500).json({ error: 'Erreur lors du fence-and-retry', code: 'FENCE_AND_RETRY_FAILED' });

@@ -12,6 +12,7 @@
  *   - Rate-limit (10 req/min par utilisateur — via rateLimiter middleware)
  */
 
+import { logger } from '../services/logger';
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
@@ -77,7 +78,7 @@ router.get('/health', requireAuth, async (_req, res) => {
     const health = await runtimeHealthService.getHealthReport();
     res.json(health);
   } catch (error) {
-    console.error('[SandboxRoute] GET /health error:', error);
+    logger.error('[SandboxRoute] GET /health error:', error);
     res.status(500).json({ error: 'Erreur vérification health sandbox' });
   }
 });
@@ -88,7 +89,7 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
     const user = req.user as IUser;
     const { functionId, agentInstanceId, toolSelection, testArgs, privateContext } = req.body;
 
-    console.info('[SandboxRoute] POST /run start', {
+    logger.info('[SandboxRoute] POST /run start', {
       userId: user.id,
       functionId: functionId ?? null,
       agentInstanceId: agentInstanceId ?? null,
@@ -107,7 +108,7 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
       req.headers.authorization,
     );
 
-    console.info('[SandboxRoute] POST /run done', {
+    logger.info('[SandboxRoute] POST /run done', {
       userId: user.id,
       functionId: functionId ?? null,
       agentInstanceId: agentInstanceId ?? null,
@@ -122,7 +123,7 @@ router.post('/run', requireAuth, validateRequest(runFunctionSchema), async (req,
     res.json(result);
   } catch (error: unknown) {
     const errMessage = errorMessageOf(error);
-    console.error('[SandboxRoute] POST /run error:', error);
+    logger.error('[SandboxRoute] POST /run error:', error);
 
     if (error instanceof RunCompletionTimeoutError) {
       return res.status(202).json({
@@ -208,7 +209,7 @@ router.post('/check', requireAuth, validateRequest(checkSyntaxSchema), async (re
     const user = req.user as IUser;
     const { language, code } = req.body;
 
-    console.info('[SandboxRoute] POST /check start', {
+    logger.info('[SandboxRoute] POST /check start', {
       userId: user.id,
       language,
       codeLength: code.length,
@@ -216,7 +217,7 @@ router.post('/check', requireAuth, validateRequest(checkSyntaxSchema), async (re
 
     const result = await sandboxService.checkSyntax(language, code);
 
-    console.info('[SandboxRoute] POST /check done', {
+    logger.info('[SandboxRoute] POST /check done', {
       userId: user.id,
       language,
       valid: result.valid,
@@ -224,7 +225,7 @@ router.post('/check', requireAuth, validateRequest(checkSyntaxSchema), async (re
     });
   } catch (error: unknown) {
     const errMessage = errorMessageOf(error);
-    console.error('[SandboxRoute] POST /check error:', error);
+    logger.error('[SandboxRoute] POST /check error:', error);
 
     if (error instanceof RuntimeNotReadyError) {
       return res.status(503).json({

@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { LLMConfig } from '../models/LLMConfig.model';
@@ -97,7 +98,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     res.json(safeConfigs);
   } catch (error) {
-    console.error('[LLMConfig] GET error:', error);
+    logger.error('[LLMConfig] GET error:', error);
     res.status(500).json({ error: 'Erreur récupération configs LLM' });
   }
 });
@@ -153,7 +154,7 @@ router.get('/:provider', requireAuth, async (req: Request, res: Response) => {
       updatedAt: config.updatedAt,
     });
   } catch (error) {
-    console.error('[LLMConfig] GET :provider error:', error);
+    logger.error('[LLMConfig] GET :provider error:', error);
     res.status(500).json({ error: 'Erreur récupération config LLM' });
   }
 });
@@ -202,12 +203,12 @@ router.post('/', requireAuth, validateRequest(upsertConfigSchema), async (req: R
       if (isLocal) {
         if (!isMaskedEndpoint) {
           config.setLocalEndpoint(localEndpoint || '');
-          console.debug(`[LLMConfig] Updated local endpoint for user ${userId}, provider ${provider}`);
+          logger.debug(`[LLMConfig] Updated local endpoint for user ${userId}, provider ${provider}`);
         }
       } else {
         if (!isMaskedKey) {
           config.setApiKey(apiKey || '');
-          console.debug(`[LLMConfig] Updated API key for user ${userId}, provider ${provider}`);
+          logger.debug(`[LLMConfig] Updated API key for user ${userId}, provider ${provider}`);
         }
       }
 
@@ -231,7 +232,7 @@ router.post('/', requireAuth, validateRequest(upsertConfigSchema), async (req: R
         config.setApiKey(apiKey || '');
       }
       await config.save();
-      console.debug(`[LLMConfig] Created ${isLocal ? 'local' : 'cloud'} config for user ${userId}, provider ${provider}`);
+      logger.debug(`[LLMConfig] Created ${isLocal ? 'local' : 'cloud'} config for user ${userId}, provider ${provider}`);
     }
 
     // Build response (mask API key but NOT endpoint - it's public)
@@ -259,7 +260,7 @@ router.post('/', requireAuth, validateRequest(upsertConfigSchema), async (req: R
       updatedAt: config.updatedAt,
     });
   } catch (error) {
-    console.error('[LLMConfig] POST error:', error);
+    logger.error('[LLMConfig] POST error:', error);
 
     // Unique constraint error
     if (isDuplicateKeyError(error)) {
@@ -294,10 +295,10 @@ router.delete('/:provider', requireAuth, async (req: Request, res: Response) => 
     // NOTE J4.4: UserSettings.llmConfigs sync REMOVED
     // llm_configs collection is now the SINGLE source of truth
 
-    console.debug(`[LLMConfig] Deleted config for user ${userId}, provider ${provider}`);
+    logger.debug(`[LLMConfig] Deleted config for user ${userId}, provider ${provider}`);
     res.json({ message: 'Config LLM supprimée' });
   } catch (error) {
-    console.error('[LLMConfig] DELETE error:', error);
+    logger.error('[LLMConfig] DELETE error:', error);
     res.status(500).json({ error: 'Erreur suppression config LLM' });
   }
 });

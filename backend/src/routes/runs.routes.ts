@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router } from 'express';
 import { z } from 'zod';
 import { UserToolRunStatusSchema } from '../domain/execution/userToolRun.contract';
@@ -128,7 +129,7 @@ function sendRunCommandError(res: import('express').Response, error: unknown) {
       });
     }
   }
-  console.error('[RunsRoute] Run command failed', {
+  logger.error('[RunsRoute] Run command failed', {
     errorType: error instanceof Error ? error.name : 'UnknownError',
   });
   return res.status(500).json({ error: 'Erreur lors de la commande de run', code: 'RUN_COMMAND_FAILED' });
@@ -208,7 +209,7 @@ router.post('/executions/:executionId/cancel', requireAuth, async (req, res) => 
       cancellationRequested: cancellation.kind === 'requested',
     });
   } catch (error) {
-    console.error('[RunsRoute] POST /executions/:executionId/cancel error:', error);
+    logger.error('[RunsRoute] POST /executions/:executionId/cancel error:', error);
     res.status(500).json({ error: 'Erreur lors de l’annulation du run' });
   }
 });
@@ -293,7 +294,7 @@ router.get('/', requireAuth, async (req, res) => {
     const runs = await userToolRunQueryService.listRuns(user.id, queryResult.data);
     res.json({ ...runs, runtimeCompatibility });
   } catch (error) {
-    console.error('[RunsRoute] GET / error:', error);
+    logger.error('[RunsRoute] GET / error:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des runs' });
   }
 });
@@ -321,7 +322,7 @@ router.get('/tool/:toolId', requireAuth, async (req, res) => {
 
     res.json({ ...runs, runtimeCompatibility });
   } catch (error) {
-    console.error('[RunsRoute] GET /tool/:toolId error:', error);
+    logger.error('[RunsRoute] GET /tool/:toolId error:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des runs du tool' });
   }
 });
@@ -349,7 +350,7 @@ router.get('/executions/:executionId', requireAuth, async (req, res) => {
 
     res.json(run);
   } catch (error) {
-    console.error('[RunsRoute] GET /executions/:executionId error:', error);
+    logger.error('[RunsRoute] GET /executions/:executionId error:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération du run' });
   }
 });
@@ -384,7 +385,7 @@ router.get('/tool/:toolId/:executionId/artifacts/content', requireAuth, async (r
       return res.status(400).json({ error: message });
     }
 
-    console.error('[RunsRoute] GET /tool/:toolId/:executionId/artifacts/content error:', error);
+    logger.error('[RunsRoute] GET /tool/:toolId/:executionId/artifacts/content error:', error);
     res.status(500).json({ error: message });
   }
 });
@@ -420,7 +421,7 @@ router.get('/tool/:toolId/:executionId/artifacts/download', requireAuth, async (
       return res.status(400).json({ error: message });
     }
 
-    console.error('[RunsRoute] GET /tool/:toolId/:executionId/artifacts/download error:', error);
+    logger.error('[RunsRoute] GET /tool/:toolId/:executionId/artifacts/download error:', error);
     res.status(500).json({ error: message });
   }
 });
@@ -446,7 +447,7 @@ router.post('/tool/:toolId/cleanup', requireAuth, async (req, res) => {
     res.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erreur lors du nettoyage des runs';
-    console.error('[RunsRoute] POST /tool/:toolId/cleanup error:', error);
+    logger.error('[RunsRoute] POST /tool/:toolId/cleanup error:', error);
     res.status(500).json({ error: message });
   }
 });

@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
@@ -134,7 +135,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     res.json({ items: toolsWithReadiness, runtimeCompatibility });
   } catch (error) {
-    console.error('[ToolsRoute] GET / error:', error);
+    logger.error('[ToolsRoute] GET / error:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des tools' });
   }
 });
@@ -155,7 +156,7 @@ router.post('/', requireAuth, async (req, res) => {
       runtimeCompatibility,
     });
   } catch (error: unknown) {
-    console.error('[ToolsRoute] POST / error:', error);
+    logger.error('[ToolsRoute] POST / error:', error);
     if (isDuplicateKeyError(error)) {
       return res.status(409).json({ error: 'Une fonction avec ce nom existe déjà dans votre espace de travail' });
     }
@@ -184,7 +185,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       runtimeCompatibility,
     });
   } catch (error) {
-    console.error('[ToolsRoute] GET /:id error:', error);
+    logger.error('[ToolsRoute] GET /:id error:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération du tool' });
   }
 });
@@ -214,7 +215,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       runtimeCompatibility,
     });
   } catch (error: unknown) {
-    console.error('[ToolsRoute] PUT /:id error:', error);
+    logger.error('[ToolsRoute] PUT /:id error:', error);
     if (isDuplicateKeyError(error)) {
       return res.status(409).json({ error: 'Une fonction avec ce nom existe déjà dans votre espace de travail' });
     }
@@ -239,7 +240,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
     res.status(204).send();
   } catch (error) {
-    console.error('[ToolsRoute] DELETE /:id error:', error);
+    logger.error('[ToolsRoute] DELETE /:id error:', error);
     res.status(500).json({ error: 'Erreur lors de la suppression du tool' });
   }
 });
@@ -266,7 +267,7 @@ router.patch('/:id/toggle', requireAuth, async (req, res) => {
       return res.status(403).json({ error: msg });
     }
 
-    console.error('[ToolsRoute] PATCH /:id/toggle error:', error);
+    logger.error('[ToolsRoute] PATCH /:id/toggle error:', error);
     res.status(500).json({ error: 'Erreur lors du toggle du tool' });
   }
 });
@@ -292,7 +293,7 @@ router.get('/:id/build-status', requireAuth, async (req, res) => {
 
     res.json(status);
   } catch (error) {
-    console.error('[ToolsRoute] GET /:id/build-status error:', error);
+    logger.error('[ToolsRoute] GET /:id/build-status error:', error);
     res.status(500).json({ error: 'Erreur lors de la lecture du statut de build' });
   }
 });
@@ -313,7 +314,7 @@ router.post('/:id/build', requireAuth, async (req, res) => {
     const result = await buildService.prepareToolVersion(idResult.data, user.id, queryResult.data.versionTag);
     res.json(result);
   } catch (error) {
-    console.error('[ToolsRoute] POST /:id/build error:', error);
+    logger.error('[ToolsRoute] POST /:id/build error:', error);
 
     if (error instanceof BuildPreparationError) {
       return res.status(409).json({ error: error.message });
@@ -340,7 +341,7 @@ router.post('/:id/provision', requireAuth, async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    console.error('[ToolsRoute] POST /:id/provision error:', error);
+    logger.error('[ToolsRoute] POST /:id/provision error:', error);
 
     if (error instanceof BuildPreparationError) {
       return res.status(409).json({ error: error.message });

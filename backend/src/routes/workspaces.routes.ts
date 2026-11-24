@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
@@ -48,7 +49,7 @@ router.get('/:workflowId', requireAuth, async (req, res) => {
       runtimeCompatibility,
     });
   } catch (error) {
-    console.error('[WorkspacesRoute] GET /:workflowId error:', error);
+    logger.error('[WorkspacesRoute] GET /:workflowId error:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération du workspace' });
   }
 });

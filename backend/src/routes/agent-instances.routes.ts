@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
@@ -168,7 +169,7 @@ router.get('/', requireAuth, async (req: Request<WorkflowParams>, res: Response)
     // ⭐ FIX: Transform all instances for frontend consumption
     res.json(instances.map(transformAgentInstanceForFrontend));
   } catch (error) {
-    console.error('[AgentInstances] GET error:', error);
+    logger.error('[AgentInstances] GET error:', error);
     res.status(500).json({ error: 'Erreur récupération instances' });
   }
 });
@@ -214,7 +215,7 @@ router.get(
         chatMessages: chatMessagesByInstance[transformedInstance.id ?? ''] || [],
       });
     } catch (error) {
-      console.error('[AgentInstances] GET/:id error:', error);
+      logger.error('[AgentInstances] GET/:id error:', error);
       res.status(500).json({ error: 'Erreur récupération instance' });
     }
   },
@@ -274,7 +275,7 @@ router.post(
 
       res.status(201).json(transformAgentInstanceForFrontend(instance));
     } catch (error) {
-      console.error('[AgentInstances] POST error:', error);
+      logger.error('[AgentInstances] POST error:', error);
       res.status(500).json({ error: 'Erreur création instance' });
     }
   },
@@ -411,7 +412,7 @@ router.post(
       );
 
       // Log des valeurs finales pour debugging
-      console.debug('[AgentInstances] 📋 Instance data prepared (PHASE 2):', {
+      logger.debug('[AgentInstances] 📋 Instance data prepared (PHASE 2):', {
         name: finalName,
         role: finalRole,
         llmProvider: finalLlmProvider,
@@ -497,7 +498,7 @@ router.post(
         });
       } catch (nodeError) {
         await AgentInstance.findByIdAndDelete(instance._id).catch((rollbackError) => {
-          console.error('[AgentInstances] ❌ Failed to rollback orphaned instance after node creation error:', rollbackError);
+          logger.error('[AgentInstances] ❌ Failed to rollback orphaned instance after node creation error:', rollbackError);
         });
 
         throw nodeError;
@@ -507,7 +508,7 @@ router.post(
       workflow.isDirty = true;
       await workflow.save();
 
-      console.debug('[AgentInstances] ✅ Instance créée depuis prototype (PHASE 2):', {
+      logger.debug('[AgentInstances] ✅ Instance créée depuis prototype (PHASE 2):', {
         instanceId: instance._id,
         executionId,
         prototypeId: prototype.id,
@@ -539,7 +540,7 @@ router.post(
         stack?: string;
         errors?: Record<string, { message: string; value?: unknown }>;
       };
-      console.error('[AgentInstances] ❌ POST/from-prototype error:', {
+      logger.error('[AgentInstances] ❌ POST/from-prototype error:', {
         message: err.message,
         name: err.name,
         // Si c'est une ValidationError Mongoose, afficher les champs en erreur
@@ -605,7 +606,7 @@ router.put(
       const user = req.user as IUser;
       const instanceId = req.params.id;
 
-      console.debug('[AgentInstances] 🔧 PUT /:id called:', {
+      logger.debug('[AgentInstances] 🔧 PUT /:id called:', {
         instanceId,
         userId: user.id,
         bodyKeys: Object.keys(req.body),
@@ -617,7 +618,7 @@ router.put(
       const instance = await AgentInstance.findOne({ _id: instanceId, userId: user.id });
 
       if (!instance) {
-        console.debug('[AgentInstances] ❌ Instance not found or user mismatch:', {
+        logger.debug('[AgentInstances] ❌ Instance not found or user mismatch:', {
           instanceId,
           instanceFound: !!instance,
         });
@@ -755,7 +756,7 @@ router.put(
         );
 
         if (!syncedNode) {
-          console.warn('[AgentInstances] ⚠️ No WorkflowNodeV2 found while syncing instance position:', {
+          logger.warn('[AgentInstances] ⚠️ No WorkflowNodeV2 found while syncing instance position:', {
             instanceId,
             workflowId: instance.workflowId?.toString?.() || instance.workflowId,
           });
@@ -767,7 +768,7 @@ router.put(
       const historyConfigObj: Record<string, unknown> = (instance.historyConfig as Record<string, unknown> | undefined) || {};
       const persistenceConfigObj = instance.persistenceConfig || {};
       const persistenceSummary = summarizePersistenceConfigBoundary(persistenceConfigObj);
-      console.debug('[AgentInstances] ✅ PUT endpoint saved:', {
+      logger.debug('[AgentInstances] ✅ PUT endpoint saved:', {
         instanceId: instance._id?.toString(),
         name: instance.name,
         role: instance.role,
@@ -790,7 +791,7 @@ router.put(
 
       res.json(transformAgentInstanceForFrontend(instance));
     } catch (error) {
-      console.error('[AgentInstances] PUT error:', error);
+      logger.error('[AgentInstances] PUT error:', error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({
           error: 'Validation échouée',
@@ -1125,7 +1126,7 @@ router.post('/:id/content', requireAuth, validateRequest(contentSchema), async (
     });
 
     if (!result.saved) {
-      console.debug(`[AgentInstances] Legacy content skipped for ${instanceId}: ${result.reason || 'unknown reason'}`);
+      logger.debug(`[AgentInstances] Legacy content skipped for ${instanceId}: ${result.reason || 'unknown reason'}`);
       return res.status(200).json({
         success: true,
         skipped: true,
@@ -1136,7 +1137,7 @@ router.post('/:id/content', requireAuth, validateRequest(contentSchema), async (
       });
     }
 
-    console.debug(`[AgentInstances] ✅ Legacy content stored in journals for ${instanceId}: ${content.type}`);
+    logger.debug(`[AgentInstances] ✅ Legacy content stored in journals for ${instanceId}: ${content.type}`);
     res.status(201).json({
       success: true,
       contentCount,
@@ -1144,7 +1145,7 @@ router.post('/:id/content', requireAuth, validateRequest(contentSchema), async (
       ...(result.entryId ? { journalId: result.entryId } : {}),
     });
   } catch (error) {
-    console.error('[AgentInstances] POST/:id/content error:', error);
+    logger.error('[AgentInstances] POST/:id/content error:', error);
     res.status(500).json({ error: 'Erreur ajout contenu' });
   }
 });
@@ -1233,10 +1234,10 @@ router.post(
         });
       }
 
-      console.debug(`[Journal] Created ${type} entry for instance ${agentInstanceId}`);
+      logger.debug(`[Journal] Created ${type} entry for instance ${agentInstanceId}`);
       res.json({ success: true, journalId: result.entryId });
     } catch (error) {
-      console.error('[Journal] POST error:', error);
+      logger.error('[Journal] POST error:', error);
       res.status(500).json({ error: 'Failed to create journal entry' });
     }
   },
@@ -1308,10 +1309,10 @@ router.post(
         });
       }
 
-      console.debug(`[Journal] Imported media draft for instance ${agentInstanceId}`);
+      logger.debug(`[Journal] Imported media draft for instance ${agentInstanceId}`);
       return res.status(200).json({ success: true, journalId: result.entryId });
     } catch (error) {
-      console.error('[Journal] Imported media draft POST error:', error);
+      logger.error('[Journal] Imported media draft POST error:', error);
       return res.status(500).json({ error: 'Failed to import media draft' });
     }
   },
@@ -1393,7 +1394,7 @@ router.delete(
         },
       });
     } catch (error) {
-      console.error('[AgentInstances] DELETE error:', error);
+      logger.error('[AgentInstances] DELETE error:', error);
 
       if (error instanceof Error && error.message === 'INSTANCE_NOT_FOUND') {
         return res.status(404).json({ error: 'Instance introuvable' });
@@ -1428,7 +1429,7 @@ router.get(
         .sort({ timestamp: 1 }) // ⭐ FIX: Use timestamp field (not createdAt), order: oldest first
         .lean();
 
-      console.debug(`[Journals] Loaded ${journals.length} entries for instance ${instanceId}`);
+      logger.debug(`[Journals] Loaded ${journals.length} entries for instance ${instanceId}`);
 
       res.json({
         success: true,
@@ -1437,7 +1438,7 @@ router.get(
         count: journals?.length || 0,
       });
     } catch (error) {
-      console.error('[Journals] GET error:', error);
+      logger.error('[Journals] GET error:', error);
       res.status(500).json({ error: 'Failed to load journals' });
     }
   },

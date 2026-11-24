@@ -225,11 +225,11 @@ async function startServer() {
       await initializeDatabase();
       databaseInitialized = true;
     } catch (dbError) {
-      console.warn('⚠️  MongoDB non disponible - Mode Guest uniquement');
-      console.warn('   Pour activer le mode Authenticated, démarrer MongoDB :');
-      console.warn('   - Windows: Installer MongoDB Community Server');
-      console.warn('   - Docker: docker run -d -p 27017:27017 --name mongodb mongo:6');
-      console.warn('');
+      logger.warn('⚠️  MongoDB non disponible - Mode Guest uniquement');
+      logger.warn('   Pour activer le mode Authenticated, démarrer MongoDB :');
+      logger.warn('   - Windows: Installer MongoDB Community Server');
+      logger.warn('   - Docker: docker run -d -p 27017:27017 --name mongodb mongo:6');
+      logger.warn('');
     }
 
     if (!isTestEnvironment && databaseInitialized) {
@@ -262,7 +262,7 @@ async function startServer() {
           runVisibility,
         ).reconcile();
         if (recovery.unresolved > 0 || recovery.lockCleanupPending > 0 || recovery.autoRecovered > 0) {
-          console.warn('[Backend startup] Some expired runs remain quarantined after Docker reconciliation', recovery);
+          logger.warn('[Backend startup] Some expired runs remain quarantined after Docker reconciliation', recovery);
         }
       }
       runWorker = createProductionRunWorker();
@@ -276,15 +276,15 @@ async function startServer() {
         serverStarted = true;
 
         if (!isTestEnvironment) {
-          console.debug('\n✨ ===== A-IR-DD2 BACKEND DÉMARRÉ ===== ✨');
-          console.debug(`🚀 Serveur HTTP: http://localhost:${PORT}`);
-          console.debug('📡 WebSocket prêt pour les connexions');
-          console.debug(`🔐 Mode: ${process.env.NODE_ENV || 'development'}`);
-          console.debug('✅ Jalon 1: Infrastructure prête (MongoDB + Encryption)');
-          console.debug('✅ Jalon 2: Authentification JWT (Passport + Zod)');
-          console.debug('🔓 Mode Guest: OPÉRATIONNEL (Python tools, WebSocket)');
-          console.debug('🔐 Mode Auth: DISPONIBLE (/api/auth/*)');
-          console.debug('═══════════════════════════════════════════\n');
+          logger.debug('\n✨ ===== A-IR-DD2 BACKEND DÉMARRÉ ===== ✨');
+          logger.debug(`🚀 Serveur HTTP: http://localhost:${PORT}`);
+          logger.debug('📡 WebSocket prêt pour les connexions');
+          logger.debug(`🔐 Mode: ${process.env.NODE_ENV || 'development'}`);
+          logger.debug('✅ Jalon 1: Infrastructure prête (MongoDB + Encryption)');
+          logger.debug('✅ Jalon 2: Authentification JWT (Passport + Zod)');
+          logger.debug('🔓 Mode Guest: OPÉRATIONNEL (Python tools, WebSocket)');
+          logger.debug('🔐 Mode Auth: DISPONIBLE (/api/auth/*)');
+          logger.debug('═══════════════════════════════════════════\n');
         }
 
         resolve();
@@ -294,12 +294,12 @@ async function startServer() {
     return httpServer;
   } catch (error) {
     if ((error as NodeJS.ErrnoException | undefined)?.code === 'EADDRINUSE') {
-      console.error(`❌ Port ${PORT} is already in use.`);
-      console.error('   Another backend process is likely still running.');
-      console.error('   Windows check: Get-NetTCPConnection -LocalPort 3001 -State Listen');
-      console.error('   Then stop it with: Stop-Process -Id <PID>');
+      logger.error(`❌ Port ${PORT} is already in use.`);
+      logger.error('   Another backend process is likely still running.');
+      logger.error('   Windows check: Get-NetTCPConnection -LocalPort 3001 -State Listen');
+      logger.error('   Then stop it with: Stop-Process -Id <PID>');
     }
-    console.error('💀 Erreur critique au démarrage:', error);
+    logger.error('💀 Erreur critique au démarrage:', error);
     process.exit(1);
   }
 }
@@ -377,14 +377,14 @@ async function shutdown(signal: string) {
   isShuttingDown = true;
 
   if (!isTestEnvironment) {
-    console.debug(`\n🛑 Received ${signal}. Shutting down backend gracefully...`);
+    logger.debug(`\n🛑 Received ${signal}. Shutting down backend gracefully...`);
   }
 
   try {
     await stopServer();
     process.exit(0);
   } catch (error) {
-    console.error('💥 Graceful shutdown failed:', error);
+    logger.error('💥 Graceful shutdown failed:', error);
     process.exit(1);
   }
 }

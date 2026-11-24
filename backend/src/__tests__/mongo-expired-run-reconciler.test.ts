@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { MongoExpiredRunReconciler, type ExpiredRunReconciliationStore } from '../services/runtime/MongoExpiredRunReconciler';
 
 import type { DockerAttemptFencingProofPort } from '../services/runtime/DockerGatewayFencedAttemptProof';
@@ -82,7 +83,7 @@ describe('MongoExpiredRunReconciler', () => {
             proveFencedAttempt: jest.fn().mockRejectedValue(new Error('gateway unreachable')),
         };
         const locks = createLockRecovery();
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 
         try {
             const summary = await new MongoExpiredRunReconciler(fencing, store, locks).reconcile();
@@ -115,7 +116,7 @@ describe('MongoExpiredRunReconciler', () => {
         const store = createStore();
         const fencing = createFencing({ operationId: '123e4567-e89b-42d3-a456-426614174001', quiescent: true, containerState: 'absent' });
         const locks = createLockRecovery('owned_by_another_run');
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 
         try {
             const summary = await new MongoExpiredRunReconciler(fencing, store, locks).reconcile();

@@ -13,6 +13,7 @@
  * @see backend/src/services/mediaStorage.service.ts
  */
 
+import { logger } from './logger';
 import {
   S3Client,
   PutObjectCommand,
@@ -47,7 +48,7 @@ import { asErrorShape } from '../utils/errorGuards';
 
 const DEBUG = process.env.DEBUG_CLOUD_STORAGE === 'true' || process.env.NODE_ENV === 'development';
 const debugLog = (message: string) => {
-  if (DEBUG) console.debug(`[S3Storage] ${message}`);
+  if (DEBUG) logger.debug(`[S3Storage] ${message}`);
 };
 
 // Durées par défaut
@@ -160,7 +161,7 @@ export class S3StorageStrategy implements ICloudStorageStrategy {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[S3Storage] Upload failed for ${fullKey}:`, errorMessage);
+      logger.error(`[S3Storage] Upload failed for ${fullKey}:`, errorMessage);
 
       return {
         success: false,
@@ -232,7 +233,7 @@ export class S3StorageStrategy implements ICloudStorageStrategy {
 
       return true;
     } catch (error) {
-      console.error(`[S3Storage] Delete failed for ${fullKey}:`, error);
+      logger.error(`[S3Storage] Delete failed for ${fullKey}:`, error);
       return false;
     }
   }
@@ -390,7 +391,7 @@ export class S3StorageStrategy implements ICloudStorageStrategy {
         result.message = 'Secret Access Key invalide';
       }
 
-      console.error('[S3Storage] Connection test failed:', errorMessage);
+      logger.error('[S3Storage] Connection test failed:', errorMessage);
     }
 
     return result;
@@ -426,7 +427,7 @@ export class S3StorageStrategy implements ICloudStorageStrategy {
         truncated: response.IsTruncated ?? false,
       };
     } catch (error) {
-      console.error('[S3Storage] List failed:', error);
+      logger.error('[S3Storage] List failed:', error);
       return { keys: [], truncated: false };
     }
   }

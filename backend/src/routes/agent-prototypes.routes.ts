@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
@@ -126,7 +127,7 @@ router.get('/', requireAuth, async (req, res) => {
     const prototypes = await AgentPrototype.find(query).sort({ createdAt: -1 });
     res.json(prototypes.map(buildPrototypeResponse));
   } catch (error) {
-    console.error('[AgentPrototypes] GET error:', error);
+    logger.error('[AgentPrototypes] GET error:', error);
     res.status(500).json({ error: 'Erreur récupération prototypes' });
   }
 });
@@ -149,7 +150,7 @@ router.get(
 
       res.json(buildPrototypeResponse(prototype));
     } catch (error) {
-      console.error('[AgentPrototypes] GET/:id error:', error);
+      logger.error('[AgentPrototypes] GET/:id error:', error);
       res.status(500).json({ error: 'Erreur récupération prototype' });
     }
   },
@@ -235,7 +236,7 @@ router.get(
         nodeIds: nodes.map((node) => node._id.toString()),
       });
     } catch (error) {
-      console.error('[AgentPrototypes] GET/:id/impact error:', error);
+      logger.error('[AgentPrototypes] GET/:id/impact error:', error);
       res.status(500).json({ error: 'Erreur calcul impact prototype' });
     }
   },
@@ -290,7 +291,7 @@ router.post(
       // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
       res.status(201).json(buildPrototypeResponse(prototype));
     } catch (error) {
-      console.error('[AgentPrototypes] POST error:', error);
+      logger.error('[AgentPrototypes] POST error:', error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({
           error: 'Validation échouée',
@@ -388,7 +389,7 @@ router.put(
       // C3 FIX: Retourner functionIds dans la réponse pour le mapping frontend
       res.json(buildPrototypeResponse(prototype));
     } catch (error) {
-      console.error('[AgentPrototypes] PUT error:', error);
+      logger.error('[AgentPrototypes] PUT error:', error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({
           error: 'Validation échouée',
@@ -430,7 +431,7 @@ router.delete(
 
       res.json({ message: 'Prototype supprimé' });
     } catch (error) {
-      console.error('[AgentPrototypes] DELETE error:', error);
+      logger.error('[AgentPrototypes] DELETE error:', error);
       res.status(500).json({ error: 'Erreur suppression prototype' });
     }
   },

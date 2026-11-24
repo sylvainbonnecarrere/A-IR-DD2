@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import mongoose from 'mongoose';
 import { UserToolRun } from '../models/UserToolRun.model';
 import { MongoRunLeaseService } from '../services/runtime/MongoRunLeaseService';
@@ -225,7 +226,7 @@ describe('leased execution orchestration', () => {
 
     it('leaves preparation failures unclassified and does not launch or permit reclaim', async () => {
         const { orchestrator, request, runner, executionId } = await fixture();
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         try {
             await expect(orchestrator.execute(request, async () => {
                 throw new Error('private preparation data');
@@ -247,8 +248,8 @@ describe('leased execution orchestration', () => {
         const workflowId = new mongoose.Types.ObjectId().toHexString();
         request.fn.workflowId = workflowId;
         const locks = new MongoWorkspaceLockService();
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-        const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+        const warning = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
         try {
             const dispatch = new MonitoredRunDispatch(leases, {
                 reconstructQueuedRun: async () => ({
@@ -301,7 +302,7 @@ describe('leased execution orchestration', () => {
 
     it('keeps an unexpected runner failure unclassified and does not log the lease token', async () => {
         const { orchestrator, request, runner, executionId, lease } = await fixture();
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         runner.mockRejectedValue(new Error('runner failed'));
         try {
             await expect(orchestrator.execute(request)).rejects.toThrow('runner failed');
@@ -315,7 +316,7 @@ describe('leased execution orchestration', () => {
 
     it('does not terminalize an unexpected runner failure after lease expiration', async () => {
         const { orchestrator, request, runner, executionId } = await fixture();
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         runner.mockImplementation(async () => {
             await UserToolRun.updateOne({ executionId }, { $set: { 'lease.expiresAt': new Date(0) } });
             throw new Error('runner failed');
@@ -330,7 +331,7 @@ describe('leased execution orchestration', () => {
 
     it('fences an error after runner completion when the lease expires', async () => {
         const { orchestrator, request, executionId } = await fixture();
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         Reflect.set(orchestrator, 'collectOutputArtifacts', jest.fn()
             .mockImplementationOnce(async () => {
                 await UserToolRun.updateOne({ executionId }, { $set: { 'lease.expiresAt': new Date(0) } });

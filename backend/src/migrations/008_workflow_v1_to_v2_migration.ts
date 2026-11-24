@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import mongoose from 'mongoose';
 
 const DEFAULT_MONGODB_URI = 'mongodb://localhost:27017/aitest';
@@ -280,7 +281,7 @@ async function runUp(): Promise<void> {
     }
 
     const summary = await migrateLegacyWorkflowGraphsToV2(db);
-    console.debug(
+    logger.debug(
       `[Migration 008] workflow V1 -> V2 migration: scanned=${summary.workflowsScanned} migrated=${summary.workflowsMigrated} nodesCreated=${summary.nodesCreated} edgesCreated=${summary.edgesCreated} duplicatesPrevented=${summary.duplicatesPrevented}`,
     );
   } finally {
@@ -293,12 +294,12 @@ const isDirectCliInvocation = /(^|[\\/])008_workflow_v1_to_v2_migration\.(ts|js)
 
 if (isDirectCliInvocation) {
   if (direction !== 'up') {
-    console.error(`[Migration 008] Direction non supportee: ${direction}. Seule la migration 'up' est autorisee.`);
+    logger.error(`[Migration 008] Direction non supportee: ${direction}. Seule la migration 'up' est autorisee.`);
     process.exit(1);
   }
 
   runUp().catch((err) => {
-    console.error('[Migration 008] ERREUR:', err instanceof Error ? err.message : String(err));
+    logger.error('[Migration 008] ERREUR:', err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
 }

@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { RunLeaseMonitor, type RunLeaseObserver } from '../services/runtime/RunLeaseMonitor';
 import type { RunLease, RunLeaseObservation } from '../services/runtime/MongoRunLeaseService';
 
@@ -54,7 +55,7 @@ describe('RunLeaseMonitor', () => {
     });
 
     it('aborts and logs a database failure without logging its contents', async () => {
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         const observer: RunLeaseObserver = {
             renewAndObserve: jest.fn().mockRejectedValue(new Error('private database details')),
         };
@@ -71,7 +72,7 @@ describe('RunLeaseMonitor', () => {
         let complete!: (value: RunLeaseObservation) => void;
         const pending = new Promise<RunLeaseObservation>((resolve) => { complete = resolve; });
         const observer: RunLeaseObserver = { renewAndObserve: jest.fn().mockReturnValue(pending) };
-        jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         const monitor = new RunLeaseMonitor(observer, lease, 10, 100, 1000);
         const starting = monitor.start();
         await jest.advanceTimersByTimeAsync(100);

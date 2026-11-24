@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { AgentAutoRecoveryService, type QuarantinedRunEntry } from '../services/runtime/agentAutoRecovery.service';
 import type { FenceAndRetryService } from '../services/fenceAndRetry.service';
 import { AgentInstance } from '../models/AgentInstance.model';
@@ -128,7 +129,7 @@ describe('AgentAutoRecoveryService (US-J7-08)', () => {
         fenceAndRetry.fenceAndRetry.mockRejectedValue(new Error('FENCING_TIMEOUT_ESCALATED'));
         const service = new AgentAutoRecoveryService(fenceAndRetry as unknown as FenceAndRetryService, ENABLED_ENV);
         mockInstanceFindById.mockReturnValue(selectLean({ recoveryPolicy: { autoFenceAndRetry: true, maxAttempts: 5 } }));
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 
         try {
             const outcome = await service.tryRecoverQuarantinedRun(createRun());
@@ -147,7 +148,7 @@ describe('AgentAutoRecoveryService (US-J7-08)', () => {
         mockInstanceFindById.mockImplementation(() => {
             throw new Error('mongo down');
         });
-        const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 
         try {
             const outcome = await service.tryRecoverQuarantinedRun(createRun());

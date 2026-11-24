@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import mongoose from 'mongoose';
 
 const DEFAULT_MONGODB_URI = 'mongodb://localhost:27017/aitest';
@@ -109,7 +110,7 @@ async function runUp(): Promise<void> {
     }
 
     const summary = await ensureSecurityOwnershipIndexes(db);
-    console.debug(
+    logger.debug(
       `[Migration 007] security ownership indexes: collections=${summary.collectionsFound} created=${summary.indexesCreated} skipped=${summary.indexesSkipped}`,
     );
   } finally {
@@ -122,12 +123,12 @@ const isDirectCliInvocation = /(^|[\\/])007_security_ownership_indexes\.(ts|js)$
 
 if (isDirectCliInvocation) {
   if (direction !== 'up') {
-    console.error(`[Migration 007] Direction non supportee: ${direction}. Seule la migration 'up' est autorisee.`);
+    logger.error(`[Migration 007] Direction non supportee: ${direction}. Seule la migration 'up' est autorisee.`);
     process.exit(1);
   }
 
   runUp().catch((err) => {
-    console.error('[Migration 007] ERREUR:', err instanceof Error ? err.message : String(err));
+    logger.error('[Migration 007] ERREUR:', err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
 }

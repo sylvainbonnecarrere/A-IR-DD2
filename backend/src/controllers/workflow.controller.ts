@@ -10,6 +10,7 @@
  * @see Guides/WIP/PERSISTANCES_ROUTES.md
  */
 
+import { logger } from '../services/logger';
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
@@ -194,14 +195,14 @@ export class WorkflowController {
           },
         };
 
-        console.debug(`[WorkflowController] Instance créée: ${result.instance._id} dans workflow ${workflowId}`);
+        logger.debug(`[WorkflowController] Instance créée: ${result.instance._id} dans workflow ${workflowId}`);
         res.status(201).json(response);
       } catch (transactionError) {
         await session.abortTransaction();
         throw transactionError;
       }
     } catch (error) {
-      console.error('[WorkflowController] createInstance error:', error);
+      logger.error('[WorkflowController] createInstance error:', error);
 
       if (error instanceof mongoose.Error.ValidationError) {
         res.status(400).json({
@@ -365,7 +366,7 @@ export class WorkflowController {
           deleteResult.audit.persistenceError = persistedAudit.persistenceError;
         }
 
-        console.debug(`[WorkflowController] Nœud supprimé: ${nodeId}`, {
+        logger.debug(`[WorkflowController] Nœud supprimé: ${nodeId}`, {
           deletedInstanceId: deleteResult.deletedInstanceId,
           journalsDeleted: deleteResult.journalsDeleted,
           mediaDeleted: deleteResult.mediaDeleted,
@@ -402,7 +403,7 @@ export class WorkflowController {
         throw transactionError;
       }
     } catch (error) {
-      console.error('[WorkflowController] deleteNode error:', error);
+      logger.error('[WorkflowController] deleteNode error:', error);
       res.status(500).json({
         error: 'Erreur suppression nœud',
         message: error instanceof Error ? error.message : 'Unknown error',
@@ -470,7 +471,7 @@ export class WorkflowController {
         edges: transformedEdges,
       });
     } catch (error) {
-      console.error('[WorkflowController] getWorkflowGraph error:', error);
+      logger.error('[WorkflowController] getWorkflowGraph error:', error);
       res.status(500).json({
         error: 'Erreur récupération workflow',
         message: error instanceof Error ? error.message : 'Unknown error',
@@ -526,7 +527,7 @@ export class WorkflowController {
 
       res.json({ success: true, node: result });
     } catch (error) {
-      console.error('[WorkflowController] updateNode error:', error);
+      logger.error('[WorkflowController] updateNode error:', error);
       res.status(500).json({
         error: 'Erreur mise à jour nœud',
         message: error instanceof Error ? error.message : 'Unknown error',

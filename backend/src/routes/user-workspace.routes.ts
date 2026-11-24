@@ -25,6 +25,7 @@
  * - D: Dependency inversion (uses models via interfaces)
  */
 
+import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import { Workflow } from '../models/Workflow.model';
 import { AgentPrototype } from '../models/AgentPrototype.model';
@@ -70,7 +71,7 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
 
     // Production-safe logging: only log healing events (important for debugging)
     if (wasCreated && process.env.NODE_ENV === 'development') {
-      console.debug('[Workspace] Self-healing triggered:', healingActions);
+      logger.debug('[Workspace] Self-healing triggered:', healingActions);
     }
 
     const agentPrototypes = await AgentPrototype.find({
@@ -86,7 +87,7 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
           { userId, $or: [{ workflowId: { $exists: false } }, { workflowId: null }] },
           { workflowId: defaultWorkflow._id },
         );
-        console.debug(
+        logger.debug(
           `[Workspace] Self-healing: Assigned ${orphanedPrototypes.length} orphaned prototypes to workflow ${defaultWorkflow._id}`,
         );
       }
@@ -111,7 +112,7 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
       includeLegacyPrototypes: true,
     });
 
-    console.debug('[Workspace] GET - response summary:', {
+    logger.debug('[Workspace] GET - response summary:', {
       hasWorkflow: !!defaultWorkflow,
       hasWorkspace: !!workspaceProvisioning,
       workflowId: defaultWorkflow?.id,
@@ -123,7 +124,7 @@ router.get('/workspace', requireAuth, async (req: Request, res: Response) => {
 
     res.json(response);
   } catch (error) {
-    console.error('[Workspace] GET error:', error);
+    logger.error('[Workspace] GET error:', error);
     res.status(500).json({
       error: 'Failed to fetch workspace',
       message: error instanceof Error ? error.message : 'Unknown error',
@@ -181,7 +182,7 @@ router.get('/workspace/default', requireAuth, async (req: Request, res: Response
       await workflow.save();
       isNewlyCreated = true;
 
-      console.debug('[Workspace] Created default workflow for user:', userId);
+      logger.debug('[Workspace] Created default workflow for user:', userId);
     }
 
     res.json({
@@ -199,7 +200,7 @@ router.get('/workspace/default', requireAuth, async (req: Request, res: Response
       isNewlyCreated,
     });
   } catch (error) {
-    console.error('[Workspace] GET default error:', error);
+    logger.error('[Workspace] GET default error:', error);
     res.status(500).json({
       error: 'Failed to get default workspace',
       message: error instanceof Error ? error.message : 'Unknown error',

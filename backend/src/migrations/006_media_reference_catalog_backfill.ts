@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import mongoose from 'mongoose';
 import {
   buildMediaReferenceCanonicalLocator,
@@ -248,7 +249,7 @@ async function runUp(): Promise<void> {
     }
 
     const summary = await backfillMediaReferenceCatalogFields(db);
-    console.debug(
+    logger.debug(
       `[Migration 006] media_references backfill: found=${summary.collectionFound} scanned=${summary.scanned} updated=${summary.updated} compatible=${summary.alreadyCompatible} blocked=${summary.blocked} indexes=${summary.indexesEnsured}`,
     );
   } finally {
@@ -261,12 +262,12 @@ const isDirectCliInvocation = /(^|[\\/])006_media_reference_catalog_backfill\.(t
 
 if (isDirectCliInvocation) {
   if (direction !== 'up') {
-    console.error(`[Migration 006] Direction non supportee: ${direction}. Seule la migration 'up' est autorisee.`);
+    logger.error(`[Migration 006] Direction non supportee: ${direction}. Seule la migration 'up' est autorisee.`);
     process.exit(1);
   }
 
   runUp().catch((err) => {
-    console.error('[Migration 006] ERREUR:', err instanceof Error ? err.message : String(err));
+    logger.error('[Migration 006] ERREUR:', err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
 }

@@ -3,17 +3,16 @@
  * Applique: Single Responsibility Principle (SOLID)
  */
 
+import { logger } from '../services/logger';
 import { Workflow, IWorkflow } from '../models/Workflow.model';
 import { IWorkflowRepository, WorkflowPatchResult } from './IWorkflowRepository';
 
 export class WorkflowRepository implements IWorkflowRepository {
   async findByUserId(userId: string): Promise<IWorkflow[]> {
     try {
-      return await Workflow.find({ userId })
-        .sort({ updatedAt: -1 })
-        .exec();
+      return await Workflow.find({ userId }).sort({ updatedAt: -1 }).exec();
     } catch (error) {
-      console.error(`[WorkflowRepository] findByUserId error for ${userId}:`, error);
+      logger.error(`[WorkflowRepository] findByUserId error for ${userId}:`, error);
       throw error;
     }
   }
@@ -22,7 +21,7 @@ export class WorkflowRepository implements IWorkflowRepository {
     try {
       return await Workflow.findById(workflowId).exec();
     } catch (error) {
-      console.error(`[WorkflowRepository] findById error for ${workflowId}:`, error);
+      logger.error(`[WorkflowRepository] findById error for ${workflowId}:`, error);
       throw error;
     }
   }
@@ -31,7 +30,7 @@ export class WorkflowRepository implements IWorkflowRepository {
     try {
       return await Workflow.findOne({ _id: workflowId, userId }).exec();
     } catch (error) {
-      console.error(`[WorkflowRepository] findOwnedById error for workflow ${workflowId} and user ${userId}:`, error);
+      logger.error(`[WorkflowRepository] findOwnedById error for workflow ${workflowId} and user ${userId}:`, error);
       throw error;
     }
   }
@@ -40,28 +39,24 @@ export class WorkflowRepository implements IWorkflowRepository {
     try {
       const newWorkflow = new Workflow(workflow);
       const saved = await newWorkflow.save();
-      console.debug(`[WorkflowRepository] Created workflow ${saved._id} for user ${workflow.userId}`);
+      logger.debug(`[WorkflowRepository] Created workflow ${saved._id} for user ${workflow.userId}`);
       return saved;
     } catch (error) {
-      console.error(`[WorkflowRepository] create error:`, error);
+      logger.error(`[WorkflowRepository] create error:`, error);
       throw error;
     }
   }
 
   async update(workflowId: string, updates: Partial<IWorkflow>): Promise<IWorkflow | null> {
     try {
-      const updated = await Workflow.findByIdAndUpdate(
-        workflowId,
-        { $set: { ...updates, updatedAt: new Date() } },
-        { new: true }
-      ).exec();
-      
+      const updated = await Workflow.findByIdAndUpdate(workflowId, { $set: { ...updates, updatedAt: new Date() } }, { new: true }).exec();
+
       if (updated) {
-        console.debug(`[WorkflowRepository] Updated workflow ${workflowId}`);
+        logger.debug(`[WorkflowRepository] Updated workflow ${workflowId}`);
       }
       return updated;
     } catch (error) {
-      console.error(`[WorkflowRepository] update error for ${workflowId}:`, error);
+      logger.error(`[WorkflowRepository] update error for ${workflowId}:`, error);
       throw error;
     }
   }
@@ -70,13 +65,13 @@ export class WorkflowRepository implements IWorkflowRepository {
     try {
       const result = await Workflow.findByIdAndDelete(workflowId).exec();
       const deleted = !!result;
-      
+
       if (deleted) {
-        console.debug(`[WorkflowRepository] Deleted workflow ${workflowId}`);
+        logger.debug(`[WorkflowRepository] Deleted workflow ${workflowId}`);
       }
       return deleted;
     } catch (error) {
-      console.error(`[WorkflowRepository] delete error for ${workflowId}:`, error);
+      logger.error(`[WorkflowRepository] delete error for ${workflowId}:`, error);
       throw error;
     }
   }
@@ -85,46 +80,38 @@ export class WorkflowRepository implements IWorkflowRepository {
     try {
       return await Workflow.countDocuments({ userId }).exec();
     } catch (error) {
-      console.error(`[WorkflowRepository] countByUserId error for ${userId}:`, error);
+      logger.error(`[WorkflowRepository] countByUserId error for ${userId}:`, error);
       throw error;
     }
   }
 
   async findFirstByUserId(userId: string): Promise<IWorkflow | null> {
     try {
-      return await Workflow.findOne({ userId })
-        .sort({ createdAt: 1 })
-        .exec();
+      return await Workflow.findOne({ userId }).sort({ createdAt: 1 }).exec();
     } catch (error) {
-      console.error(`[WorkflowRepository] findFirstByUserId error for ${userId}:`, error);
+      logger.error(`[WorkflowRepository] findFirstByUserId error for ${userId}:`, error);
       throw error;
     }
   }
 
   async deactivateOthers(userId: string, exceptWorkflowId: string): Promise<number> {
     try {
-      const result = await Workflow.updateMany(
-        { userId, _id: { $ne: exceptWorkflowId } },
-        { isActive: false }
-      ).exec();
+      const result = await Workflow.updateMany({ userId, _id: { $ne: exceptWorkflowId } }, { isActive: false }).exec();
 
       return result.modifiedCount ?? 0;
     } catch (error) {
-      console.error(`[WorkflowRepository] deactivateOthers error for user ${userId}:`, error);
+      logger.error(`[WorkflowRepository] deactivateOthers error for user ${userId}:`, error);
       throw error;
     }
   }
 
   async unsetDefaultForOthers(userId: string, exceptWorkflowId: string): Promise<number> {
     try {
-      const result = await Workflow.updateMany(
-        { userId, _id: { $ne: exceptWorkflowId } },
-        { isDefault: false }
-      ).exec();
+      const result = await Workflow.updateMany({ userId, _id: { $ne: exceptWorkflowId } }, { isDefault: false }).exec();
 
       return result.modifiedCount ?? 0;
     } catch (error) {
-      console.error(`[WorkflowRepository] unsetDefaultForOthers error for user ${userId}:`, error);
+      logger.error(`[WorkflowRepository] unsetDefaultForOthers error for user ${userId}:`, error);
       throw error;
     }
   }
@@ -155,7 +142,7 @@ export class WorkflowRepository implements IWorkflowRepository {
         {
           new: true,
           runValidators: true,
-        }
+        },
       ).exec();
 
       if (updated) {
@@ -169,7 +156,7 @@ export class WorkflowRepository implements IWorkflowRepository {
 
       return { kind: 'version_conflict', currentVersion: typeof existing.__v === 'number' ? existing.__v : null };
     } catch (error) {
-      console.error(`[WorkflowRepository] patchOwned error for ${workflowId}:`, error);
+      logger.error(`[WorkflowRepository] patchOwned error for ${workflowId}:`, error);
       throw error;
     }
   }

@@ -10,6 +10,7 @@
  * Les commandes passent desormais par /api/tools et /api/runs.
  */
 
+import { logger } from '../services/logger';
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { UserToolRunStatusSchema } from '../domain/execution/userToolRun.contract';
@@ -98,7 +99,7 @@ router.get('/', requireAuth, async (req, res) => {
       })),
     );
   } catch (error) {
-    console.error('[FunctionsRoute] GET / error:', error);
+    logger.error('[FunctionsRoute] GET / error:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des fonctions' });
   }
 });
@@ -127,7 +128,7 @@ router.get('/agent/:agentId', requireAuth, async (req, res) => {
       })),
     );
   } catch (error) {
-    console.error('[FunctionsRoute] GET /agent/:agentId error:', error);
+    logger.error('[FunctionsRoute] GET /agent/:agentId error:', error);
     res.status(500).json({ error: "Erreur lors de la récupération des fonctions de l'agent" });
   }
 });
@@ -159,7 +160,7 @@ router.get('/:id/runs', requireAuth, async (req, res) => {
 
     res.json(runs);
   } catch (error) {
-    console.error('[FunctionsRoute] GET /:id/runs error:', error);
+    logger.error('[FunctionsRoute] GET /:id/runs error:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des exécutions' });
   }
 });
@@ -195,7 +196,7 @@ router.get('/:id/runs/:executionId/artifacts/content', requireAuth, async (req, 
       return res.status(400).json({ error: message });
     }
 
-    console.error('[FunctionsRoute] GET /:id/runs/:executionId/artifacts/content error:', error);
+    logger.error('[FunctionsRoute] GET /:id/runs/:executionId/artifacts/content error:', error);
     res.status(500).json({ error: message });
   }
 });
@@ -232,7 +233,7 @@ router.get('/:id/runs/:executionId/artifacts/download', requireAuth, async (req,
       return res.status(400).json({ error: message });
     }
 
-    console.error('[FunctionsRoute] GET /:id/runs/:executionId/artifacts/download error:', error);
+    logger.error('[FunctionsRoute] GET /:id/runs/:executionId/artifacts/download error:', error);
     res.status(500).json({ error: message });
   }
 });
@@ -257,7 +258,7 @@ router.get('/:id/build-status', requireAuth, async (req, res) => {
 
     res.json(status);
   } catch (error: unknown) {
-    console.error('[FunctionsRoute] GET /:id/build-status error:', error);
+    logger.error('[FunctionsRoute] GET /:id/build-status error:', error);
     res.status(500).json({ error: 'Erreur lors de la lecture du statut de build' });
   }
 });
@@ -288,7 +289,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       runtimeCompatibility,
     });
   } catch (error) {
-    console.error('[FunctionsRoute] GET /:id error:', error);
+    logger.error('[FunctionsRoute] GET /:id error:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération de la fonction' });
   }
 });

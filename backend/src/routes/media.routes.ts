@@ -17,6 +17,7 @@
  * @see backend/src/services/mediaStorage.service.ts
  */
 
+import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import { createReadStream, existsSync, statSync } from 'fs';
 import { stat, unlink } from 'fs/promises';
@@ -80,7 +81,7 @@ function secureLog(action: string, details: Record<string, unknown>) {
     safeDetails.path = safeDetails.path.replace(/^.*users\//, 'users/');
   }
 
-  console.debug(`[MediaRoutes] ${action}:`, safeDetails);
+  logger.debug(`[MediaRoutes] ${action}:`, safeDetails);
 }
 
 async function resolveLegacyDeleteWarnings(mediaRef: IMediaReference): Promise<DeleteMediaWarning[]> {
@@ -109,7 +110,7 @@ async function resolveLegacyDeleteWarnings(mediaRef: IMediaReference): Promise<D
       },
     ];
   } catch (error) {
-    console.warn('[MediaRoutes] Legacy runtime warning lookup failed:', error);
+    logger.warn('[MediaRoutes] Legacy runtime warning lookup failed:', error);
     return [];
   }
 }
@@ -230,7 +231,7 @@ router.get('/workflows/:workflowId/explorer', requireAuth, async (req: Request, 
       },
     });
   } catch (error) {
-    console.error('[MediaRoutes] Erreur read model workflow media:', error);
+    logger.error('[MediaRoutes] Erreur read model workflow media:', error);
     return res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -267,7 +268,7 @@ router.post('/workflows/:workflowId/explorer/repair-legacy-catalog', requireAuth
       meta: result,
     });
   } catch (error) {
-    console.error('[MediaRoutes] Erreur maintenance catalogue media legacy:', error);
+    logger.error('[MediaRoutes] Erreur maintenance catalogue media legacy:', error);
     return res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -348,7 +349,7 @@ router.get('/:mediaId', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    console.error('[MediaRoutes] Erreur récupération média:', error);
+    logger.error('[MediaRoutes] Erreur récupération média:', error);
     return res.status(500).json({
       error: 'Erreur serveur',
       code: 'INTERNAL_ERROR',
@@ -425,7 +426,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('[MediaRoutes] Erreur listage médias:', error);
+    logger.error('[MediaRoutes] Erreur listage médias:', error);
     return res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -509,7 +510,7 @@ router.delete('/:mediaId', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    console.error('[MediaRoutes] Erreur suppression média:', error);
+    logger.error('[MediaRoutes] Erreur suppression média:', error);
     return res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -548,7 +549,7 @@ router.post('/test-cloud', requireAuth, async (req: Request, res: Response) => {
 
     return res.json(result);
   } catch (error) {
-    console.error('[MediaRoutes] Erreur test cloud:', error);
+    logger.error('[MediaRoutes] Erreur test cloud:', error);
 
     if (error instanceof CloudStorageError) {
       return res.status(400).json({
@@ -580,7 +581,7 @@ async function streamLocalMedia(req: Request, res: Response, mediaRef: IMediaRef
 
   // Vérifier existence
   if (!existsSync(absolutePath)) {
-    console.warn(`[MediaRoutes] Fichier manquant: ${mediaRef.localPath}`);
+    logger.warn(`[MediaRoutes] Fichier manquant: ${mediaRef.localPath}`);
     return res.status(404).json({
       error: 'Fichier non trouvé sur le disque',
       code: 'FILE_MISSING',
@@ -636,7 +637,7 @@ async function streamLocalMedia(req: Request, res: Response, mediaRef: IMediaRef
     // Stream le chunk
     const stream = createReadStream(absolutePath, { start, end });
     stream.on('error', (err) => {
-      console.error('[MediaRoutes] Erreur stream:', err);
+      logger.error('[MediaRoutes] Erreur stream:', err);
       if (!res.headersSent) {
         res.status(500).json({ error: 'Erreur lecture fichier' });
       }
@@ -649,7 +650,7 @@ async function streamLocalMedia(req: Request, res: Response, mediaRef: IMediaRef
 
     const stream = createReadStream(absolutePath);
     stream.on('error', (err) => {
-      console.error('[MediaRoutes] Erreur stream:', err);
+      logger.error('[MediaRoutes] Erreur stream:', err);
       if (!res.headersSent) {
         res.status(500).json({ error: 'Erreur lecture fichier' });
       }
@@ -776,7 +777,7 @@ async function deleteLocalMediaByReference(
     await unlink(resolvedPath.absolutePath);
     return true;
   } catch (error) {
-    console.warn(`[MediaRoutes] Échec suppression ${resolvedPath.normalizedPath}:`, error);
+    logger.warn(`[MediaRoutes] Échec suppression ${resolvedPath.normalizedPath}:`, error);
     return false;
   }
 }

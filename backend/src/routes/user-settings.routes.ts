@@ -22,6 +22,7 @@
  * - userId from token validated
  */
 
+import { logger } from '../services/logger';
 import express, { Router, Request, Response, NextFunction } from 'express';
 import UserSettings, { IUserSettings } from '../models/UserSettings.model';
 import { User, type IUser } from '../models/User.model';
@@ -67,7 +68,7 @@ router.get('/api/user-settings', requireAuth, async (req: Request, res: Response
       updatedAt: settings.updatedAt,
     });
   } catch (error) {
-    console.error('[GET /api/user-settings] Error:', error);
+    logger.error('[GET /api/user-settings] Error:', error);
     res.status(500).json({
       error: 'Failed to fetch user settings',
       message: error instanceof Error ? error.message : 'Unknown error',
@@ -141,7 +142,7 @@ const saveSettingsHandler = async (req: Request, res: Response) => {
       updatedAt: settings.updatedAt,
     });
   } catch (error) {
-    console.error('[SAVE user-settings] Error:', error);
+    logger.error('[SAVE user-settings] Error:', error);
     res.status(500).json({
       error: 'Failed to save user settings',
       message: error instanceof Error ? error.message : 'Unknown error',

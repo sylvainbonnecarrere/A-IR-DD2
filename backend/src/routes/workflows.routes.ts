@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
@@ -67,7 +68,7 @@ function markLegacyWorkflowV1Usage(
   res.setHeader('X-Workflow-Legacy-Count', String(legacyWorkflowV1UsageCounters[routeKey]));
   res.setHeader('X-Workflow-Legacy-Policy', 'v2-canonical-only');
 
-  console.warn('[Workflows][DeprecatedV1Route]', {
+  logger.warn('[Workflows][DeprecatedV1Route]', {
     routeKey,
     workflowId,
     detailId: detailId || null,
@@ -121,20 +122,20 @@ router.get('/', requireAuth, async (req, res) => {
     const user = req.user as IUser;
     const userId = user._id.toString();
 
-    console.debug(`[Workflows GET] User: ${userId}`);
+    logger.debug(`[Workflows GET] User: ${userId}`);
 
     const result = await listUserWorkflowsUseCase.execute({
       userId,
       currentDefaultWorkflowId: user.defaultWorkflowId?.toString() || null,
     });
 
-    console.debug(`[Workflows] Returning ${result.workflows.length} workflows`, {
+    logger.debug(`[Workflows] Returning ${result.workflows.length} workflows`, {
       repairAction: result.repairAction,
       userId,
     });
     res.json({ workflows: result.workflows });
   } catch (error) {
-    console.error('[Workflows] GET error:', error);
+    logger.error('[Workflows] GET error:', error);
     res.status(500).json({ error: 'Erreur récupération workflows' });
   }
 });
@@ -162,7 +163,7 @@ router.get('/:id', requireAuth, requireOwnershipAsync(resolveWorkflowOwnershipBy
       edges,
     });
   } catch (error) {
-    console.error('[Workflows] GET/:id error:', error);
+    logger.error('[Workflows] GET/:id error:', error);
     res.status(500).json({ error: 'Erreur récupération workflow' });
   }
 });
@@ -175,7 +176,7 @@ router.post('/', requireAuth, validateRequest(createWorkflowSchema), async (req,
     const user = req.user as IUser;
     const userId = user._id.toString();
 
-    console.debug(`[Workflows POST] Creating workflow for user: ${userId}`);
+    logger.debug(`[Workflows POST] Creating workflow for user: ${userId}`);
 
     const newWorkflow = await createWorkflowUseCase.execute({
       userId,
@@ -183,11 +184,11 @@ router.post('/', requireAuth, validateRequest(createWorkflowSchema), async (req,
       description: req.body.description,
     });
 
-    console.debug(`[Workflows POST] Created workflow: ${newWorkflow._id}`);
+    logger.debug(`[Workflows POST] Created workflow: ${newWorkflow._id}`);
 
     res.status(201).json(newWorkflow);
   } catch (error) {
-    console.error('[Workflows POST] Error:', error);
+    logger.error('[Workflows POST] Error:', error);
     res.status(500).json({ error: 'Erreur création workflow', details: error instanceof Error ? error.message : String(error) });
   }
 });
@@ -249,7 +250,7 @@ router.put(
         });
       }
 
-      console.error('[Workflows] PUT error:', error);
+      logger.error('[Workflows] PUT error:', error);
       res.status(500).json({ error: 'Erreur mise à jour workflow' });
     }
   },
@@ -288,7 +289,7 @@ router.delete(
         });
       }
 
-      console.error('[Workflows] DELETE error:', error);
+      logger.error('[Workflows] DELETE error:', error);
       res.status(500).json({
         error: 'Erreur suppression workflow',
         details: error instanceof Error ? error.message : String(error),
@@ -328,7 +329,7 @@ router.post(
 
       // ⭐ Production-safe: Only log in development
       if (process.env.NODE_ENV === 'development') {
-        console.debug('[Workflows] SELECT - Workflow activated:', {
+        logger.debug('[Workflows] SELECT - Workflow activated:', {
           workflowId: workflowId,
           agentsCount: workspaceSnapshot.agentInstances.length,
         });
@@ -348,7 +349,7 @@ router.post(
         });
       }
 
-      console.error('[Workflows] SELECT error:', error);
+      logger.error('[Workflows] SELECT error:', error);
       res.status(500).json({
         error: "Erreur lors de l'activation du workflow",
         details: error instanceof Error ? error.message : String(error),
@@ -386,7 +387,7 @@ router.get('/:id/stats', requireAuth, requireOwnershipAsync(resolveWorkflowOwner
       nodeCount: nodeCount,
     });
   } catch (error) {
-    console.error('[Workflows] STATS error:', error);
+    logger.error('[Workflows] STATS error:', error);
     res.status(500).json({
       error: 'Erreur lors de la récupération des stats',
       details: error instanceof Error ? error.message : String(error),
@@ -412,7 +413,7 @@ router.post('/:id/save', requireAuth, requireOwnershipAsync(resolveWorkflowOwner
       lastSavedAt: workflow.lastSavedAt,
     });
   } catch (error) {
-    console.error('[Workflows] POST/:id/save error:', error);
+    logger.error('[Workflows] POST/:id/save error:', error);
     res.status(500).json({ error: 'Erreur sauvegarde workflow' });
   }
 });
@@ -470,7 +471,7 @@ router.patch('/:id/patch', requireAuth, requireOwnershipAsync(resolveWorkflowOwn
       });
     }
 
-    console.debug('[Workflows] PATCH atomic update:', {
+    logger.debug('[Workflows] PATCH atomic update:', {
       id: req.params.id,
       fields: Object.keys($set),
       newVersion: result.workflow.__v,
@@ -483,7 +484,7 @@ router.patch('/:id/patch', requireAuth, requireOwnershipAsync(resolveWorkflowOwn
       lastSavedAt: result.workflow.lastSavedAt,
     });
   } catch (error) {
-    console.error('[Workflows] PATCH/:id/patch error:', error);
+    logger.error('[Workflows] PATCH/:id/patch error:', error);
     res.status(500).json({
       error: 'Erreur mise à jour partielle workflow',
       message: error instanceof Error ? error.message : 'Unknown error',
@@ -509,7 +510,7 @@ router.patch('/:id/nodes/:nodeId/position', requireAuth, requireOwnershipAsync(r
 
     return rejectLegacyWorkflowV1Mutation(res, 'nodePositionPatch', req.params.id, req.params.nodeId);
   } catch (error) {
-    console.error('[Workflows] PATCH node position error:', error);
+    logger.error('[Workflows] PATCH node position error:', error);
     res.status(500).json({ error: 'Erreur mise à jour position' });
   }
 });
@@ -532,7 +533,7 @@ router.post('/:id/edges', requireAuth, requireOwnershipAsync(resolveWorkflowOwne
 
     return rejectLegacyWorkflowV1Mutation(res, 'edgeCreate', req.params.id);
   } catch (error) {
-    console.error('[Workflows] POST edge error:', error);
+    logger.error('[Workflows] POST edge error:', error);
     res.status(500).json({ error: 'Erreur ajout edge' });
   }
 });
@@ -549,7 +550,7 @@ router.delete('/:id/edges/:edgeId', requireAuth, requireOwnershipAsync(resolveWo
 
     return rejectLegacyWorkflowV1Mutation(res, 'edgeDelete', req.params.id, req.params.edgeId);
   } catch (error) {
-    console.error('[Workflows] DELETE edge error:', error);
+    logger.error('[Workflows] DELETE edge error:', error);
     res.status(500).json({ error: 'Erreur suppression edge' });
   }
 });
@@ -569,7 +570,7 @@ router.post('/:id/mark-dirty', requireAuth, requireOwnershipAsync(resolveWorkflo
 
     res.json({ message: 'Workflow marqué comme modifié' });
   } catch (error) {
-    console.error('[Workflows] POST/:id/mark-dirty error:', error);
+    logger.error('[Workflows] POST/:id/mark-dirty error:', error);
     res.status(500).json({ error: 'Erreur marquage workflow' });
   }
 });

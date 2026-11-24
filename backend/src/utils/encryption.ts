@@ -1,8 +1,9 @@
+import { logger } from '../services/logger';
 import crypto from 'crypto';
 
 /**
  * Encryption utility using AES-256-GCM with PBKDF2 key derivation
- * 
+ *
  * Format stocké: "iv:salt:authTag:encryptedData"
  * - iv: Initialization Vector (16 bytes hex)
  * - salt: Salt pour PBKDF2 (32 bytes hex)
@@ -24,14 +25,8 @@ const PBKDF2_ITERATIONS = 100000; // Résistance brute-force
  * @param userSalt Salt additionnel basé sur userId
  */
 function deriveKey(masterKey: string, salt: Buffer, userSalt: string): Buffer {
-    const combinedSalt = Buffer.concat([salt, Buffer.from(userSalt, 'utf-8')]);
-    return crypto.pbkdf2Sync(
-        Buffer.from(masterKey, 'hex'),
-        combinedSalt,
-        PBKDF2_ITERATIONS,
-        KEY_LENGTH,
-        'sha256'
-    );
+  const combinedSalt = Buffer.concat([salt, Buffer.from(userSalt, 'utf-8')]);
+  return crypto.pbkdf2Sync(Buffer.from(masterKey, 'hex'), combinedSalt, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha256');
 }
 
 /**
@@ -41,32 +36,27 @@ function deriveKey(masterKey: string, salt: Buffer, userSalt: string): Buffer {
  * @returns Format "iv:salt:authTag:encryptedData"
  */
 export function encrypt(plaintext: string, userSalt: string): string {
-    if (!process.env.ENCRYPTION_KEY) {
-        throw new Error('ENCRYPTION_KEY non configurée dans .env');
-    }
+  if (!process.env.ENCRYPTION_KEY) {
+    throw new Error('ENCRYPTION_KEY non configurée dans .env');
+  }
 
-    // Générer IV et salt uniques
-    const iv = crypto.randomBytes(IV_LENGTH);
-    const salt = crypto.randomBytes(SALT_LENGTH);
+  // Générer IV et salt uniques
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const salt = crypto.randomBytes(SALT_LENGTH);
 
-    // Dériver clé
-    const key = deriveKey(process.env.ENCRYPTION_KEY, salt, userSalt);
+  // Dériver clé
+  const key = deriveKey(process.env.ENCRYPTION_KEY, salt, userSalt);
 
-    // Chiffrer
-    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
-    let encrypted = cipher.update(plaintext, 'utf-8', 'hex');
-    encrypted += cipher.final('hex');
+  // Chiffrer
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  let encrypted = cipher.update(plaintext, 'utf-8', 'hex');
+  encrypted += cipher.final('hex');
 
-    // Récupérer auth tag
-    const authTag = cipher.getAuthTag();
+  // Récupérer auth tag
+  const authTag = cipher.getAuthTag();
 
-    // Format final
-    return [
-        iv.toString('hex'),
-        salt.toString('hex'),
-        authTag.toString('hex'),
-        encrypted
-    ].join(':');
+  // Format final
+  return [iv.toString('hex'), salt.toString('hex'), authTag.toString('hex'), encrypted].join(':');
 }
 
 /**
@@ -76,45 +66,45 @@ export function encrypt(plaintext: string, userSalt: string): string {
  * @returns Texte en clair (API key)
  */
 export function decrypt(ciphertext: string, userSalt: string): string {
-    if (!process.env.ENCRYPTION_KEY) {
-        throw new Error('ENCRYPTION_KEY non configurée dans .env');
-    }
+  if (!process.env.ENCRYPTION_KEY) {
+    throw new Error('ENCRYPTION_KEY non configurée dans .env');
+  }
 
-    // ⭐ FIX: Vérifier si c'est du plaintext non chiffré (migration legacy)
-    // Si le format n'est pas "iv:salt:authTag:data", retourner directement
-    if (!isEncrypted(ciphertext)) {
-        console.warn('[decrypt] ⚠️ Legacy plaintext API key detected (not encrypted), returning as-is');
-        return ciphertext; // ← Retourner plaintext pour backward compatibility
-    }
+  // ⭐ FIX: Vérifier si c'est du plaintext non chiffré (migration legacy)
+  // Si le format n'est pas "iv:salt:authTag:data", retourner directement
+  if (!isEncrypted(ciphertext)) {
+    logger.warn('[decrypt] ⚠️ Legacy plaintext API key detected (not encrypted), returning as-is');
+    return ciphertext; // ← Retourner plaintext pour backward compatibility
+  }
 
-    // Parser format
-    const parts = ciphertext.split(':');
-    if (parts.length !== 4) {
-        throw new Error('Format de ciphertext invalide');
-    }
+  // Parser format
+  const parts = ciphertext.split(':');
+  if (parts.length !== 4) {
+    throw new Error('Format de ciphertext invalide');
+  }
 
-    const [ivHex, saltHex, authTagHex, encryptedData] = parts;
-    const iv = Buffer.from(ivHex, 'hex');
-    const salt = Buffer.from(saltHex, 'hex');
-    const authTag = Buffer.from(authTagHex, 'hex');
+  const [ivHex, saltHex, authTagHex, encryptedData] = parts;
+  const iv = Buffer.from(ivHex, 'hex');
+  const salt = Buffer.from(saltHex, 'hex');
+  const authTag = Buffer.from(authTagHex, 'hex');
 
-    // Dériver clé (même processus qu'encryption)
-    const key = deriveKey(process.env.ENCRYPTION_KEY, salt, userSalt);
+  // Dériver clé (même processus qu'encryption)
+  const key = deriveKey(process.env.ENCRYPTION_KEY, salt, userSalt);
 
-    // Déchiffrer
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(authTag);
+  // Déchiffrer
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(authTag);
 
-    let decrypted = decipher.update(encryptedData, 'hex', 'utf-8');
-    decrypted += decipher.final('utf-8');
+  let decrypted = decipher.update(encryptedData, 'hex', 'utf-8');
+  decrypted += decipher.final('utf-8');
 
-    return decrypted;
+  return decrypted;
 }
 
 /**
  * Vérifie si une chaîne est chiffrée (format valide)
  */
 export function isEncrypted(value: string): boolean {
-    const parts = value.split(':');
-    return parts.length === 4 && parts.every(part => /^[0-9a-f]+$/i.test(part));
+  const parts = value.split(':');
+  return parts.length === 4 && parts.every((part) => /^[0-9a-f]+$/i.test(part));
 }

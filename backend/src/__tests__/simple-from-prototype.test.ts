@@ -1,4 +1,5 @@
 // Test simple et isolé pour /from-prototype
+import { logger } from '../services/logger';
 import request from 'supertest';
 import express from 'express';
 import '../middleware/auth.middleware';
@@ -69,8 +70,8 @@ describe('Simple Test - POST /from-prototype', () => {
         position: { x: 10, y: 20 },
       });
 
-    console.debug('Response status:', res.status);
-    console.debug('Response body:', JSON.stringify(res.body));
+    logger.debug('Response status:', res.status);
+    logger.debug('Response body:', JSON.stringify(res.body));
 
     expect(res.status).toBe(201);
     expect(res.body.id).toBeDefined();

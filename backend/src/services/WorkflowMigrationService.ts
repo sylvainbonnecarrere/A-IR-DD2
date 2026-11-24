@@ -3,6 +3,7 @@
  * Applique: SOLID principles - Single Responsibility, Open/Closed, Dependency Inversion
  */
 
+import { logger } from './logger';
 import mongoose from 'mongoose';
 import { IWorkflowMigrationService, IMigrationResult } from './IWorkflowMigrationService';
 import { IUserRepository } from '../repositories/IUserRepository';
@@ -18,12 +19,12 @@ import { User } from '../models/User.model';
 export class WorkflowMigrationService implements IWorkflowMigrationService {
   constructor(
     private userRepository: IUserRepository,
-    private workflowRepository: IWorkflowRepository
+    private workflowRepository: IWorkflowRepository,
   ) {}
 
   /**
    * Assure qu'un utilisateur a un workflow par défaut (IDEMPOTENT)
-   * 
+   *
    * Flow:
    * 1. Récupère l'utilisateur
    * 2. Si defaultWorkflowId existe → retour OK
@@ -42,23 +43,21 @@ export class WorkflowMigrationService implements IWorkflowMigrationService {
           user: null,
           action: 'already_set',
           error: `User ${userId} not found`,
-          message: 'Utilisateur non trouvé'
+          message: 'Utilisateur non trouvé',
         };
       }
 
       // 2. User already has default workflow → idempotent return
       if (user.defaultWorkflowId) {
-        const existingWorkflow = await this.workflowRepository.findById(
-          user.defaultWorkflowId.toString()
-        );
-        
+        const existingWorkflow = await this.workflowRepository.findById(user.defaultWorkflowId.toString());
+
         if (existingWorkflow) {
           return {
             success: true,
             workflow: existingWorkflow,
             user,
             action: 'already_set',
-            message: `Workflow par défaut déjà assigné: ${existingWorkflow.name}`
+            message: `Workflow par défaut déjà assigné: ${existingWorkflow.name}`,
           };
         }
       }
@@ -73,61 +72,56 @@ export class WorkflowMigrationService implements IWorkflowMigrationService {
         // Use first workflow as default
         targetWorkflow = workflows[0];
         action = 'assigned';
-        console.debug(`[WorkflowMigrationService] Migration: User ${userId} had ${workflows.length} workflows, assigning first as default`);
+        logger.debug(`[WorkflowMigrationService] Migration: User ${userId} had ${workflows.length} workflows, assigning first as default`);
       } else {
         // Create default workflow
         targetWorkflow = await this.createDefaultWorkflow(userId);
         action = 'created';
-        console.debug(`[WorkflowMigrationService] Migration: Created default workflow for user ${userId}`);
+        logger.debug(`[WorkflowMigrationService] Migration: Created default workflow for user ${userId}`);
       }
 
       // 4. Update User record
-      const updatedUser = await this.userRepository.setDefaultWorkflow(
-        userId,
-        targetWorkflow._id.toString()
-      );
+      const updatedUser = await this.userRepository.setDefaultWorkflow(userId, targetWorkflow._id.toString());
 
       // 5. Sync workflow count
       const count = await this.workflowRepository.countByUserId(userId);
       await this.userRepository.syncWorkflowCount(userId, count);
 
-      console.debug(`[WorkflowMigrationService] Success: User ${userId} now has default workflow ${targetWorkflow._id}`);
+      logger.debug(`[WorkflowMigrationService] Success: User ${userId} now has default workflow ${targetWorkflow._id}`);
 
       return {
         success: true,
         workflow: targetWorkflow,
         user: updatedUser,
         action,
-        message: action === 'created' 
-          ? `Workflow par défaut créé: ${targetWorkflow.name}`
-          : `Workflow assigné: ${targetWorkflow.name}`
+        message: action === 'created' ? `Workflow par défaut créé: ${targetWorkflow.name}` : `Workflow assigné: ${targetWorkflow.name}`,
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error(`[WorkflowMigrationService] ensureUserHasDefaultWorkflow failed for ${userId}:`, error);
+      logger.error(`[WorkflowMigrationService] ensureUserHasDefaultWorkflow failed for ${userId}:`, error);
       return {
         success: false,
         workflow: null,
         user: null,
         action: 'already_set',
         error: errorMsg,
-        message: `Erreur lors de la migration: ${errorMsg}`
+        message: `Erreur lors de la migration: ${errorMsg}`,
       };
     }
   }
 
-/**
- * Crée un workflow par défaut avec settings standards
- */
-async createDefaultWorkflow(userId: string): Promise<IWorkflow> {
+  /**
+   * Crée un workflow par défaut avec settings standards
+   */
+  async createDefaultWorkflow(userId: string): Promise<IWorkflow> {
     const workflowData = {
       userId: new mongoose.Types.ObjectId(userId),
       name: 'Mon Workflow',
       description: 'Workflow créé automatiquement pour débuter',
       isActive: true,
-      isDefault: true
+      isDefault: true,
     } as Omit<IWorkflow, '_id' | 'createdAt' | 'updatedAt'>;
-    
+
     const defaultWorkflow = await this.workflowRepository.create(workflowData);
 
     return defaultWorkflow;
@@ -144,13 +138,13 @@ async createDefaultWorkflow(userId: string): Promise<IWorkflow> {
     try {
       // Trouver tous les utilisateurs sans defaultWorkflowId
       const usersWithoutDefault = await User.find({
-        $or: [
-          { defaultWorkflowId: null },
-          { defaultWorkflowId: undefined }
-        ]
-      }).select('_id email').limit(batchSize).exec();
+        $or: [{ defaultWorkflowId: null }, { defaultWorkflowId: undefined }],
+      })
+        .select('_id email')
+        .limit(batchSize)
+        .exec();
 
-      console.debug(`[WorkflowMigrationService] Found ${usersWithoutDefault.length} users to migrate`);
+      logger.debug(`[WorkflowMigrationService] Found ${usersWithoutDefault.length} users to migrate`);
 
       for (const user of usersWithoutDefault) {
         try {
@@ -160,21 +154,21 @@ async createDefaultWorkflow(userId: string): Promise<IWorkflow> {
           } else {
             const error = `User ${user.email}: ${result.error || 'Unknown error'}`;
             errors.push(error);
-            console.warn(`[WorkflowMigrationService] Failed to migrate user:`, error);
+            logger.warn(`[WorkflowMigrationService] Failed to migrate user:`, error);
           }
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           const error = `User ${user.email}: ${errorMsg}`;
           errors.push(error);
-          console.error(`[WorkflowMigrationService] Migration error for user ${user.email}:`, err);
+          logger.error(`[WorkflowMigrationService] Migration error for user ${user.email}:`, err);
         }
       }
 
-      console.debug(`[WorkflowMigrationService] Migration complete: ${migratedCount} users migrated, ${errors.length} errors`);
+      logger.debug(`[WorkflowMigrationService] Migration complete: ${migratedCount} users migrated, ${errors.length} errors`);
       return { migratedCount, errors };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error(`[WorkflowMigrationService] Batch migration failed:`, error);
+      logger.error(`[WorkflowMigrationService] Batch migration failed:`, error);
       errors.push(`Batch migration failed: ${errorMsg}`);
       return { migratedCount, errors };
     }

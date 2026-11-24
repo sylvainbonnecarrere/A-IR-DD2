@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { MonitoredRunDispatch, type LeasedRunExecutor, type QueuedRunReconstructor } from '../services/runtime/MonitoredRunDispatch';
 import type { RunLease, RunLeaseObservation } from '../services/runtime/MongoRunLeaseService';
 import type { RunLeaseObserver } from '../services/runtime/RunLeaseMonitor';
@@ -50,7 +51,7 @@ describe('MonitoredRunDispatch', () => {
     });
 
     it('does not reconstruct if the initial renewal times out', async () => {
-        jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        jest.spyOn(logger, 'error').mockImplementation(() => undefined);
         const observer: RunLeaseObserver = { renewAndObserve: jest.fn().mockReturnValue(new Promise(() => undefined)) };
         const reconstructor: QueuedRunReconstructor = { reconstructQueuedRun: jest.fn() };
         const executor: LeasedRunExecutor = { execute: jest.fn() };

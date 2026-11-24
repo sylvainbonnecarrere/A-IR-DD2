@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import type { ZodType } from 'zod';
@@ -116,7 +117,7 @@ export class WebSocketManager {
 
   private setupEventHandlers() {
     this.io.on('connection', (socket) => {
-      console.debug(`[WebSocket] Client connecté: ${socket.id} (user: ${socket.data.userId})`);
+      logger.debug(`[WebSocket] Client connecté: ${socket.id} (user: ${socket.data.userId})`);
 
       // Envoyer confirmation de connexion
       socket.emit('connection:status', 'connected');
@@ -171,7 +172,7 @@ export class WebSocketManager {
 
       // === DÉCONNEXION ===
       socket.on('disconnect', () => {
-        console.debug(`[WebSocket] Client déconnecté: ${socket.id} (user: ${socket.data.userId})`);
+        logger.debug(`[WebSocket] Client déconnecté: ${socket.id} (user: ${socket.data.userId})`);
         this.handleDisconnect(socket);
       });
     });
@@ -241,7 +242,7 @@ export class WebSocketManager {
       userInfo: socket.data.userInfo || { name: socket.data.userId, color: generateUserColor(socket.data.userId) },
     });
 
-    console.debug(`[WebSocket] User ${socket.data.userId} rejoint workspace ${workspaceId}`);
+    logger.debug(`[WebSocket] User ${socket.data.userId} rejoint workspace ${workspaceId}`);
   }
 
   private handleWorkspaceLeave(socket: WorkspaceSocket, workspaceId: string) {
@@ -266,7 +267,7 @@ export class WebSocketManager {
       userId: socket.data.userId,
     });
 
-    console.debug(`[WebSocket] User ${socket.data.userId} quitte workspace ${workspaceId}`);
+    logger.debug(`[WebSocket] User ${socket.data.userId} quitte workspace ${workspaceId}`);
   }
 
   private handleDisconnect(socket: WorkspaceSocket) {
@@ -321,7 +322,7 @@ export class WebSocketManager {
   }
 
   private denySocketAction(socket: WorkspaceSocket, eventName: string, reason: string, metadata: Record<string, unknown> = {}) {
-    console.warn('[WebSocket][Denied]', {
+    logger.warn('[WebSocket][Denied]', {
       socketId: socket.id,
       eventName,
       reason,

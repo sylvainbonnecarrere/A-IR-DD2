@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 import mongoose from 'mongoose';
 import type { LegacyFunctionLike } from '../utils/userToolLegacyMapper';
 import { mapLegacyFunctionToUserToolFields } from '../utils/userToolLegacyMapper';
@@ -142,7 +143,7 @@ async function runUp(): Promise<void> {
 
     const summary = await migrateLegacyUserFunctionsToUserToolsAndDropCollection(db);
 
-    console.debug(
+    logger.debug(
       `[Migration 005] user_functions EOL: found=${summary.collectionFound} scanned=${summary.scanned} created=${summary.created} skippedExistingById=${summary.skippedExistingById} blocked=${summary.blockedByLogicalConflict} dropped=${summary.dropped}`,
     );
 
@@ -161,12 +162,12 @@ const isDirectCliInvocation = /(^|[\\/])005_user_functions_eol\.(ts|js)$/.test(p
 
 if (isDirectCliInvocation) {
   if (direction !== 'up') {
-    console.error(`[Migration 005] Direction non supportee: ${direction}. Seule la migration 'up' est autorisee.`);
+    logger.error(`[Migration 005] Direction non supportee: ${direction}. Seule la migration 'up' est autorisee.`);
     process.exit(1);
   }
 
   runUp().catch((err) => {
-    console.error('[Migration 005] ERREUR:', err instanceof Error ? err.message : String(err));
+    logger.error('[Migration 005] ERREUR:', err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
 }
