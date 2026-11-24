@@ -58,8 +58,8 @@ export const WorkflowService = {
       return this._fetchFromAPI('/api/workflows', {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${options.token}`
-        }
+          Authorization: `Bearer ${options.token}`,
+        },
       });
     } else {
       return WorkflowService._loadFromStorage<Workflow[]>(GUEST_WORKFLOW_KEY, []);
@@ -69,16 +69,13 @@ export const WorkflowService = {
   /**
    * Récupérer un workflow spécifique
    */
-  async getWorkflow(
-    workflowId: string,
-    options: PersistenceOptions
-  ): Promise<Workflow | null> {
+  async getWorkflow(workflowId: string, options: PersistenceOptions): Promise<Workflow | null> {
     if (options.isAuthenticated && options.token) {
       return this._fetchFromAPI(`/api/workflows/${workflowId}`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${options.token}`
-        }
+          Authorization: `Bearer ${options.token}`,
+        },
       });
     } else {
       const workflows = WorkflowService._loadFromStorage<Workflow[]>(GUEST_WORKFLOW_KEY, []);
@@ -89,18 +86,15 @@ export const WorkflowService = {
   /**
    * Créer un nouveau workflow
    */
-  async createWorkflow(
-    workflowData: Partial<Workflow>,
-    options: PersistenceOptions
-  ): Promise<Workflow> {
+  async createWorkflow(workflowData: Partial<Workflow>, options: PersistenceOptions): Promise<Workflow> {
     if (options.isAuthenticated && options.token) {
       return this._fetchFromAPI('/api/workflows', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${options.token}`
+          Authorization: `Bearer ${options.token}`,
         },
-        body: JSON.stringify(workflowData)
+        body: JSON.stringify(workflowData),
       });
     } else {
       // Mode invité: générer un ID local
@@ -111,7 +105,7 @@ export const WorkflowService = {
         nodes: [],
         edges: [],
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
       };
       this._saveToStorage(GUEST_WORKFLOW_KEY, [workflow]);
       return workflow;
@@ -121,19 +115,15 @@ export const WorkflowService = {
   /**
    * Mettre à jour un workflow
    */
-  async updateWorkflow(
-    workflowId: string,
-    updates: Partial<Workflow>,
-    options: PersistenceOptions
-  ): Promise<Workflow> {
+  async updateWorkflow(workflowId: string, updates: Partial<Workflow>, options: PersistenceOptions): Promise<Workflow> {
     if (options.isAuthenticated && options.token) {
       return this._fetchFromAPI(`/api/workflows/${workflowId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${options.token}`
+          Authorization: `Bearer ${options.token}`,
         },
-        body: JSON.stringify(updates)
+        body: JSON.stringify(updates),
       });
     } else {
       // Mode invité: mettre à jour dans localStorage
@@ -147,7 +137,7 @@ export const WorkflowService = {
       const updated = {
         ...workflows[index],
         ...updates,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       };
 
       workflows[index] = updated;
@@ -159,16 +149,13 @@ export const WorkflowService = {
   /**
    * Supprimer un workflow
    */
-  async deleteWorkflow(
-    workflowId: string,
-    options: PersistenceOptions
-  ): Promise<void> {
+  async deleteWorkflow(workflowId: string, options: PersistenceOptions): Promise<void> {
     if (options.isAuthenticated && options.token) {
       await this._fetchFromAPI(`/api/workflows/${workflowId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${options.token}`
-        }
+          Authorization: `Bearer ${options.token}`,
+        },
       });
     } else {
       // Mode invité: supprimer de localStorage
@@ -181,31 +168,20 @@ export const WorkflowService = {
   /**
    * Activer/Désactiver un workflow
    */
-  async setActiveWorkflow(
-    workflowId: string,
-    isActive: boolean,
-    options: PersistenceOptions
-  ): Promise<Workflow> {
-    return this.updateWorkflow(
-      workflowId,
-      { isActive },
-      options
-    );
+  async setActiveWorkflow(workflowId: string, isActive: boolean, options: PersistenceOptions): Promise<Workflow> {
+    return this.updateWorkflow(workflowId, { isActive }, options);
   },
 
   /**
    * Privé: Requête API générique
    */
-  async _fetchFromAPI<T = unknown>(
-    endpoint: string,
-    init: RequestInit
-  ): Promise<T> {
+  async _fetchFromAPI<T = unknown>(endpoint: string, init: RequestInit): Promise<T> {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...init,
       headers: {
         'Content-Type': 'application/json',
-        ...init.headers
-      }
+        ...init.headers,
+      },
     });
 
     if (!response.ok) {
@@ -243,7 +219,7 @@ export const WorkflowService = {
     } catch (err) {
       console.error(`Failed to save to localStorage: ${key}`, err);
     }
-  }
+  },
 };
 
 /**
@@ -251,38 +227,29 @@ export const WorkflowService = {
  * Gestion des nœuds avec persistence transparente
  */
 export const WorkflowNodeService = {
-  async getNodesByWorkflow(
-    workflowId: string,
-    options: PersistenceOptions
-  ): Promise<V2WorkflowNode[]> {
+  async getNodesByWorkflow(workflowId: string, options: PersistenceOptions): Promise<V2WorkflowNode[]> {
     if (options.isAuthenticated && options.token) {
-      return WorkflowService._fetchFromAPI(
-        `/api/workflows/${workflowId}/nodes`,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${options.token}`
-          }
-        }
-      );
+      return WorkflowService._fetchFromAPI(`/api/workflows/${workflowId}/nodes`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${options.token}`,
+        },
+      });
     } else {
       const nodes = WorkflowService._loadFromStorage<StoredWorkflowNode[]>(GUEST_NODES_KEY, []);
       return nodes.filter((n: StoredWorkflowNode) => n.workflowId === workflowId);
     }
   },
 
-  async createNode(
-    node: Partial<V2WorkflowNode>,
-    options: PersistenceOptions
-  ): Promise<V2WorkflowNode> {
+  async createNode(node: Partial<V2WorkflowNode>, options: PersistenceOptions): Promise<V2WorkflowNode> {
     if (options.isAuthenticated && options.token) {
       return WorkflowService._fetchFromAPI('/api/nodes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${options.token}`
+          Authorization: `Bearer ${options.token}`,
         },
-        body: JSON.stringify(node)
+        body: JSON.stringify(node),
       });
     } else {
       const nodes = WorkflowService._loadFromStorage<StoredWorkflowNode[]>(GUEST_NODES_KEY, []) as V2WorkflowNode[];
@@ -295,8 +262,8 @@ export const WorkflowNodeService = {
           robotId: ((node as NodeCreationInput).robotId || node.data?.robotId || 'Archi') as RobotId,
           label: (node as NodeCreationInput).label || node.data?.label || 'New Node',
           isMinimized: node.data?.isMinimized,
-          isMaximized: node.data?.isMaximized
-        }
+          isMaximized: node.data?.isMaximized,
+        },
       };
       nodes.push(newNode);
       WorkflowService._saveToStorage(GUEST_NODES_KEY, nodes);
@@ -304,19 +271,15 @@ export const WorkflowNodeService = {
     }
   },
 
-  async updateNode(
-    nodeId: string,
-    updates: Partial<V2WorkflowNode>,
-    options: PersistenceOptions
-  ): Promise<V2WorkflowNode> {
+  async updateNode(nodeId: string, updates: Partial<V2WorkflowNode>, options: PersistenceOptions): Promise<V2WorkflowNode> {
     if (options.isAuthenticated && options.token) {
       return WorkflowService._fetchFromAPI(`/api/nodes/${nodeId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${options.token}`
+          Authorization: `Bearer ${options.token}`,
         },
-        body: JSON.stringify(updates)
+        body: JSON.stringify(updates),
       });
     } else {
       const nodes = WorkflowService._loadFromStorage<StoredWorkflowNode[]>(GUEST_NODES_KEY, []);
@@ -330,43 +293,34 @@ export const WorkflowNodeService = {
     }
   },
 
-  async deleteNode(
-    nodeId: string,
-    options: PersistenceOptions
-  ): Promise<void> {
+  async deleteNode(nodeId: string, options: PersistenceOptions): Promise<void> {
     if (options.isAuthenticated && options.token) {
       await WorkflowService._fetchFromAPI(`/api/nodes/${nodeId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${options.token}`
-        }
+          Authorization: `Bearer ${options.token}`,
+        },
       });
     } else {
       const nodes = WorkflowService._loadFromStorage<StoredWorkflowNode[]>(GUEST_NODES_KEY, []);
       const filtered = nodes.filter((n: StoredWorkflowNode) => n._id !== nodeId);
       WorkflowService._saveToStorage(GUEST_NODES_KEY, filtered);
     }
-  }
+  },
 };
 
 /**
  * Service: Edges (Connexions entre nœuds)
  */
 export const WorkflowEdgeService = {
-  async getEdgesByWorkflow(
-    workflowId: string,
-    options: PersistenceOptions
-  ): Promise<V2WorkflowEdge[]> {
+  async getEdgesByWorkflow(workflowId: string, options: PersistenceOptions): Promise<V2WorkflowEdge[]> {
     if (options.isAuthenticated && options.token) {
-      const response = await WorkflowService._fetchFromAPI<{ edges?: V2WorkflowEdge[] }>(
-        `/api/workflows/${workflowId}/v2/graph`,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${options.token}`
-          }
-        }
-      );
+      const response = await WorkflowService._fetchFromAPI<{ edges?: V2WorkflowEdge[] }>(`/api/workflows/${workflowId}/v2/graph`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${options.token}`,
+        },
+      });
       return Array.isArray(response?.edges) ? response.edges : [];
     } else {
       const edges = WorkflowService._loadFromStorage<StoredWorkflowEdge[]>(GUEST_EDGES_KEY, []);
@@ -374,14 +328,9 @@ export const WorkflowEdgeService = {
     }
   },
 
-  async createEdge(
-    edge: Partial<V2WorkflowEdge>,
-    options: PersistenceOptions
-  ): Promise<V2WorkflowEdge> {
+  async createEdge(edge: Partial<V2WorkflowEdge>, options: PersistenceOptions): Promise<V2WorkflowEdge> {
     if (options.isAuthenticated && options.token) {
-      throw new Error(
-        'Deprecated workflow V1 edge mutation is forbidden. Use the canonical V2 workflow graph APIs for edge persistence.'
-      );
+      throw new Error('Deprecated workflow V1 edge mutation is forbidden. Use the canonical V2 workflow graph APIs for edge persistence.');
     }
 
     const edges = WorkflowService._loadFromStorage<StoredWorkflowEdge[]>(GUEST_EDGES_KEY, []) as V2WorkflowEdge[];
@@ -390,31 +339,26 @@ export const WorkflowEdgeService = {
       source: edge.source || '',
       target: edge.target || '',
       type: edge.type || 'default',
-      data: edge.data
+      data: edge.data,
     };
     edges.push(newEdge);
     WorkflowService._saveToStorage(GUEST_EDGES_KEY, edges);
     return newEdge;
   },
 
-  async deleteEdge(
-    edgeId: string,
-    options: PersistenceOptions
-  ): Promise<void> {
+  async deleteEdge(edgeId: string, options: PersistenceOptions): Promise<void> {
     if (options.isAuthenticated && options.token) {
-      throw new Error(
-        'Deprecated workflow V1 edge mutation is forbidden. Use the canonical V2 workflow graph APIs for edge persistence.'
-      );
+      throw new Error('Deprecated workflow V1 edge mutation is forbidden. Use the canonical V2 workflow graph APIs for edge persistence.');
     }
 
     const edges = WorkflowService._loadFromStorage<StoredWorkflowEdge[]>(GUEST_EDGES_KEY, []);
     const filtered = edges.filter((e: StoredWorkflowEdge) => e._id !== edgeId);
     WorkflowService._saveToStorage(GUEST_EDGES_KEY, filtered);
-  }
+  },
 };
 
 export default {
   WorkflowService,
   WorkflowNodeService,
-  WorkflowEdgeService
+  WorkflowEdgeService,
 };

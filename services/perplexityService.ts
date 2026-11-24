@@ -1,15 +1,6 @@
 // services/perplexityService.ts
 import { ChatMessage, Tool, ToolCall, OutputConfig } from '../types';
-import type {
-  ProviderChatMessage,
-  ProviderContentPart,
-  ProviderRequestBody,
-  RawProviderToolCall,
-  ProviderCitation,
-  RawLMStudioModel,
-  ProviderToolDefinition,
-  ProviderResponseFormat,
-} from './llm/providerApi.types';
+import type { ProviderChatMessage, ProviderRequestBody, RawProviderToolCall } from './llm/providerApi.types';
 
 const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions';
 
@@ -77,7 +68,7 @@ export const generateContentStream = async function* (
 
     const decoder = new TextDecoder();
     let buffer = '';
-    let toolCalls: ToolCall[] = [];
+    const toolCalls: ToolCall[] = [];
 
     while (true) {
       const { done, value } = await reader.read();
@@ -158,16 +149,16 @@ export const generateContentWithSearch = async (
 };
 
 export const generateImage = async (
-  apiKey: string,
-  prompt: string,
+  _apiKey: string,
+  _prompt: string,
 ): Promise<{ image: string; error?: undefined } | { error: string; image?: undefined }> => {
   return { error: 'Image generation is not supported by Perplexity.' };
 };
 
 export const editImage = async (
-  apiKey: string,
-  prompt: string,
-  image: { mimeType: string; data: string },
+  _apiKey: string,
+  _prompt: string,
+  _image: { mimeType: string; data: string },
 ): Promise<{ image?: string; text?: string; error?: string }> => {
   return { error: 'Image modification is not supported by Perplexity.' };
 };

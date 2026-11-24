@@ -302,7 +302,7 @@ export const importCustomTemplates = (jsonString: string): number => {
  * Convertir une CustomTemplate (guest mode) en AgentTemplateDTO (auth mode)
  * Pour synchroniser les templates du localStorage vers MongoDB après login
  */
-const convertCustomTemplateToDTO = (custom: CustomTemplate, userId: string): CreateTemplatePayload => {
+const _convertCustomTemplateToDTO = (custom: CustomTemplate, _userId: string): CreateTemplatePayload => {
   // Extraire le modèle LLM (custom.model → custom.template.llmModel)
   const llmModel = (custom as unknown as { model?: string }).model || 'gpt-4o';
   const llmProvider = (custom as unknown as { llmProvider?: string }).llmProvider || 'openai';

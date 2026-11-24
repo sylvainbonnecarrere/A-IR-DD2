@@ -14,16 +14,7 @@
 // - Compatibility: browser no longer talks directly to arbitrary local ports
 // - OpenAI Compatible: proxy still targets /v1/chat/completions on the backend side
 import { ChatMessage, Tool, ToolCall, OutputConfig } from '../types';
-import type {
-  ProviderChatMessage,
-  ProviderContentPart,
-  ProviderRequestBody,
-  RawProviderToolCall,
-  ProviderCitation,
-  RawLMStudioModel,
-  ProviderToolDefinition,
-  ProviderResponseFormat,
-} from './llm/providerApi.types';
+import type { ProviderChatMessage, ProviderRequestBody, RawProviderToolCall, RawLMStudioModel } from './llm/providerApi.types';
 
 import { buildLMStudioProxyUrl } from '../config/api.config';
 
@@ -119,7 +110,7 @@ const formatMessages = (history?: ChatMessage[], systemInstruction?: string) => 
   return messages;
 };
 
-const detectLocalEndpoint = async (): Promise<string> => {
+const _detectLocalEndpoint = async (): Promise<string> => {
   // Fallback to default endpoint if not configured
   // Actual detection happens during configuration via backend proxy
   return DEFAULT_CONFIG.endpoint;
@@ -150,7 +141,7 @@ const fetchWithTimeout = async (url: string, options: RequestInit, timeout: numb
 };
 
 export const detectAvailableModels = async (config?: Partial<LMStudioConfig>): Promise<LMStudioModelInfo[]> => {
-  const fullConfig = { ...DEFAULT_CONFIG, ...config };
+  const _fullConfig = { ...DEFAULT_CONFIG, ...config };
 
   try {
     const endpoint = config?.endpoint || DEFAULT_CONFIG.endpoint;
@@ -396,8 +387,7 @@ export const generateContentStream = async function* (
     const reader = response.body?.getReader();
     if (!reader) throw new Error('Could not get reader from response body.');
 
-    let text = '';
-    let toolCalls: ToolCall[] = [];
+    const toolCalls: ToolCall[] = [];
     let currentToolCall: Partial<ToolCall> | null = null;
     let buffer = ''; // Buffer for incomplete lines
 
@@ -439,7 +429,6 @@ export const generateContentStream = async function* (
             const delta = data.choices?.[0]?.delta;
 
             if (delta?.content) {
-              text += delta.content;
               // V2AgentNode expects: { response: { text: string } }
               yield { response: { text: delta.content }, isComplete: false };
             }
@@ -609,7 +598,7 @@ export const checkServerHealth = async (endpoint?: string): Promise<{ healthy: b
       endpoint: detectedEndpoint,
       models: models.length,
     };
-  } catch (error) {
+  } catch {
     return {
       healthy: false,
     };

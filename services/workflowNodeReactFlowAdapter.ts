@@ -87,22 +87,17 @@ export function projectWorkflowNodeToReactFlowNode({
     robotId = workflowNode.data.robotId || agent?.creator_id || 'unknown';
   } else {
     const resolved = workflowNode.instanceId ? resolveInstance?.(workflowNode.instanceId) : null;
-    const directInstance = !resolved?.instance && workflowNode.instanceId
-      ? agentInstances.find((candidate) => candidate.id === workflowNode.instanceId) ?? null
-      : null;
+    const directInstance =
+      !resolved?.instance && workflowNode.instanceId
+        ? (agentInstances.find((candidate) => candidate.id === workflowNode.instanceId) ?? null)
+        : null;
     const resolvedWorkflowId = resolved?.instance.workflowId || directInstance?.workflowId || workflowId;
 
     position = workflowNode.position || position;
     agentInstance = ensureWorkflowScopedInstance(resolved?.instance ?? directInstance, resolvedWorkflowId);
     nodeWorkflowId = agentInstance?.workflowId || workflowId;
-    agent = workflowNode.agent
-      ?? resolved?.prototype
-      ?? resolvePrototypeById(agents, agentInstance?.prototypeId)
-      ?? null;
-    robotId = workflowNode.agent?.id
-      || resolved?.prototype?.creator_id
-      || resolved?.prototype?.id
-      || 'unknown';
+    agent = workflowNode.agent ?? resolved?.prototype ?? resolvePrototypeById(agents, agentInstance?.prototypeId) ?? null;
+    robotId = workflowNode.agent?.id || resolved?.prototype?.creator_id || resolved?.prototype?.id || 'unknown';
   }
 
   return {
@@ -126,12 +121,14 @@ export function projectWorkflowNodesToReactFlowNodes({
   agentInstances = [],
   resolveInstance,
 }: ProjectWorkflowNodesToReactFlowNodesParams): Node<ReactFlowAgentNodeData>[] {
-  return workflowNodes.map((workflowNode, index) => projectWorkflowNodeToReactFlowNode({
-    workflowNode,
-    index,
-    workflowId,
-    agents,
-    agentInstances,
-    resolveInstance,
-  }));
+  return workflowNodes.map((workflowNode, index) =>
+    projectWorkflowNodeToReactFlowNode({
+      workflowNode,
+      index,
+      workflowId,
+      agents,
+      agentInstances,
+      resolveInstance,
+    }),
+  );
 }

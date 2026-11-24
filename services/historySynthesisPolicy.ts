@@ -25,7 +25,7 @@ const isLimitTriggerable = (historyConfig: Pick<HistoryConfig, 'limits' | 'enabl
 
 export const getTriggeredHistoryLimits = (
   historyConfig: Pick<HistoryConfig, 'limits' | 'enabledLimits'>,
-  stats: HistoryLimitStats
+  stats: HistoryLimitStats,
 ): HistoryLimitKey[] => {
   return HISTORY_LIMIT_KEYS.filter((limitKey) => {
     if (!isLimitTriggerable(historyConfig, limitKey)) {
@@ -38,7 +38,7 @@ export const getTriggeredHistoryLimits = (
 
 export const shouldTriggerHistorySynthesis = (
   historyConfig: Pick<HistoryConfig, 'limits' | 'enabledLimits'>,
-  stats: HistoryLimitStats
+  stats: HistoryLimitStats,
 ): boolean => {
   return getTriggeredHistoryLimits(historyConfig, stats).length > 0;
 };

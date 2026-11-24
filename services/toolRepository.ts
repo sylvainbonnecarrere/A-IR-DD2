@@ -1,273 +1,262 @@
 import apiClient from '../utils/apiClient';
 import type {
-    BuildPreparationResult,
-    CreateFunctionPayload,
-    FunctionArtifactPreview,
-    FunctionRunCleanupResult,
-    FunctionRunListResponse,
-    FunctionRunRecord,
-    FunctionRunSortField,
-    FunctionRunSortOrder,
-    RuntimeHealthReport,
-    RuntimeCompatibilityContext,
-    SandboxRunResult,
-    SyntaxCheckResult,
-    ToolDetailResponse,
-    ToolTransitionRecord,
-    ToolsListResponse,
-    ToolWorkspaceResponse,
-    UpdateFunctionPayload,
-    UserFunction,
+  BuildPreparationResult,
+  CreateFunctionPayload,
+  FunctionArtifactPreview,
+  FunctionRunCleanupResult,
+  FunctionRunListResponse,
+  FunctionRunRecord,
+  FunctionRunSortField,
+  FunctionRunSortOrder,
+  RuntimeHealthReport,
+  RuntimeCompatibilityContext,
+  SandboxRunResult,
+  SyntaxCheckResult,
+  ToolDetailResponse,
+  ToolTransitionRecord,
+  ToolsListResponse,
+  ToolWorkspaceResponse,
+  UpdateFunctionPayload,
+  UserFunction,
 } from '../types/function.types';
 import type { ToolSelection } from '../types';
 
 const parseRuntimeCompatibilityFromHeaders = (headers: Record<string, unknown> | undefined): RuntimeCompatibilityContext | null => {
-    if (!headers) {
-        return null;
-    }
+  if (!headers) {
+    return null;
+  }
 
-    const mode = headers['x-runtime-mode'];
-    const securityLevel = headers['x-runtime-security-level'];
-    const executionReady = headers['x-runtime-execution-ready'];
-    const preferredRunner = headers['x-runtime-preferred-runner'];
+  const mode = headers['x-runtime-mode'];
+  const securityLevel = headers['x-runtime-security-level'];
+  const executionReady = headers['x-runtime-execution-ready'];
+  const preferredRunner = headers['x-runtime-preferred-runner'];
 
-    if (
-        typeof mode !== 'string'
-        || typeof securityLevel !== 'string'
-        || typeof executionReady !== 'string'
-        || typeof preferredRunner !== 'string'
-    ) {
-        return null;
-    }
+  if (
+    typeof mode !== 'string' ||
+    typeof securityLevel !== 'string' ||
+    typeof executionReady !== 'string' ||
+    typeof preferredRunner !== 'string'
+  ) {
+    return null;
+  }
 
-    return {
-        checkedAt: new Date().toISOString(),
-        mode: mode as RuntimeCompatibilityContext['mode'],
-        securityLevel: securityLevel as RuntimeCompatibilityContext['securityLevel'],
-        executionReady: executionReady === 'true',
-        preferredRunner: preferredRunner as RuntimeCompatibilityContext['preferredRunner'],
-        warning: typeof headers['x-runtime-warning'] === 'string' ? headers['x-runtime-warning'] : undefined,
-        summary: typeof headers['x-runtime-warning'] === 'string'
-            ? headers['x-runtime-warning']
-            : `Runtime ${securityLevel}`
-    };
+  return {
+    checkedAt: new Date().toISOString(),
+    mode: mode as RuntimeCompatibilityContext['mode'],
+    securityLevel: securityLevel as RuntimeCompatibilityContext['securityLevel'],
+    executionReady: executionReady === 'true',
+    preferredRunner: preferredRunner as RuntimeCompatibilityContext['preferredRunner'],
+    warning: typeof headers['x-runtime-warning'] === 'string' ? headers['x-runtime-warning'] : undefined,
+    summary: typeof headers['x-runtime-warning'] === 'string' ? headers['x-runtime-warning'] : `Runtime ${securityLevel}`,
+  };
 };
 
 const parseVersionNumber = (tag?: string | null): number => {
-    if (!tag) {
-        return 1;
-    }
+  if (!tag) {
+    return 1;
+  }
 
-    const match = tag.match(/(\d+)/);
-    return match ? Number.parseInt(match[1], 10) : 1;
+  const match = tag.match(/(\d+)/);
+  return match ? Number.parseInt(match[1], 10) : 1;
 };
 
 const resolveCodePathRoot = (tool: ToolTransitionRecord): UserFunction['codePathRoot'] => {
-    const sourcePath = tool.currentVersion.sourcePath;
+  const sourcePath = tool.currentVersion.sourcePath;
 
-    if (!sourcePath) {
-        return null;
-    }
+  if (!sourcePath) {
+    return null;
+  }
 
-    if (tool.origin === 'native') {
-        return 'native_repo';
-    }
+  if (tool.origin === 'native') {
+    return 'native_repo';
+  }
 
-    return tool.workspaceContext ? 'workspace_source' : 'legacy_relative';
+  return tool.workspaceContext ? 'workspace_source' : 'legacy_relative';
 };
 
 const mapToolToUserFunction = (tool: ToolTransitionRecord): UserFunction => {
-    const dependencies = tool.runtime === 'python'
-        ? Array.isArray((tool.dependencies as { python?: unknown })?.python)
-            ? ((tool.dependencies as { python: string[] }).python)
-            : []
-        : Array.isArray((tool.dependencies as { npm?: unknown })?.npm)
-            ? ((tool.dependencies as { npm: string[] }).npm)
-            : [];
+  const dependencies =
+    tool.runtime === 'python'
+      ? Array.isArray((tool.dependencies as { python?: unknown })?.python)
+        ? (tool.dependencies as { python: string[] }).python
+        : []
+      : Array.isArray((tool.dependencies as { npm?: unknown })?.npm)
+        ? (tool.dependencies as { npm: string[] }).npm
+        : [];
 
-    const workspaceContext = tool.workspaceContext;
-    const currentVersion = tool.currentVersion;
+  const workspaceContext = tool.workspaceContext;
+  const currentVersion = tool.currentVersion;
 
-    return {
-        _id: tool.legacyFunctionId || tool.id,
-        toolId: tool.id,
-        name: tool.name,
-        description: tool.description,
-        language: tool.runtime,
-        origin: tool.origin,
-        userId: tool.origin === 'native' ? null : null,
-        workflowId: tool.workflowId ?? null,
-        inputSchema: tool.inputSchema,
-        outputSchema: tool.outputSchema,
-        codePath: currentVersion?.sourcePath ?? null,
-        resolvedCodePath: currentVersion?.sourcePath ?? null,
-        codePathRoot: resolveCodePathRoot(tool),
-        codeInline: currentVersion?.sourceInline ?? null,
-        dependencies,
-        isEnabled: tool.isEnabled,
-        isReadonly: tool.isReadonly,
-        version: parseVersionNumber(tool.currentVersion.versionTag),
-        versionTag: tool.currentVersion.versionTag,
-        tags: tool.tags,
-        readinessStatus: tool.readinessStatus,
-        workspaceContext: workspaceContext ? {
-            workspaceId: workspaceContext.workspaceId,
-            logicalRoot: workspaceContext.logicalRoot,
-            runtimeRoots: workspaceContext.runtimeRoots,
-            manifests: workspaceContext.manifests,
-            status: workspaceContext.status,
-            lastScanAt: workspaceContext.lastScanAt ?? null,
-        } : undefined,
-        createdAt: String(tool.createdAt),
-        updatedAt: String(tool.updatedAt),
-    };
+  return {
+    _id: tool.legacyFunctionId || tool.id,
+    toolId: tool.id,
+    name: tool.name,
+    description: tool.description,
+    language: tool.runtime,
+    origin: tool.origin,
+    userId: tool.origin === 'native' ? null : null,
+    workflowId: tool.workflowId ?? null,
+    inputSchema: tool.inputSchema,
+    outputSchema: tool.outputSchema,
+    codePath: currentVersion?.sourcePath ?? null,
+    resolvedCodePath: currentVersion?.sourcePath ?? null,
+    codePathRoot: resolveCodePathRoot(tool),
+    codeInline: currentVersion?.sourceInline ?? null,
+    dependencies,
+    isEnabled: tool.isEnabled,
+    isReadonly: tool.isReadonly,
+    version: parseVersionNumber(tool.currentVersion.versionTag),
+    versionTag: tool.currentVersion.versionTag,
+    tags: tool.tags,
+    readinessStatus: tool.readinessStatus,
+    workspaceContext: workspaceContext
+      ? {
+          workspaceId: workspaceContext.workspaceId,
+          logicalRoot: workspaceContext.logicalRoot,
+          runtimeRoots: workspaceContext.runtimeRoots,
+          manifests: workspaceContext.manifests,
+          status: workspaceContext.status,
+          lastScanAt: workspaceContext.lastScanAt ?? null,
+        }
+      : undefined,
+    createdAt: String(tool.createdAt),
+    updatedAt: String(tool.updatedAt),
+  };
 };
 
 const mapToolDetailResponseToUserFunction = (response: ToolDetailResponse): UserFunction => ({
-    ...mapToolToUserFunction(response.tool),
-    runtimeCompatibility: response.runtimeCompatibility,
+  ...mapToolToUserFunction(response.tool),
+  runtimeCompatibility: response.runtimeCompatibility,
 });
 
 export interface LoadPhilFunctionsResult {
-    functions: UserFunction[];
-    runtimeCompatibility: RuntimeCompatibilityContext | null;
-    workspace: ToolWorkspaceResponse['workspace'] | null;
+  functions: UserFunction[];
+  runtimeCompatibility: RuntimeCompatibilityContext | null;
+  workspace: ToolWorkspaceResponse['workspace'] | null;
 }
 
 class ToolRepository {
-    async loadPhilFunctions(workflowId?: string): Promise<LoadPhilFunctionsResult> {
-        const params = new URLSearchParams();
-        if (workflowId) {
-            params.append('workflowId', workflowId);
-        }
-
-        const toolsResponse = await apiClient.get<ToolsListResponse>(`/api/tools${params.size > 0 ? `?${params}` : ''}`);
-        const runtimeCompatibility = toolsResponse.data.runtimeCompatibility
-            ?? parseRuntimeCompatibilityFromHeaders(toolsResponse.headers as Record<string, unknown>);
-
-        let workspace: ToolWorkspaceResponse['workspace'] | null = null;
-        if (workflowId) {
-            try {
-                const workspaceResponse = await apiClient.get<ToolWorkspaceResponse>(`/api/workspaces/${workflowId}`);
-                workspace = workspaceResponse.data.workspace;
-            } catch {
-                workspace = null;
-            }
-        }
-
-        return {
-            functions: toolsResponse.data.items.map(mapToolToUserFunction),
-            runtimeCompatibility,
-            workspace,
-        };
+  async loadPhilFunctions(workflowId?: string): Promise<LoadPhilFunctionsResult> {
+    const params = new URLSearchParams();
+    if (workflowId) {
+      params.append('workflowId', workflowId);
     }
 
-    async createFunction(payload: CreateFunctionPayload) {
-        const response = await apiClient.post<ToolDetailResponse>('/api/tools', payload);
-        return {
-            ...response,
-            data: mapToolDetailResponseToUserFunction(response.data)
-        };
+    const toolsResponse = await apiClient.get<ToolsListResponse>(`/api/tools${params.size > 0 ? `?${params}` : ''}`);
+    const runtimeCompatibility =
+      toolsResponse.data.runtimeCompatibility ?? parseRuntimeCompatibilityFromHeaders(toolsResponse.headers as Record<string, unknown>);
+
+    let workspace: ToolWorkspaceResponse['workspace'] | null = null;
+    if (workflowId) {
+      try {
+        const workspaceResponse = await apiClient.get<ToolWorkspaceResponse>(`/api/workspaces/${workflowId}`);
+        workspace = workspaceResponse.data.workspace;
+      } catch {
+        workspace = null;
+      }
     }
 
-    async updateFunction(id: string, payload: UpdateFunctionPayload) {
-        const response = await apiClient.put<ToolDetailResponse>(`/api/tools/${id}`, payload);
-        return {
-            ...response,
-            data: mapToolDetailResponseToUserFunction(response.data)
-        };
-    }
+    return {
+      functions: toolsResponse.data.items.map(mapToolToUserFunction),
+      runtimeCompatibility,
+      workspace,
+    };
+  }
 
-    async deleteFunction(id: string) {
-        return apiClient.delete(`/api/tools/${id}`);
-    }
+  async createFunction(payload: CreateFunctionPayload) {
+    const response = await apiClient.post<ToolDetailResponse>('/api/tools', payload);
+    return {
+      ...response,
+      data: mapToolDetailResponseToUserFunction(response.data),
+    };
+  }
 
-    async toggleFunction(id: string, allowBashPy = false) {
-        return apiClient.patch<{ id: string; isEnabled: boolean }>(`/api/tools/${id}/toggle`, { allowBashPy });
-    }
+  async updateFunction(id: string, payload: UpdateFunctionPayload) {
+    const response = await apiClient.put<ToolDetailResponse>(`/api/tools/${id}`, payload);
+    return {
+      ...response,
+      data: mapToolDetailResponseToUserFunction(response.data),
+    };
+  }
 
-    async runInSandbox(functionId: string | undefined, testArgs: Record<string, unknown>, toolSelection?: ToolSelection) {
-        return apiClient.post<SandboxRunResult>('/api/sandbox/run', {
-            ...(toolSelection ? { toolSelection } : {}),
-            ...(!toolSelection && functionId ? { functionId } : {}),
-            testArgs,
-        });
-    }
+  async deleteFunction(id: string) {
+    return apiClient.delete(`/api/tools/${id}`);
+  }
 
-    async checkSyntax(language: 'python' | 'typescript', code: string) {
-        return apiClient.post<SyntaxCheckResult>('/api/sandbox/check', { language, code });
-    }
+  async toggleFunction(id: string, allowBashPy = false) {
+    return apiClient.patch<{ id: string; isEnabled: boolean }>(`/api/tools/${id}/toggle`, { allowBashPy });
+  }
 
-    async loadFunctionRuns(
-        functionId: string,
-        options: {
-            limit?: number;
-            page?: number;
-            status?: FunctionRunRecord['status'];
-            sortBy?: FunctionRunSortField;
-            sortOrder?: FunctionRunSortOrder;
-        } = {}
-    ) {
-        return apiClient.get<FunctionRunListResponse & { runtimeCompatibility?: RuntimeCompatibilityContext }>(
-            '/api/runs',
-            {
-                params: {
-                    toolId: functionId,
-                    limit: options.limit,
-                    page: options.page,
-                    status: options.status,
-                    sortBy: options.sortBy,
-                    sortOrder: options.sortOrder,
-                }
-            }
-        );
-    }
+  async runInSandbox(functionId: string | undefined, testArgs: Record<string, unknown>, toolSelection?: ToolSelection) {
+    return apiClient.post<SandboxRunResult>('/api/sandbox/run', {
+      ...(toolSelection ? { toolSelection } : {}),
+      ...(!toolSelection && functionId ? { functionId } : {}),
+      testArgs,
+    });
+  }
 
-    async loadFunctionRunByExecutionId(executionId: string, toolId?: string) {
-        return apiClient.get<FunctionRunRecord>(
-            `/api/runs/executions/${executionId}`,
-            {
-                params: {
-                    toolId,
-                }
-            }
-        );
-    }
+  async checkSyntax(language: 'python' | 'typescript', code: string) {
+    return apiClient.post<SyntaxCheckResult>('/api/sandbox/check', { language, code });
+  }
 
-    async loadArtifactPreview(functionId: string, executionId: string, artifactPath: string) {
-        return apiClient.get<FunctionArtifactPreview>(
-            `/api/runs/tool/${functionId}/${executionId}/artifacts/content`,
-            {
-                params: { path: artifactPath }
-            }
-        );
-    }
+  async loadFunctionRuns(
+    functionId: string,
+    options: {
+      limit?: number;
+      page?: number;
+      status?: FunctionRunRecord['status'];
+      sortBy?: FunctionRunSortField;
+      sortOrder?: FunctionRunSortOrder;
+    } = {},
+  ) {
+    return apiClient.get<FunctionRunListResponse & { runtimeCompatibility?: RuntimeCompatibilityContext }>('/api/runs', {
+      params: {
+        toolId: functionId,
+        limit: options.limit,
+        page: options.page,
+        status: options.status,
+        sortBy: options.sortBy,
+        sortOrder: options.sortOrder,
+      },
+    });
+  }
 
-    async downloadArtifact(functionId: string, executionId: string, artifactPath: string) {
-        return apiClient.get<Blob>(
-            `/api/runs/tool/${functionId}/${executionId}/artifacts/download`,
-            {
-                params: { path: artifactPath },
-                responseType: 'blob'
-            }
-        );
-    }
+  async loadFunctionRunByExecutionId(executionId: string, toolId?: string) {
+    return apiClient.get<FunctionRunRecord>(`/api/runs/executions/${executionId}`, {
+      params: {
+        toolId,
+      },
+    });
+  }
 
-    async cleanupFunctionRuns(functionId: string, options: { retentionDays?: number; retainLatest?: number; dryRun?: boolean }) {
-        return apiClient.post<FunctionRunCleanupResult>(`/api/runs/tool/${functionId}/cleanup`, options);
-    }
+  async loadArtifactPreview(functionId: string, executionId: string, artifactPath: string) {
+    return apiClient.get<FunctionArtifactPreview>(`/api/runs/tool/${functionId}/${executionId}/artifacts/content`, {
+      params: { path: artifactPath },
+    });
+  }
 
-    async runBuild(functionId: string) {
-        return apiClient.post<BuildPreparationResult>(`/api/tools/${functionId}/build`, {});
-    }
+  async downloadArtifact(functionId: string, executionId: string, artifactPath: string) {
+    return apiClient.get<Blob>(`/api/runs/tool/${functionId}/${executionId}/artifacts/download`, {
+      params: { path: artifactPath },
+      responseType: 'blob',
+    });
+  }
 
-    async loadBuildStatus(functionId: string) {
-        return apiClient.get<BuildPreparationResult>(`/api/tools/${functionId}/build-status`);
-    }
+  async cleanupFunctionRuns(functionId: string, options: { retentionDays?: number; retainLatest?: number; dryRun?: boolean }) {
+    return apiClient.post<FunctionRunCleanupResult>(`/api/runs/tool/${functionId}/cleanup`, options);
+  }
 
-    async loadRuntimeHealth() {
-        return apiClient.get<RuntimeHealthReport>('/api/sandbox/health');
-    }
+  async runBuild(functionId: string) {
+    return apiClient.post<BuildPreparationResult>(`/api/tools/${functionId}/build`, {});
+  }
+
+  async loadBuildStatus(functionId: string) {
+    return apiClient.get<BuildPreparationResult>(`/api/tools/${functionId}/build-status`);
+  }
+
+  async loadRuntimeHealth() {
+    return apiClient.get<RuntimeHealthReport>('/api/sandbox/health');
+  }
 }
 
 export const toolRepository = new ToolRepository();

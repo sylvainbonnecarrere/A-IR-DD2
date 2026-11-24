@@ -1,7 +1,15 @@
 import * as llmService from './llmService';
 import { resolveHistoryRuntimeConfig } from './runtimeConfigResolver';
 import { computeHistoryLimitStats, getTriggeredHistoryLimits, type HistoryLimitStats } from './historySynthesisPolicy';
-import { ChatMessage, HistoryConfig, HistoryLimitKey, InvisibleHistorySummaryState, LLMConfig, LLMProvider, LocalLLMProfile } from '../types';
+import {
+  ChatMessage,
+  HistoryConfig,
+  HistoryLimitKey,
+  InvisibleHistorySummaryState,
+  LLMConfig,
+  LLMProvider,
+  LocalLLMProfile,
+} from '../types';
 import { validateAndRepairHistoryConfig } from '../utils/historyConfigDefaults';
 
 const HIDDEN_HISTORY_SUMMARY_MESSAGE_ID = '__hidden-history-summary__';
@@ -51,9 +59,7 @@ function resolveSummaryBaseline(
     };
   }
 
-  const coveredIndex = visibleMessagesBeforeSend.findIndex(
-    (message) => message.id === invisibleSummaryState.coveredThroughMessageId,
-  );
+  const coveredIndex = visibleMessagesBeforeSend.findIndex((message) => message.id === invisibleSummaryState.coveredThroughMessageId);
 
   if (coveredIndex === -1) {
     return {
@@ -72,15 +78,16 @@ function toConversationLines(messages: ChatMessage[]): string {
   return messages.map((message) => `${message.sender}: ${message.text}`).join('\n');
 }
 
-function resolveAvailableHistoryProviders(
-  historyConfig: HistoryConfig | null | undefined,
-  llmConfigs: LLMConfig[],
-): LLMProvider[] {
-  return Array.from(new Set([
-    historyConfig?.llmProvider,
-    ...llmConfigs.filter((config) => config.enabled).map((config) => config.provider),
-    LLMProvider.Gemini,
-  ].filter((provider): provider is LLMProvider => Boolean(provider))));
+function resolveAvailableHistoryProviders(historyConfig: HistoryConfig | null | undefined, llmConfigs: LLMConfig[]): LLMProvider[] {
+  return Array.from(
+    new Set(
+      [
+        historyConfig?.llmProvider,
+        ...llmConfigs.filter((config) => config.enabled).map((config) => config.provider),
+        LLMProvider.Gemini,
+      ].filter((provider): provider is LLMProvider => Boolean(provider)),
+    ),
+  );
 }
 
 export async function prepareConversationHistoryForAPI({
@@ -108,10 +115,7 @@ export async function prepareConversationHistoryForAPI({
     };
   }
 
-  const { activeSummaryState, unsummarizedMessages } = resolveSummaryBaseline(
-    visibleMessagesBeforeSend,
-    invisibleSummaryState,
-  );
+  const { activeSummaryState, unsummarizedMessages } = resolveSummaryBaseline(visibleMessagesBeforeSend, invisibleSummaryState);
 
   const conversationBase = activeSummaryState
     ? [buildHiddenSummaryMessage(activeSummaryState.summary), ...unsummarizedMessages]
@@ -151,12 +155,14 @@ export async function prepareConversationHistoryForAPI({
       : visibleMessagesBeforeSend;
 
     const summarizationPrompt = `${t('conversation_to_summarize')}:\n\n${toConversationLines(summarizationSource)}`;
-    const summarizationHistory: ChatMessage[] = [{
-      id: `${HIDDEN_HISTORY_SUMMARY_MESSAGE_ID}-prompt`,
-      sender: 'user',
-      text: summarizationPrompt,
-      timestamp: new Date(),
-    }];
+    const summarizationHistory: ChatMessage[] = [
+      {
+        id: `${HIDDEN_HISTORY_SUMMARY_MESSAGE_ID}-prompt`,
+        sender: 'user',
+        text: summarizationPrompt,
+        timestamp: new Date(),
+      },
+    ];
 
     const { text: summaryText } = await llmService.generateContent(
       summarizationConfig.provider,

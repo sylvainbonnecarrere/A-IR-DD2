@@ -18,7 +18,7 @@ export interface ExecutedAgentToolCall {
 export function parseToolCallArguments(rawArguments: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(rawArguments);
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }
@@ -57,7 +57,7 @@ async function executeUserFunctionViaSandbox(
   fn: UserFunction,
   args: Record<string, unknown>,
   authToken: string,
-  privateContext?: Record<string, unknown>
+  privateContext?: Record<string, unknown>,
 ): Promise<ExecutedAgentToolCall> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -76,11 +76,12 @@ async function executeUserFunctionViaSandbox(
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.success) {
-    const errorMessage = typeof payload?.error === 'string'
-      ? payload.error
-      : typeof payload?.errorDetails?.message === 'string'
-        ? payload.errorDetails.message
-        : `Sandbox execution failed with HTTP ${response.status}`;
+    const errorMessage =
+      typeof payload?.error === 'string'
+        ? payload.error
+        : typeof payload?.errorDetails?.message === 'string'
+          ? payload.errorDetails.message
+          : `Sandbox execution failed with HTTP ${response.status}`;
     throw new Error(errorMessage);
   }
 
@@ -103,17 +104,14 @@ export async function executeAgentToolCall(input: {
   authToken?: string;
 }): Promise<ExecutedAgentToolCall> {
   const parsedArguments = parseToolCallArguments(input.toolCall.arguments);
-  const executedArguments = input.toolCall.name === 'web_search_py'
-    ? buildWebSearchExecutionArgs(parsedArguments, input.agent)
-    : parsedArguments;
+  const executedArguments =
+    input.toolCall.name === 'web_search_py' ? buildWebSearchExecutionArgs(parsedArguments, input.agent) : parsedArguments;
 
   const serializedArguments = JSON.stringify(executedArguments);
   const matchedFunction = input.availableFunctions?.find((fn) => fn.isEnabled && fn.name === input.toolCall.name);
 
   if (matchedFunction && input.authToken) {
-    const privateContext = input.toolCall.name === 'web_search_py'
-      ? buildWebSearchPrivateContext(input.agent)
-      : undefined;
+    const privateContext = input.toolCall.name === 'web_search_py' ? buildWebSearchPrivateContext(input.agent) : undefined;
 
     return executeUserFunctionViaSandbox(matchedFunction, executedArguments, input.authToken, privateContext);
   }

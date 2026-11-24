@@ -1,15 +1,6 @@
 // services/deepSeekService.ts
 import { ChatMessage, Tool, ToolCall, OutputConfig } from '../types';
-import type {
-  ProviderChatMessage,
-  ProviderContentPart,
-  ProviderRequestBody,
-  RawProviderToolCall,
-  ProviderCitation,
-  RawLMStudioModel,
-  ProviderToolDefinition,
-  ProviderResponseFormat,
-} from './llm/providerApi.types';
+import type { ProviderChatMessage, ProviderRequestBody, RawProviderToolCall } from './llm/providerApi.types';
 
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 
@@ -32,7 +23,7 @@ const getHeaders = (apiKey: string) => {
   };
 };
 
-const formatMessages = (history?: ChatMessage[], systemInstruction?: string, model?: string) => {
+const formatMessages = (history?: ChatMessage[], systemInstruction?: string, _model?: string) => {
   const messages: ProviderChatMessage[] = [];
   if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
 
@@ -138,8 +129,7 @@ export const generateContentStream = async function* (
     const reader = response.body?.getReader();
     if (!reader) throw new Error('Could not get reader from response body.');
 
-    let text = '';
-    let toolCalls: ToolCall[] = [];
+    const toolCalls: ToolCall[] = [];
     let currentToolCall: Partial<ToolCall> | null = null;
 
     try {
@@ -159,7 +149,6 @@ export const generateContentStream = async function* (
             const delta = data.choices?.[0]?.delta;
 
             if (delta?.content) {
-              text += delta.content;
               yield { text: delta.content, isComplete: false };
             }
 

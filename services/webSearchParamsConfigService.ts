@@ -5,7 +5,7 @@ import { buildGovernanceHeaders } from '../utils/governanceHeaders';
 export async function persistInstanceWebSearchParams(
   instance: AgentInstance,
   webSearchParams: WebSearchParams,
-  accessToken?: string | null
+  accessToken?: string | null,
 ): Promise<void> {
   if (!accessToken || !instance.id || !instance.configuration_json) {
     return;

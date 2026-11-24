@@ -72,7 +72,10 @@ export interface WorkflowRunServiceOptions {
 }
 
 class WorkflowRunService {
-  async listWorkflowRuns(workflowId: string, options: Omit<WorkflowRunServiceOptions, 'workflowId'> = {}): Promise<FunctionRunListResponse> {
+  async listWorkflowRuns(
+    workflowId: string,
+    options: Omit<WorkflowRunServiceOptions, 'workflowId'> = {},
+  ): Promise<FunctionRunListResponse> {
     const response = await apiClient.get<FunctionRunListResponse>('/api/runs', {
       params: {
         workflowId,
@@ -87,8 +90,13 @@ class WorkflowRunService {
     return response.data;
   }
 
-  async launchRun(payload: LaunchWorkflowRunPayload): Promise<{ executionId: string; status: string; idempotency?: { key: string | null; replayed: boolean } }> {
-    const response = await apiClient.post<{ executionId: string; status: string; idempotency?: { key: string | null; replayed: boolean } }>('/api/runs/execute', payload);
+  async launchRun(
+    payload: LaunchWorkflowRunPayload,
+  ): Promise<{ executionId: string; status: string; idempotency?: { key: string | null; replayed: boolean } }> {
+    const response = await apiClient.post<{ executionId: string; status: string; idempotency?: { key: string | null; replayed: boolean } }>(
+      '/api/runs/execute',
+      payload,
+    );
     return response.data;
   }
 

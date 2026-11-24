@@ -63,7 +63,7 @@ type AgentPrototypePayload = Omit<Agent, 'id' | 'creator_id' | 'created_at' | 'u
 /**
  * Réponse API standardisée
  */
-interface APIResponse<T = any> {
+interface APIResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
@@ -115,12 +115,12 @@ export function mergeAgentPrototypeImpacts(...impacts: Array<AgentPrototypeImpac
  * Frontend: model, creator_id, capabilities (enum array)
  * Backend: llmModel, robotId, capabilities (string array)
  */
-function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string, workflowId?: string): Record<string, any> {
+function mapAgentToAPIPayload(agentData: AgentPrototypePayload, robotId: string, workflowId?: string): Record<string, unknown> {
   const normalizedToolReferences = normalizeAgentToolReferences(agentData.toolSelections, agentData.functionIds);
   const toolSelections = normalizedToolReferences.toolSelections.length > 0 ? normalizedToolReferences.toolSelections : undefined;
   const functionIds = normalizedToolReferences.functionIds.length > 0 ? normalizedToolReferences.functionIds : undefined;
 
-  const payload: Record<string, any> = {
+  const payload: Record<string, unknown> = {
     name: agentData.name || '',
     role: agentData.role || '',
     systemPrompt: agentData.systemPrompt || '',
@@ -257,7 +257,7 @@ export async function updateAgentPrototype(
 ): Promise<APIResponse<Agent>> {
   try {
     // Map only provided fields
-    const payload: Record<string, any> = {};
+    const payload: Record<string, unknown> = {};
     if (agentData.name !== undefined) payload.name = agentData.name;
     if (agentData.role !== undefined) payload.role = agentData.role;
     if (agentData.systemPrompt !== undefined) payload.systemPrompt = agentData.systemPrompt;

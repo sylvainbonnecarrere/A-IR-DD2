@@ -57,10 +57,7 @@ interface WorkflowMediaExplorerOptions {
 }
 
 export const workflowMediaExplorerService = {
-  async getWorkflowMedia(
-    workflowId: string,
-    options: WorkflowMediaExplorerOptions,
-  ): Promise<WorkflowMediaExplorerResponse> {
+  async getWorkflowMedia(workflowId: string, options: WorkflowMediaExplorerOptions): Promise<WorkflowMediaExplorerResponse> {
     const searchParams = new URLSearchParams();
 
     if (options.q?.trim()) {
@@ -91,16 +88,13 @@ export const workflowMediaExplorerService = {
       searchParams.set('storageMode', options.storageMode);
     }
 
-    const response = await fetch(
-      `${API_BASE_URL}/api/media/workflows/${workflowId}/explorer?${searchParams.toString()}`,
-      {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${options.token}`,
-          'Content-Type': 'application/json',
-        },
+    const response = await fetch(`${API_BASE_URL}/api/media/workflows/${workflowId}/explorer?${searchParams.toString()}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${options.token}`,
+        'Content-Type': 'application/json',
       },
-    );
+    });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Request failed' }));
@@ -110,25 +104,19 @@ export const workflowMediaExplorerService = {
     return response.json();
   },
 
-  async getMediaBlob(
-    mediaId: string,
-    options: { token: string; download?: boolean },
-  ): Promise<Blob> {
+  async getMediaBlob(mediaId: string, options: { token: string; download?: boolean }): Promise<Blob> {
     const searchParams = new URLSearchParams();
     if (options.download) {
       searchParams.set('download', 'true');
     }
 
     const queryString = searchParams.toString();
-    const response = await fetch(
-      `${API_BASE_URL}/api/media/${mediaId}${queryString ? `?${queryString}` : ''}`,
-      {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${options.token}`,
-        },
+    const response = await fetch(`${API_BASE_URL}/api/media/${mediaId}${queryString ? `?${queryString}` : ''}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${options.token}`,
       },
-    );
+    });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Request failed' }));
@@ -138,10 +126,7 @@ export const workflowMediaExplorerService = {
     return response.blob();
   },
 
-  async deleteMedia(
-    mediaId: string,
-    options: { token: string },
-  ): Promise<DeleteWorkflowMediaResponse> {
+  async deleteMedia(mediaId: string, options: { token: string }): Promise<DeleteWorkflowMediaResponse> {
     const response = await fetch(`${API_BASE_URL}/api/media/${mediaId}`, {
       method: 'DELETE',
       headers: {

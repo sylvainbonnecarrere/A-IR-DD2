@@ -64,7 +64,7 @@ export interface WorkflowSaveData {
     id: string;
     type: string;
     position: { x: number; y: number };
-    data: Record<string, any>;
+    data: Record<string, unknown>;
   }>;
   edges?: Array<{
     id: string;
@@ -107,7 +107,7 @@ export interface AgentInstanceContent {
   duration?: number;
   subType?: string;
   timestamp?: Date;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 type JournalWriteType = 'chat' | 'error' | 'media';
@@ -422,7 +422,7 @@ export interface CreateAgentInstanceData {
   prototypeId: string;
   name: string;
   position: { x: number; y: number };
-  configuration_json?: Record<string, any>;
+  configuration_json?: Record<string, unknown>;
   persistenceConfig?: PersistenceConfig; // ⭐ NEW: Override config from WorkflowValidationModal
 }
 
@@ -622,7 +622,7 @@ export async function addAgentInstanceContent(
         if (content.type === 'chat') {
           instances[index].metrics.callCount++;
           if (content.metadata?.tokensUsed) {
-            instances[index].metrics.totalTokens += content.metadata.tokensUsed;
+            instances[index].metrics.totalTokens += Number(content.metadata.tokensUsed) || 0;
           }
         } else if (content.type === 'error') {
           instances[index].metrics.totalErrors++;

@@ -12,66 +12,63 @@
 import type { PromptToolReadModel } from '../../types/function.types';
 
 export interface PromptBuilderOptions {
-    /** UI / hint language.  fr → French labels, anything else → English. */
-    language?: 'fr' | 'en';
-    /** Hard cap on number of functions emitted in the prompt (default: 20). */
-    maxFunctions?: number;
+  /** UI / hint language.  fr → French labels, anything else → English. */
+  language?: 'fr' | 'en';
+  /** Hard cap on number of functions emitted in the prompt (default: 20). */
+  maxFunctions?: number;
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 type JSONSchemaProperty = {
-    type?: string;
-    description?: string;
-    example?: unknown;
-    default?: unknown;
-    enum?: unknown[];
+  type?: string;
+  description?: string;
+  example?: unknown;
+  default?: unknown;
+  enum?: unknown[];
 };
 
 type JSONSchema = {
-    type?: string;
-    properties?: Record<string, JSONSchemaProperty>;
-    required?: string[];
+  type?: string;
+  properties?: Record<string, JSONSchemaProperty>;
+  required?: string[];
 };
 
 function defaultForType(type: string): unknown {
-    const map: Record<string, unknown> = {
-        string: 'example',
-        number: 0,
-        integer: 0,
-        boolean: true,
-        array: [],
-        object: {},
-    };
-    return map[type] ?? null;
+  const map: Record<string, unknown> = {
+    string: 'example',
+    number: 0,
+    integer: 0,
+    boolean: true,
+    array: [],
+    object: {},
+  };
+  return map[type] ?? null;
 }
 
 function schemaToExample(schema: JSONSchema | null | undefined): Record<string, unknown> {
-    if (!schema?.properties) return {};
-    return Object.fromEntries(
-        Object.entries(schema.properties).map(([key, val]) => [
-            key,
-            val.example ?? val.default ?? defaultForType(val.type ?? 'string'),
-        ])
-    );
+  if (!schema?.properties) return {};
+  return Object.fromEntries(
+    Object.entries(schema.properties).map(([key, val]) => [key, val.example ?? val.default ?? defaultForType(val.type ?? 'string')]),
+  );
 }
 
 function formatFunction(fn: PromptToolReadModel, lang: 'fr' | 'en'): string {
-    const required = (fn.inputSchema as JSONSchema)?.required ?? [];
-    const exampleArgs = schemaToExample(fn.inputSchema as JSONSchema);
-    const exampleJson = JSON.stringify({ name: fn.name, arguments: exampleArgs }, null, 2);
+  const required = (fn.inputSchema as JSONSchema)?.required ?? [];
+  const exampleArgs = schemaToExample(fn.inputSchema as JSONSchema);
+  const exampleJson = JSON.stringify({ name: fn.name, arguments: exampleArgs }, null, 2);
 
-    const requiredLabel = lang === 'fr' ? 'Paramètres requis' : 'Required parameters';
-    const noneLabel = lang === 'fr' ? 'aucun' : 'none';
+  const requiredLabel = lang === 'fr' ? 'Paramètres requis' : 'Required parameters';
+  const noneLabel = lang === 'fr' ? 'aucun' : 'none';
 
-    return [
-        `**${fn.name}**`,
-        `Description : ${fn.description}`,
-        '```json',
-        exampleJson,
-        '```',
-        `${requiredLabel} : ${required.length > 0 ? required.join(', ') : noneLabel}`,
-    ].join('\n');
+  return [
+    `**${fn.name}**`,
+    `Description : ${fn.description}`,
+    '```json',
+    exampleJson,
+    '```',
+    `${requiredLabel} : ${required.length > 0 ? required.join(', ') : noneLabel}`,
+  ].join('\n');
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -89,19 +86,16 @@ function formatFunction(fn: PromptToolReadModel, lang: 'fr' | 'en'): string {
  * @param options    Language + function count overrides.
  * @returns          A self-contained string ready to be appended to the system prompt.
  */
-export function buildFunctionCallingPrompt(
-    functions: PromptToolReadModel[],
-    options: PromptBuilderOptions = {}
-): string {
-    const { language = 'fr', maxFunctions = 20 } = options;
-    const visible = functions.filter(f => f.isEnabled).slice(0, maxFunctions);
+export function buildFunctionCallingPrompt(functions: PromptToolReadModel[], options: PromptBuilderOptions = {}): string {
+  const { language = 'fr', maxFunctions = 20 } = options;
+  const visible = functions.filter((f) => f.isEnabled).slice(0, maxFunctions);
 
-    if (visible.length === 0) return '';
+  if (visible.length === 0) return '';
 
-    const functionDocs = visible.map(f => formatFunction(f, language)).join('\n\n');
+  const functionDocs = visible.map((f) => formatFunction(f, language)).join('\n\n');
 
-    if (language === 'fr') {
-        return `
+  if (language === 'fr') {
+    return `
 ## CAPACITÉS D'ACTION
 
 Tu as accès aux fonctions suivantes. Pour invoquer une fonction, tu DOIS utiliser EXACTEMENT ce format XML :
@@ -134,9 +128,9 @@ Réponse utilisateur
 
 ${functionDocs}
 `.trim();
-    }
+  }
 
-    return `
+  return `
 ## ACTION CAPABILITIES
 
 You have access to the following functions. To invoke a function, you MUST use EXACTLY this XML format:
