@@ -30,6 +30,11 @@ export default tseslint.config(
       'backend/node_modules/**',
       'backend/dist/**',
       'backend/python/**',
+      // US-RC-07 : `backend/storage/` = workspaces runtime générés par les utilisateurs
+      // (sources d'outils produits à l'exécution), pas du code versionné — hors lint.
+      'backend/storage/**',
+      'backend/coverage/**',
+      '.scratch/**',
       'public/icons/**',
       '*.min.js',
     ],
@@ -76,6 +81,14 @@ export default tseslint.config(
     files: ['backend/src/**/*.{ts,tsx}'],
     rules: {
       'no-console': ['error', { allow: ['debug', 'info', 'warn', 'error'] }],
+    },
+  },
+  {
+    // US-RC-07 : scripts CLI backend en .ts (scripts/, docker/, test-utils/) — stdout est
+    // l'interface CLI, `console` y est autorisé (même rationale que le bloc .js/.cjs/.mjs).
+    files: ['backend/scripts/**/*.{ts,tsx}', 'backend/docker/**/*.{ts,tsx}', 'backend/test-utils/**/*.{ts,tsx}'],
+    rules: {
+      'no-console': 'off',
     },
   },
   {

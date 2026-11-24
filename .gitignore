@@ -199,3 +199,6 @@ backend/python/.provisioned/
 # ⭐ hygiène : bytecode Python jamais versionné (30 .pyc désindexés le 2026-11-21)
 __pycache__/
 *.pyc
+
+# Scratch local agent (hors versionnement)
+.scratch/

@@ -1,6 +1,10 @@
 #!/usr/bin/env node
-// ⭐ Ratchet d'hygiène (2026-11-21) : bloque toute AUGMENTATION du nombre de `any`
-// explicites et de `console.log(` dans le code versionné (frontend racine + backend/src).
+// ⭐ Ratchet d'hygiène (2026-11-21, étendu US-RC-07) : bloque toute AUGMENTATION
+// - du nombre de `any` explicites et de `console.log(` dans le code versionné
+//   (frontend racine + backend/src) ;
+// - du nombre de WARNINGS eslint (severity 1) du repo, répartis en
+//   lintWarningsFrontend / lintWarningsBackend (un seul run eslint JSON, mis en cache
+//   dans node_modules/.cache — ~20 s au premier run, rapide ensuite).
 // La dette existante est connue et listée dans hygiene-baseline.json ; on ne fait que
 // empêcher qu'elle grossisse. Pour corriger la dette : diminuer les compteurs, puis
 // `npm run hygiene:update-baseline`.
@@ -45,6 +49,14 @@ function runSelfTest() {
     fs.writeFileSync(SELF_TEST_FILE, 'console.log("dirty");\n');
     const withLog = run();
     assert(withLog.status === 1, 'le ratchet doit échouer (exit 1) sur un fichier NON SUIVI contenant console.log(');
+    // US-RC-07 : sonde warnings eslint — une variable inutilisée dans un fichier non
+    // suivi ne touche ni ANY_RE ni LOG_RE, seul le compteur de warnings doit capter.
+    fs.writeFileSync(SELF_TEST_FILE, 'const ratchetUnusedProbe = 1;\nexport {};\n');
+    const withWarn = run();
+    assert(
+      withWarn.status === 1,
+      'le ratchet doit échouer (exit 1) sur un fichier NON SUIVI produisant un warning eslint (variable inutilisée)',
+    );
   } finally {
     fs.rmSync(SELF_TEST_FILE, { force: true });
   }
@@ -68,11 +80,40 @@ const countIn = (files, re) =>
     }
   }, 0);
 
+// US-RC-07 : compteurs de warnings eslint (severity 1) — un seul run eslint du repo,
+// résultat JSON parsé, réparti frontend (hors backend/) / backend (sous backend/).
+// Le cache eslint (node_modules/.cache, hors git) rend les runs suivants quasi
+// instantanés ; les fichiers non suivis sont lintés aussi (eslint . les voit).
+const countLintWarnings = () => {
+  const eslintBin = path.join(root, 'node_modules', 'eslint', 'bin', 'eslint.js');
+  const res = spawnSync(
+    process.execPath,
+    [eslintBin, '.', '--format', 'json', '--cache', '--cache-location', path.join('node_modules', '.cache', 'hygiene-ratchet-eslint.json')],
+    { cwd: root, encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 },
+  );
+  let report;
+  try {
+    report = JSON.parse(res.stdout);
+  } catch {
+    throw new Error(`ratchet: sortie eslint illisible (status ${res.status}) — run hors cache ?`);
+  }
+  let frontend = 0;
+  let backend = 0;
+  for (const f of report) {
+    const rel = path.relative(root, f.filePath).split(path.sep).join('/');
+    const warnings = f.messages.filter((m) => m.severity === 1).length;
+    if (rel.startsWith('backend/')) backend += warnings;
+    else frontend += warnings;
+  }
+  return { lintWarningsFrontend: frontend, lintWarningsBackend: backend };
+};
+
 const current = {
   anyFrontend: countIn(frontendFiles, ANY_RE),
   anyBackend: countIn(backendFiles, ANY_RE),
   consoleLogFrontend: countIn(frontendFiles, LOG_RE),
   consoleLogBackend: countIn(backendFiles, LOG_RE),
+  ...countLintWarnings(),
 };
 
 if (process.argv.includes('--update')) {
@@ -102,7 +143,9 @@ for (const k of keys) {
 }
 
 if (regressed) {
-  console.error('\nECHEC ratchet : la dette (any / console.log) a AUGMENTE — corrige ou justifie, ne recale pas la baseline.');
+  console.error(
+    '\nECHEC ratchet : la dette (any / console.log / warnings eslint) a AUGMENTE — corrige ou justifie, ne recale pas la baseline.',
+  );
   process.exit(1);
 }
 console.log('\nOK : aucune augmentation de la dette hygiène.');
