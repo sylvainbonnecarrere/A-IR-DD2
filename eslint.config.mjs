@@ -52,9 +52,27 @@ export default tseslint.config(
     },
   },
   {
+    // US-RC-04 (frontend) : `console.log` interdit en erreur sur tout le ts/tsx
+    // (stock front à 0, ratchet consoleLogFrontend 126 -> 0) ; debug/info/warn/error
+    // restent autorisés. Le bloc `backend/**` juste après rebascule le backend hors
+    // src en "warn" (backend/scripts = scripts CLI), puis backend/src repasse en
+    // erreur (bloc existant) — l'ordre des blocs flat config décide.
+    files: ['**/*.{ts,tsx}'],
+    rules: {
+      'no-console': ['error', { allow: ['debug', 'info', 'warn', 'error'] }],
+    },
+  },
+  {
+    // Backend hors src (scripts CLI, docker) : on-console reste en warn (dette
+    // ratchetée), comme avant US-RC-04.
+    files: ['backend/**/*.{ts,tsx}'],
+    rules: {
+      'no-console': ['warn', { allow: ['warn', 'error'] }],
+    },
+  },
+  {
     // US-RC-04 (backend) : `console.log` interdit en erreur dans backend/src
     // (backend à 0 console.log) ; debug/info/warn/error restent autorisés.
-    // Le front reste en "warn" tant que son stock de console.log n'est pas à 0.
     files: ['backend/src/**/*.{ts,tsx}'],
     rules: {
       'no-console': ['error', { allow: ['debug', 'info', 'warn', 'error'] }],

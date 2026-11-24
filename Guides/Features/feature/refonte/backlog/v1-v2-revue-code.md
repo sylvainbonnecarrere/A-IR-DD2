@@ -209,6 +209,16 @@ Validation lot 1 : `tsc --noEmit` back 0, `eslint --quiet` 0, ratchet exit 0 (43
 
 **État d'avancement (2026-11-23, agent `03-backend`, branche `main`) — PARTIE BACK TERMINÉE :** les 2 `console.log` de `simple-from-prototype.test.ts:72-73` → `console.debug` ; 1 site déguisé trouvé par eslint (`console        .log` dans `migrations/001_add_localEndpoint.ts:44`, invisible au ratchet) → `console.debug` aussi. `eslint.config.mjs` : bloc override `backend/src/**/*.{ts,tsx}` avec `no-console: ["error", { allow: ["debug","info","warn","error"] }]` — bloc disjoint du front (reste en `warn`). Baseline recalée : `consoleLogBackend` 2 → **0**. Validations : tsc back 0, `eslint . --quiet` 0 erreur (preuve négative : fichier temporaire avec `console.log` → 1 error), ratchet exit 0, prettier + `format:changed` OK, suite `simple-from-prototype` 3/3, `test:j6:backend` 126/126, `ci:node25:runtime` OK, audit strict OK. **Reste (06-frontend) :** 126 `console.log` front → `console.debug`, puis flip du bloc global front en `error` une fois le stock front à 0.
 
+**État d'avancement (2026-11-23, agent `06-frontend`, branche `main`) — PARTIE FRONT TERMINÉE : `consoleLogFrontend` 126 → 0, US-RC-04 TERMINÉE des deux côtés.**
+
+| Lot | Commit | consoleLogFrontend | Fichiers |
+|---|---|---|---|
+| 1 | `6d6d40e` | 126 → 73 | `scripts/test-new-llms.ts` (40), `scripts/audit-workflow-architecture.ts` (13) |
+| 2 | `e99ddef` | 73 → **0** | 5 tests : `J4.4-PrototypesWipe.TNR` (28), `J4.4-WorkflowNodesWipe.TNR` (21), `J4.4-AuthGuestIsolation.TNR` (21), `WorkflowCanvas.route-reentry.semi-e2e.spec` (2), `GuestStartup.live.smoke.spec` (1) |
+| 3 | (flip règle) | 0 → 0 | `eslint.config.mjs` : bloc `**/*.{ts,tsx}` → `no-console: ["error", { allow: ["debug","info","warn","error"] }]` + bloc `backend/**` de rebascule en `warn` (backend/scripts = CLI) ; le bloc `backend/src/**` error (posé par 03-backend) est conservé et prime en dernier |
+
+Tous les `console.log(` étaient des appels simples (aucun espion `console.log` dans les tests — seulement warn/error) ; aucun `console.log` déguisé (espaces) côté front (vérifié au grep large + lint error). Baseline recalée : `consoleLogFrontend` 126 → **0** (tous les compteurs hygiène sont maintenant à 0). Validations : `tsc --noEmit` 0, `npm run lint` exit 0 (0 erreur), preuves négatives `console.log` → 1 error sur fichier front ET sur `backend/src`, exit 0 sur `backend/scripts` ; ratchet exit 0 (0/0/0/0 stable), prettier + `format:changed` OK, jest 3 suites/16 tests verts (J4.4 TNR), audit strict OK. **Prochaine US enchaînée : US-RC-06** (logger structuré `ILogger` côté `03-backend` — 428 `console.debug/info/warn/error` back à remplacer ; le gate bloque désormais toute réapparition d'un `console.log` des deux côtés).
+
 ### US-RC-05 — Prettier sur fichiers modifiés en CI (depuis US-HYG-05)
 
 **Agent responsable :** `04-cicd-installation.agent.md`
