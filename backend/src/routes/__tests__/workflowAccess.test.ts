@@ -1,10 +1,11 @@
 import { buildWorkflowOwnershipResolver } from '../workflowAccess';
+import type { IWorkflowRepository } from '../../repositories/IWorkflowRepository';
 
 describe('buildWorkflowOwnershipResolver', () => {
   it('resolves the actual owner from the workflow repository', async () => {
     const workflowRepository = {
       findById: jest.fn().mockResolvedValue({ _id: 'wf-1', userId: 'user-1' }),
-    } as any;
+    } as unknown as jest.Mocked<IWorkflowRepository>;
 
     const resolveOwnership = buildWorkflowOwnershipResolver(workflowRepository);
 
@@ -17,7 +18,7 @@ describe('buildWorkflowOwnershipResolver', () => {
   it('returns the workflow owner id when another user owns the resource', async () => {
     const workflowRepository = {
       findById: jest.fn().mockResolvedValue({ _id: 'wf-2', userId: 'user-2' }),
-    } as any;
+    } as unknown as jest.Mocked<IWorkflowRepository>;
 
     const resolveOwnership = buildWorkflowOwnershipResolver(workflowRepository);
 
@@ -27,7 +28,7 @@ describe('buildWorkflowOwnershipResolver', () => {
   it('returns null when the workflow does not exist', async () => {
     const workflowRepository = {
       findById: jest.fn().mockResolvedValue(null),
-    } as any;
+    } as unknown as jest.Mocked<IWorkflowRepository>;
 
     const resolveOwnership = buildWorkflowOwnershipResolver(workflowRepository);
 
