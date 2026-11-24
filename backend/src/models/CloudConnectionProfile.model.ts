@@ -222,7 +222,7 @@ function extractServiceAccountEmail(serviceAccountKey?: string): string | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(serviceAccountKey);
-  } catch (error) {
+  } catch {
     throw new Error('Clé de service account invalide (JSON mal formé)');
   }
 

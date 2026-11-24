@@ -25,7 +25,7 @@ export class NativeRunner implements IRunner {
         if (!finished) {
           try {
             child.kill('SIGKILL');
-          } catch (e) {}
+          } catch {}
           finished = true;
           resolve({ success: false, exitCode: null, stdout, stderr: stderr + '\nTimeout' });
         }
@@ -57,13 +57,13 @@ export class NativeRunner implements IRunner {
         try {
           const payload = typeof input === 'string' ? input : JSON.stringify(input);
           child.stdin.write(payload);
-        } catch (e) {
+        } catch {
           // ignore
         }
       }
       try {
         child.stdin.end();
-      } catch (e) {}
+      } catch {}
     });
   }
 }
