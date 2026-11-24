@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { SandboxService } from './services/sandbox.service';
-import { UserToolQueryService, type ToolTransitionReadModel } from './services/userToolQuery.service';
+import { UserToolQueryService } from './services/userToolQuery.service';
 
 const userToolQueryService = new UserToolQueryService();
 const sandboxService = new SandboxService();
@@ -19,37 +19,37 @@ const sandboxService = new SandboxService();
  * @param agentId Optional agent id for context (audit / logging)
  */
 export const executeFunctionById = async (
-    fnId: string,
-    args: Record<string, unknown>,
-    userId: string,
-    agentId?: string
+  fnId: string,
+  args: Record<string, unknown>,
+  userId: string,
+  agentId?: string,
 ): Promise<object> => {
-    // --- 1. Load from canonical catalog with ownership gate ---
-    if (!mongoose.Types.ObjectId.isValid(fnId)) {
-        throw new Error(`Invalid function id: ${fnId}`);
-    }
+  // --- 1. Load from canonical catalog with ownership gate ---
+  if (!mongoose.Types.ObjectId.isValid(fnId)) {
+    throw new Error(`Invalid function id: ${fnId}`);
+  }
 
-    const tool = await userToolQueryService.getToolById(fnId, userId);
+  const tool = await userToolQueryService.getToolById(fnId, userId);
 
-    if (!tool) {
-        throw new Error(`Function '${fnId}' not found or access denied for user '${userId}'.`);
-    }
-    if (!tool.isEnabled) {
-        throw new Error(`Function '${tool.name}' is disabled.`);
-    }
+  if (!tool) {
+    throw new Error(`Function '${fnId}' not found or access denied for user '${userId}'.`);
+  }
+  if (!tool.isEnabled) {
+    throw new Error(`Function '${tool.name}' is disabled.`);
+  }
 
-    const acknowledgement = await sandboxService.queueFunctionRun({
-        functionId: tool.id,
-        userId,
-        testArgs: args,
-        launchContext: agentId ? 'workflow_run' : 'system_validation',
-        agentInstanceId: agentId,
-    });
-    const result = await sandboxService.waitForRunCompletion(acknowledgement.executionId, userId);
+  const acknowledgement = await sandboxService.queueFunctionRun({
+    functionId: tool.id,
+    userId,
+    testArgs: args,
+    launchContext: agentId ? 'workflow_run' : 'system_validation',
+    agentInstanceId: agentId,
+  });
+  const result = await sandboxService.waitForRunCompletion(acknowledgement.executionId, userId);
 
-    if (!result.success) {
-        throw new Error(result.stderr || `Function '${tool.name}' failed.`);
-    }
+  if (!result.success) {
+    throw new Error(result.stderr || `Function '${tool.name}' failed.`);
+  }
 
-    return result.output as object;
+  return result.output as object;
 };

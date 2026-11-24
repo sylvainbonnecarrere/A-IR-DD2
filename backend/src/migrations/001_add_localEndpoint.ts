@@ -16,8 +16,7 @@
 
 import { logger } from '../services/logger';
 import mongoose from 'mongoose';
-import { LLMConfig, ILLMConfig } from '../models/LLMConfig.model';
-import { decrypt } from '../utils/encryption';
+import { LLMConfig } from '../models/LLMConfig.model';
 
 const LOCAL_PROVIDERS = ['LLM local (on premise)', 'Jan', 'Ollama'];
 

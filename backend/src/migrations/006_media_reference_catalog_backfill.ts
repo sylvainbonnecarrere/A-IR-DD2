@@ -5,13 +5,11 @@ import {
   deriveMediaReferencePrimaryStorageMode,
   type CloudProvider,
   type MediaStorageMode,
-  type ProductMediaStorageMode,
 } from '../models/MediaReference.model';
 
 const DEFAULT_MONGODB_URI = 'mongodb://localhost:27017/aitest';
 
 type BackfillStorageMode = MediaStorageMode;
-type BackfillPrimaryStorageMode = ProductMediaStorageMode;
 
 export interface MediaReferenceCatalogBackfillSummary {
   collectionFound: boolean;

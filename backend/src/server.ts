@@ -224,7 +224,7 @@ async function startServer() {
       // This runs AFTER successful MongoDB connection
       await initializeDatabase();
       databaseInitialized = true;
-    } catch (dbError) {
+    } catch {
       logger.warn('⚠️  MongoDB non disponible - Mode Guest uniquement');
       logger.warn('   Pour activer le mode Authenticated, démarrer MongoDB :');
       logger.warn('   - Windows: Installer MongoDB Community Server');

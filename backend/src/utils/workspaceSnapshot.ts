@@ -11,12 +11,9 @@ import { transformAgentInstanceForFrontend } from './transforms';
 
 import type {
   ProjectedChatMessage,
-  SnapshotAgentInstanceDoc,
   SnapshotAgentInstanceNode,
   SnapshotAgentPrototypeDoc,
   SnapshotEdgeDoc,
-  SnapshotJournalEntryDoc,
-  SnapshotLLMConfigDoc,
   SnapshotUserToolRunDoc,
   SnapshotWorkflowDoc,
 } from '../domain/workflow/workspaceSnapshot.contract';

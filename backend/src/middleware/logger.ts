@@ -81,7 +81,7 @@ export function logError(error: Error, context: string): void {
 /**
  * Middleware de gestion d'erreurs global pour les routes LMStudio
  */
-export function errorHandler(err: Error, req: Request, res: Response, next: NextFunction): void {
+export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction): void {
   logError(err, `${req.method} ${req.path}`);
 
   // Réponse sécurisée (pas de détails d'implémentation)

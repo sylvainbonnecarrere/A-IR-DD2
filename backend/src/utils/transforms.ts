@@ -36,7 +36,7 @@ export function transformAgentInstanceForFrontend(instance: SnapshotAgentInstanc
     llmModel,
     systemPrompt,
     capabilities,
-    tools,
+    tools: _tools,
     legacyTools,
     toolSelections,
     historyConfig,

@@ -8,11 +8,6 @@ const logInfo = (...args: unknown[]) => {
     logger.debug(String(args[0] ?? ''), ...args.slice(1));
   }
 };
-const logWarn = (...args: unknown[]) => {
-  if (!isTestEnvironment) {
-    logger.warn(String(args[0] ?? ''), ...args.slice(1));
-  }
-};
 const logError = (...args: unknown[]) => {
   if (!isTestEnvironment) {
     logger.error(String(args[0] ?? ''), ...args.slice(1));
