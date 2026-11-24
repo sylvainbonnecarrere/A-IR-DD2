@@ -1,17 +1,6 @@
 // services/mistralService.ts
 import { ChatMessage, Tool, ToolCall, OutputConfig } from '../types';
-import type {
-  ProviderChatMessage,
-  ProviderContentPart,
-  ProviderRequestBody,
-  RawProviderToolCall,
-  ProviderCitation,
-  RawLMStudioModel,
-  ProviderToolDefinition,
-  ProviderResponseFormat,
-} from './llm/providerApi.types';
-
-import { fileToBase64 } from '../utils/fileUtils';
+import type { ProviderChatMessage, ProviderRequestBody, RawProviderToolCall } from './llm/providerApi.types';
 
 const MISTRAL_API_BASE_URL = 'https://api.mistral.ai/v1';
 
@@ -32,7 +21,7 @@ const createApiError = async (response: Response): Promise<Error> => {
     } else if (typeof errorData === 'string' && errorData.length > 0) {
       message = errorData;
     }
-  } catch (e) {
+  } catch {
     if (errorBody.length > 0) {
       message = errorBody;
     }
@@ -162,7 +151,7 @@ export const generateContentStream = async function* (
 
     const decoder = new TextDecoder();
     let buffer = '';
-    let toolCalls: ToolCall[] = [];
+    const toolCalls: ToolCall[] = [];
 
     while (true) {
       const { done, value } = await reader.read();
@@ -205,12 +194,12 @@ export const generateContentStream = async function* (
 };
 
 export const generateContent = async (
-  apiKey: string,
-  model: string,
-  systemInstruction?: string,
-  history?: ChatMessage[],
-  tools?: Tool[],
-  outputConfig?: OutputConfig,
+  _apiKey: string,
+  _model: string,
+  _systemInstruction?: string,
+  _history?: ChatMessage[],
+  _tools?: Tool[],
+  _outputConfig?: OutputConfig,
 ): Promise<{ text: string }> => {
   return { text: 'Non-streaming not implemented for Mistral in this refactor.' };
 };
@@ -241,9 +230,9 @@ export const performOcr = async (
   apiKey: string,
   source: { file: File } | { url: string },
 ): Promise<{ text: string; error?: undefined } | { error: string; text?: undefined }> => {
-  const headers = getHeaders(apiKey);
+  const _headers = getHeaders(apiKey);
 
-  let finalHeaders = { Authorization: `Bearer ${apiKey}` };
+  const finalHeaders = { Authorization: `Bearer ${apiKey}` };
   let body: BodyInit;
 
   try {
@@ -284,25 +273,25 @@ export const performOcr = async (
 };
 
 export const generateContentWithSearch = async (
-  apiKey: string,
-  model: string,
-  prompt: string,
-  systemInstruction?: string,
+  _apiKey: string,
+  _model: string,
+  _prompt: string,
+  _systemInstruction?: string,
 ): Promise<{ text: string; citations: { title: string; uri: string }[] }> => {
   return { text: `Error: Web Search is not supported by Mistral.`, citations: [] };
 };
 
 export const generateImage = async (
-  apiKey: string,
-  prompt: string,
+  _apiKey: string,
+  _prompt: string,
 ): Promise<{ image: string; error?: undefined } | { error: string; image?: undefined }> => {
   return { error: 'Image generation is not supported by Mistral.' };
 };
 
 export const editImage = async (
-  apiKey: string,
-  prompt: string,
-  image: { mimeType: string; data: string },
+  _apiKey: string,
+  _prompt: string,
+  _image: { mimeType: string; data: string },
 ): Promise<{ image?: string; text?: string; error?: string }> => {
   return { error: 'Image modification is not supported by Mistral.' };
 };

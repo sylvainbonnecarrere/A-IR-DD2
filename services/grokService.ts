@@ -6,9 +6,6 @@ import type {
   ProviderRequestBody,
   RawProviderToolCall,
   ProviderCitation,
-  RawLMStudioModel,
-  ProviderToolDefinition,
-  ProviderResponseFormat,
 } from './llm/providerApi.types';
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
@@ -24,7 +21,7 @@ const createApiError = async (response: Response): Promise<Error> => {
     const errorData = JSON.parse(errorBody);
     const message = errorData.error?.message || errorData.message || JSON.stringify(errorData);
     return new Error(`xAI Grok API error: ${response.status} - ${message}`);
-  } catch (e) {
+  } catch {
     return new Error(`xAI Grok API error: ${response.status} - ${errorBody}`);
   }
 };
@@ -92,7 +89,7 @@ export const generateContentStream = async function* (
     if (!reader) throw new Error('Could not get reader from response body.');
     const decoder = new TextDecoder();
     let buffer = '';
-    let toolCalls: ToolCall[] = [];
+    const toolCalls: ToolCall[] = [];
 
     while (true) {
       const { done, value } = await reader.read();
@@ -135,32 +132,32 @@ export const generateContentStream = async function* (
 };
 
 export const generateContent = async (
-  apiKey: string,
-  model: string,
-  systemInstruction?: string,
-  history?: ChatMessage[],
-  tools?: Tool[],
-  outputConfig?: OutputConfig,
+  _apiKey: string,
+  _model: string,
+  _systemInstruction?: string,
+  _history?: ChatMessage[],
+  _tools?: Tool[],
+  _outputConfig?: OutputConfig,
 ): Promise<{ text: string }> => {
   return { text: 'Non-streaming not implemented for Grok.' };
 };
 export const generateContentWithSearch = async (
-  apiKey: string,
-  model: string,
-  prompt: string,
+  _apiKey: string,
+  _model: string,
+  _prompt: string,
 ): Promise<{ text: string; citations: ProviderCitation[] }> => {
   return { text: `Error: Web Search not supported.`, citations: [] };
 };
 export const generateImage = async (
-  apiKey: string,
-  prompt: string,
+  _apiKey: string,
+  _prompt: string,
 ): Promise<{ image: string; error?: undefined } | { error: string; image?: undefined }> => {
   return { error: 'Image generation is not supported.' };
 };
 export const editImage = async (
-  apiKey: string,
-  prompt: string,
-  image: { mimeType: string; data: string },
+  _apiKey: string,
+  _prompt: string,
+  _image: { mimeType: string; data: string },
 ): Promise<{ image?: string; text?: string; error?: string }> => {
   return { error: 'Image modification is not supported by Grok.' };
 };

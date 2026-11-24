@@ -1,15 +1,6 @@
 // services/anthropicService.ts
 import { ChatMessage, Tool, ToolCall, OutputConfig } from '../types';
-import type {
-  ProviderChatMessage,
-  ProviderContentPart,
-  ProviderRequestBody,
-  RawProviderToolCall,
-  ProviderCitation,
-  RawLMStudioModel,
-  ProviderToolDefinition,
-  ProviderResponseFormat,
-} from './llm/providerApi.types';
+import type { ProviderChatMessage, ProviderContentPart, ProviderToolDefinition, ProviderResponseFormat } from './llm/providerApi.types';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
@@ -157,7 +148,7 @@ export const generateContentStream = async function* (
     if (!reader) throw new Error('Could not get reader from response body.');
     const decoder = new TextDecoder();
     let buffer = '';
-    let currentToolCalls: ToolCall[] = [];
+    const currentToolCalls: ToolCall[] = [];
     let currentToolInput = '';
     let thinkingContent = '';
 
@@ -217,31 +208,31 @@ export const generateContentStream = async function* (
 };
 
 export const generateContent = async (
-  apiKey: string,
-  model: string,
-  systemInstruction?: string,
-  history?: ChatMessage[],
-  tools?: Tool[],
-  outputConfig?: OutputConfig,
+  _apiKey: string,
+  _model: string,
+  _systemInstruction?: string,
+  _history?: ChatMessage[],
+  _tools?: Tool[],
+  _outputConfig?: OutputConfig,
 ): Promise<{ text: string }> => ({ text: 'Not implemented' });
 
 export const generateContentWithSearch = async (
-  apiKey: string,
-  model: string,
-  prompt: string,
-  systemInstruction?: string,
+  _apiKey: string,
+  _model: string,
+  _prompt: string,
+  _systemInstruction?: string,
 ): Promise<{ text: string; citations: { title: string; uri: string }[] }> => {
   return { text: `Error: Web Search is not supported by Anthropic.`, citations: [] };
 };
 
 export const generateImage = async (
-  apiKey: string,
-  prompt: string,
+  _apiKey: string,
+  _prompt: string,
 ): Promise<{ image: string; error?: undefined } | { error: string; image?: undefined }> => ({ error: 'Not supported' });
 export const editImage = async (
-  apiKey: string,
-  prompt: string,
-  image: { mimeType: string; data: string },
+  _apiKey: string,
+  _prompt: string,
+  _image: { mimeType: string; data: string },
 ): Promise<{ image?: string; text?: string; error?: string }> => {
   return { error: 'Image modification is not supported by Anthropic.' };
 };

@@ -1,15 +1,6 @@
 // services/kimiService.ts
 import { ChatMessage, Tool, ToolCall, OutputConfig } from '../types';
-import type {
-  ProviderChatMessage,
-  ProviderContentPart,
-  ProviderRequestBody,
-  RawProviderToolCall,
-  ProviderCitation,
-  RawLMStudioModel,
-  ProviderToolDefinition,
-  ProviderResponseFormat,
-} from './llm/providerApi.types';
+import type { ProviderChatMessage, ProviderRequestBody, RawProviderToolCall, ProviderCitation } from './llm/providerApi.types';
 
 const KIMI_API_URL = 'https://kimi-k2.ai/api/v1/chat/completions';
 
@@ -78,7 +69,7 @@ export const generateContentStream = async function* (
     if (!reader) throw new Error('Could not get reader.');
     const decoder = new TextDecoder();
     let buffer = '';
-    let toolCalls: ToolCall[] = [];
+    const toolCalls: ToolCall[] = [];
 
     while (true) {
       const { done, value } = await reader.read();
@@ -121,32 +112,32 @@ export const generateContentStream = async function* (
 };
 
 export const generateContent = async (
-  apiKey: string,
-  model: string,
-  systemInstruction?: string,
-  history?: ChatMessage[],
-  tools?: Tool[],
-  outputConfig?: OutputConfig,
+  _apiKey: string,
+  _model: string,
+  _systemInstruction?: string,
+  _history?: ChatMessage[],
+  _tools?: Tool[],
+  _outputConfig?: OutputConfig,
 ): Promise<{ text: string }> => {
   return { text: 'Non-streaming not implemented.' };
 };
 export const generateContentWithSearch = async (
-  apiKey: string,
-  model: string,
-  prompt: string,
+  _apiKey: string,
+  _model: string,
+  _prompt: string,
 ): Promise<{ text: string; citations: ProviderCitation[] }> => {
   return { text: `Error: Kimi does not support web search.`, citations: [] };
 };
 export const generateImage = async (
-  apiKey: string,
-  prompt: string,
+  _apiKey: string,
+  _prompt: string,
 ): Promise<{ image: string; error?: undefined } | { error: string; image?: undefined }> => {
   return { error: 'Image generation is not supported.' };
 };
 export const editImage = async (
-  apiKey: string,
-  prompt: string,
-  image: { mimeType: string; data: string },
+  _apiKey: string,
+  _prompt: string,
+  _image: { mimeType: string; data: string },
 ): Promise<{ image?: string; text?: string; error?: string }> => {
   return { error: 'Image modification is not supported by Kimi.' };
 };
