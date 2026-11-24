@@ -15,13 +15,12 @@ import { IUser } from '../models/User.model';
 import { journalService } from '../services/journal.service';
 import { buildChatMessagesByInstance } from '../utils/chatMessageProjection';
 import { transformAgentInstanceForFrontend } from '../utils/transforms';
-import type { SnapshotJournalEntryDoc, SnapshotUserToolRunDoc } from '../domain/workflow/workspaceSnapshot.contract';
+import type { SnapshotUserToolRunDoc } from '../domain/workflow/workspaceSnapshot.contract';
 import { CanonicalRobotIdEnum } from '../types/robotIds';
 import { WebSearchParamsSchema, parseWebSearchParams } from '../schemas/web-search-params.schema';
 import {
   extractPersistenceConfigValue,
   normalizePersistenceConfigForPersistence,
-  normalizePersistenceConfigForProduct,
   summarizePersistenceConfigBoundary,
   type PersistenceConfig,
 } from '../types/persistence';

@@ -23,9 +23,9 @@
  */
 
 import { logger } from '../services/logger';
-import express, { Router, Request, Response, NextFunction } from 'express';
-import UserSettings, { IUserSettings } from '../models/UserSettings.model';
-import { User, type IUser } from '../models/User.model';
+import { Router, Request, Response } from 'express';
+import UserSettings from '../models/UserSettings.model';
+import { type IUser } from '../models/User.model';
 import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();

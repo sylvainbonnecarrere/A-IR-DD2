@@ -20,12 +20,10 @@
 import { logger } from '../services/logger';
 import { Router, Request, Response } from 'express';
 import { createReadStream, existsSync, statSync } from 'fs';
-import { stat, unlink } from 'fs/promises';
-import path from 'path';
+import { unlink } from 'fs/promises';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { requireAuth } from '../middleware/auth.middleware';
-import { validateRequest } from '../middleware/validation.middleware';
 import { MediaReference, IMediaReference } from '../models/MediaReference.model';
 import { AgentJournal } from '../models/AgentJournal.model';
 import { UserToolRun } from '../models/UserToolRun.model';
@@ -46,7 +44,6 @@ const router = Router();
 
 // Tailles de chunks pour streaming
 const DEFAULT_CHUNK_SIZE = 1024 * 1024; // 1MB
-const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
 const workflowMediaExplorerService = new WorkflowMediaExplorerService();
 
 interface DeleteMediaWarning {

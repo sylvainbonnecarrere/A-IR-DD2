@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
 import { Workflow } from '../models/Workflow.model';
 import { AgentInstance } from '../models/AgentInstance.model';
 import { WorkflowEdge } from '../models/WorkflowEdge.model';
-import { User, IUser } from '../models/User.model';
+import { IUser } from '../models/User.model';
 import { WorkflowNodeV2 } from '../models/WorkflowNodeV2.model'; // ⭐ PERF: Top-level import instead of dynamic require
 import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
@@ -501,7 +501,6 @@ router.patch('/:id/patch', requireAuth, requireOwnershipAsync(resolveWorkflowOwn
  */
 router.patch('/:id/nodes/:nodeId/position', requireAuth, requireOwnershipAsync(resolveWorkflowOwnershipByRequest), async (req, res) => {
   try {
-    const user = req.user as IUser;
     const { x, y } = req.body;
 
     if (typeof x !== 'number' || typeof y !== 'number') {
@@ -524,8 +523,7 @@ router.patch('/:id/nodes/:nodeId/position', requireAuth, requireOwnershipAsync(r
  */
 router.post('/:id/edges', requireAuth, requireOwnershipAsync(resolveWorkflowOwnershipByRequest), async (req, res) => {
   try {
-    const user = req.user as IUser;
-    const { source, target, type = 'default', data } = req.body;
+    const { source, target } = req.body;
 
     if (!source || !target) {
       return rejectLegacyWorkflowV1Mutation(res, 'edgeCreate', req.params.id);
@@ -546,8 +544,6 @@ router.post('/:id/edges', requireAuth, requireOwnershipAsync(resolveWorkflowOwne
  */
 router.delete('/:id/edges/:edgeId', requireAuth, requireOwnershipAsync(resolveWorkflowOwnershipByRequest), async (req, res) => {
   try {
-    const user = req.user as IUser;
-
     return rejectLegacyWorkflowV1Mutation(res, 'edgeDelete', req.params.id, req.params.edgeId);
   } catch (error) {
     logger.error('[Workflows] DELETE edge error:', error);

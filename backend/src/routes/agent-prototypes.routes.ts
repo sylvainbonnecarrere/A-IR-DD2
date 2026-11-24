@@ -51,9 +51,10 @@ const persistenceConfigSchema = z
   .optional();
 
 function buildPrototypeResponse(prototype: IAgentPrototype): Record<string, unknown> {
-  const responseObj: Record<string, any> = prototype.toObject();
-  responseObj.functionIds = (prototype.tools || []).map((id) => id.toString());
-  responseObj.toolSelections = prototype.toolSelections || responseObj.functionIds.map((toolId: string) => ({ toolId }));
+  const responseObj: Record<string, unknown> = prototype.toObject();
+  const functionIds = (prototype.tools || []).map((id) => id.toString());
+  responseObj.functionIds = functionIds;
+  responseObj.toolSelections = prototype.toolSelections || functionIds.map((toolId: string) => ({ toolId }));
   responseObj.tools = Array.isArray(prototype.legacyTools) ? prototype.legacyTools : [];
   const rawPersistenceConfig = extractPersistenceConfigValue(prototype.persistenceConfig);
   responseObj.persistenceConfig = normalizePersistenceConfigForProduct(rawPersistenceConfig);
@@ -258,7 +259,7 @@ router.post(
 
       // C3 FIX: Extraire functionIds et mapper vers tools (ObjectId[])
       const { functionIds, toolSelections, tools, webSearchParams, persistenceConfig, ...rest } = req.body;
-      const prototypeData: Record<string, any> = { userId: user.id, ...rest };
+      const prototypeData: Record<string, unknown> = { userId: user.id, ...rest };
       if (webSearchParams !== undefined) {
         prototypeData.webSearchParams = parseWebSearchParams(webSearchParams);
       }

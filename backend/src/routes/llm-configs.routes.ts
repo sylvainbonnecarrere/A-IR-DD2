@@ -3,7 +3,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { LLMConfig } from '../models/LLMConfig.model';
 // NOTE J4.4: UserSettings import REMOVED - llmConfigs field no longer exists
-import { requireAuth, requireOwnershipAsync } from '../middleware/auth.middleware';
+import { requireAuth } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { isLocalProvider } from '../utils/providerUtils';
 import type { IUser } from '../models/User.model';
@@ -77,7 +77,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         try {
           const decrypted = c.getDecryptedApiKey();
           maskedApiKey = '•'.repeat(decrypted.length);
-        } catch (err) {
+        } catch {
           maskedApiKey = '••••••••••••••••••••'; // 20 points default
         }
       }
@@ -136,7 +136,7 @@ router.get('/:provider', requireAuth, async (req: Request, res: Response) => {
       try {
         const decrypted = config.getDecryptedApiKey();
         maskedApiKey = '•'.repeat(decrypted.length);
-      } catch (err) {
+      } catch {
         maskedApiKey = '••••••••••••••••••••';
       }
     }
@@ -241,7 +241,7 @@ router.post('/', requireAuth, validateRequest(upsertConfigSchema), async (req: R
       try {
         const decrypted = config.getDecryptedApiKey();
         maskedApiKey = '•'.repeat(decrypted.length);
-      } catch (err) {
+      } catch {
         maskedApiKey = '••••••••••••••••••••';
       }
     }
