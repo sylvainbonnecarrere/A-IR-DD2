@@ -135,7 +135,9 @@ export function useAppWorkflowController({
         useRuntimeStore.getState().resetForWorkflowSwitch();
 
         setSwitchProgress(30);
-        const { data } = await apiClient.post(`/api/workflows/${workflowId}/select`);
+        const { data } = await apiClient.post<{ success: boolean; message?: string; reloadedData: WorkspaceSnapshot }>(
+          `/api/workflows/${workflowId}/select`,
+        );
 
         if (!data.success) {
           throw new Error(data.message || 'Switch failed');

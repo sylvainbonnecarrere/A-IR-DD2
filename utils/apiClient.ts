@@ -83,7 +83,7 @@ axiosInstance.interceptors.response.use(
             originalRequest.headers instanceof AxiosHeaders ? originalRequest.headers : new AxiosHeaders(originalRequest.headers);
           originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
           return axiosInstance(originalRequest);
-        } catch (refreshError) {
+        } catch {
           console.warn('[apiClient] Refresh token flow failed.', {
             url: originalRequest.url,
             method: originalRequest.method,
@@ -114,27 +114,27 @@ export const apiClient = {
   /**
    * GET request
    */
-  get: <T = any>(url: string, config?: AxiosRequestConfig) => axiosInstance.get<T>(url, config),
+  get: <T = unknown>(url: string, config?: AxiosRequestConfig) => axiosInstance.get<T>(url, config),
 
   /**
    * POST request
    */
-  post: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => axiosInstance.post<T>(url, data, config),
+  post: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) => axiosInstance.post<T>(url, data, config),
 
   /**
    * PUT request
    */
-  put: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => axiosInstance.put<T>(url, data, config),
+  put: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) => axiosInstance.put<T>(url, data, config),
 
   /**
    * PATCH request
    */
-  patch: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => axiosInstance.patch<T>(url, data, config),
+  patch: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) => axiosInstance.patch<T>(url, data, config),
 
   /**
    * DELETE request
    */
-  delete: <T = any>(url: string, config?: AxiosRequestConfig) => axiosInstance.delete<T>(url, config),
+  delete: <T = unknown>(url: string, config?: AxiosRequestConfig) => axiosInstance.delete<T>(url, config),
 
   /**
    * Get raw axios instance for advanced usage

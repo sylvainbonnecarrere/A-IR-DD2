@@ -635,7 +635,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     })),
 
   // Utility functions
-  getAgentsByRobot: (robotId) => {
+  getAgentsByRobot: (_robotId) => {
     const state = get();
     // TODO: Implement robot-specific filtering logic
     return state.agents;
@@ -680,8 +680,8 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     try {
       console.debug('[Workflows] Attempting GET /api/workflows via apiClient');
 
-      const { data } = await apiClient.get('/api/workflows');
-      const workflows: Workflow[] = data.workflows || data;
+      const { data } = await apiClient.get<Workflow[] | { workflows?: Workflow[] }>('/api/workflows');
+      const workflows: Workflow[] = Array.isArray(data) ? data : data.workflows || [];
 
       console.debug(`[Workflows] Primary endpoint returned ${workflows.length} workflows`);
 
@@ -696,11 +696,14 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       });
 
       console.debug('[Workflows] State updated successfully');
-    } catch (primaryError) {
+    } catch {
       // ⭐ ROBUST FALLBACK: Try workspace endpoint if primary fails
       console.warn('[Workflows] Primary endpoint failed, attempting fallback to /api/user/workspace');
       try {
-        const { data: workspaceData } = await apiClient.get('/api/user/workspace');
+        const { data: workspaceData } = await apiClient.get<{
+          workflow?: Partial<Workflow> & { id?: string };
+          metadata?: { userId?: string };
+        }>('/api/user/workspace');
         const currentWorkflow = workspaceData.workflow;
         if (!currentWorkflow) {
           throw new Error('No workflow in workspace response');
@@ -742,7 +745,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   createWorkflow: async (name: string, description?: string): Promise<Workflow> => {
     set({ isLoadingWorkflows: true, workflowLoadError: null });
     try {
-      const { data: newWorkflow } = await apiClient.post('/api/workflows', { name, description });
+      const { data: newWorkflow } = await apiClient.post<Workflow>('/api/workflows', { name, description });
 
       set((state) => ({
         workflows: [...state.workflows, newWorkflow],
@@ -768,7 +771,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       if (isDefault !== undefined) {
         body.isDefault = isDefault;
       }
-      const { data: updatedWorkflow } = await apiClient.put(`/api/workflows/${id}`, body);
+      const { data: updatedWorkflow } = await apiClient.put<Workflow>(`/api/workflows/${id}`, body);
 
       set((state) => {
         let updatedWorkflows = state.workflows.map((w) => (w._id === id ? updatedWorkflow : w));
@@ -838,7 +841,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
    */
   getWorkflowStats: async (id: string) => {
     try {
-      const { data } = await apiClient.get(`/api/workflows/${id}/stats`);
+      const { data } = await apiClient.get<{ agentInstanceCount: number; nodeCount: number }>(`/api/workflows/${id}/stats`);
       return data;
     } catch (error) {
       console.error('Failed to fetch workflow stats:', error);

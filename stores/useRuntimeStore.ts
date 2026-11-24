@@ -3,7 +3,6 @@ import {
   ChatMessage,
   InvisibleHistorySummaryState,
   LLMConfig,
-  LLMProvider,
   LocalLLMProfile,
   PendingNodeAttachment,
   RobotId,

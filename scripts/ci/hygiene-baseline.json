@@ -1,10 +1,10 @@
 {
   "note": "Baseline ratchet hygiène — ne recale que quand la dette DIMINUE.",
-  "updatedAt": "2026-11-24T22:41:54.767Z",
+  "updatedAt": "2026-11-24T23:17:36.119Z",
   "anyFrontend": 0,
   "anyBackend": 0,
   "consoleLogFrontend": 0,
   "consoleLogBackend": 0,
-  "lintWarningsFrontend": 162,
+  "lintWarningsFrontend": 129,
   "lintWarningsBackend": 0
 }

@@ -21,7 +21,6 @@ import type {
   FunctionFilter,
   SandboxRunResult,
   FunctionRunRecord,
-  FunctionRunListResponse,
   FunctionRunSortField,
   FunctionRunSortOrder,
   FunctionRunCleanupResult,

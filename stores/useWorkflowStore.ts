@@ -23,7 +23,7 @@ export interface WorkflowExecution {
   startedAt: string;
   completedAt?: string;
   currentNodeId?: string;
-  results: Record<string, any>;
+  results: Record<string, unknown>;
   errors: Record<string, Error>;
 }
 
@@ -74,9 +74,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   markDirty: (changeType?: string) => {
     set((state) => ({
       isDirty: true,
-      pendingChanges: changeType
-        ? [...new Set([...state.pendingChanges, changeType])]
-        : state.pendingChanges
+      pendingChanges: changeType ? [...new Set([...state.pendingChanges, changeType])] : state.pendingChanges,
     }));
   },
 
@@ -85,7 +83,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       isDirty: false,
       lastSynced: new Date(),
       syncVersion: newVersion ?? get().syncVersion + 1,
-      pendingChanges: []
+      pendingChanges: [],
     });
   },
 
@@ -94,7 +92,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     return {
       isDirty: state.isDirty,
       lastSynced: state.lastSynced,
-      pendingCount: state.pendingChanges.length
+      pendingCount: state.pendingChanges.length,
     };
   },
 
@@ -106,17 +104,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         description: workflowData.description || '',
         isDefault: workflowData.isDefault,
         isActive: workflowData.isActive,
-        canvasState: workflowData.canvasState
+        canvasState: workflowData.canvasState,
       },
       isDirty: false,
-      lastSynced: new Date()
+      lastSynced: new Date(),
     });
   },
 
   getCurrentWorkflowId: () => get().currentWorkflow?.id || null,
 
   toggleConfigPanel: () => {
-    set(state => ({ isConfigPanelOpen: !state.isConfigPanelOpen }));
+    set((state) => ({ isConfigPanelOpen: !state.isConfigPanelOpen }));
   },
 
   // Execution backed by the canonical V2 workflow run API
@@ -132,7 +130,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         status: result.status as FunctionRunRecord['status'],
         startedAt: new Date().toISOString(),
         results: {},
-        errors: {}
+        errors: {},
       };
 
       set({ execution });
@@ -150,7 +148,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     try {
       await WorkflowRunService.cancelRun(execution.id);
       set({
-        execution: { ...execution, status: 'stopped' }
+        execution: { ...execution, status: 'stopped' },
       });
     } catch (error) {
       console.error('[useWorkflowStore] Failed to stop workflow run:', error);
@@ -165,7 +163,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     try {
       await WorkflowRunService.cancelRun(execution.id);
       set({
-        execution: { ...execution, status: 'stopped' }
+        execution: { ...execution, status: 'stopped' },
       });
     } catch (error) {
       console.error('[useWorkflowStore] Failed to cancel workflow run:', error);
@@ -173,13 +171,14 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     }
   },
 
-  resetAll: () => set({
-    currentWorkflow: null,
-    execution: null,
-    isConfigPanelOpen: false,
-    isDirty: false,
-    lastSynced: null,
-    syncVersion: 0,
-    pendingChanges: []
-  })
+  resetAll: () =>
+    set({
+      currentWorkflow: null,
+      execution: null,
+      isConfigPanelOpen: false,
+      isDirty: false,
+      lastSynced: null,
+      syncVersion: 0,
+      pendingChanges: [],
+    }),
 }));

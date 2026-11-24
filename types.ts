@@ -508,7 +508,7 @@ export interface ConnectionPrototype {
     type: 'bearer' | 'api_key' | 'oauth' | 'basic' | 'none';
     credentials?: Record<string, string>;
   };
-  configuration: Record<string, any>;
+  configuration: Record<string, unknown>;
   creator_id: RobotId; // Must be RobotId.Com
   created_at: string;
   updated_at: string;
@@ -519,8 +519,8 @@ export interface FilePrototype {
   name: string;
   type: 'upload' | 'transformation' | 'validation' | 'output';
   format: string; // 'json', 'csv', 'pdf', etc.
-  validation_rules: Record<string, any>;
-  transformation_config?: Record<string, any>;
+  validation_rules: Record<string, unknown>;
+  transformation_config?: Record<string, unknown>;
   creator_id: RobotId; // Must be RobotId.Phil
   created_at: string;
   updated_at: string;
@@ -531,7 +531,7 @@ export interface EventPrototype {
   name: string;
   type: 'trigger' | 'scheduler' | 'webhook' | 'conditional';
   schedule?: string; // cron expression
-  conditions?: Record<string, any>;
+  conditions?: Record<string, unknown>;
   rate_limit?: {
     max_calls: number;
     time_window: number; // seconds

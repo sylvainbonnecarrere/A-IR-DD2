@@ -18,9 +18,7 @@ export interface AgentTemplate {
  * Get available LLM providers from provided configs
  */
 const getAvailableLLMProvidersFromConfigs = (llmConfigs: LLMConfig[]): LLMProvider[] => {
-  const availableProviders = llmConfigs
-    .filter(config => config.enabled)
-    .map(config => config.provider);
+  const availableProviders = llmConfigs.filter((config) => config.enabled).map((config) => config.provider);
 
   return availableProviders;
 };
@@ -32,12 +30,10 @@ const getAvailableLLMProviders = (): LLMProvider[] => {
   if (stored) {
     try {
       const configs = JSON.parse(stored) as LLMConfig[];
-      const availableProviders = configs
-        .filter(config => config.enabled)
-        .map(config => config.provider);
+      const availableProviders = configs.filter((config) => config.enabled).map((config) => config.provider);
 
       return availableProviders;
-    } catch (e) {
+    } catch {
       // Return empty array if parsing fails
       return [];
     }
@@ -49,7 +45,7 @@ const getAvailableLLMProviders = (): LLMProvider[] => {
 /**
  * Get default capabilities for a provider
  */
-const getDefaultCapabilities = (provider: LLMProvider): LLMCapability[] => {
+const getDefaultCapabilities = (_provider: LLMProvider): LLMCapability[] => {
   // Return basic capabilities that most providers support
   return [LLMCapability.Chat, LLMCapability.FunctionCalling];
 };
@@ -58,12 +54,12 @@ const getDefaultCapabilities = (provider: LLMProvider): LLMCapability[] => {
  * Get available capabilities for a given LLM provider from provided configs
  */
 const getProviderCapabilitiesFromConfigs = (provider: LLMProvider, llmConfigs: LLMConfig[]): LLMCapability[] => {
-  const providerConfig = llmConfigs.find(c => c.provider === provider);
+  const providerConfig = llmConfigs.find((c) => c.provider === provider);
 
   if (providerConfig && providerConfig.capabilities) {
     const capabilities = Object.keys(providerConfig.capabilities)
-      .filter(cap => providerConfig.capabilities[cap as keyof typeof providerConfig.capabilities])
-      .map(cap => cap as LLMCapability);
+      .filter((cap) => providerConfig.capabilities[cap as keyof typeof providerConfig.capabilities])
+      .map((cap) => cap as LLMCapability);
 
     return capabilities;
   }
@@ -81,16 +77,16 @@ const getProviderCapabilities = (provider: LLMProvider): LLMCapability[] => {
   if (stored) {
     try {
       const configs = JSON.parse(stored) as LLMConfig[];
-      const providerConfig = configs.find(c => c.provider === provider);
+      const providerConfig = configs.find((c) => c.provider === provider);
 
       if (providerConfig && providerConfig.capabilities) {
         const capabilities = Object.keys(providerConfig.capabilities)
-          .filter(cap => providerConfig.capabilities[cap as keyof typeof providerConfig.capabilities])
-          .map(cap => cap as LLMCapability);
+          .filter((cap) => providerConfig.capabilities[cap as keyof typeof providerConfig.capabilities])
+          .map((cap) => cap as LLMCapability);
 
         return capabilities;
       }
-    } catch (e) {
+    } catch {
       // Fallback to default capabilities
     }
   }
@@ -101,13 +97,19 @@ const getProviderCapabilities = (provider: LLMProvider): LLMCapability[] => {
     [LLMProvider.Anthropic]: [LLMCapability.Chat, LLMCapability.FileUpload, LLMCapability.FunctionCalling],
     [LLMProvider.Mistral]: [LLMCapability.Chat, LLMCapability.FileUpload, LLMCapability.FunctionCalling, LLMCapability.Embedding],
     [LLMProvider.DeepSeek]: [LLMCapability.Chat, LLMCapability.FunctionCalling, LLMCapability.Reasoning],
-    [LLMProvider.Gemini]: [LLMCapability.Chat, LLMCapability.FileUpload, LLMCapability.ImageGeneration, LLMCapability.FunctionCalling, LLMCapability.WebSearch],
+    [LLMProvider.Gemini]: [
+      LLMCapability.Chat,
+      LLMCapability.FileUpload,
+      LLMCapability.ImageGeneration,
+      LLMCapability.FunctionCalling,
+      LLMCapability.WebSearch,
+    ],
     [LLMProvider.Grok]: [LLMCapability.Chat, LLMCapability.FileUpload, LLMCapability.FunctionCalling],
     [LLMProvider.Perplexity]: [LLMCapability.Chat, LLMCapability.FunctionCalling, LLMCapability.WebSearch],
     [LLMProvider.Qwen]: [LLMCapability.Chat, LLMCapability.FileUpload, LLMCapability.FunctionCalling],
     [LLMProvider.Kimi]: [LLMCapability.Chat, LLMCapability.FunctionCalling],
     [LLMProvider.LMStudio]: [LLMCapability.Chat, LLMCapability.FunctionCalling],
-    [LLMProvider.ArcLLM]: [LLMCapability.VideoGeneration, LLMCapability.MapsGrounding, LLMCapability.WebSearchGrounding]
+    [LLMProvider.ArcLLM]: [LLMCapability.VideoGeneration, LLMCapability.MapsGrounding, LLMCapability.WebSearchGrounding],
   };
 
   return defaultCapabilities[provider] || [LLMCapability.Chat];
@@ -138,9 +140,7 @@ export const getCompatibleProvider = (templateCapabilities: LLMCapability[]): LL
     const providerCapabilities = getProviderCapabilities(provider);
 
     // Check if provider supports all required template capabilities
-    const hasAllCapabilities = templateCapabilities.every(cap =>
-      providerCapabilities.includes(cap)
-    );
+    const hasAllCapabilities = templateCapabilities.every((cap) => providerCapabilities.includes(cap));
 
     if (hasAllCapabilities) {
       return provider;
@@ -153,17 +153,17 @@ export const getCompatibleProvider = (templateCapabilities: LLMCapability[]): LL
 // Helper pour créer un outil de recherche web simple
 const createWebSearchTool = (): Tool => ({
   name: 'search_web_py',
-  description: 'Recherche d\'informations sur le web',
+  description: "Recherche d'informations sur le web",
   parameters: {
     type: 'object',
     properties: {
       query: {
         type: 'string',
-        description: 'Requête de recherche'
-      }
+        description: 'Requête de recherche',
+      },
     },
-    required: ['query']
-  }
+    required: ['query'],
+  },
 });
 
 // Templates prédéfinis pour chaque robot
@@ -192,13 +192,13 @@ Format tes réponses de manière structurée avec des sections claires pour chaq
       llmProvider: LLMProvider.Anthropic,
       model: 'claude-3-sonnet-20240229',
       capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling, LLMCapability.WebSearch],
-      tools: [createWebSearchTool()]
-    }
+      tools: [createWebSearchTool()],
+    },
   },
   {
     id: 'archi-architect',
     name: 'Architecte Système',
-    description: 'Conception d\'architectures logicielles et microservices',
+    description: "Conception d'architectures logicielles et microservices",
     category: 'specialist',
     robotId: RobotId.Archi,
     icon: '🏗️',
@@ -217,15 +217,15 @@ Pour chaque demande, analyse le contexte, propose des solutions alternatives et 
       llmProvider: LLMProvider.OpenAI,
       model: 'gpt-4',
       capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
-      tools: []
-    }
+      tools: [],
+    },
   },
 
   // BOS - Templates de supervision et monitoring
   {
     id: 'bos-project-manager',
     name: 'Chef de Projet',
-    description: 'Gestion de projet, planification et coordination d\'équipe',
+    description: "Gestion de projet, planification et coordination d'équipe",
     category: 'assistant',
     robotId: RobotId.Bos,
     icon: '📊',
@@ -245,15 +245,15 @@ Adopte une approche pragmatique et propose des solutions concrètes avec des liv
       llmProvider: LLMProvider.Gemini,
       model: 'gemini-pro',
       capabilities: [LLMCapability.Chat, LLMCapability.WebSearch],
-      tools: [createWebSearchTool()]
-    }
+      tools: [createWebSearchTool()],
+    },
   },
 
   // COM - Templates de communication et intégration
   {
     id: 'com-api-specialist',
     name: 'Spécialiste API',
-    description: 'Expert en conception et intégration d\'APIs REST/GraphQL',
+    description: "Expert en conception et intégration d'APIs REST/GraphQL",
     category: 'specialist',
     robotId: RobotId.Com,
     icon: '🔌',
@@ -272,8 +272,8 @@ Fournis des exemples de code pratiques et des recommandations basées sur les me
       llmProvider: LLMProvider.OpenAI,
       model: 'gpt-4',
       capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling, LLMCapability.WebSearch],
-      tools: [createWebSearchTool()]
-    }
+      tools: [createWebSearchTool()],
+    },
   },
 
   // PHIL - Templates de traitement de données
@@ -299,8 +299,8 @@ Présente tes analyses de manière claire avec des visualisations conceptuelles 
       llmProvider: LLMProvider.Anthropic,
       model: 'claude-3-sonnet-20240229',
       capabilities: [LLMCapability.Chat, LLMCapability.FileUpload, LLMCapability.WebSearch],
-      tools: [createWebSearchTool()]
-    }
+      tools: [createWebSearchTool()],
+    },
   },
 
   // TIM - Templates d'automatisation et événements
@@ -326,8 +326,8 @@ Propose des solutions d'automatisation concrètes avec une approche progressive 
       llmProvider: LLMProvider.Mistral,
       model: 'mistral-large-latest',
       capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
-      tools: [createWebSearchTool()]
-    }
+      tools: [createWebSearchTool()],
+    },
   },
 
   // Templates généralistes
@@ -354,8 +354,8 @@ Sois toujours utile, précis et bienveillant dans tes réponses.`,
       llmProvider: LLMProvider.Gemini,
       model: 'gemini-pro',
       capabilities: [LLMCapability.Chat, LLMCapability.WebSearch],
-      tools: [createWebSearchTool()]
-    }
+      tools: [createWebSearchTool()],
+    },
   },
 
   // ===========================
@@ -389,8 +389,8 @@ Sois créatif et propose des variations intéressantes !`,
       llmProvider: LLMProvider.ArcLLM,
       model: 'arc-video-v1',
       capabilities: [LLMCapability.VideoGeneration],
-      tools: []
-    }
+      tools: [],
+    },
   },
   {
     id: 'arcllm-research-assistant',
@@ -424,19 +424,19 @@ Sois précis, factuel et cite toujours tes sources !`,
       llmProvider: LLMProvider.ArcLLM,
       model: 'arc-grounding-v1',
       capabilities: [LLMCapability.Chat, LLMCapability.MapsGrounding, LLMCapability.WebSearchGrounding],
-      tools: []
-    }
-  }
+      tools: [],
+    },
+  },
 ];
 
 // Fonction utilitaire pour filtrer les templates par robot
 export const getTemplatesByRobot = (robotId: RobotId): AgentTemplate[] => {
-  return AGENT_TEMPLATES.filter(template => template.robotId === robotId);
+  return AGENT_TEMPLATES.filter((template) => template.robotId === robotId);
 };
 
 // Fonction utilitaire pour filtrer les templates par catégorie
 export const getTemplatesByCategory = (category: AgentTemplate['category']): AgentTemplate[] => {
-  return AGENT_TEMPLATES.filter(template => template.category === category);
+  return AGENT_TEMPLATES.filter((template) => template.category === category);
 };
 
 /**
@@ -445,13 +445,11 @@ export const getTemplatesByCategory = (category: AgentTemplate['category']): Age
 export const getCompatibleTemplates = (): AgentTemplate[] => {
   const availableProviders = getAvailableLLMProviders();
 
-  return AGENT_TEMPLATES.filter(template => {
+  return AGENT_TEMPLATES.filter((template) => {
     // Check if any available provider can support the template's capabilities
-    return availableProviders.some(provider => {
+    return availableProviders.some((provider) => {
       const providerCapabilities = getProviderCapabilities(provider);
-      return template.template.capabilities.every(cap =>
-        providerCapabilities.includes(cap)
-      );
+      return template.template.capabilities.every((cap) => providerCapabilities.includes(cap));
     });
   });
 };
@@ -460,7 +458,7 @@ export const getCompatibleTemplates = (): AgentTemplate[] => {
  * Get templates filtered by both category and compatibility
  */
 export const getCompatibleTemplatesByCategory = (category: AgentTemplate['category']): AgentTemplate[] => {
-  return getCompatibleTemplates().filter(template => template.category === category);
+  return getCompatibleTemplates().filter((template) => template.category === category);
 };
 
 /**
@@ -484,7 +482,7 @@ const adaptLLMProvider = (templateProvider: LLMProvider, availableProviders: LLM
     [LLMProvider.Qwen]: [LLMProvider.DeepSeek, LLMProvider.Mistral, LLMProvider.OpenAI, LLMProvider.Anthropic],
     [LLMProvider.Kimi]: [LLMProvider.DeepSeek, LLMProvider.Mistral, LLMProvider.OpenAI, LLMProvider.Anthropic],
     [LLMProvider.LMStudio]: [LLMProvider.OpenAI, LLMProvider.Anthropic, LLMProvider.DeepSeek, LLMProvider.Mistral],
-    [LLMProvider.ArcLLM]: [LLMProvider.Gemini, LLMProvider.OpenAI, LLMProvider.Anthropic, LLMProvider.DeepSeek]
+    [LLMProvider.ArcLLM]: [LLMProvider.Gemini, LLMProvider.OpenAI, LLMProvider.Anthropic, LLMProvider.DeepSeek],
   };
 
   const fallbacks = fallbackMap[templateProvider] || availableProviders;
@@ -528,9 +526,7 @@ export const createAgentFromTemplateObject = (template: AgentTemplate, customNam
     providerCapabilities = getProviderCapabilities(adaptedProvider);
   }
 
-  const adaptedCapabilities = template.template.capabilities.filter(cap =>
-    providerCapabilities.includes(cap)
-  );
+  const adaptedCapabilities = template.template.capabilities.filter((cap) => providerCapabilities.includes(cap));
 
   const finalAgent = {
     ...template.template,
@@ -541,7 +537,7 @@ export const createAgentFromTemplateObject = (template: AgentTemplate, customNam
     capabilities: adaptedCapabilities, // Use compatible capabilities only
     creator_id: template.robotId,
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
   };
 
   return finalAgent;
@@ -552,7 +548,7 @@ export const createAgentFromTemplateObject = (template: AgentTemplate, customNam
  * Version legacy pour compatibilité
  */
 export const createAgentFromTemplate = (templateId: string, customName?: string, llmConfigs?: LLMConfig[]): Agent | null => {
-  const template = AGENT_TEMPLATES.find(t => t.id === templateId);
+  const template = AGENT_TEMPLATES.find((t) => t.id === templateId);
   if (!template) return null;
 
   return createAgentFromTemplateObject(template, customName, llmConfigs);

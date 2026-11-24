@@ -67,7 +67,7 @@ async function testLMStudio() {
     models.slice(0, 3).forEach((model) => {
       console.debug(`  📋 ${model.name} (${model.type}, ${model.parameters})`);
     });
-  } catch (error) {
+  } catch {
     console.debug('⚠️ Modèles par défaut utilisés');
   }
 }
