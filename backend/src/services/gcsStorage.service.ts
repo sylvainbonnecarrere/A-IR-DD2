@@ -13,7 +13,7 @@
  */
 
 import { logger } from './logger';
-import { Storage, Bucket, File, GetSignedUrlConfig, StorageOptions } from '@google-cloud/storage';
+import { Storage, Bucket, GetSignedUrlConfig, StorageOptions } from '@google-cloud/storage';
 import { asErrorShape } from '../utils/errorGuards';
 import { Readable } from 'stream';
 
@@ -74,7 +74,7 @@ export class GCSStorageStrategy implements ICloudStorageStrategy {
       try {
         const credentials = JSON.parse(config.gcs.serviceAccountKey);
         storageConfig.credentials = credentials;
-      } catch (error) {
+      } catch {
         throw new CloudStorageError('Clé de service account invalide (JSON mal formé)', CloudStorageErrorCodes.INVALID_CREDENTIALS, 'gcs');
       }
     }

@@ -5,7 +5,6 @@ import type { RuntimeHealthReport } from '../../types/runtimeHealth.types';
 import type { SandboxRunnerPort, SandboxRunnerReadiness } from './SandboxRunner';
 import type {
   SandboxExecutionFailureKind,
-  SandboxExecutionMetadata,
   SandboxExecutionRequest,
   SandboxExecutionResult,
   SandboxSyntaxCheckResult,

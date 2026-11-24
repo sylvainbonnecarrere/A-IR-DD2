@@ -53,7 +53,6 @@ const debugLog = (message: string) => {
 
 // Durées par défaut
 const DEFAULT_SIGNED_URL_EXPIRY = 3600; // 1 heure
-const DEFAULT_UPLOAD_EXPIRY = 300; // 5 minutes pour upload
 
 // ============================================
 // SERVICE S3 STORAGE STRATEGY

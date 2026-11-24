@@ -4,7 +4,6 @@ import path from 'path';
 import mongoose from 'mongoose';
 import { AgentInstance } from '../models/AgentInstance.model';
 import { AgentJournal } from '../models/AgentJournal.model';
-import { Workflow } from '../models/Workflow.model';
 import { IMediaReference, IUserToolRunArtifact } from '../models';
 import {
   mediaReferenceMatchesJournalMediaContract,

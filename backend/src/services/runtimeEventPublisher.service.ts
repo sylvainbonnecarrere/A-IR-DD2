@@ -1,4 +1,4 @@
-import { buildRuntimeEvent, RuntimeEventAggregateType, RuntimeEventEnvelope, RuntimeEventType } from '../domain/execution/runtimeEvent.contract';
+import { buildRuntimeEvent, RuntimeEventAggregateType, RuntimeEventType } from '../domain/execution/runtimeEvent.contract';
 
 export interface RuntimeEventEmitter {
   emitRuntimeEvent: (workspaceId: string, event: unknown) => boolean;
@@ -76,7 +76,9 @@ export class RuntimeEventPublisher {
 
   // ⭐ J7-09: événements de visibilité quarantaine/fencing (payload whitelisté, aucun secret).
 
-  public publishRunQuarantined(context: RuntimeEventPublishContext & { lockHeld?: boolean; reason?: string; operationId?: string }): boolean {
+  public publishRunQuarantined(
+    context: RuntimeEventPublishContext & { lockHeld?: boolean; reason?: string; operationId?: string },
+  ): boolean {
     return this.emitRunEvent('run:quarantined', context, {
       lockHeld: context.lockHeld ?? true,
       reason: context.reason,
@@ -92,7 +94,9 @@ export class RuntimeEventPublisher {
     });
   }
 
-  public publishRunRecoveryRelaunched(context: RuntimeEventPublishContext & { newRunId?: string; recoveryAttemptCount?: number; reason?: string }): boolean {
+  public publishRunRecoveryRelaunched(
+    context: RuntimeEventPublishContext & { newRunId?: string; recoveryAttemptCount?: number; reason?: string },
+  ): boolean {
     return this.emitRunEvent('run:recovery_relaunched', context, {
       newRunId: context.newRunId,
       recoveryAttemptCount: context.recoveryAttemptCount,
@@ -100,11 +104,7 @@ export class RuntimeEventPublisher {
     });
   }
 
-  private emitRunEvent(
-    type: RuntimeEventType,
-    context: RuntimeEventPublishContext,
-    extraPayload: Record<string, unknown>,
-  ): boolean {
+  private emitRunEvent(type: RuntimeEventType, context: RuntimeEventPublishContext, extraPayload: Record<string, unknown>): boolean {
     const workspaceId = context.workspaceId.trim();
     const roomWorkspaceId = context.roomWorkspaceId ? context.roomWorkspaceId.trim() : workspaceId;
     if (!workspaceId || roomWorkspaceId !== workspaceId) {
@@ -121,10 +121,19 @@ export class RuntimeEventPublisher {
     const payload: Record<string, unknown> = Object.fromEntries(
       Object.entries({ ...basePayload, ...extraPayload }).filter(([, value]) => value !== undefined),
     );
-    return this.emit(workspaceId, type, 'run', context.runId ?? context.workflowId ?? workspaceId, payload, context.correlationId as string | undefined);
+    return this.emit(
+      workspaceId,
+      type,
+      'run',
+      context.runId ?? context.workflowId ?? workspaceId,
+      payload,
+      context.correlationId as string | undefined,
+    );
   }
 
-  private publishStateChange(context: RuntimeEventPublishContext & { aggregateType: RuntimeEventAggregateType; aggregateId: string }): boolean {
+  private publishStateChange(
+    context: RuntimeEventPublishContext & { aggregateType: RuntimeEventAggregateType; aggregateId: string },
+  ): boolean {
     const workspaceId = context.workspaceId.trim();
     const roomWorkspaceId = context.roomWorkspaceId ? context.roomWorkspaceId.trim() : workspaceId;
 
@@ -258,13 +267,21 @@ export class RuntimeEventPublisher {
     return aggregateType === 'run' ? 'run:progressed' : 'task:progressed';
   }
 
-  private buildEventSignature(workspaceId: string, aggregateType: RuntimeEventAggregateType, aggregateId: string, type: RuntimeEventType, payload: Record<string, unknown>): string {
+  private buildEventSignature(
+    workspaceId: string,
+    aggregateType: RuntimeEventAggregateType,
+    aggregateId: string,
+    type: RuntimeEventType,
+    payload: Record<string, unknown>,
+  ): string {
     return JSON.stringify({ workspaceId, aggregateType, aggregateId, type, payload });
   }
 }
 
 export function createRuntimeEventPublisher(emitter?: RuntimeEventEmitter): RuntimeEventPublisher {
-  return new RuntimeEventPublisher(emitter ?? {
-    emitRuntimeEvent: (workspaceId, event) => configuredRuntimeEventEmitter?.emitRuntimeEvent(workspaceId, event) ?? false,
-  });
+  return new RuntimeEventPublisher(
+    emitter ?? {
+      emitRuntimeEvent: (workspaceId, event) => configuredRuntimeEventEmitter?.emitRuntimeEvent(workspaceId, event) ?? false,
+    },
+  );
 }

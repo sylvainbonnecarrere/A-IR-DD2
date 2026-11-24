@@ -638,7 +638,7 @@ export async function runDatabaseBootstrap(db: mongoose.mongo.Db): Promise<void>
       db.listCollections().toArray(),
       new Promise((_, reject) => setTimeout(() => reject(new Error('listCollections timeout')), 5000)),
     ])) as mongoose.mongo.CollectionInfo[];
-  } catch (timeoutError) {
+  } catch {
     logger.warn('[Database] listCollections timeout - proceeding with empty collection list');
     currentDbCollections = [];
   }
@@ -853,7 +853,7 @@ async function verifyIndexes(db: mongoose.mongo.Db): Promise<void> {
       const collection = db.collection(collectionName);
       const indexes = await collection.listIndexes().toArray();
       logger.debug(`  ${collectionName}: ${indexes.length} index(es)`);
-    } catch (error) {
+    } catch {
       // Non-critical: Just log
       logger.debug(`  ${collectionName}: Could not verify indexes`);
     }

@@ -17,14 +17,7 @@ import { logger } from './logger';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import {
-  MediaPayload,
-  FileMetadata,
-  PersistenceConfig,
-  MAX_DATABASE_MEDIA_SIZE,
-  ALLOWED_MIME_TYPES,
-  MediaStorageMode,
-} from '../types/persistence';
+import { MediaPayload, FileMetadata, PersistenceConfig, MAX_DATABASE_MEDIA_SIZE, ALLOWED_MIME_TYPES } from '../types/persistence';
 import { CloudConnectionProfile } from '../models/CloudConnectionProfile.model';
 import {
   CloudStorageConfig,

@@ -9,7 +9,6 @@ import { IWorkflowMigrationService, IMigrationResult } from './IWorkflowMigratio
 import { IUserRepository } from '../repositories/IUserRepository';
 import { IWorkflowRepository } from '../repositories/IWorkflowRepository';
 import { IWorkflow } from '../models/Workflow.model';
-import { IUser } from '../models/User.model';
 import { User } from '../models/User.model';
 
 /**
