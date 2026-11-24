@@ -20,7 +20,7 @@ import { useDesignStore } from '../stores/useDesignStore';
 import { useWorkflowStore } from '../stores/useWorkflowStore';
 import { useRuntimeStore } from '../stores/useRuntimeStore';
 import { wipeGuestData, GUEST_STORAGE_KEYS } from '../utils/guestDataUtils';
-import { LLMCapability, LLMProvider, RobotId } from '../types';
+import { LLMCapability, LLMProvider } from '../types';
 import { createTestAgentDraft } from './builders/domainBuilders';
 
 function createIsolationAgentDraft(name: string, role: string, systemPrompt: string) {

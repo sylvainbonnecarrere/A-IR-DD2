@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { render, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
@@ -24,12 +24,17 @@ import { useRuntimeStore } from '../stores/useRuntimeStore';
 const TestComponent: React.FC<{ onDone: (result: unknown) => void }> = ({ onDone }) => {
   const auth = useAuth();
   const [done, setDone] = useState(false);
+  // Refs pour lire l'auth courant et onDone sans re-déclencher l'effet de sonde
+  const authRef = useRef(auth);
+  authRef.current = auth;
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
   useEffect(() => {
     if (auth.isLoading) return; // wait hydration
 
     // Perform logout and then evaluate effects
-    auth.logout();
+    authRef.current.logout();
 
     // Allow microtask queue to flush and stores to update
     setTimeout(() => {
@@ -51,7 +56,7 @@ const TestComponent: React.FC<{ onDone: (result: unknown) => void }> = ({ onDone
         runtimeSessions: (runtime as unknown as { sessions?: unknown[] }).sessions?.length,
       };
 
-      onDone(result);
+      onDoneRef.current(result);
       setDone(true);
     }, 0);
   }, [auth.isLoading]);

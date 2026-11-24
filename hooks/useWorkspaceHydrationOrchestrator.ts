@@ -7,7 +7,6 @@ import { getAllGuestKeys } from '../utils/guestDataUtils';
 import { mapPersistedChatMessages, mergePersistedAndRuntimeMessages, type PersistedChatMessage } from '../services/persistedChatMessages';
 import {
   mapPersistedInstanceToAgentInstance,
-  mapPersistedInstanceToLegacyWorkflowNode,
   mapPersistedInstanceToV2Node,
   mapPersistedPrototypeToAgent,
 } from '../services/agentContractAdapters';

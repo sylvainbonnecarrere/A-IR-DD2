@@ -18,7 +18,7 @@ const mockUseAuth = useAuth as unknown as jest.Mock;
 let mockAppHydrationHarness = resetAppHydrationHarness();
 let mockRuntimeStore = mockAppHydrationHarness.runtimeStore;
 let mockDesignStore = mockAppHydrationHarness.designStore;
-let mockWorkflowStore = mockAppHydrationHarness.workflowStore;
+let _mockWorkflowStore = mockAppHydrationHarness.workflowStore;
 let mockFunctionStore = mockAppHydrationHarness.functionStore;
 
 const waitForHydrationOverlayIdle = () =>
@@ -215,7 +215,7 @@ describe('App workspace hydration integration flows', () => {
     mockAppHydrationHarness = resetAppHydrationHarness();
     mockRuntimeStore = mockAppHydrationHarness.runtimeStore;
     mockDesignStore = mockAppHydrationHarness.designStore;
-    mockWorkflowStore = mockAppHydrationHarness.workflowStore;
+    _mockWorkflowStore = mockAppHydrationHarness.workflowStore;
     mockFunctionStore = mockAppHydrationHarness.functionStore;
     mockAppHydrationHarness.autoSignalWorkflowCanvasReady = true;
     mockAppHydrationHarness.documentVisibilityState = 'visible';

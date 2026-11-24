@@ -1,12 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useAgentChat } from '../../hooks/useAgentChat';
 import { LLMCapability, LLMProvider, type Agent } from '../../types';
-import {
-  createTestAgent,
-  createTestAgentInstance,
-  createTestUserFunction,
-  createToolSelection,
-} from '../builders/domainBuilders';
+import { createTestAgent, createTestAgentInstance, createTestUserFunction, createToolSelection } from '../builders/domainBuilders';
 import { resetUseAgentChatHarness } from '../harnesses/useAgentChatHarness';
 
 const mockRunAgentLoop = jest.fn();
@@ -72,7 +67,7 @@ jest.mock('../../stores/useFunctionStore', () => ({
         const { getUseAgentChatHarness } = require('../harnesses/useAgentChatHarness');
         return getUseAgentChatHarness().functionStore;
       },
-    }
+    },
   ),
 }));
 
@@ -174,14 +169,16 @@ describe('useAgentChat local AgentLoop path', () => {
       },
     });
 
-    const { result } = renderHook(() => useAgentChat({
-      nodeId: 'node-1',
-      agent,
-      llmConfigs: [],
-      t: (key: string) => key,
-      instanceId: 'instance-1',
-      accessToken: 'token-123',
-    }));
+    const { result } = renderHook(() =>
+      useAgentChat({
+        nodeId: 'node-1',
+        agent,
+        llmConfigs: [],
+        t: (key: string) => key,
+        instanceId: 'instance-1',
+        accessToken: 'token-123',
+      }),
+    );
 
     await act(async () => {
       await result.current.handleSendMessage('météo demain Marseille', null);
@@ -191,15 +188,13 @@ describe('useAgentChat local AgentLoop path', () => {
       expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
     });
 
-    expect(mockRunAgentLoop.mock.calls[0][2]).toEqual([
-      expect.objectContaining({ name: 'web_search_py' }),
-    ]);
+    expect(mockRunAgentLoop.mock.calls[0][2]).toEqual([expect.objectContaining({ name: 'web_search_py' })]);
     expect(useAgentChatHarness.runtimeStore.addNodeMessage).toHaveBeenCalledWith(
       'node-1',
       expect.objectContaining({
         sender: 'agent',
         text: 'outil lancé',
-      })
+      }),
     );
   });
 
@@ -237,14 +232,16 @@ describe('useAgentChat local AgentLoop path', () => {
       },
     });
 
-    const { result } = renderHook(() => useAgentChat({
-      nodeId: 'node-1',
-      agent,
-      llmConfigs: [],
-      t: (key: string) => key,
-      instanceId: 'instance-1',
-      accessToken: 'token-123',
-    }));
+    const { result } = renderHook(() =>
+      useAgentChat({
+        nodeId: 'node-1',
+        agent,
+        llmConfigs: [],
+        t: (key: string) => key,
+        instanceId: 'instance-1',
+        accessToken: 'token-123',
+      }),
+    );
 
     await act(async () => {
       await result.current.handleSendMessage('Nouveau message utilisateur', null);
@@ -270,7 +267,7 @@ describe('useAgentChat local AgentLoop path', () => {
       expect.objectContaining({
         summary: 'Résumé caché',
         coveredThroughMessageId: 'prior-msg-1',
-      })
+      }),
     );
   });
 
@@ -302,14 +299,16 @@ describe('useAgentChat local AgentLoop path', () => {
       toolSelections: [],
     });
 
-    const { result } = renderHook(() => useAgentChat({
-      nodeId: 'node-1',
-      agent,
-      llmConfigs: [],
-      t: (key: string) => key,
-      instanceId: 'instance-1',
-      accessToken: 'token-123',
-    }));
+    const { result } = renderHook(() =>
+      useAgentChat({
+        nodeId: 'node-1',
+        agent,
+        llmConfigs: [],
+        t: (key: string) => key,
+        instanceId: 'instance-1',
+        accessToken: 'token-123',
+      }),
+    );
 
     await act(async () => {
       await result.current.handleSendMessage('météo demain Marseille', null);
@@ -319,9 +318,7 @@ describe('useAgentChat local AgentLoop path', () => {
       expect(mockRunAgentLoop).toHaveBeenCalledTimes(1);
     });
 
-    expect(mockRunAgentLoop.mock.calls[0][2]).toEqual([
-      expect.objectContaining({ name: 'web_search_py' }),
-    ]);
+    expect(mockRunAgentLoop.mock.calls[0][2]).toEqual([expect.objectContaining({ name: 'web_search_py' })]);
   });
 
   it('does not crash when a legacy partial historyConfig is enabled on the first chat turn', async () => {
@@ -343,14 +340,16 @@ describe('useAgentChat local AgentLoop path', () => {
       } as Agent['historyConfig'],
     });
 
-    const { result } = renderHook(() => useAgentChat({
-      nodeId: 'node-1',
-      agent,
-      llmConfigs: [],
-      t: (key: string) => key,
-      instanceId: 'instance-1',
-      accessToken: 'token-123',
-    }));
+    const { result } = renderHook(() =>
+      useAgentChat({
+        nodeId: 'node-1',
+        agent,
+        llmConfigs: [],
+        t: (key: string) => key,
+        instanceId: 'instance-1',
+        accessToken: 'token-123',
+      }),
+    );
 
     await act(async () => {
       await result.current.handleSendMessage('Bonjour, je suis Sylvain', null);
@@ -366,7 +365,7 @@ describe('useAgentChat local AgentLoop path', () => {
         sender: 'agent',
         isError: true,
         text: expect.stringContaining("reading 'char'"),
-      })
+      }),
     );
   });
 });

@@ -19,240 +19,215 @@ const TEST_ONLY_PASSWORD = 'test-only-password-123';
 const mockLogin = jest.fn();
 
 jest.mock('../../hooks/useAuth', () => ({
-    useAuth: () => ({
-        login: mockLogin,
-        isLoading: false,
-    }),
+  useAuth: () => ({
+    login: mockLogin,
+    isLoading: false,
+  }),
 }));
 
 jest.mock('../../hooks/useLocalization', () => ({
-    useLocalization: () => ({
-        t: (key: string) => ({
-            login_modal_title: 'Connexion',
-            login_email_label: 'Email',
-            login_password_label: 'Mot de passe',
-            login_button_text: 'Se connecter',
-            login_button_loading: 'Connexion...',
-            login_footer_text: 'Pas encore de compte ?',
-            login_footer_link: 'Créer un compte',
-            login_error_required_fields: 'Tous les champs sont requis',
-            login_error_message: 'Erreur de connexion',
-        }[key] ?? key),
-    }),
+  useLocalization: () => ({
+    t: (key: string) =>
+      ({
+        login_modal_title: 'Connexion',
+        login_email_label: 'Email',
+        login_password_label: 'Mot de passe',
+        login_button_text: 'Se connecter',
+        login_button_loading: 'Connexion...',
+        login_footer_text: 'Pas encore de compte ?',
+        login_footer_link: 'Créer un compte',
+        login_error_required_fields: 'Tous les champs sont requis',
+        login_error_message: 'Erreur de connexion',
+      })[key] ?? key,
+  }),
 }));
 
 const renderWithAuth = (component: React.ReactElement) => {
-    return render(component);
+  return render(component);
 };
 
 describe('LoginModal', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        localStorage.clear();
-        mockLogin.mockResolvedValue(undefined);
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    mockLogin.mockResolvedValue(undefined);
+  });
+
+  describe('Visibility', () => {
+    test('should not render when isOpen is false', () => {
+      renderWithAuth(<LoginModal isOpen={false} onClose={() => {}} />);
+
+      expect(screen.queryByText('Connexion')).not.toBeInTheDocument();
     });
 
-    describe('Visibility', () => {
-        test('should not render when isOpen is false', () => {
-            renderWithAuth(
-                <LoginModal isOpen={false} onClose={() => { }} />
-            );
+    test('should render when isOpen is true', () => {
+      renderWithAuth(<LoginModal isOpen={true} onClose={() => {}} />);
 
-            expect(screen.queryByText('Connexion')).not.toBeInTheDocument();
-        });
+      expect(screen.getByText('Connexion')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('votre@email.com')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('••••••••')).toBeInTheDocument();
+    });
+  });
 
-        test('should render when isOpen is true', () => {
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={() => { }} />
-            );
+  describe('Form Interaction', () => {
+    test('should update form fields on input', async () => {
+      const user = userEvent.setup();
 
-            expect(screen.getByText('Connexion')).toBeInTheDocument();
-            expect(screen.getByPlaceholderText('votre@email.com')).toBeInTheDocument();
-            expect(screen.getByPlaceholderText('••••••••')).toBeInTheDocument();
-        });
+      renderWithAuth(<LoginModal isOpen={true} onClose={() => {}} />);
+
+      const emailInput = screen.getByPlaceholderText('votre@email.com') as HTMLInputElement;
+      const passwordInput = screen.getByPlaceholderText('••••••••') as HTMLInputElement;
+
+      await user.type(emailInput, 'test@example.com');
+      await user.type(passwordInput, TEST_ONLY_PASSWORD);
+
+      expect(emailInput.value).toBe('test@example.com');
+      expect(passwordInput.value).toBe(TEST_ONLY_PASSWORD);
     });
 
-    describe('Form Interaction', () => {
-        test('should update form fields on input', async () => {
-            const user = userEvent.setup();
+    test('should disable submit button when fields are empty', () => {
+      renderWithAuth(<LoginModal isOpen={true} onClose={() => {}} />);
 
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={() => { }} />
-            );
-
-            const emailInput = screen.getByPlaceholderText('votre@email.com') as HTMLInputElement;
-            const passwordInput = screen.getByPlaceholderText('••••••••') as HTMLInputElement;
-
-            await user.type(emailInput, 'test@example.com');
-            await user.type(passwordInput, TEST_ONLY_PASSWORD);
-
-            expect(emailInput.value).toBe('test@example.com');
-            expect(passwordInput.value).toBe(TEST_ONLY_PASSWORD);
-        });
-
-        test('should disable submit button when fields are empty', () => {
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={() => { }} />
-            );
-
-            const submitButton = screen.getByRole('button', { name: /Se connecter/i });
-            expect(submitButton).toBeDisabled();
-        });
-
-        test('should enable submit button when fields are filled', async () => {
-            const user = userEvent.setup();
-
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={() => { }} />
-            );
-
-            const emailInput = screen.getByPlaceholderText('votre@email.com');
-            const passwordInput = screen.getByPlaceholderText('••••••••');
-            const submitButton = screen.getByRole('button', { name: /Se connecter/i });
-
-            await user.type(emailInput, 'test@example.com');
-            await user.type(passwordInput, TEST_ONLY_PASSWORD);
-
-            expect(submitButton).not.toBeDisabled();
-        });
+      const submitButton = screen.getByRole('button', { name: /Se connecter/i });
+      expect(submitButton).toBeDisabled();
     });
 
-    describe('Close Button', () => {
-        test('should call onClose when close button clicked', () => {
-            const onClose = jest.fn();
+    test('should enable submit button when fields are filled', async () => {
+      const user = userEvent.setup();
 
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={onClose} />
-            );
+      renderWithAuth(<LoginModal isOpen={true} onClose={() => {}} />);
 
-            const closeButton = screen.getByLabelText('Close');
-            fireEvent.click(closeButton);
+      const emailInput = screen.getByPlaceholderText('votre@email.com');
+      const passwordInput = screen.getByPlaceholderText('••••••••');
+      const submitButton = screen.getByRole('button', { name: /Se connecter/i });
 
-            expect(onClose).toHaveBeenCalledTimes(1);
-        });
+      await user.type(emailInput, 'test@example.com');
+      await user.type(passwordInput, TEST_ONLY_PASSWORD);
+
+      expect(submitButton).not.toBeDisabled();
+    });
+  });
+
+  describe('Close Button', () => {
+    test('should call onClose when close button clicked', () => {
+      const onClose = jest.fn();
+
+      renderWithAuth(<LoginModal isOpen={true} onClose={onClose} />);
+
+      const closeButton = screen.getByLabelText('Close');
+      fireEvent.click(closeButton);
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Form Submission', () => {
+    test('should show error message on login failure', async () => {
+      const user = userEvent.setup();
+      mockLogin.mockRejectedValueOnce(new Error('Login failed'));
+
+      renderWithAuth(<LoginModal isOpen={true} onClose={() => {}} />);
+
+      const emailInput = screen.getByPlaceholderText('votre@email.com');
+      const passwordInput = screen.getByPlaceholderText('••••••••');
+      const submitButton = screen.getByRole('button', { name: /Se connecter/i });
+
+      await user.type(emailInput, 'test@example.com');
+      await user.type(passwordInput, TEST_ONLY_PASSWORD);
+      await user.click(submitButton);
+
+      // Wait for error to appear
+      await waitFor(() => {
+        // Error should be displayed or UI should show error state
+        expect(submitButton).not.toBeDisabled();
+      });
     });
 
-    describe('Form Submission', () => {
-        test('should show error message on login failure', async () => {
-            const user = userEvent.setup();
-            mockLogin.mockRejectedValueOnce(new Error('Login failed'));
+    test('should not block UI on submission error', async () => {
+      const user = userEvent.setup();
+      mockLogin.mockRejectedValueOnce(new Error('Connection error'));
 
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={() => { }} />
-            );
+      const { rerender: _rerender } = renderWithAuth(<LoginModal isOpen={true} onClose={() => {}} />);
 
-            const emailInput = screen.getByPlaceholderText('votre@email.com');
-            const passwordInput = screen.getByPlaceholderText('••••••••');
-            const submitButton = screen.getByRole('button', { name: /Se connecter/i });
+      const emailInput = screen.getByPlaceholderText('votre@email.com');
+      const passwordInput = screen.getByPlaceholderText('••••••••');
+      const submitButton = screen.getByRole('button', { name: /Se connecter/i });
 
-            await user.type(emailInput, 'test@example.com');
-            await user.type(passwordInput, TEST_ONLY_PASSWORD);
-            await user.click(submitButton);
+      await user.type(emailInput, 'test@example.com');
+      await user.type(passwordInput, TEST_ONLY_PASSWORD);
+      await user.click(submitButton);
 
-            // Wait for error to appear
-            await waitFor(() => {
-                // Error should be displayed or UI should show error state
-                expect(submitButton).not.toBeDisabled();
-            });
-        });
+      // Modal should still be accessible and interactive
+      await waitFor(() => {
+        expect(screen.getByText('Connexion')).toBeInTheDocument();
+        expect(screen.getByLabelText('Close')).toBeInTheDocument();
+      });
+    });
+  });
 
-        test('should not block UI on submission error', async () => {
-            const user = userEvent.setup();
-            mockLogin.mockRejectedValueOnce(new Error('Connection error'));
+  describe('Non-Blocking Behavior', () => {
+    test('should allow closing modal even if login pending', async () => {
+      const onClose = jest.fn();
+      const user = userEvent.setup();
 
-            const { rerender } = renderWithAuth(
-                <LoginModal isOpen={true} onClose={() => { }} />
-            );
+      renderWithAuth(<LoginModal isOpen={true} onClose={onClose} />);
 
-            const emailInput = screen.getByPlaceholderText('votre@email.com');
-            const passwordInput = screen.getByPlaceholderText('••••••••');
-            const submitButton = screen.getByRole('button', { name: /Se connecter/i });
+      const emailInput = screen.getByPlaceholderText('votre@email.com');
+      const passwordInput = screen.getByPlaceholderText('••••••••');
 
-            await user.type(emailInput, 'test@example.com');
-            await user.type(passwordInput, TEST_ONLY_PASSWORD);
-            await user.click(submitButton);
+      await user.type(emailInput, 'test@example.com');
+      await user.type(passwordInput, TEST_ONLY_PASSWORD);
 
-            // Modal should still be accessible and interactive
-            await waitFor(() => {
-                expect(screen.getByText('Connexion')).toBeInTheDocument();
-                expect(screen.getByLabelText('Close')).toBeInTheDocument();
-            });
-        });
+      // Click close button instead of submit
+      const closeButton = screen.getByLabelText('Close');
+      fireEvent.click(closeButton);
+
+      expect(onClose).toHaveBeenCalled();
     });
 
-    describe('Non-Blocking Behavior', () => {
-        test('should allow closing modal even if login pending', async () => {
-            const onClose = jest.fn();
-            const user = userEvent.setup();
+    test('should not affect guest mode when modal is opened', () => {
+      // Guest mode should work independently of modal
+      const { rerender: _rerender } = renderWithAuth(
+        <div>
+          <div data-testid="guest-indicator">Guest Mode</div>
+          <LoginModal isOpen={true} onClose={() => {}} />
+        </div>,
+      );
 
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={onClose} />
-            );
+      expect(screen.getByTestId('guest-indicator')).toBeInTheDocument();
+      expect(screen.getByText('Connexion')).toBeInTheDocument();
+    });
+  });
 
-            const emailInput = screen.getByPlaceholderText('votre@email.com');
-            const passwordInput = screen.getByPlaceholderText('••••••••');
+  describe('Password Field', () => {
+    test('should have password type for security', () => {
+      renderWithAuth(<LoginModal isOpen={true} onClose={() => {}} />);
 
-            await user.type(emailInput, 'test@example.com');
-            await user.type(passwordInput, TEST_ONLY_PASSWORD);
-
-            // Click close button instead of submit
-            const closeButton = screen.getByLabelText('Close');
-            fireEvent.click(closeButton);
-
-            expect(onClose).toHaveBeenCalled();
-        });
-
-        test('should not affect guest mode when modal is opened', () => {
-            // Guest mode should work independently of modal
-            const { rerender } = renderWithAuth(
-                <div>
-                    <div data-testid="guest-indicator">Guest Mode</div>
-                    <LoginModal isOpen={true} onClose={() => { }} />
-                </div>
-            );
-
-            expect(screen.getByTestId('guest-indicator')).toBeInTheDocument();
-            expect(screen.getByText('Connexion')).toBeInTheDocument();
-        });
+      const passwordInput = screen.getByPlaceholderText('••••••••') as HTMLInputElement;
+      expect(passwordInput.type).toBe('password');
     });
 
-    describe('Password Field', () => {
-        test('should have password type for security', () => {
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={() => { }} />
-            );
+    test('should have minimum length validation', () => {
+      renderWithAuth(<LoginModal isOpen={true} onClose={() => {}} />);
 
-            const passwordInput = screen.getByPlaceholderText('••••••••') as HTMLInputElement;
-            expect(passwordInput.type).toBe('password');
-        });
+      const passwordInput = screen.getByPlaceholderText('••••••••') as HTMLInputElement;
+      expect(passwordInput.minLength).toBe(8);
+    });
+  });
 
-        test('should have minimum length validation', () => {
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={() => { }} />
-            );
+  describe('Accessibility', () => {
+    test('should have proper labels for form fields', () => {
+      renderWithAuth(<LoginModal isOpen={true} onClose={() => {}} />);
 
-            const passwordInput = screen.getByPlaceholderText('••••••••') as HTMLInputElement;
-            expect(passwordInput.minLength).toBe(8);
-        });
+      expect(screen.getByLabelText('Email')).toBeInTheDocument();
+      expect(screen.getByLabelText('Mot de passe')).toBeInTheDocument();
     });
 
-    describe('Accessibility', () => {
-        test('should have proper labels for form fields', () => {
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={() => { }} />
-            );
+    test('should have aria-label on close button', () => {
+      renderWithAuth(<LoginModal isOpen={true} onClose={() => {}} />);
 
-            expect(screen.getByLabelText('Email')).toBeInTheDocument();
-            expect(screen.getByLabelText('Mot de passe')).toBeInTheDocument();
-        });
-
-        test('should have aria-label on close button', () => {
-            renderWithAuth(
-                <LoginModal isOpen={true} onClose={() => { }} />
-            );
-
-            const closeButton = screen.getByLabelText('Close');
-            expect(closeButton).toHaveAttribute('aria-label', 'Close');
-        });
+      const closeButton = screen.getByLabelText('Close');
+      expect(closeButton).toHaveAttribute('aria-label', 'Close');
     });
+  });
 });

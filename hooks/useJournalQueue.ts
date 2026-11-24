@@ -44,7 +44,7 @@ const MAX_RETRIES = 3;
 
 export const useJournalQueue = () => {
   // ⭐ FIX: Récupérer le token d'authentification
-  const { accessToken, isAuthenticated } = useAuth();
+  const { accessToken, isAuthenticated: _isAuthenticated } = useAuth();
   const accessTokenRef = useRef(accessToken);
 
   // Mettre à jour la ref quand le token change
@@ -61,61 +61,6 @@ export const useJournalQueue = () => {
   });
   const processingRef = useRef(false);
   const flushTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  /**
-   * Ajouter une entrée à la queue
-   * ⭐ FIX: Vérifier l'authentification ET le saveMode avant d'ajouter à la queue
-   * En mode manuel, les journaux sont persistés via le bouton Save, pas automatiquement
-   */
-  const enqueueEntry = useCallback(
-    (
-      workflowId: string,
-      instanceId: string,
-      type: 'chat' | 'error' | 'media' | 'tool_invocation',
-      payload: unknown,
-      forceImmediate: boolean = false, // ⭐ NEW: Force l'envoi même en mode manuel (pour le bouton Save)
-    ) => {
-      // ⭐ FIX: Ne pas enregistrer si l'utilisateur n'est pas authentifié
-      if (!accessTokenRef.current) {
-        console.debug(`[JournalQueue] Skipping ${type} entry - user not authenticated (guest mode)`);
-        return;
-      }
-
-      // ⭐ FIX: En mode MANUEL, ne pas envoyer automatiquement (sauf si forcé par le bouton Save)
-      const saveMode = useSaveModeStore.getState().saveMode;
-      if (saveMode === 'manual' && !forceImmediate) {
-        console.debug(`[JournalQueue] Skipping ${type} entry - save mode is 'manual' (use Save button)`);
-        return;
-      }
-
-      // Validation des paramètres requis
-      if (!workflowId || !instanceId) {
-        console.warn(`[JournalQueue] Skipping ${type} entry - missing workflowId or instanceId`);
-        return;
-      }
-
-      const entry: JournalQueueItem = {
-        id: `queue-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        workflowId,
-        instanceId,
-        type,
-        payload,
-        retryCount: 0,
-        maxRetries: MAX_RETRIES,
-        createdAt: Date.now(),
-      };
-
-      queueRef.current.push(entry);
-      statsRef.current.totalQueued++;
-      statsRef.current.currentQueue = [...queueRef.current];
-
-      console.debug(`[JournalQueue] ✅ Enqueued ${type} entry (queue size: ${queueRef.current.length})`);
-
-      // Déclencher le traitement
-      flushQueue();
-    },
-    [],
-  );
 
   /**
    * Persister une entrée unique
@@ -249,6 +194,60 @@ export const useJournalQueue = () => {
       }
     }
   }, []);
+  /**
+   * Ajouter une entrée à la queue
+   * ⭐ FIX: Vérifier l'authentification ET le saveMode avant d'ajouter à la queue
+   * En mode manuel, les journaux sont persistés via le bouton Save, pas automatiquement
+   */
+  const enqueueEntry = useCallback(
+    (
+      workflowId: string,
+      instanceId: string,
+      type: 'chat' | 'error' | 'media' | 'tool_invocation',
+      payload: unknown,
+      forceImmediate: boolean = false, // ⭐ NEW: Force l'envoi même en mode manuel (pour le bouton Save)
+    ) => {
+      // ⭐ FIX: Ne pas enregistrer si l'utilisateur n'est pas authentifié
+      if (!accessTokenRef.current) {
+        console.debug(`[JournalQueue] Skipping ${type} entry - user not authenticated (guest mode)`);
+        return;
+      }
+
+      // ⭐ FIX: En mode MANUEL, ne pas envoyer automatiquement (sauf si forcé par le bouton Save)
+      const saveMode = useSaveModeStore.getState().saveMode;
+      if (saveMode === 'manual' && !forceImmediate) {
+        console.debug(`[JournalQueue] Skipping ${type} entry - save mode is 'manual' (use Save button)`);
+        return;
+      }
+
+      // Validation des paramètres requis
+      if (!workflowId || !instanceId) {
+        console.warn(`[JournalQueue] Skipping ${type} entry - missing workflowId or instanceId`);
+        return;
+      }
+
+      const entry: JournalQueueItem = {
+        id: `queue-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        workflowId,
+        instanceId,
+        type,
+        payload,
+        retryCount: 0,
+        maxRetries: MAX_RETRIES,
+        createdAt: Date.now(),
+      };
+
+      queueRef.current.push(entry);
+      statsRef.current.totalQueued++;
+      statsRef.current.currentQueue = [...queueRef.current];
+
+      console.debug(`[JournalQueue] ✅ Enqueued ${type} entry (queue size: ${queueRef.current.length})`);
+
+      // Déclencher le traitement
+      flushQueue();
+    },
+    [flushQueue],
+  );
 
   /**
    * Récupérer les stats de la queue

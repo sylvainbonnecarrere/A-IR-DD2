@@ -95,12 +95,12 @@ jest.mock('../../stores/useFunctionStore', () => ({
 import * as llmService from '../../services/llmService';
 import { executeTool } from '../../utils/toolExecutor';
 
-const mockedGenerateContentStream = llmService.generateContentStream as jest.Mock;
+const _mockedGenerateContentStream = llmService.generateContentStream as jest.Mock;
 const mockedGenerateContent = llmService.generateContent as jest.Mock;
 const mockedGenerateImage = llmService.generateImage as jest.Mock;
 const mockedEditImage = llmService.editImage as jest.Mock;
 const mockedGenerateContentWithMaps = llmService.generateContentWithMaps as jest.Mock;
-const mockedExecuteTool = executeTool as jest.Mock;
+const _mockedExecuteTool = executeTool as jest.Mock;
 
 const LOCAL_RUNTIME_CONFIG: LLMConfig = {
   provider: LLMProvider.LMStudio,
@@ -156,7 +156,7 @@ function createAgent(overrides: Partial<Agent> = {}): Agent {
   });
 }
 
-function createStream(chunks: unknown[]) {
+function _createStream(chunks: unknown[]) {
   return (async function* () {
     for (const chunk of chunks) {
       yield chunk;

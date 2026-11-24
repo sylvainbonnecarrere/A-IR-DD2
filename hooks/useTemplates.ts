@@ -6,12 +6,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  AgentTemplateDTO,
-  CreateTemplatePayload,
-  UpdateTemplatePayload,
-  TemplateAPIError,
-} from '../services/templateAPI';
+import { CreateTemplatePayload, UpdateTemplatePayload, TemplateAPIError } from '../services/templateAPI';
 import * as templateAPI from '../services/templateAPI';
 
 // ============================================
@@ -21,8 +16,7 @@ import * as templateAPI from '../services/templateAPI';
 export const templateQueryKeys = {
   all: ['templates'] as const,
   lists: () => [...templateQueryKeys.all, 'list'] as const,
-  list: (filters?: Record<string, any>) =>
-    [...templateQueryKeys.lists(), { ...filters }] as const,
+  list: (filters?: Record<string, unknown>) => [...templateQueryKeys.lists(), { ...filters }] as const,
   details: () => [...templateQueryKeys.all, 'detail'] as const,
   detail: (id: string) => [...templateQueryKeys.details(), id] as const,
 };
@@ -33,7 +27,7 @@ export const templateQueryKeys = {
 
 /**
  * Hook pour récupérer les templates de l'utilisateur avec filtering/pagination
- * 
+ *
  * @param accessToken JWT token d'authentification
  * @param options Query options (filters, pagination, sorting)
  * @example
@@ -53,7 +47,7 @@ export function useTemplatesQuery(
     skip?: number;
     sortBy?: 'createdAt' | 'usageCount' | 'name';
     sortOrder?: 'asc' | 'desc';
-  }
+  },
 ) {
   return useQuery({
     queryKey: templateQueryKeys.list(options),
@@ -77,16 +71,13 @@ export function useTemplatesQuery(
 
 /**
  * Hook pour récupérer UN template spécifique
- * 
+ *
  * @param templateId MongoDB ObjectId du template
  * @param accessToken JWT token d'authentification
  * @example
  * const { data: template, isLoading } = useTemplateQuery(templateId, token);
  */
-export function useTemplateQuery(
-  templateId: string | null,
-  accessToken: string | null | undefined
-) {
+export function useTemplateQuery(templateId: string | null, accessToken: string | null | undefined) {
   return useQuery({
     queryKey: templateQueryKeys.detail(templateId || ''),
     queryFn: async () => {
@@ -109,7 +100,7 @@ export function useTemplateQuery(
 
 /**
  * Mutation hook pour créer un nouveau template
- * 
+ *
  * @param accessToken JWT token d'authentification
  * @example
  * const { mutate: createTemplate, isPending } = useCreateTemplateMutation(token);
@@ -135,10 +126,7 @@ export function useCreateTemplateMutation(accessToken: string | null | undefined
         queryKey: templateQueryKeys.lists(),
       });
       // Add new template to cache
-      queryClient.setQueryData(
-        templateQueryKeys.detail(newTemplate._id),
-        newTemplate
-      );
+      queryClient.setQueryData(templateQueryKeys.detail(newTemplate._id), newTemplate);
     },
     onError: (error) => {
       console.error('[useCreateTemplateMutation] Error:', error);
@@ -153,7 +141,7 @@ export function useCreateTemplateMutation(accessToken: string | null | undefined
 
 /**
  * Mutation hook pour mettre à jour un template existant
- * 
+ *
  * @param accessToken JWT token d'authentification
  * @example
  * const { mutate: updateTemplate } = useUpdateTemplateMutation(token);
@@ -170,18 +158,11 @@ export function useUpdateTemplateMutation(accessToken: string | null | undefined
       if (!accessToken) {
         throw new TemplateAPIError('Not authenticated', 401);
       }
-      return templateAPI.updateTemplate(
-        params.templateId,
-        params.updates,
-        accessToken
-      );
+      return templateAPI.updateTemplate(params.templateId, params.updates, accessToken);
     },
     onSuccess: (updatedTemplate) => {
       // Update specific template in cache
-      queryClient.setQueryData(
-        templateQueryKeys.detail(updatedTemplate._id),
-        updatedTemplate
-      );
+      queryClient.setQueryData(templateQueryKeys.detail(updatedTemplate._id), updatedTemplate);
       // Invalidate lists so they update
       queryClient.invalidateQueries({
         queryKey: templateQueryKeys.lists(),
@@ -199,7 +180,7 @@ export function useUpdateTemplateMutation(accessToken: string | null | undefined
 
 /**
  * Mutation hook pour supprimer un template
- * 
+ *
  * @param accessToken JWT token d'authentification
  * @example
  * const { mutate: deleteTemplate } = useDeleteTemplateMutation(token);
@@ -238,7 +219,7 @@ export function useDeleteTemplateMutation(accessToken: string | null | undefined
 
 /**
  * Mutation hook pour toggle isStarred d'un template
- * 
+ *
  * @param accessToken JWT token d'authentification
  * @example
  * const { mutate: toggleStar } = useToggleTemplateStarMutation(token);
@@ -256,10 +237,7 @@ export function useToggleTemplateStarMutation(accessToken: string | null | undef
     },
     onSuccess: (updatedTemplate) => {
       // Update in cache
-      queryClient.setQueryData(
-        templateQueryKeys.detail(updatedTemplate._id),
-        updatedTemplate
-      );
+      queryClient.setQueryData(templateQueryKeys.detail(updatedTemplate._id), updatedTemplate);
       // Invalidate lists (sorting by star may have changed)
       queryClient.invalidateQueries({
         queryKey: templateQueryKeys.lists(),
@@ -278,15 +256,13 @@ export function useToggleTemplateStarMutation(accessToken: string | null | undef
 /**
  * Mutation hook pour incrémenter usage count d'un template
  * Appelé quand un template est utilisé pour créer un prototype
- * 
+ *
  * @param accessToken JWT token d'authentification
  * @example
  * const { mutate: recordUsage } = useRecordTemplateUsageMutation(token);
  * recordUsage("templateId"); // usageCount ++
  */
-export function useRecordTemplateUsageMutation(
-  accessToken: string | null | undefined
-) {
+export function useRecordTemplateUsageMutation(accessToken: string | null | undefined) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -298,10 +274,7 @@ export function useRecordTemplateUsageMutation(
     },
     onSuccess: (updatedTemplate) => {
       // Update in cache
-      queryClient.setQueryData(
-        templateQueryKeys.detail(updatedTemplate._id),
-        updatedTemplate
-      );
+      queryClient.setQueryData(templateQueryKeys.detail(updatedTemplate._id), updatedTemplate);
       // Invalidate lists (pagination may have changed due to sort)
       queryClient.invalidateQueries({
         queryKey: templateQueryKeys.lists(),

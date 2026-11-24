@@ -1,7 +1,7 @@
 // hooks/useLMStudioDetection.ts
 // Jalon 3: Hook personnalisé pour détection LMStudio avec auto-refresh
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { LMStudioModelDetection, LLMCapability } from '../types';
 import { detectLMStudioModel } from '../services/routeDetectionService';
 
@@ -104,12 +104,18 @@ export const useLMStudioDetection = (options: UseLMStudioDetectionOptions = {}):
     }
   };
 
+  // Ref pour garder la dernière version de performDetection sans re-déclencher l'effet
+  const performDetectionRef = useRef(performDetection);
+  useEffect(() => {
+    performDetectionRef.current = performDetection;
+  });
+
   // Auto-détection quand endpoint change (si autoDetect activé)
   useEffect(() => {
     if (autoDetect) {
-      void performDetection(false);
+      void performDetectionRef.current(false);
     }
-  }, [endpoint, autoDetect]); // Dépendances simplifiées pour re-déclencher
+  }, [endpoint, autoDetect]);
 
   // Fonction manuelle de re-détection
   const redetect = async () => {

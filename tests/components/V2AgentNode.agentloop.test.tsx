@@ -23,9 +23,9 @@ const textUtilsMocks = jest.requireMock('../../utils/textUtils') as {
 const runtimeConfigResolverMocks = jest.requireMock('../../services/runtimeConfigResolver') as { resolveHistoryRuntimeConfig: jest.Mock };
 
 let v2AgentNodeHarness = resetV2AgentNodeHarness();
-let runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
-let designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
-let functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> } =
+let _runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
+let _designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
+let _functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> } =
   v2AgentNodeHarness.functionStore;
 let workflowCanvasContextState: Record<string, unknown> = v2AgentNodeHarness.workflowCanvasContext;
 
@@ -313,10 +313,10 @@ describe('V2AgentNode AgentLoop integration', () => {
       credential: null,
     });
 
-    runtimeStoreState = v2AgentNodeHarness.runtimeStore;
-    designStoreState = v2AgentNodeHarness.designStore;
+    _runtimeStoreState = v2AgentNodeHarness.runtimeStore;
+    _designStoreState = v2AgentNodeHarness.designStore;
     workflowCanvasContextState = v2AgentNodeHarness.workflowCanvasContext;
-    functionStoreState = v2AgentNodeHarness.functionStore;
+    _functionStoreState = v2AgentNodeHarness.functionStore;
 
     mockLoadFunctions.mockImplementation(async () => undefined);
 
@@ -375,11 +375,11 @@ describe('V2AgentNode AgentLoop integration', () => {
   });
 
   it('toggles restore without requesting any position update', () => {
-    runtimeStoreState = {
-      ...runtimeStoreState,
+    _runtimeStoreState = {
+      ..._runtimeStoreState,
       getIsNodeMinimized: jest.fn(() => true),
     };
-    v2AgentNodeHarness.runtimeStore = runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
+    v2AgentNodeHarness.runtimeStore = _runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
 
     render(
       <V2AgentNode
@@ -505,8 +505,8 @@ describe('V2AgentNode AgentLoop integration', () => {
   it('continues the native provider flow after a tool result even when Chat is not explicitly enabled', async () => {
     const nodeMessages: Record<string, unknown[]> = {};
 
-    runtimeStoreState = {
-      ...runtimeStoreState,
+    _runtimeStoreState = {
+      ..._runtimeStoreState,
       getNodeMessages: jest.fn((nodeId: string) => nodeMessages[nodeId] ?? []),
       addNodeMessage: jest.fn((nodeId: string, message: unknown) => {
         nodeMessages[nodeId] = [...(nodeMessages[nodeId] ?? []), message];
@@ -515,7 +515,7 @@ describe('V2AgentNode AgentLoop integration', () => {
         nodeMessages[nodeId] = messages;
       }),
     };
-    v2AgentNodeHarness.runtimeStore = runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
+    v2AgentNodeHarness.runtimeStore = _runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
 
     const nativeToolAgent: Agent = {
       ...baseAgent,
@@ -597,9 +597,9 @@ describe('V2AgentNode AgentLoop integration', () => {
   });
 
   it('reloads the function catalog on demand when the initial local tool scope is empty', async () => {
-    functionStoreState.functions = [];
+    _functionStoreState.functions = [];
     mockLoadFunctions.mockImplementation(async () => {
-      functionStoreState.functions = [createFunction()];
+      _functionStoreState.functions = [createFunction()];
     });
 
     render(
@@ -639,7 +639,7 @@ describe('V2AgentNode AgentLoop integration', () => {
   });
 
   it('fails visibly when configured tools remain unresolved after catalog reload', async () => {
-    functionStoreState.functions = [];
+    _functionStoreState.functions = [];
     mockLoadFunctions.mockImplementation(async () => undefined);
 
     render(
@@ -877,11 +877,11 @@ describe('V2AgentNode AgentLoop integration', () => {
   it('shows a tool message immediately on local tool_call_start before the final response is added', async () => {
     const nodeMessages: Record<string, unknown[]> = { 'node-1': [] };
 
-    runtimeStoreState.getNodeMessages = jest.fn((nodeId: string) => nodeMessages[nodeId] ?? []);
-    runtimeStoreState.addNodeMessage = jest.fn((nodeId: string, message: unknown) => {
+    _runtimeStoreState.getNodeMessages = jest.fn((nodeId: string) => nodeMessages[nodeId] ?? []);
+    _runtimeStoreState.addNodeMessage = jest.fn((nodeId: string, message: unknown) => {
       nodeMessages[nodeId] = [...(nodeMessages[nodeId] ?? []), message];
     });
-    runtimeStoreState.setNodeMessages = jest.fn((nodeId: string, nextMessages: unknown[]) => {
+    _runtimeStoreState.setNodeMessages = jest.fn((nodeId: string, nextMessages: unknown[]) => {
       nodeMessages[nodeId] = nextMessages;
     });
 
@@ -1076,7 +1076,7 @@ describe('V2AgentNode AgentLoop integration', () => {
       },
     };
 
-    runtimeStoreState.getNodeMessages = jest.fn(() => [
+    _runtimeStoreState.getNodeMessages = jest.fn(() => [
       {
         id: 'prior-visible-msg',
         sender: 'agent',

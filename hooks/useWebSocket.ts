@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import webSocketService, { ConnectionState, ConnectedUser } from '../services/webSocketService';
+import webSocketService, { ConnectionState } from '../services/webSocketService';
 import { ChatMessage } from '../types';
 
 interface UseWebSocketReturn {
@@ -15,9 +15,7 @@ interface UseWebSocketReturn {
 }
 
 export const useWebSocket = (): UseWebSocketReturn => {
-  const [connectionState, setConnectionState] = useState<ConnectionState>(
-    webSocketService.getConnectionState()
-  );
+  const [connectionState, setConnectionState] = useState<ConnectionState>(webSocketService.getConnectionState());
 
   useEffect(() => {
     // S'abonner aux changements d'état de connexion

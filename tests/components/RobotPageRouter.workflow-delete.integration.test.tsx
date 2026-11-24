@@ -6,10 +6,10 @@ import type { UserFunction } from '../../types/function.types';
 import { resetRobotPageRouterHarness } from '../harnesses/robotPageRouterHarness';
 
 let robotPageRouterHarness = resetRobotPageRouterHarness();
-let designStoreState: Record<string, any> = robotPageRouterHarness.designStore;
-let workflowStoreState: Record<string, any> = robotPageRouterHarness.workflowStore;
-let runtimeStoreState: Record<string, any> = robotPageRouterHarness.runtimeStore;
-let functionStoreState: {
+let _designStoreState: Record<string, unknown> = robotPageRouterHarness.designStore;
+let _workflowStoreState: Record<string, unknown> = robotPageRouterHarness.workflowStore;
+let _runtimeStoreState: Record<string, unknown> = robotPageRouterHarness.runtimeStore;
+let _functionStoreState: {
   functions: UserFunction[];
   loadFunctions: jest.Mock<Promise<void>, [string?]>;
 } = robotPageRouterHarness.functionStore;
@@ -111,7 +111,7 @@ jest.mock('../../stores/useRuntimeStore', () => {
   return {
     ...actual, // ⭐ US-J7-13: sélecteurs purs (getWorkflowLatestRunId, getInstanceRunStatus)
     useRuntimeStore: Object.assign(
-      (selector?: (state: Record<string, any>) => unknown) => {
+      (selector?: (state: Record<string, unknown>) => unknown) => {
         const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().runtimeStore;
         return selector ? selector(state) : state;
       },
@@ -128,7 +128,7 @@ jest.mock('../../stores/useDesignStore', () => {
   return {
     ...actual,
     useDesignStore: Object.assign(
-      (selector?: (state: Record<string, any>) => unknown) => {
+      (selector?: (state: Record<string, unknown>) => unknown) => {
         const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().designStore;
         return selector ? selector(state) : state;
       },
@@ -141,7 +141,7 @@ jest.mock('../../stores/useDesignStore', () => {
 
 jest.mock('../../stores/useWorkflowStore', () => ({
   useWorkflowStore: Object.assign(
-    (selector?: (state: Record<string, any>) => unknown) => {
+    (selector?: (state: Record<string, unknown>) => unknown) => {
       const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().workflowStore;
       return selector ? selector(state) : state;
     },
@@ -153,7 +153,7 @@ jest.mock('../../stores/useWorkflowStore', () => ({
 
 jest.mock('../../stores/useFunctionStore', () => ({
   useFunctionStore: Object.assign(
-    (selector?: (state: typeof functionStoreState) => unknown) => {
+    (selector?: (state: typeof _functionStoreState) => unknown) => {
       const state = require('../harnesses/robotPageRouterHarness').getRobotPageRouterHarness().functionStore;
       return selector ? selector(state) : state;
     },
@@ -368,10 +368,10 @@ describe('RobotPageRouter BOS/canvas delete integration', () => {
       },
     });
 
-    runtimeStoreState = robotPageRouterHarness.runtimeStore;
-    designStoreState = robotPageRouterHarness.designStore;
-    workflowStoreState = robotPageRouterHarness.workflowStore;
-    functionStoreState = robotPageRouterHarness.functionStore;
+    _runtimeStoreState = robotPageRouterHarness.runtimeStore;
+    _designStoreState = robotPageRouterHarness.designStore;
+    _workflowStoreState = robotPageRouterHarness.workflowStore;
+    _functionStoreState = robotPageRouterHarness.functionStore;
   });
 
   it('propagates a real BOS workflow node delete click from the canvas UI to the delete callback', async () => {

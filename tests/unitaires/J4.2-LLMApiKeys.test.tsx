@@ -11,7 +11,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, waitFor, act } from '@testing-library/react';
 import { AuthProvider, useAuth } from '../../contexts';
 
 const TEST_ONLY_PASSWORD = 'test-only-password-123';

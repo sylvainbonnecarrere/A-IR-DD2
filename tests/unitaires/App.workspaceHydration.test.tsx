@@ -23,7 +23,7 @@ const mockHydrateToolMessagesFromPersistedRuns = jest.fn(async (messages: ChatMe
 let mockAppHydrationHarness = resetAppHydrationHarness();
 let mockRuntimeStore = mockAppHydrationHarness.runtimeStore;
 let mockDesignStore = mockAppHydrationHarness.designStore;
-let mockWorkflowStore = mockAppHydrationHarness.workflowStore;
+let _mockWorkflowStore = mockAppHydrationHarness.workflowStore;
 let mockFunctionStore = mockAppHydrationHarness.functionStore;
 
 const requireResolver = <T extends (...args: unknown[]) => unknown>(resolver: T | null | undefined, label: string): T => {
@@ -263,7 +263,7 @@ describe('App workspace hydration orchestration', () => {
     mockAppHydrationHarness = resetAppHydrationHarness();
     mockRuntimeStore = mockAppHydrationHarness.runtimeStore;
     mockDesignStore = mockAppHydrationHarness.designStore;
-    mockWorkflowStore = mockAppHydrationHarness.workflowStore;
+    _mockWorkflowStore = mockAppHydrationHarness.workflowStore;
     mockFunctionStore = mockAppHydrationHarness.functionStore;
     mockUseAuth.mockReset();
     mockUseAuth.mockReturnValue({
@@ -908,7 +908,7 @@ describe('App workspace hydration orchestration', () => {
 
     let resolveProjection: ((messages: ChatMessage[]) => void) | null = null;
     mockHydrateToolMessagesFromPersistedRuns.mockImplementationOnce(
-      (messages: ChatMessage[]) =>
+      (_messages: ChatMessage[]) =>
         new Promise((resolve) => {
           resolveProjection = resolve;
         }),

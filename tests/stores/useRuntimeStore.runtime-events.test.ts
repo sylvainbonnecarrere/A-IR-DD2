@@ -105,18 +105,18 @@ describe('useRuntimeStore runtime observation', () => {
   });
 
   it('setRunSnapshot ingère une lecture REST : statuts, verrou, dernier run et état ready', () => {
-    useRuntimeStore.getState().setRunSnapshot('wf-1', [
-      runRecord('run-2', 'quarantined', { lockHeld: true, workflowId: 'wf-1', agentInstanceId: 'inst-2' }),
-      runRecord('run-1', 'completed', { workflowId: 'wf-1' }),
-    ]);
+    useRuntimeStore
+      .getState()
+      .setRunSnapshot('wf-1', [
+        runRecord('run-2', 'quarantined', { lockHeld: true, workflowId: 'wf-1', agentInstanceId: 'inst-2' }),
+        runRecord('run-1', 'completed', { workflowId: 'wf-1' }),
+      ]);
 
     const state = useRuntimeStore.getState();
     expect(state.runStatuses['run-2']).toBe('quarantined');
     expect(state.runLockHeld['run-2']).toBe(true);
     // verrou dérivé du statut quarantined quand lockHeld absent
-    useRuntimeStore.getState().setRunSnapshot('wf-2', [
-      runRecord('run-8', 'quarantined', { workflowId: 'wf-2' }),
-    ]);
+    useRuntimeStore.getState().setRunSnapshot('wf-2', [runRecord('run-8', 'quarantined', { workflowId: 'wf-2' })]);
     expect(useRuntimeStore.getState().runLockHeld['run-8']).toBe(true);
     // premier élément (tri desc) = dernier run du workflow
     expect(useRuntimeStore.getState().workflowLatestRunId['wf-1']).toBe('run-2');
@@ -132,9 +132,7 @@ describe('useRuntimeStore runtime observation', () => {
 
   it('sélecteurs getWorkflowLatestRunId / getInstanceRunStatus lisent l’état d’observation', () => {
     const { getWorkflowLatestRunId, getInstanceRunStatus } = require('../../stores/useRuntimeStore');
-    useRuntimeStore.getState().setRunSnapshot('wf-1', [
-      runRecord('run-5', 'running', { workflowId: 'wf-1', agentInstanceId: 'inst-5' }),
-    ]);
+    useRuntimeStore.getState().setRunSnapshot('wf-1', [runRecord('run-5', 'running', { workflowId: 'wf-1', agentInstanceId: 'inst-5' })]);
     const state = useRuntimeStore.getState();
     expect(getWorkflowLatestRunId(state, 'wf-1')).toBe('run-5');
     expect(getWorkflowLatestRunId(state, null)).toBeNull();
@@ -144,9 +142,7 @@ describe('useRuntimeStore runtime observation', () => {
   });
 
   it('resetAll efface aussi l’état d’observation des runs (workflowRuns inclus)', () => {
-    useRuntimeStore.getState().setRunSnapshot('wf-1', [
-      runRecord('run-1', 'running', { workflowId: 'wf-1' }),
-    ]);
+    useRuntimeStore.getState().setRunSnapshot('wf-1', [runRecord('run-1', 'running', { workflowId: 'wf-1' })]);
     useRuntimeStore.getState().recordRuntimeEvent({
       id: 'evt-x',
       type: 'run:quarantined',
@@ -166,5 +162,4 @@ describe('useRuntimeStore runtime observation', () => {
     expect(state.workflowRuns).toEqual({});
     expect(state.runSyncState).toEqual({});
   });
-
 });

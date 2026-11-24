@@ -11,9 +11,9 @@ const mockPersistInstanceWebSearchParams = jest.fn();
 const mockUpdateInstanceConfig = jest.fn();
 
 let v2AgentNodeHarness = resetV2AgentNodeHarness();
-let runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
-let designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
-let functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> } =
+let _runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
+let _designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
+let _functionStoreState: { functions: UserFunction[]; loadFunctions: (workflowId?: string) => Promise<void> } =
   v2AgentNodeHarness.functionStore;
 
 jest.mock('reactflow', () => ({
@@ -185,9 +185,9 @@ describe('V2AgentNode web search params entrypoint', () => {
       },
     });
 
-    runtimeStoreState = v2AgentNodeHarness.runtimeStore;
-    designStoreState = v2AgentNodeHarness.designStore;
-    functionStoreState = v2AgentNodeHarness.functionStore;
+    _runtimeStoreState = v2AgentNodeHarness.runtimeStore;
+    _designStoreState = v2AgentNodeHarness.designStore;
+    _functionStoreState = v2AgentNodeHarness.functionStore;
 
     (runAgentLoop as jest.Mock).mockReset().mockResolvedValue({
       finalResponse: 'ok',
@@ -198,7 +198,7 @@ describe('V2AgentNode web search params entrypoint', () => {
   });
 
   it('shows the globe button and opens the params modal for web_search_py', async () => {
-    const view = render(
+    const _view = render(
       <V2AgentNode
         id="node-1"
         type="customAgent"
@@ -208,7 +208,7 @@ describe('V2AgentNode web search params entrypoint', () => {
         dragging={false}
         zIndex={1}
         isConnectable={true}
-        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] }}
+        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: _designStoreState.agentInstances[0] }}
       />,
     );
 
@@ -226,7 +226,7 @@ describe('V2AgentNode web search params entrypoint', () => {
 
   it('loads the function catalog on mount so the globe button appears when web_search_py is selected', async () => {
     const loadFunctions = jest.fn(async () => {
-      functionStoreState.functions = [
+      _functionStoreState.functions = [
         {
           _id: 'fn-1',
           toolId: 'tool.web-search',
@@ -251,11 +251,11 @@ describe('V2AgentNode web search params entrypoint', () => {
       ];
     });
 
-    functionStoreState = {
+    _functionStoreState = {
       functions: [],
       loadFunctions,
     };
-    v2AgentNodeHarness.functionStore = functionStoreState as typeof v2AgentNodeHarness.functionStore;
+    v2AgentNodeHarness.functionStore = _functionStoreState as typeof v2AgentNodeHarness.functionStore;
 
     const view = render(
       <V2AgentNode
@@ -267,7 +267,7 @@ describe('V2AgentNode web search params entrypoint', () => {
         dragging={false}
         zIndex={1}
         isConnectable={true}
-        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] }}
+        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: _designStoreState.agentInstances[0] }}
       />,
     );
 
@@ -285,7 +285,7 @@ describe('V2AgentNode web search params entrypoint', () => {
         dragging={false}
         zIndex={1}
         isConnectable={true}
-        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: designStoreState.agentInstances[0] }}
+        data={{ robotId: RobotId.Archi, label: 'Archi', agent, agentInstance: _designStoreState.agentInstances[0] }}
       />,
     );
 
@@ -299,17 +299,17 @@ describe('V2AgentNode web search params entrypoint', () => {
       functionIds: [],
     };
     const inheritedInstance = {
-      ...designStoreState.agentInstances[0],
+      ..._designStoreState.agentInstances[0],
       toolSelections: [],
       configuration_json: {
-        ...designStoreState.agentInstances[0].configuration_json,
+        ..._designStoreState.agentInstances[0].configuration_json,
         toolSelections: [],
       },
     };
 
-    designStoreState.agents = [];
-    designStoreState.agentInstances = [inheritedInstance];
-    v2AgentNodeHarness.designStore = designStoreState as typeof v2AgentNodeHarness.designStore;
+    _designStoreState.agents = [];
+    _designStoreState.agentInstances = [inheritedInstance];
+    v2AgentNodeHarness.designStore = _designStoreState as typeof v2AgentNodeHarness.designStore;
 
     const view = render(
       <V2AgentNode
@@ -327,8 +327,8 @@ describe('V2AgentNode web search params entrypoint', () => {
 
     expect(screen.queryByTitle("Paramètres Web Search de l'agent")).not.toBeInTheDocument();
 
-    designStoreState.agents = [agent];
-    v2AgentNodeHarness.designStore = designStoreState as typeof v2AgentNodeHarness.designStore;
+    _designStoreState.agents = [agent];
+    v2AgentNodeHarness.designStore = _designStoreState as typeof v2AgentNodeHarness.designStore;
 
     view.rerender(
       <V2AgentNode

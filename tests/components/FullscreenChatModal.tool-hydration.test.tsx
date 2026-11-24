@@ -8,9 +8,9 @@ import { createTestAgent, createTestAgentInstance, createToolSelection } from '.
 import { resetFullscreenChatHarness } from '../harnesses/fullscreenChatHarness';
 
 let fullscreenChatHarness = resetFullscreenChatHarness();
-let runtimeStoreState = fullscreenChatHarness.runtimeStore;
-let designStoreState = fullscreenChatHarness.designStore;
-let functionStoreState = fullscreenChatHarness.functionStore;
+let _runtimeStoreState = fullscreenChatHarness.runtimeStore;
+let _designStoreState = fullscreenChatHarness.designStore;
+let _functionStoreState = fullscreenChatHarness.functionStore;
 const mockUseAgentChat = jest.fn(() => ({ handleSendMessage: jest.fn(), loadingMessage: '', isHistorySynthesisActive: false }));
 
 jest.mock('../../components/workflow/ToolCallBlock', () => ({ ToolCallBlock: () => <div data-testid="tool-call-block" /> }));
@@ -18,13 +18,10 @@ jest.mock('../../components/modals/ConfirmationModal', () => ({ ConfirmationModa
 jest.mock('../../components/modals/WebSearchParamsModal', () => ({ WebSearchParamsModal: () => null }));
 jest.mock('../../components/panels/ImageGenerationPanel', () => ({
   ImageGenerationPanel: ({ onImageGenerated }: { onImageGenerated?: (nodeId: string, imageBase64: string) => void }) => (
-    <button
-      data-testid="mock-image-generation-add"
-      onClick={() => onImageGenerated?.('node-instance-1', 'generated-image-base64')}
-    >
+    <button data-testid="mock-image-generation-add" onClick={() => onImageGenerated?.('node-instance-1', 'generated-image-base64')}>
       mock-image-generation-add
     </button>
-  )
+  ),
 }));
 jest.mock('../../components/panels/VideoGenerationConfigPanel', () => ({ VideoGenerationConfigPanel: () => null }));
 jest.mock('../../components/panels/MapsGroundingConfigPanel', () => ({ MapsGroundingConfigPanel: () => null }));
@@ -37,7 +34,7 @@ jest.mock('../../utils/apiClient', () => ({
   default: {
     get: jest.fn(),
     post: jest.fn(),
-  }
+  },
 }));
 
 jest.mock('../../stores/useRuntimeStore', () => ({
@@ -110,9 +107,9 @@ describe('FullscreenChatModal tool projection hydration', () => {
       }),
       functionStore: { functions: [] as UserFunction[] },
     });
-    runtimeStoreState = fullscreenChatHarness.runtimeStore;
-    designStoreState = fullscreenChatHarness.designStore;
-    functionStoreState = fullscreenChatHarness.functionStore;
+    _runtimeStoreState = fullscreenChatHarness.runtimeStore;
+    _designStoreState = fullscreenChatHarness.designStore;
+    _functionStoreState = fullscreenChatHarness.functionStore;
 
     (apiClient.get as jest.Mock).mockResolvedValue({
       data: {
@@ -132,11 +129,11 @@ describe('FullscreenChatModal tool projection hydration', () => {
               result: { temperature: 21 },
               status: 'success',
               executionId: 'exec-1',
-              timestamp: '2026-05-01T09:00:00.000Z'
-            }
-          }
-        ]
-      }
+              timestamp: '2026-05-01T09:00:00.000Z',
+            },
+          },
+        ],
+      },
     });
   });
 
@@ -144,22 +141,24 @@ describe('FullscreenChatModal tool projection hydration', () => {
     render(<FullscreenChatModal />);
 
     await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/api/agent-instances/instance-1'));
-    await waitFor(() => expect(runtimeStoreState.setNodeMessages).toHaveBeenCalledWith(
-      'node-instance-1',
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'persisted-tool-msg',
-          sender: 'tool',
-          toolCallRecord: expect.objectContaining({
-            id: 'call-1',
-            toolId: 'tool.weather',
-            functionId: 'legacy-weather',
-            executionId: 'exec-1',
-            timestamp: expect.any(Date)
-          })
-        })
-      ])
-    ));
+    await waitFor(() =>
+      expect(_runtimeStoreState.setNodeMessages).toHaveBeenCalledWith(
+        'node-instance-1',
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'persisted-tool-msg',
+            sender: 'tool',
+            toolCallRecord: expect.objectContaining({
+              id: 'call-1',
+              toolId: 'tool.weather',
+              functionId: 'legacy-weather',
+              executionId: 'exec-1',
+              timestamp: expect.any(Date),
+            }),
+          }),
+        ]),
+      ),
+    );
   });
 
   it('rehydrates legacy persisted tool/result pairs into a ToolCallBlock-compatible message', async () => {
@@ -178,42 +177,44 @@ describe('FullscreenChatModal tool projection hydration', () => {
             sender: 'agent',
             text: '[executionId=utr-6a1989ce121cd1727a9b6ed8] {\n  "result": "Ton nom, Joe, est maintenant enregistré dans ma mémoire"\n}',
             timestamp: '2026-05-01T09:00:00.100Z',
-          }
-        ]
-      }
+          },
+        ],
+      },
     });
 
     render(<FullscreenChatModal />);
 
     await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/api/agent-instances/instance-1'));
-    await waitFor(() => expect(runtimeStoreState.setNodeMessages).toHaveBeenCalledWith(
-      'node-instance-1',
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'legacy-tool-msg',
-          sender: 'tool',
-          toolCallRecord: expect.objectContaining({
-            id: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
-            functionName: 'hello_test',
-            executionId: 'utr-6a1989ce121cd1727a9b6ed8',
-            arguments: { user_name: 'Joe' },
-            result: {
-              result: 'Ton nom, Joe, est maintenant enregistré dans ma mémoire',
-            },
-            timestamp: expect.any(Date),
-          })
-        }),
-        expect.objectContaining({
-          id: 'legacy-tool-result-msg',
-          sender: 'tool_result',
-          toolCallId: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
-        })
-      ])
-    ));
+    await waitFor(() =>
+      expect(_runtimeStoreState.setNodeMessages).toHaveBeenCalledWith(
+        'node-instance-1',
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'legacy-tool-msg',
+            sender: 'tool',
+            toolCallRecord: expect.objectContaining({
+              id: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
+              functionName: 'hello_test',
+              executionId: 'utr-6a1989ce121cd1727a9b6ed8',
+              arguments: { user_name: 'Joe' },
+              result: {
+                result: 'Ton nom, Joe, est maintenant enregistré dans ma mémoire',
+              },
+              timestamp: expect.any(Date),
+            }),
+          }),
+          expect.objectContaining({
+            id: 'legacy-tool-result-msg',
+            sender: 'tool_result',
+            toolCallId: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
+          }),
+        ]),
+      ),
+    );
   });
 
   it('shows the synthesis icon in the chat loader when history synthesis is active', () => {
-    runtimeStoreState.isNodeExecuting = jest.fn(() => true);
+    _runtimeStoreState.isNodeExecuting = jest.fn(() => true);
     mockUseAgentChat.mockReturnValue({
       handleSendMessage: jest.fn(),
       loadingMessage: 'agentNode_history_summarizing',
@@ -231,20 +232,20 @@ describe('FullscreenChatModal tool projection hydration', () => {
     (apiClient.get as jest.Mock).mockResolvedValueOnce({
       data: {
         id: 'instance-1',
-        chatMessages: []
-      }
+        chatMessages: [],
+      },
     });
 
-    designStoreState = {
-      ...designStoreState,
+    _designStoreState = {
+      ..._designStoreState,
       agents: [
         {
-          ...designStoreState.agents[0],
+          ..._designStoreState.agents[0],
           capabilities: [LLMCapability.ImageGeneration],
         },
       ],
     };
-    fullscreenChatHarness.designStore = designStoreState as typeof fullscreenChatHarness.designStore;
+    fullscreenChatHarness.designStore = _designStoreState as typeof fullscreenChatHarness.designStore;
 
     render(<FullscreenChatModal onImageGenerated={onImageGenerated} />);
 
@@ -252,15 +253,13 @@ describe('FullscreenChatModal tool projection hydration', () => {
     fireEvent.click(await screen.findByTestId('mock-image-generation-add'));
 
     expect(onImageGenerated).toHaveBeenCalledWith('node-instance-1', 'generated-image-base64');
-    expect(runtimeStoreState.addNodeMessage).not.toHaveBeenCalledWith(
+    expect(_runtimeStoreState.addNodeMessage).not.toHaveBeenCalledWith(
       'node-instance-1',
-      expect.objectContaining({ image: 'generated-image-base64' })
+      expect.objectContaining({ image: 'generated-image-base64' }),
     );
-    expect(runtimeStoreState.setNodeMessages).not.toHaveBeenCalledWith(
+    expect(_runtimeStoreState.setNodeMessages).not.toHaveBeenCalledWith(
       'node-instance-1',
-      expect.arrayContaining([
-        expect.objectContaining({ image: 'generated-image-base64' })
-      ])
+      expect.arrayContaining([expect.objectContaining({ image: 'generated-image-base64' })]),
     );
   });
 });

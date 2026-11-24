@@ -162,7 +162,7 @@ export function useWorkflowPersistence(options: WorkflowPersistenceOptions): Use
             id: n.id,
             type: n.type || 'agent',
             position: n.position,
-            data: n.data as Record<string, any>,
+            data: n.data as Record<string, unknown>,
           })),
           edges: edges.map((e) => ({
             id: e.id,
@@ -239,7 +239,7 @@ export function useWorkflowPersistence(options: WorkflowPersistenceOptions): Use
 
       try {
         // Build MongoDB-style $set updates
-        const mongoUpdates: Record<string, any> = {};
+        const mongoUpdates: Record<string, unknown> = {};
 
         if (updates.name) mongoUpdates['name'] = updates.name;
         if (updates.description) mongoUpdates['description'] = updates.description;
@@ -370,29 +370,6 @@ export function useWorkflowPersistence(options: WorkflowPersistenceOptions): Use
     [],
   );
 
-  // ============================================
-  // AGENT RESULT BUFFERING - Règle 4.5.5
-  // ============================================
-
-  const bufferAgentResult = useCallback((instanceId: string, result: AgentInstanceContent) => {
-    const buffer = agentResultBufferRef.current;
-
-    if (!buffer.has(instanceId)) {
-      buffer.set(instanceId, []);
-    }
-    buffer.get(instanceId)!.push(result);
-
-    // Reset flush timer
-    if (bufferFlushTimerRef.current) {
-      clearTimeout(bufferFlushTimerRef.current);
-    }
-
-    // Schedule flush after buffer interval
-    bufferFlushTimerRef.current = setTimeout(() => {
-      flushAgentResults();
-    }, AGENT_RESULT_BUFFER_MS);
-  }, []);
-
   const flushAgentResults = useCallback(async () => {
     const buffer = agentResultBufferRef.current;
 
@@ -423,6 +400,32 @@ export function useWorkflowPersistence(options: WorkflowPersistenceOptions): Use
     // Clear buffer
     buffer.clear();
   }, [isAuthenticated, accessToken]);
+
+  // ============================================
+  // AGENT RESULT BUFFERING - Règle 4.5.5
+  // ============================================
+
+  const bufferAgentResult = useCallback(
+    (instanceId: string, result: AgentInstanceContent) => {
+      const buffer = agentResultBufferRef.current;
+
+      if (!buffer.has(instanceId)) {
+        buffer.set(instanceId, []);
+      }
+      buffer.get(instanceId)!.push(result);
+
+      // Reset flush timer
+      if (bufferFlushTimerRef.current) {
+        clearTimeout(bufferFlushTimerRef.current);
+      }
+
+      // Schedule flush after buffer interval
+      bufferFlushTimerRef.current = setTimeout(() => {
+        flushAgentResults();
+      }, AGENT_RESULT_BUFFER_MS);
+    },
+    [flushAgentResults],
+  );
 
   // ============================================
   // DEBOUNCED AUTO-SAVE - Règle 4.5.1
@@ -457,9 +460,10 @@ export function useWorkflowPersistence(options: WorkflowPersistenceOptions): Use
 
   // Cleanup on unmount
   useEffect(() => {
+    const buffer = agentResultBufferRef.current;
     return () => {
       // Flush any remaining agent results
-      if (agentResultBufferRef.current.size > 0) {
+      if (buffer.size > 0) {
         flushAgentResults();
       }
     };

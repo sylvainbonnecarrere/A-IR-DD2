@@ -18,28 +18,32 @@ describe('WorkflowRunService V2 contract bridge', () => {
   });
 
   it('lists workflow-scoped runs through the canonical /api/runs route', async () => {
-    jest.spyOn(apiClient, 'get').mockResolvedValue(okResponse({
-      data: {
-        items: [{
-          executionId: 'run-1',
-          status: 'running',
-          runtime: 'python',
-          runner: 'docker_sandbox',
-          launchContext: 'workflow_run',
-          createdAt: '2026-01-01T00:00:00.000Z',
-          updatedAt: '2026-01-01T00:00:10.000Z',
-          timing: { startedAt: '2026-01-01T00:00:01.000Z' },
-        }],
-        pagination: {
-          page: 1,
-          limit: 20,
-          total: 1,
-          totalPages: 1,
-          sortBy: 'createdAt',
-          sortOrder: 'desc',
+    jest.spyOn(apiClient, 'get').mockResolvedValue(
+      okResponse({
+        data: {
+          items: [
+            {
+              executionId: 'run-1',
+              status: 'running',
+              runtime: 'python',
+              runner: 'docker_sandbox',
+              launchContext: 'workflow_run',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:10.000Z',
+              timing: { startedAt: '2026-01-01T00:00:01.000Z' },
+            },
+          ],
+          pagination: {
+            page: 1,
+            limit: 20,
+            total: 1,
+            totalPages: 1,
+            sortBy: 'createdAt',
+            sortOrder: 'desc',
+          },
         },
-      },
-    }));
+      }),
+    );
 
     const result = await WorkflowRunService.listWorkflowRuns('wf-123');
 
@@ -55,13 +59,15 @@ describe('WorkflowRunService V2 contract bridge', () => {
   });
 
   it('launches a run through the canonical execute endpoint using workflow context', async () => {
-    jest.spyOn(apiClient, 'post').mockResolvedValue(okResponse({
-      data: {
-        executionId: 'run-456',
-        status: 'queued',
-        idempotency: { key: null, replayed: false },
-      },
-    }));
+    jest.spyOn(apiClient, 'post').mockResolvedValue(
+      okResponse({
+        data: {
+          executionId: 'run-456',
+          status: 'queued',
+          idempotency: { key: null, replayed: false },
+        },
+      }),
+    );
 
     const result = await WorkflowRunService.launchRun({
       workflowId: 'wf-123',
@@ -71,26 +77,31 @@ describe('WorkflowRunService V2 contract bridge', () => {
       privateContext: { workflowId: 'wf-123' },
     });
 
-    expect(apiClient.post).toHaveBeenCalledWith('/api/runs/execute', expect.objectContaining({
-      functionId: 'tool-99',
-      agentInstanceId: 'instance-22',
-      testArgs: { input: 'hello' },
-      privateContext: expect.objectContaining({ workflowId: 'wf-123' }),
-    }));
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/api/runs/execute',
+      expect.objectContaining({
+        functionId: 'tool-99',
+        agentInstanceId: 'instance-22',
+        testArgs: { input: 'hello' },
+        privateContext: expect.objectContaining({ workflowId: 'wf-123' }),
+      }),
+    );
     expect(result.executionId).toBe('run-456');
     expect(result.status).toBe('queued');
   });
 
   it('reads a run by executionId through the canonical details route', async () => {
-    jest.spyOn(apiClient, 'get').mockResolvedValue(okResponse({
-      data: {
-        executionId: 'run-789',
-        status: 'running',
-        toolId: 'tool-99',
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:05.000Z',
-      },
-    }));
+    jest.spyOn(apiClient, 'get').mockResolvedValue(
+      okResponse({
+        data: {
+          executionId: 'run-789',
+          status: 'running',
+          toolId: 'tool-99',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:05.000Z',
+        },
+      }),
+    );
 
     const result = await WorkflowRunService.getRun('run-789', 'tool-99');
 
@@ -102,9 +113,11 @@ describe('WorkflowRunService V2 contract bridge', () => {
   });
 
   it('cancels a queued or running run via the execution cancel route', async () => {
-    jest.spyOn(apiClient, 'post').mockResolvedValue(okResponse({
-      data: { success: true, executionId: 'run-cancelled', status: 'stopped' },
-    }));
+    jest.spyOn(apiClient, 'post').mockResolvedValue(
+      okResponse({
+        data: { success: true, executionId: 'run-cancelled', status: 'stopped' },
+      }),
+    );
 
     const result = await WorkflowRunService.cancelRun('run-cancelled');
 
@@ -120,11 +133,7 @@ describe('WorkflowRunService V2 contract bridge', () => {
 
     const result = await WorkflowRunService.retryRun('run-7', 'idem-uuid-1');
 
-    expect(apiClient.post).toHaveBeenCalledWith(
-      '/api/runs/executions/run-7/retry',
-      {},
-      { headers: { 'Idempotency-Key': 'idem-uuid-1' } },
-    );
+    expect(apiClient.post).toHaveBeenCalledWith('/api/runs/executions/run-7/retry', {}, { headers: { 'Idempotency-Key': 'idem-uuid-1' } });
     expect(result.executionId).toBe('run-new');
     expect(result.retryOfExecutionId).toBe('run-7');
     expect(result.status).toBe('queued');
@@ -208,5 +217,4 @@ describe('WorkflowRunService V2 contract bridge', () => {
     const { newIdempotencyKey } = require('../../services/workflowRunService');
     expect(newIdempotencyKey()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   });
-
 });

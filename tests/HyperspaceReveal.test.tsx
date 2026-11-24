@@ -28,7 +28,7 @@ const mockRequestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
   return ++rafId;
 });
 
-const mockCancelAnimationFrame = jest.fn((id: number) => {
+const mockCancelAnimationFrame = jest.fn((__id: number) => {
   // Cancel logic
 });
 
@@ -470,7 +470,7 @@ describe('Performance Tests', () => {
       autoTriggerDelay?: number;
       onExperienceComplete?: () => void;
     };
-    let HyperspaceReveal: React.FC<HyperspaceRevealProps>;
+    let __HyperspaceReveal: React.FC<HyperspaceRevealProps>;
 
     // Mesurer le temps d'exécution de plusieurs frames
     const startTime = performance.now();

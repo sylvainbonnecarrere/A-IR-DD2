@@ -348,7 +348,7 @@ export const useWorkflowData = (): UseWorkflowDataState & UseWorkflowDataActions
    */
   const clearError = useCallback(() => {
     setState((s) => ({ ...s, error: null }));
-  }, [persistenceOptions]);
+  }, []);
 
   /**
    * Charger les workflows au montage ou lors du changement d'authentification

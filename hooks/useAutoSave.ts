@@ -2,15 +2,15 @@
  * @file useAutoSave.ts
  * @description Hook pour la sauvegarde automatique du workflow avec debounce
  * @domain Design Domain - Persistence Logic
- * 
+ *
  * ⭐ PLAN_DE_PERSISTENCE: Mode Automatique
- * 
+ *
  * ARCHITECTURE:
  * - Surveille les changements de nodes/edges dans le DesignStore
  * - Debounce de 2000ms pour éviter les sauvegardes trop fréquentes
  * - Indicateur d'état (idle/saving/saved/error)
  * - Respect du saveMode (auto vs manual)
- * 
+ *
  * SOLID PRINCIPLES:
  * - S: Single responsibility - Uniquement la sauvegarde auto
  * - O: Open for extension via callbacks
@@ -25,13 +25,7 @@ import { PersistenceService } from '../services/persistenceService';
 
 export type AutoSaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
-const INVALID_WORKFLOW_IDS = new Set([
-  'default-workflow',
-  'new-workflow',
-  'temp-workflow',
-  'placeholder',
-  ''
-]);
+const INVALID_WORKFLOW_IDS = new Set(['default-workflow', 'new-workflow', 'temp-workflow', 'placeholder', '']);
 
 function isValidWorkflowId(workflowId: string | null | undefined): workflowId is string {
   return !!workflowId && !INVALID_WORKFLOW_IDS.has(workflowId.toLowerCase()) && /^[a-f\d]{24}$/i.test(workflowId);
@@ -66,14 +60,7 @@ interface UseAutoSaveReturn {
 }
 
 export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
-  const {
-    debounceMs = 2000,
-    onSaveStart,
-    onSaveComplete,
-    workflowId,
-    workflowName,
-    canvasState
-  } = options;
+  const { debounceMs = 2000, onSaveStart, onSaveComplete, workflowId, workflowName, canvasState } = options;
 
   const [status, setStatus] = useState<AutoSaveStatus>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
@@ -97,7 +84,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
   const performSave = useCallback(async () => {
     // Prevent concurrent saves
     if (isSavingRef.current) return;
-    
+
     // Only save if authenticated and auto-save enabled
     if (!isAuthenticated || !accessToken) return;
 
@@ -117,23 +104,23 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
           id: effectiveWorkflowId,
           name: workflowName,
           canvasState,
-          nodes: nodes.map(n => ({
+          nodes: nodes.map((n) => ({
             id: n.id,
             type: n.type,
             position: n.position,
-            data: n.data as Record<string, any>
+            data: n.data as Record<string, unknown>,
           })),
-          edges: edges.map(e => ({
+          edges: edges.map((e) => ({
             id: e.id,
             source: e.source,
             target: e.target,
-            type: e.type
-          }))
+            type: e.type,
+          })),
         },
         {
           isAuthenticated,
-          accessToken: accessToken || undefined
-        }
+          accessToken: accessToken || undefined,
+        },
       );
 
       if (result.success) {
@@ -141,14 +128,14 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
         setLastSavedAt(new Date());
         setError(null);
         console.debug('[useAutoSave] ✅ Auto-save successful');
-        
+
         // Reset status after 3 seconds
         setTimeout(() => {
           if (!isSavingRef.current) {
             setStatus('idle');
           }
         }, 3000);
-        
+
         onSaveComplete?.(true);
       } else {
         setStatus('error');
@@ -175,7 +162,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
     nodes,
     edges,
     onSaveStart,
-    onSaveComplete
+    onSaveComplete,
   ]);
 
   /**
@@ -218,8 +205,8 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
     if (!isEnabled) return;
 
     // Serialize current state for comparison
-    const nodesHash = JSON.stringify(nodes.map(n => ({ id: n.id, position: n.position })));
-    const edgesHash = JSON.stringify(edges.map(e => ({ id: e.id, source: e.source, target: e.target })));
+    const nodesHash = JSON.stringify(nodes.map((n) => ({ id: n.id, position: n.position })));
+    const edgesHash = JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target })));
 
     // Check if state actually changed
     const nodesChanged = nodesHash !== prevNodesRef.current;
@@ -228,7 +215,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
     if (nodesChanged || edgesChanged) {
       prevNodesRef.current = nodesHash;
       prevEdgesRef.current = edgesHash;
-      
+
       // Only trigger if we had previous state (skip initial render)
       if (prevNodesRef.current && prevEdgesRef.current) {
         console.debug('[useAutoSave] 📝 Changes detected, scheduling auto-save...');
@@ -263,7 +250,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveReturn {
     lastSavedAt,
     error,
     saveNow,
-    isEnabled
+    isEnabled,
   };
 }
 

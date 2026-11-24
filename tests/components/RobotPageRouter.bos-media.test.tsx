@@ -12,9 +12,8 @@ jest.mock('../../components/WorkflowCanvas', () => ({
 }));
 jest.mock('../../components/modals/BosMediaModal', () => ({
   __esModule: true,
-  default: ({ isOpen, workflowId, workflowName }: { isOpen: boolean; workflowId: string | null; workflowName?: string | null }) => (
-    isOpen ? <div data-testid="bos-media-modal">{`${workflowId}:${workflowName}`}</div> : null
-  ),
+  default: ({ isOpen, workflowId, workflowName }: { isOpen: boolean; workflowId: string | null; workflowName?: string | null }) =>
+    isOpen ? <div data-testid="bos-media-modal">{`${workflowId}:${workflowName}`}</div> : null,
 }));
 
 describe('RobotPageRouter BOS media button', () => {
@@ -38,19 +37,13 @@ describe('RobotPageRouter BOS media button', () => {
       t: (key: string, fallback?: string) => fallback || key,
     });
 
-    (useDesignStore as unknown as jest.Mock).mockImplementation((selector?: (state: typeof designStoreState) => unknown) => (
-      selector ? selector(designStoreState) : designStoreState
-    ));
+    (useDesignStore as unknown as jest.Mock).mockImplementation((selector?: (state: typeof designStoreState) => unknown) =>
+      selector ? selector(designStoreState) : designStoreState,
+    );
   });
 
   it('shows the media button on the BOS workflow map and opens the modal for the active workflow', async () => {
-    render(
-      <RobotPageRouter
-        currentPath="/bos/dashboard"
-        llmConfigs={[]}
-        agents={[]}
-      />,
-    );
+    render(<RobotPageRouter currentPath="/bos/dashboard" llmConfigs={[]} agents={[]} />);
 
     expect(screen.getByRole('button', { name: 'Gestion des fichiers' })).toBeInTheDocument();
     expect(await screen.findByTestId('workflow-canvas')).toBeInTheDocument();

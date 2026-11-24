@@ -327,7 +327,7 @@ describe('Optimistic UI Pattern', () => {
 
     const { result } = renderHook(() => useWorkflowPersistence(mockOptions));
 
-    let previousValue = { test: 'original' };
+    const previousValue = { test: 'original' };
     const rollbackFn = jest.fn();
 
     await act(async () => {

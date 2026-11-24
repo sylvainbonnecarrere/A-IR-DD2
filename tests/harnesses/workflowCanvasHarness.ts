@@ -11,7 +11,7 @@ export interface WorkflowCanvasHarnessState {
   renderedNodes: Record<string, unknown>[];
   capturedOnNodesChange: ((changes: unknown[]) => void) | null;
   capturedOnNodeDragStop: ((event: unknown, node: Record<string, unknown>) => void) | null;
-  capturedWorkflowCanvasContextValue: Record<string, any> | null;
+  capturedWorkflowCanvasContextValue: ({ onToggleNodeMinimize?: (nodeId: string) => void } & Record<string, unknown>) | null;
 }
 
 interface ResetWorkflowCanvasHarnessOptions {
@@ -22,9 +22,7 @@ interface ResetWorkflowCanvasHarnessOptions {
 
 let workflowCanvasHarnessState: WorkflowCanvasHarnessState;
 
-export function resetWorkflowCanvasHarness(
-  options: ResetWorkflowCanvasHarnessOptions = {},
-): WorkflowCanvasHarnessState {
+export function resetWorkflowCanvasHarness(options: ResetWorkflowCanvasHarnessOptions = {}): WorkflowCanvasHarnessState {
   workflowCanvasHarnessState = {
     designStore: createDesignStoreTestState(options.designStore),
     workflowStore: createWorkflowStoreTestState(options.workflowStore),

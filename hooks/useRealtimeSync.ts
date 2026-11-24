@@ -17,11 +17,11 @@ interface UseRealtimeSyncReturn {
 }
 
 export const useRealtimeSync = ({
-  nodes,
+  nodes: _nodes,
   onUpdateNodePosition,
   onUpdateNodeMessages,
   onToggleNodeMinimize,
-  currentUserId
+  currentUserId,
 }: UseRealtimeSyncProps): UseRealtimeSyncReturn => {
   const lastSyncTime = useRef<Map<string, number>>(new Map());
   const syncCooldown = 100; // 100ms cooldown pour éviter les boucles
@@ -31,11 +31,11 @@ export const useRealtimeSync = ({
     const handleAgentPositionUpdated = (data: { nodeId: string; position: { x: number; y: number }; userId: string }) => {
       // Ignorer nos propres updates
       if (data.userId === currentUserId) return;
-      
+
       // Vérifier cooldown pour éviter les boucles
       const lastSync = lastSyncTime.current.get(`position_${data.nodeId}`) || 0;
       if (Date.now() - lastSync < syncCooldown) return;
-      
+
       console.debug('[Realtime] Position reçue:', data);
       onUpdateNodePosition(data.nodeId, data.position);
       lastSyncTime.current.set(`position_${data.nodeId}`, Date.now());
@@ -44,7 +44,7 @@ export const useRealtimeSync = ({
     const handleAgentMessageAdded = (data: { nodeId: string; message: ChatMessage; userId: string }) => {
       // Ignorer nos propres updates
       if (data.userId === currentUserId) return;
-      
+
       console.debug('[Realtime] Message reçu:', data);
       onUpdateNodeMessages(data.nodeId, (prev) => [...prev, data.message]);
     };
@@ -52,7 +52,7 @@ export const useRealtimeSync = ({
     const handleAgentToggleMinimized = (data: { nodeId: string; userId: string }) => {
       // Ignorer nos propres updates
       if (data.userId === currentUserId) return;
-      
+
       console.debug('[Realtime] Toggle minimize reçu:', data);
       onToggleNodeMinimize(data.nodeId);
     };
@@ -75,7 +75,7 @@ export const useRealtimeSync = ({
     // Vérifier cooldown
     const lastSync = lastSyncTime.current.get(`position_${nodeId}`) || 0;
     if (Date.now() - lastSync < syncCooldown) return;
-    
+
     webSocketService.updateAgentPosition(nodeId, position);
     lastSyncTime.current.set(`position_${nodeId}`, Date.now());
   }, []);

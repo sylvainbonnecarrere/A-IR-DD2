@@ -8,7 +8,7 @@
  * - Guest mode (no token)
  */
 
-import axios, { AxiosInstance } from 'axios';
+import __axios, { AxiosInstance } from 'axios';
 import MockAdapter from 'axios-mock-adapter';
 
 // Mock localStorage

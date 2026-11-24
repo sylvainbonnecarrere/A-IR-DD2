@@ -4,13 +4,9 @@ import {
   AgentBatchDeleteResult,
   AgentDeletionMediaPolicy,
   LLMConfig,
-  LLMProvider,
-  WorkflowNode,
   LLMCapability,
   ChatMessage,
-  HistoryConfig,
   RobotId,
-  V2WorkflowNode,
   AgentInstance,
   NodePositionUpdateOptions,
   MapsPanelPreloadedResults,
@@ -25,7 +21,7 @@ import { FullscreenChatModal } from './components/modals/FullscreenChatModal';
 import { AgentConfigurationModal } from './components/modals/AgentConfigurationModal';
 import { useRuntimeStore } from './stores/useRuntimeStore';
 import { useDesignStore } from './stores/useDesignStore';
-import { useFunctionStore } from './stores/useFunctionStore';
+
 import { useAppShellStore } from './stores/useAppShellStore';
 import { NotificationProvider } from './contexts';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -41,16 +37,16 @@ import { WorkflowSwitchOverlay } from './components/WorkflowSwitchOverlay';
 // ⭐ AUTO-SAVE: Import PersistenceService for immediate instance creation
 import { PersistenceService } from './services/persistenceService';
 import { deleteWorkflowInstance, deleteWorkflowInstances, persistNodePosition } from './services/appWorkflowPersistenceService';
-import { createAgentPrototype, updateAgentPrototype } from './services/agentPrototypeAPI';
+
 import { resolveActiveWorkflowId } from './services/workflowIdResolver';
 import { remapAgentInstanceReference, remapEditingImageInfo, remapPanelNodeId } from './utils/mediaPanelRuntimeSync';
 // ⭐ V2: Import apiClient for workflow switch orchestration
-import apiClient from './utils/apiClient';
+
 // ⭐ FIX QA: Import useJournalQueue for image persistence
 import { useJournalQueue } from './hooks/useJournalQueue';
-import type { WorkspaceSnapshot } from './services/workspaceBootstrapService';
+
 import { useAppWorkflowController } from './hooks/useAppWorkflowController';
-import { findAvailableWorkflowNodePosition, findCollisionFreeWorkflowNodePosition } from './utils/workflowNodePlacement';
+import { findAvailableWorkflowNodePosition } from './utils/workflowNodePlacement';
 import { generateRuntimeMessageId } from './utils/runtimeMessageId';
 import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from './utils/robotPageRouting';
 
@@ -120,9 +116,9 @@ export function AppContent() {
   const currentImageNodeId = useAppShellStore((state) => state.currentImageNodeId);
   const currentImageAgent = useAppShellStore((state) => state.currentImageAgent);
   const currentImageAgentInstance = useAppShellStore((state) => state.currentImageAgentInstance);
-  const currentVideoNodeId = useAppShellStore((state) => state.currentVideoNodeId);
-  const currentVideoAgent = useAppShellStore((state) => state.currentVideoAgent);
-  const currentVideoAgentInstance = useAppShellStore((state) => state.currentVideoAgentInstance);
+  const _currentVideoNodeId = useAppShellStore((state) => state.currentVideoNodeId);
+  const _currentVideoAgent = useAppShellStore((state) => state.currentVideoAgent);
+  const _currentVideoAgentInstance = useAppShellStore((state) => state.currentVideoAgentInstance);
   const currentMapsNodeId = useAppShellStore((state) => state.currentMapsNodeId);
   const editingImageInfo = useAppShellStore((state) => state.editingImageInfo);
   const mapsPreloadedResults = useAppShellStore((state) => state.mapsPreloadedResults);
@@ -160,11 +156,14 @@ export function AppContent() {
   const currentRouteUsesWorkflowCanvas =
     currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosDashboard || currentResolvedRoute === ROBOT_PAGE_ROUTE_IDS.bosSupervision;
 
-  const handleRobotNavigation = useCallback((robotId: RobotId, path: string) => {
-    setCurrentPath(path);
-    // TODO: Implement proper routing logic
-    console.debug(`Navigating to robot ${robotId} at path ${path}`);
-  }, []);
+  const handleRobotNavigation = useCallback(
+    (robotId: RobotId, path: string) => {
+      setCurrentPath(path);
+      // TODO: Implement proper routing logic
+      console.debug(`Navigating to robot ${robotId} at path ${path}`);
+    },
+    [setCurrentPath],
+  );
 
   const handleRuntimeNavigation = useCallback(
     (robotId: string, path: string) => {
@@ -193,7 +192,7 @@ export function AppContent() {
       setShowHyperspace(true);
       setHyperspaceActive(false); // Reset to idle
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, setHyperspaceActive, setShowHyperspace]);
 
   // ⭐ UX: Auto-trigger warp after short delay when hyperspace is shown
   useEffect(() => {
@@ -203,7 +202,7 @@ export function AppContent() {
       }, 1500); // 1.5s idle phase before warp
       return () => clearTimeout(timer);
     }
-  }, [showHyperspace, hyperspaceActive]);
+  }, [showHyperspace, hyperspaceActive, setHyperspaceActive]);
 
   // ⭐ UX: Handle hyperspace animation complete
   const handleHyperspaceComplete = useCallback(() => {
@@ -212,7 +211,7 @@ export function AppContent() {
       setShowHyperspace(false);
       setHyperspaceActive(false);
     }, 100);
-  }, []);
+  }, [setHyperspaceActive, setShowHyperspace]);
 
   // Runtime Store access
   const updateLLMConfigs = useRuntimeStore((state) => state.updateLLMConfigs);
@@ -223,7 +222,7 @@ export function AppContent() {
   const recordRuntimeEvent = useRuntimeStore((state) => state.recordRuntimeEvent);
   const runtimeStoreLLMConfigs = useRuntimeStore((state) => state.llmConfigs);
   const runtimeStoreLocalLLMProfiles = useRuntimeStore((state) => state.localLLMProfiles);
-  const runtimeNodeMessages = useRuntimeStore((state) => state.nodeMessages);
+  const _runtimeNodeMessages = useRuntimeStore((state) => state.nodeMessages);
   const llmConfigs = runtimeStoreLLMConfigs.length > 0 ? runtimeStoreLLMConfigs : authRuntimeLLMConfigs;
   const localLLMProfiles = runtimeStoreLocalLLMProfiles.length > 0 ? runtimeStoreLocalLLMProfiles : authLocalLLMProfiles;
 
@@ -261,12 +260,12 @@ export function AppContent() {
   const addAgentInstance = useDesignStore((state) => state.addAgentInstance);
   const deleteNode = useDesignStore((state) => state.deleteNode);
   const deleteAgentInstance = useDesignStore((state) => state.deleteAgentInstance);
-  const hydrateFromServer = useDesignStore((state) => state.hydrateFromServer);
+  const _hydrateFromServer = useDesignStore((state) => state.hydrateFromServer);
   const updateInstanceId = useDesignStore((state) => state.updateInstanceId);
   const updateAgentInstance = useDesignStore((state) => state.updateAgentInstance);
   const addNode = useDesignStore((state) => state.addNode);
   const updateNode = useDesignStore((state) => state.updateNode);
-  const agentInstances = useDesignStore((state) => state.agentInstances);
+  const _agentInstances = useDesignStore((state) => state.agentInstances);
   const storeNodes = useDesignStore((state) => state.nodes);
   const designWorkflows = useDesignStore((state) => state.workflows);
   const designCurrentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
@@ -287,7 +286,6 @@ export function AppContent() {
   );
 
   const {
-    switchToWorkflow,
     handleWorkflowCanvasReady,
     isSwitchingWorkflow,
     switchProgress,
@@ -376,7 +374,7 @@ export function AppContent() {
     if (cleanedCount > 0 || fixedCount > 0) {
       console.debug(`🚀 App startup integrity check completed: cleaned ${cleanedCount} instances, fixed ${fixedCount} nodes`);
     }
-  }, []); // Run only once on mount
+  }, [cleanupOrphanedInstances, validateWorkflowIntegrity]); // Run only once on mount (setters stables)
 
   const handleSaveSettings = async (_newLLMConfigs: LLMConfig[]) => {
     try {
@@ -628,7 +626,20 @@ export function AppContent() {
         }
       }
     },
-    [addAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId, updateInstanceId, addNode],
+    [
+      addAgentInstance,
+      isAuthenticated,
+      accessToken,
+      resolveCurrentWorkflowId,
+      updateInstanceId,
+      addNode,
+      setCurrentImageAgentInstance,
+      setCurrentImageNodeId,
+      setCurrentMapsNodeId,
+      setCurrentVideoAgentInstance,
+      setCurrentVideoNodeId,
+      setEditingImageInfo,
+    ],
   );
 
   /**
@@ -813,7 +824,7 @@ export function AppContent() {
     setFullscreenImage({ src, mimeType });
   };
 
-  const handleOpenAgentFullscreen = (nodeId: string) => {
+  const _handleOpenAgentFullscreen = (nodeId: string) => {
     // Utiliser le store runtime pour ouvrir le FullscreenChatModal existant
     const { setFullscreenChatNodeId } = useRuntimeStore.getState();
     setFullscreenChatNodeId(nodeId);

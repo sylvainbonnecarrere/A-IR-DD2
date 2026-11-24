@@ -92,6 +92,15 @@ export default tseslint.config(
     },
   },
   {
+    // US-RC-07 : fichiers de tests jest — `require()` est le pattern standard des
+    // factories jest.mock (hoisting) et des accès tardifs aux modules mockés ;
+    // la règle no-require-imports ne s'y applique pas.
+    files: ['tests/**/*.{ts,tsx}', 'hooks/__tests__/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  {
     // Scripts Node / CI / docker (.js/.cjs/.mjs) : console et require autorisés.
     files: ['**/*.{js,cjs,mjs}'],
     rules: {

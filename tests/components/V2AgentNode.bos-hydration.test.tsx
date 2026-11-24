@@ -9,89 +9,87 @@ const mockHydrateToolMessagesFromPersistedRuns = jest.fn();
 const mockBuildBosHydrationFingerprint = jest.fn();
 
 let v2AgentNodeHarness = resetV2AgentNodeHarness();
-let runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
-let designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
+let _runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
+let _designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
 
 jest.mock('reactflow', () => ({
-    Handle: () => null,
-    Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
+  Handle: () => null,
+  Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
 }));
 
 jest.mock('../../components/UI', () => ({
-    Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-        <button {...props}>{children}</button>
-    ),
+  Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...props}>{children}</button>,
 }));
 
 jest.mock('../../components/Icons', () => ({
-    CloseIcon: () => null,
-    EditIcon: () => null,
-    SendIcon: () => null,
-    UploadIcon: () => null,
-    ImageIcon: () => null,
-    ErrorIcon: () => null,
-    ExpandIcon: () => null,
-    MaximizeIcon: () => null,
+  CloseIcon: () => null,
+  EditIcon: () => null,
+  SendIcon: () => null,
+  UploadIcon: () => null,
+  ImageIcon: () => null,
+  ErrorIcon: () => null,
+  ExpandIcon: () => null,
+  MaximizeIcon: () => null,
 }));
 
 jest.mock('../../components/modals/ConfirmationModal', () => ({
-    ConfirmationModal: () => null,
+  ConfirmationModal: () => null,
 }));
 
 jest.mock('../../components/panels/WebSearchGroundingPanel', () => ({
-    WebSearchGroundingPanel: () => null,
+  WebSearchGroundingPanel: () => null,
 }));
 
 jest.mock('../../components/workflow/ToolCallBlock', () => ({
-    ToolCallBlock: () => <div data-testid="tool-call-block" />,
+  ToolCallBlock: () => <div data-testid="tool-call-block" />,
 }));
 
 jest.mock('../../hooks/useLocalization', () => ({
-    useLocalization: jest.fn(() => ({
-        t: (key: string) => key,
-    })),
+  useLocalization: jest.fn(() => ({
+    t: (key: string) => key,
+  })),
 }));
 
 jest.mock('../../hooks/useJournalQueue', () => ({
-    useJournalQueue: jest.fn(() => ({
-        enqueueJournalEntry: jest.fn(),
-    })),
+  useJournalQueue: jest.fn(() => ({
+    enqueueJournalEntry: jest.fn(),
+  })),
 }));
 
 jest.mock('../../hooks/useAuth', () => ({
-    useAuth: jest.fn(() => ({
-        accessToken: null,
-    })),
+  useAuth: jest.fn(() => ({
+    accessToken: null,
+  })),
 }));
 
 jest.mock('../../stores/useRuntimeStore', () => ({
-    useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-        const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().runtimeStore;
-        return selector ? selector(state) : state;
-    }),
+  useRuntimeStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().runtimeStore;
+    return selector ? selector(state) : state;
+  }),
 }));
 
 jest.mock('../../stores/useDesignStore', () => {
-    const actual = jest.requireActual('../../stores/useDesignStore');
+  const actual = jest.requireActual('../../stores/useDesignStore');
 
-    return {
-        ...actual,
-        useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
-            const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().designStore;
-            return selector ? selector(state) : state;
-        }),
-    };
+  return {
+    ...actual,
+    useDesignStore: jest.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+      const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().designStore;
+      return selector ? selector(state) : state;
+    }),
+  };
 });
 
 jest.mock('../../stores/useFunctionStore', () => ({
-    useFunctionStore: jest.fn((selector?: (state: { functions: unknown[]; loadFunctions: () => Promise<void> }) => unknown) => {
-        const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().functionStore;
-        return selector ? selector(state) : state;
-    }),
+  useFunctionStore: jest.fn((selector?: (state: { functions: unknown[]; loadFunctions: () => Promise<void> }) => unknown) => {
+    const state = require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().functionStore;
+    return selector ? selector(state) : state;
+  }),
 }));
 
 jest.mock('../../contexts/WorkflowCanvasContext', () => ({
-    useWorkflowCanvasContext: jest.fn(() => require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().workflowCanvasContext),
+  useWorkflowCanvasContext: jest.fn(() => require('../harnesses/v2AgentNodeHarness').getV2AgentNodeHarness().workflowCanvasContext),
 }));
 
 jest.mock('../../services/llmService', () => ({}));
@@ -100,254 +98,252 @@ jest.mock('../../services/llm/AgentLoop', () => ({ runAgentLoop: jest.fn() }));
 jest.mock('../../utils/fileUtils', () => ({ fileToBase64: jest.fn(), fileToText: jest.fn() }));
 jest.mock('../../utils/toolExecutor', () => ({ executeTool: jest.fn() }));
 jest.mock('../../utils/textUtils', () => ({
-    countChars: jest.fn(() => 0),
-    countTokens: jest.fn(() => 0),
-    countWords: jest.fn(() => 0),
-    countSentences: jest.fn(() => 0),
-    countMessages: jest.fn(() => 0),
+  countChars: jest.fn(() => 0),
+  countTokens: jest.fn(() => 0),
+  countWords: jest.fn(() => 0),
+  countSentences: jest.fn(() => 0),
+  countMessages: jest.fn(() => 0),
 }));
 jest.mock('../../utils/llmProviderUtils', () => ({
-    isLLMConfigured: jest.fn(() => true),
-    isLocalProvider: jest.fn(() => false),
+  isLLMConfigured: jest.fn(() => true),
+  isLocalProvider: jest.fn(() => false),
 }));
 jest.mock('../../services/runtimeConfigResolver', () => ({
-    resolveAgentRuntimeConfig: jest.fn(() => ({ isConfigured: true })),
-    resolveHistoryRuntimeConfig: jest.fn(() => ({ isEnabled: false })),
+  resolveAgentRuntimeConfig: jest.fn(() => ({ isConfigured: true })),
+  resolveHistoryRuntimeConfig: jest.fn(() => ({ isEnabled: false })),
 }));
 
 jest.mock('../../services/bosRunProjectionService', () => ({
-    buildBosHydrationFingerprint: (...args: unknown[]) => mockBuildBosHydrationFingerprint(...args),
-    hydrateToolMessagesFromPersistedRuns: (...args: unknown[]) => mockHydrateToolMessagesFromPersistedRuns(...args),
+  buildBosHydrationFingerprint: (...args: unknown[]) => mockBuildBosHydrationFingerprint(...args),
+  hydrateToolMessagesFromPersistedRuns: (...args: unknown[]) => mockHydrateToolMessagesFromPersistedRuns(...args),
 }));
 
 const baseAgent: Agent = {
-    id: 'agent-1',
-    name: 'Bos Agent',
-    role: 'Supervisor',
-    systemPrompt: 'Observe tool runs',
-    llmProvider: LLMProvider.Gemini,
-    model: 'gemini-2.5-flash',
-    capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
-    tools: [],
-    creator_id: RobotId.Bos,
-    created_at: '2026-03-23T10:00:00.000Z',
-    updated_at: '2026-03-23T10:00:00.000Z',
+  id: 'agent-1',
+  name: 'Bos Agent',
+  role: 'Supervisor',
+  systemPrompt: 'Observe tool runs',
+  llmProvider: LLMProvider.Gemini,
+  model: 'gemini-2.5-flash',
+  capabilities: [LLMCapability.Chat, LLMCapability.FunctionCalling],
+  tools: [],
+  creator_id: RobotId.Bos,
+  created_at: '2026-03-23T10:00:00.000Z',
+  updated_at: '2026-03-23T10:00:00.000Z',
 };
 
 const persistedToolCall: ToolCallRecord = {
-    id: 'tool-call-1',
-    toolId: 'tool.weather',
-    functionId: 'legacy-weather',
-    functionName: 'Weather Tool',
-    arguments: { city: 'Paris' },
-    result: { ok: true },
-    status: 'success',
-    executionId: 'exec-1',
-    timestamp: new Date('2026-03-23T10:00:00.000Z'),
+  id: 'tool-call-1',
+  toolId: 'tool.weather',
+  functionId: 'legacy-weather',
+  functionName: 'Weather Tool',
+  arguments: { city: 'Paris' },
+  result: { ok: true },
+  status: 'success',
+  executionId: 'exec-1',
+  timestamp: new Date('2026-03-23T10:00:00.000Z'),
 };
 
 describe('V2AgentNode Bos hydration', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
-            configurable: true,
-            value: jest.fn(),
-        });
-
-        const messages: ChatMessage[] = [
-            {
-                id: 'msg-tool-1',
-                sender: 'tool',
-                text: 'Tool call pending hydration',
-                timestamp: new Date('2026-03-23T10:00:00.000Z'),
-                toolCallRecord: persistedToolCall,
-            },
-        ];
-
-        const hydratedMessages: ChatMessage[] = [
-            {
-                ...messages[0],
-                toolCallRecord: {
-                    ...persistedToolCall,
-                    artifacts: [{ path: 'output/report.json', kind: 'json' }],
-                },
-            },
-        ];
-
-        v2AgentNodeHarness = resetV2AgentNodeHarness({
-            runtimeStore: {
-                getIsNodeMinimized: jest.fn(() => false),
-                getNodeMessages: jest.fn((_nodeId: string) => messages),
-                addNodeMessage: jest.fn(),
-                setNodeMessages: mockSetNodeMessages,
-                isNodeExecuting: jest.fn(() => false),
-                setNodeExecuting: jest.fn(),
-                setImagePanelOpen: jest.fn(),
-                setImageModificationPanelOpen: jest.fn(),
-                setFullscreenImage: jest.fn(),
-                setFullscreenChatNodeId: jest.fn(),
-                llmConfigs: [],
-                localLLMProfiles: [],
-            },
-            designStore: {
-                agentInstances: [],
-            },
-            functionStore: {
-                functions: [],
-                loadFunctions: jest.fn(async () => undefined),
-            },
-        });
-        runtimeStoreState = v2AgentNodeHarness.runtimeStore;
-        designStoreState = v2AgentNodeHarness.designStore;
-
-        mockBuildBosHydrationFingerprint
-            .mockReturnValueOnce('fingerprint:before')
-            .mockReturnValueOnce('fingerprint:after');
-        mockHydrateToolMessagesFromPersistedRuns.mockResolvedValue(hydratedMessages);
+  beforeEach(() => {
+    jest.clearAllMocks();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: jest.fn(),
     });
 
-    it('rehydrates persisted tool runs and projects them back into the runtime store on mount', async () => {
-        render(
-            <V2AgentNode
-                id="node-1"
-                selected={false}
-                xPos={0}
-                yPos={0}
-                zIndex={1}
-                dragging={false}
-                data={{
-                    robotId: 'bos',
-                    label: 'Bos',
-                    agent: baseAgent,
-                }}
-                type="default"
-                isConnectable={true}
-            />
-        );
+    const messages: ChatMessage[] = [
+      {
+        id: 'msg-tool-1',
+        sender: 'tool',
+        text: 'Tool call pending hydration',
+        timestamp: new Date('2026-03-23T10:00:00.000Z'),
+        toolCallRecord: persistedToolCall,
+      },
+    ];
 
-        await waitFor(() => {
-            expect(mockHydrateToolMessagesFromPersistedRuns).toHaveBeenCalledTimes(1);
-            expect(mockSetNodeMessages).toHaveBeenCalledWith(
-                'node-1',
-                expect.arrayContaining([
-                    expect.objectContaining({
-                        toolCallRecord: expect.objectContaining({
-                            executionId: 'exec-1',
-                            artifacts: [{ path: 'output/report.json', kind: 'json' }],
-                        }),
-                    }),
-                ])
-            );
-        });
+    const hydratedMessages: ChatMessage[] = [
+      {
+        ...messages[0],
+        toolCallRecord: {
+          ...persistedToolCall,
+          artifacts: [{ path: 'output/report.json', kind: 'json' }],
+        },
+      },
+    ];
+
+    v2AgentNodeHarness = resetV2AgentNodeHarness({
+      runtimeStore: {
+        getIsNodeMinimized: jest.fn(() => false),
+        getNodeMessages: jest.fn((_nodeId: string) => messages),
+        addNodeMessage: jest.fn(),
+        setNodeMessages: mockSetNodeMessages,
+        isNodeExecuting: jest.fn(() => false),
+        setNodeExecuting: jest.fn(),
+        setImagePanelOpen: jest.fn(),
+        setImageModificationPanelOpen: jest.fn(),
+        setFullscreenImage: jest.fn(),
+        setFullscreenChatNodeId: jest.fn(),
+        llmConfigs: [],
+        localLLMProfiles: [],
+      },
+      designStore: {
+        agentInstances: [],
+      },
+      functionStore: {
+        functions: [],
+        loadFunctions: jest.fn(async () => undefined),
+      },
     });
+    _runtimeStoreState = v2AgentNodeHarness.runtimeStore;
+    _designStoreState = v2AgentNodeHarness.designStore;
 
-    it('skips post-mount BOS hydration when persisted projection data is already present', async () => {
-        const hydratedMessages: ChatMessage[] = [
-            {
-                id: 'msg-tool-1',
-                sender: 'tool',
-                text: 'Already projected',
-                timestamp: new Date('2026-03-23T10:00:00.000Z'),
-                toolCallRecord: {
-                    ...persistedToolCall,
-                    persistedRunStatus: 'completed',
-                    persistedRunUpdatedAt: '2026-03-23T10:00:05.000Z',
-                    artifacts: [{ path: 'output/report.json', kind: 'json' }],
-                },
-            },
-        ];
+    mockBuildBosHydrationFingerprint.mockReturnValueOnce('fingerprint:before').mockReturnValueOnce('fingerprint:after');
+    mockHydrateToolMessagesFromPersistedRuns.mockResolvedValue(hydratedMessages);
+  });
 
-        runtimeStoreState = {
-            ...runtimeStoreState,
-            getNodeMessages: jest.fn((_nodeId: string) => hydratedMessages),
-        };
-        v2AgentNodeHarness.runtimeStore = runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
-        mockBuildBosHydrationFingerprint.mockReturnValue('fingerprint:hydrated');
+  it('rehydrates persisted tool runs and projects them back into the runtime store on mount', async () => {
+    render(
+      <V2AgentNode
+        id="node-1"
+        selected={false}
+        xPos={0}
+        yPos={0}
+        zIndex={1}
+        dragging={false}
+        data={{
+          robotId: 'bos',
+          label: 'Bos',
+          agent: baseAgent,
+        }}
+        type="default"
+        isConnectable={true}
+      />,
+    );
 
-        render(
-            <V2AgentNode
-                id="node-1"
-                selected={false}
-                xPos={0}
-                yPos={0}
-                zIndex={1}
-                dragging={false}
-                data={{
-                    robotId: 'bos',
-                    label: 'Bos',
-                    agent: baseAgent,
-                }}
-                type="default"
-                isConnectable={true}
-            />
-        );
-
-        await waitFor(() => {
-            expect(mockHydrateToolMessagesFromPersistedRuns).not.toHaveBeenCalled();
-        });
+    await waitFor(() => {
+      expect(mockHydrateToolMessagesFromPersistedRuns).toHaveBeenCalledTimes(1);
+      expect(mockSetNodeMessages).toHaveBeenCalledWith(
+        'node-1',
+        expect.arrayContaining([
+          expect.objectContaining({
+            toolCallRecord: expect.objectContaining({
+              executionId: 'exec-1',
+              artifacts: [{ path: 'output/report.json', kind: 'json' }],
+            }),
+          }),
+        ]),
+      );
     });
+  });
 
-    it('normalizes already-loaded legacy agent tool transcripts into structured tool messages', async () => {
-        runtimeStoreState = {
-            ...runtimeStoreState,
-            getNodeMessages: jest.fn(() => ([
-                {
-                    id: 'legacy-agent-tool-1',
-                    sender: 'agent',
-                    text: 'hello_test({"user_name":"Joe"}) [utr-6a1989ce121cd1727a9b6ed8]',
-                    timestamp: new Date('2026-05-31T17:08:50.000Z'),
-                },
-                {
-                    id: 'legacy-agent-tool-result-1',
-                    sender: 'agent',
-                    text: '[executionId=utr-6a1989ce121cd1727a9b6ed8] {\n  "result": "Ton nom, Joe, est maintenant enregistré dans ma mémoire"\n}',
-                    timestamp: new Date('2026-05-31T17:08:50.001Z'),
-                },
-            ])),
-        };
-        v2AgentNodeHarness.runtimeStore = runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
-        mockBuildBosHydrationFingerprint.mockReturnValue('');
+  it('skips post-mount BOS hydration when persisted projection data is already present', async () => {
+    const hydratedMessages: ChatMessage[] = [
+      {
+        id: 'msg-tool-1',
+        sender: 'tool',
+        text: 'Already projected',
+        timestamp: new Date('2026-03-23T10:00:00.000Z'),
+        toolCallRecord: {
+          ...persistedToolCall,
+          persistedRunStatus: 'completed',
+          persistedRunUpdatedAt: '2026-03-23T10:00:05.000Z',
+          artifacts: [{ path: 'output/report.json', kind: 'json' }],
+        },
+      },
+    ];
 
-        render(
-            <V2AgentNode
-                id="node-1"
-                selected={false}
-                xPos={0}
-                yPos={0}
-                zIndex={1}
-                dragging={false}
-                data={{
-                    robotId: 'bos',
-                    label: 'Bos',
-                    agent: baseAgent,
-                }}
-                type="default"
-                isConnectable={true}
-            />
-        );
+    _runtimeStoreState = {
+      ..._runtimeStoreState,
+      getNodeMessages: jest.fn((_nodeId: string) => hydratedMessages),
+    };
+    v2AgentNodeHarness.runtimeStore = _runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
+    mockBuildBosHydrationFingerprint.mockReturnValue('fingerprint:hydrated');
 
-        await waitFor(() => {
-            expect(mockSetNodeMessages).toHaveBeenCalledWith(
-                'node-1',
-                expect.arrayContaining([
-                    expect.objectContaining({
-                        id: 'legacy-agent-tool-1',
-                        sender: 'tool',
-                        toolCallRecord: expect.objectContaining({
-                            id: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
-                            functionName: 'hello_test',
-                            executionId: 'utr-6a1989ce121cd1727a9b6ed8',
-                            arguments: { user_name: 'Joe' },
-                        }),
-                    }),
-                    expect.objectContaining({
-                        id: 'legacy-agent-tool-result-1',
-                        sender: 'tool_result',
-                        toolCallId: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
-                        toolName: 'hello_test',
-                    }),
-                ])
-            );
-        });
+    render(
+      <V2AgentNode
+        id="node-1"
+        selected={false}
+        xPos={0}
+        yPos={0}
+        zIndex={1}
+        dragging={false}
+        data={{
+          robotId: 'bos',
+          label: 'Bos',
+          agent: baseAgent,
+        }}
+        type="default"
+        isConnectable={true}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockHydrateToolMessagesFromPersistedRuns).not.toHaveBeenCalled();
     });
+  });
+
+  it('normalizes already-loaded legacy agent tool transcripts into structured tool messages', async () => {
+    _runtimeStoreState = {
+      ..._runtimeStoreState,
+      getNodeMessages: jest.fn(() => [
+        {
+          id: 'legacy-agent-tool-1',
+          sender: 'agent',
+          text: 'hello_test({"user_name":"Joe"}) [utr-6a1989ce121cd1727a9b6ed8]',
+          timestamp: new Date('2026-05-31T17:08:50.000Z'),
+        },
+        {
+          id: 'legacy-agent-tool-result-1',
+          sender: 'agent',
+          text: '[executionId=utr-6a1989ce121cd1727a9b6ed8] {\n  "result": "Ton nom, Joe, est maintenant enregistré dans ma mémoire"\n}',
+          timestamp: new Date('2026-05-31T17:08:50.001Z'),
+        },
+      ]),
+    };
+    v2AgentNodeHarness.runtimeStore = _runtimeStoreState as typeof v2AgentNodeHarness.runtimeStore;
+    mockBuildBosHydrationFingerprint.mockReturnValue('');
+
+    render(
+      <V2AgentNode
+        id="node-1"
+        selected={false}
+        xPos={0}
+        yPos={0}
+        zIndex={1}
+        dragging={false}
+        data={{
+          robotId: 'bos',
+          label: 'Bos',
+          agent: baseAgent,
+        }}
+        type="default"
+        isConnectable={true}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockSetNodeMessages).toHaveBeenCalledWith(
+        'node-1',
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'legacy-agent-tool-1',
+            sender: 'tool',
+            toolCallRecord: expect.objectContaining({
+              id: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
+              functionName: 'hello_test',
+              executionId: 'utr-6a1989ce121cd1727a9b6ed8',
+              arguments: { user_name: 'Joe' },
+            }),
+          }),
+          expect.objectContaining({
+            id: 'legacy-agent-tool-result-1',
+            sender: 'tool_result',
+            toolCallId: 'legacy-tool-call:utr-6a1989ce121cd1727a9b6ed8',
+            toolName: 'hello_test',
+          }),
+        ]),
+      );
+    });
+  });
 });

@@ -16,9 +16,7 @@ jest.mock('../../components/WorkflowCanvas', () => ({
 }));
 jest.mock('../../components/workflow/WorkflowToolbar', () => ({
   __esModule: true,
-  WorkflowToolbar: ({ className }: { className?: string }) => (
-    <div data-testid="workflow-toolbar" className={className} />
-  ),
+  WorkflowToolbar: ({ className }: { className?: string }) => <div data-testid="workflow-toolbar" className={className} />,
 }));
 jest.mock('../../components/ArchiPrototypingPage', () => ({
   __esModule: true,
@@ -42,21 +40,24 @@ describe('RobotPageRouter — WorkflowToolbar US-J7-13', () => {
       t: (key: string, fallback?: string) => fallback || key,
     });
 
-    (useDesignStore as unknown as jest.Mock).mockImplementation((selector?: (state: typeof designStoreState) => unknown) => (
-      selector ? selector(designStoreState) : designStoreState
-    ));
+    (useDesignStore as unknown as jest.Mock).mockImplementation((selector?: (state: typeof designStoreState) => unknown) =>
+      selector ? selector(designStoreState) : designStoreState,
+    );
   });
 
-  it.each(['/bos/dashboard', '/bos/supervision'])('monte la toolbar sur %s (le nom du workflow reste dans la toolbar, plus dans le header)', async (path) => {
-    render(<RobotPageRouter currentPath={path} llmConfigs={[]} agents={[]} />);
+  it.each(['/bos/dashboard', '/bos/supervision'])(
+    'monte la toolbar sur %s (le nom du workflow reste dans la toolbar, plus dans le header)',
+    async (path) => {
+      render(<RobotPageRouter currentPath={path} llmConfigs={[]} agents={[]} />);
 
-    expect(await screen.findByTestId('workflow-toolbar')).toBeInTheDocument();
-    // ⭐ retour graphique 2026-11-19 : le nom du workflow n'est plus dans le header (redondant avec la toolbar)
-    expect(screen.queryByTestId('workflow-header-name')).toBeNull();
-    expect(await screen.findByTestId('workflow-canvas')).toBeInTheDocument();
-    // la toolbar est en flux (shrink-0), pas en overlay : le canvas reste dans le flux
-    expect(screen.getByTestId('workflow-toolbar')).toHaveClass('shrink-0');
-  });
+      expect(await screen.findByTestId('workflow-toolbar')).toBeInTheDocument();
+      // ⭐ retour graphique 2026-11-19 : le nom du workflow n'est plus dans le header (redondant avec la toolbar)
+      expect(screen.queryByTestId('workflow-header-name')).toBeNull();
+      expect(await screen.findByTestId('workflow-canvas')).toBeInTheDocument();
+      // la toolbar est en flux (shrink-0), pas en overlay : le canvas reste dans le flux
+      expect(screen.getByTestId('workflow-toolbar')).toHaveClass('shrink-0');
+    },
+  );
 
   it('ne monte pas la toolbar sur la page archi', async () => {
     render(<RobotPageRouter currentPath="/archi" llmConfigs={[]} agents={[]} />);

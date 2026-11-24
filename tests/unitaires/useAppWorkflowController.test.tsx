@@ -5,15 +5,12 @@ import { useAppWorkflowController } from '../../hooks/useAppWorkflowController';
 import apiClient from '../../utils/apiClient';
 
 jest.mock('../../stores/useDesignStore', () => ({
-  useDesignStore: Object.assign(
-    () => ({ currentWorkflowId: 'wf-1' }),
-    {
-      getState: () => ({
-        currentWorkflowId: 'wf-1',
-        loadUserWorkflows: jest.fn().mockResolvedValue(undefined),
-      }),
-    },
-  ),
+  useDesignStore: Object.assign(() => ({ currentWorkflowId: 'wf-1' }), {
+    getState: () => ({
+      currentWorkflowId: 'wf-1',
+      loadUserWorkflows: jest.fn().mockResolvedValue(undefined),
+    }),
+  }),
 }));
 
 jest.mock('../../utils/apiClient', () => ({
@@ -76,17 +73,19 @@ function TestHarness() {
 describe('useAppWorkflowController', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockPost.mockResolvedValue(okResponse({
-      data: {
-        success: true,
-        reloadedData: {
-          workflow: { id: 'wf-1', name: 'Workflow A' },
-          agentPrototypes: [],
-          agentInstances: [],
-          edges: [],
+    mockPost.mockResolvedValue(
+      okResponse({
+        data: {
+          success: true,
+          reloadedData: {
+            workflow: { id: 'wf-1', name: 'Workflow A' },
+            agentPrototypes: [],
+            agentInstances: [],
+            edges: [],
+          },
         },
-      },
-    }));
+      }),
+    );
   });
 
   it('switches to a workflow by posting the selected workflow snapshot', async () => {

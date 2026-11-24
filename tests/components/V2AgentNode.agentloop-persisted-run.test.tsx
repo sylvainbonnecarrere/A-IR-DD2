@@ -11,9 +11,9 @@ const mockCreateAdapter = jest.fn();
 const mockEnqueueEntry = jest.fn();
 
 let v2AgentNodeHarness = resetV2AgentNodeHarness();
-let runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
-let designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
-let functionStoreState: { functions: UserFunction[] } = v2AgentNodeHarness.functionStore;
+let _runtimeStoreState: Record<string, unknown> = v2AgentNodeHarness.runtimeStore;
+let _designStoreState: Record<string, unknown> = v2AgentNodeHarness.designStore;
+let _functionStoreState: { functions: UserFunction[] } = v2AgentNodeHarness.functionStore;
 let nodeMessages: Record<string, ChatMessage[]>;
 
 jest.mock('../../services/toolRepository', () => ({
@@ -240,9 +240,9 @@ describe('V2AgentNode AgentLoop persisted run bridge', () => {
         functions: [createFunction()],
       },
     });
-    runtimeStoreState = v2AgentNodeHarness.runtimeStore;
-    designStoreState = v2AgentNodeHarness.designStore;
-    functionStoreState = v2AgentNodeHarness.functionStore;
+    _runtimeStoreState = v2AgentNodeHarness.runtimeStore;
+    _designStoreState = v2AgentNodeHarness.designStore;
+    _functionStoreState = v2AgentNodeHarness.functionStore;
 
     mockCreateAdapter.mockReturnValue({
       provider: LLMProvider.Gemini,
@@ -411,7 +411,7 @@ describe('V2AgentNode AgentLoop persisted run bridge', () => {
 
     await waitFor(() => {
       expect(mockedToolRepository.loadFunctionRunByExecutionId).toHaveBeenCalledWith('exec-1', 'tool.weather');
-      expect(runtimeStoreState.setNodeMessages as jest.Mock).toHaveBeenCalledWith(
+      expect(_runtimeStoreState.setNodeMessages as jest.Mock).toHaveBeenCalledWith(
         'node-1',
         expect.arrayContaining([
           expect.objectContaining({

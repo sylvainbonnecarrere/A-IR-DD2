@@ -8,9 +8,9 @@ import { createTestAgent, createTestAgentInstance, createToolSelection } from '.
 import { resetFullscreenChatHarness } from '../harnesses/fullscreenChatHarness';
 
 let fullscreenChatHarness = resetFullscreenChatHarness();
-let runtimeStoreState: Record<string, unknown> = fullscreenChatHarness.runtimeStore;
-let designStoreState: Record<string, unknown> = fullscreenChatHarness.designStore;
-let functionStoreState: { functions: UserFunction[] } = fullscreenChatHarness.functionStore;
+let _runtimeStoreState: Record<string, unknown> = fullscreenChatHarness.runtimeStore;
+let _designStoreState: Record<string, unknown> = fullscreenChatHarness.designStore;
+let _functionStoreState: { functions: UserFunction[] } = fullscreenChatHarness.functionStore;
 
 const createWebSearchFunction = (): UserFunction => ({
   _id: 'fn-1',
@@ -133,9 +133,9 @@ describe('FullscreenChatModal web search params entrypoint', () => {
       functionStore: { functions: [createWebSearchFunction()] },
     });
 
-    runtimeStoreState = fullscreenChatHarness.runtimeStore;
-    designStoreState = fullscreenChatHarness.designStore;
-    functionStoreState = fullscreenChatHarness.functionStore;
+    _runtimeStoreState = fullscreenChatHarness.runtimeStore;
+    _designStoreState = fullscreenChatHarness.designStore;
+    _functionStoreState = fullscreenChatHarness.functionStore;
   });
 
   it('shows the web search params button and opens the modal', async () => {
@@ -147,16 +147,16 @@ describe('FullscreenChatModal web search params entrypoint', () => {
   });
 
   it('falls back to the prototype configuration when instance configuration_json is null', async () => {
-    designStoreState = {
-      ...designStoreState,
+    _designStoreState = {
+      ..._designStoreState,
       agentInstances: [
         {
-          ...designStoreState.agentInstances[0],
+          ..._designStoreState.agentInstances[0],
           configuration_json: null,
         },
       ],
     };
-    fullscreenChatHarness.designStore = designStoreState as typeof fullscreenChatHarness.designStore;
+    fullscreenChatHarness.designStore = _designStoreState as typeof fullscreenChatHarness.designStore;
 
     render(<FullscreenChatModal />);
 

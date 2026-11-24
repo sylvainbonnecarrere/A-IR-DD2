@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import BosWorkflowManagementPage from '../../components/BosWorkflowManagementPage';
-import WorkflowCard from '../../components/workflow/WorkflowCard';
+
 import CreerWorkflowDialog from '../../components/modals/CreerWorkflowDialog';
 import { useDesignStore } from '../../stores/useDesignStore';
 import { useAuth } from '../../contexts/AuthContext';
@@ -13,17 +13,16 @@ jest.mock('../../contexts/AuthContext');
 jest.mock('../../hooks/useLocalization');
 jest.mock('../../components/workflow/WorkflowCard', () => ({
   __esModule: true,
-  default: () => <div data-testid="workflow-card">WorkflowCard</div>
+  default: () => <div data-testid="workflow-card">WorkflowCard</div>,
 }));
 jest.mock('../../components/modals/BosMediaModal', () => ({
   __esModule: true,
-  default: ({ isOpen, workflowId, workflowName }: { isOpen: boolean; workflowId: string | null; workflowName?: string | null }) => (
-    isOpen ? <div data-testid="bos-media-modal">{`${workflowId}:${workflowName}`}</div> : null
-  )
+  default: ({ isOpen, workflowId, workflowName }: { isOpen: boolean; workflowId: string | null; workflowName?: string | null }) =>
+    isOpen ? <div data-testid="bos-media-modal">{`${workflowId}:${workflowName}`}</div> : null,
 }));
 jest.mock('../../components/modals/EditWorkflowDialog', () => ({
   __esModule: true,
-  default: () => <div data-testid="edit-dialog">EditDialog</div>
+  default: () => <div data-testid="edit-dialog">EditDialog</div>,
 }));
 
 const mockWorkflow = {
@@ -34,41 +33,41 @@ const mockWorkflow = {
   isActive: true,
   isDefault: true,
   createdAt: new Date('2024-01-01'),
-  updatedAt: new Date('2024-01-02')
+  updatedAt: new Date('2024-01-02'),
 };
 
 describe('BosWorkflowManagementPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     (useLocalization as unknown as jest.Mock).mockReturnValue({
-      t: (key: string, fallback?: string) => fallback || key
+      t: (key: string, fallback?: string) => fallback || key,
     });
   });
 
   it('renders guest message when not authenticated', () => {
     (useAuth as unknown as jest.Mock).mockReturnValue({
-      isAuthenticated: false
+      isAuthenticated: false,
     });
-    
+
     (useDesignStore as unknown as jest.Mock).mockReturnValue({
       workflows: [],
       currentWorkflowId: null,
       isLoadingWorkflows: false,
-      workflowLoadError: null
+      workflowLoadError: null,
     });
 
     render(<BosWorkflowManagementPage />);
-    
+
     expect(screen.getByRole('heading', { name: /nav_guest_message/i })).toBeInTheDocument();
     expect(screen.getByText('nav_connect_for_workflows')).toBeInTheDocument();
   });
 
   it('renders loading state', () => {
     (useAuth as unknown as jest.Mock).mockReturnValue({
-      isAuthenticated: true
+      isAuthenticated: true,
     });
-    
+
     (useDesignStore as unknown as jest.Mock).mockReturnValue({
       workflows: [],
       currentWorkflowId: null,
@@ -78,19 +77,19 @@ describe('BosWorkflowManagementPage', () => {
       selectWorkflow: jest.fn(),
       createWorkflow: jest.fn(),
       updateWorkflow: jest.fn(),
-      deleteWorkflow: jest.fn()
+      deleteWorkflow: jest.fn(),
     });
 
     render(<BosWorkflowManagementPage />);
-    
+
     expect(screen.getAllByText((_, element) => element?.textContent?.includes('loading') ?? false).length).toBeGreaterThan(0);
   });
 
   it('renders workflows list', async () => {
     (useAuth as unknown as jest.Mock).mockReturnValue({
-      isAuthenticated: true
+      isAuthenticated: true,
     });
-    
+
     (useDesignStore as unknown as jest.Mock).mockReturnValue({
       workflows: [mockWorkflow],
       currentWorkflowId: 'wf-1',
@@ -100,11 +99,11 @@ describe('BosWorkflowManagementPage', () => {
       selectWorkflow: jest.fn(),
       createWorkflow: jest.fn(),
       updateWorkflow: jest.fn(),
-      deleteWorkflow: jest.fn()
+      deleteWorkflow: jest.fn(),
     });
 
     render(<BosWorkflowManagementPage />);
-    
+
     await waitFor(() => {
       expect(screen.getByTestId('workflow-card')).toBeInTheDocument();
     });
@@ -112,9 +111,9 @@ describe('BosWorkflowManagementPage', () => {
 
   it('opens create dialog on button click', async () => {
     (useAuth as unknown as jest.Mock).mockReturnValue({
-      isAuthenticated: true
+      isAuthenticated: true,
     });
-    
+
     (useDesignStore as unknown as jest.Mock).mockReturnValue({
       workflows: [],
       currentWorkflowId: null,
@@ -124,21 +123,21 @@ describe('BosWorkflowManagementPage', () => {
       selectWorkflow: jest.fn(),
       createWorkflow: jest.fn(),
       updateWorkflow: jest.fn(),
-      deleteWorkflow: jest.fn()
+      deleteWorkflow: jest.fn(),
     });
 
     render(<BosWorkflowManagementPage />);
-    
+
     const createButton = screen.getByText('nav_create_workflow');
     fireEvent.click(createButton);
-    
+
     // Dialog should appear (mocked in this test)
     expect(createButton).toBeInTheDocument();
   });
 
   it('opens BOS media modal for the active workflow', async () => {
     (useAuth as unknown as jest.Mock).mockReturnValue({
-      isAuthenticated: true
+      isAuthenticated: true,
     });
 
     (useDesignStore as unknown as jest.Mock).mockReturnValue({
@@ -150,7 +149,7 @@ describe('BosWorkflowManagementPage', () => {
       selectWorkflow: jest.fn(),
       createWorkflow: jest.fn(),
       updateWorkflow: jest.fn(),
-      deleteWorkflow: jest.fn()
+      deleteWorkflow: jest.fn(),
     });
 
     render(<BosWorkflowManagementPage />);
@@ -164,9 +163,9 @@ describe('BosWorkflowManagementPage', () => {
 describe('CreerWorkflowDialog', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     (useLocalization as unknown as jest.Mock).mockReturnValue({
-      t: (key: string, fallback?: string) => fallback || key
+      t: (key: string, fallback?: string) => fallback || key,
     });
   });
 
@@ -174,14 +173,8 @@ describe('CreerWorkflowDialog', () => {
     const mockOnClose = jest.fn();
     const mockOnCreate = jest.fn();
 
-    render(
-      <CreerWorkflowDialog
-        isOpen={true}
-        onClose={mockOnClose}
-        onCreate={mockOnCreate}
-      />
-    );
-    
+    render(<CreerWorkflowDialog isOpen={true} onClose={mockOnClose} onCreate={mockOnCreate} />);
+
     expect(screen.getByText('dialog_create_workflow_title')).toBeInTheDocument();
   });
 
@@ -189,14 +182,8 @@ describe('CreerWorkflowDialog', () => {
     const mockOnClose = jest.fn();
     const mockOnCreate = jest.fn();
 
-    render(
-      <CreerWorkflowDialog
-        isOpen={false}
-        onClose={mockOnClose}
-        onCreate={mockOnCreate}
-      />
-    );
-    
+    render(<CreerWorkflowDialog isOpen={false} onClose={mockOnClose} onCreate={mockOnCreate} />);
+
     expect(screen.queryByText('dialog_create_workflow_title')).not.toBeInTheDocument();
   });
 
@@ -204,22 +191,16 @@ describe('CreerWorkflowDialog', () => {
     const mockOnClose = jest.fn();
     const mockOnCreate = jest.fn().mockResolvedValue(undefined);
 
-    render(
-      <CreerWorkflowDialog
-        isOpen={true}
-        onClose={mockOnClose}
-        onCreate={mockOnCreate}
-      />
-    );
-    
+    render(<CreerWorkflowDialog isOpen={true} onClose={mockOnClose} onCreate={mockOnCreate} />);
+
     const nameInput = screen.getByPlaceholderText('dialog_workflow_name_placeholder') as HTMLInputElement;
     const descInput = screen.getByPlaceholderText('dialog_workflow_description_placeholder') as HTMLTextAreaElement;
     const createButton = screen.getByText('dialog_workflow_create_button');
-    
+
     fireEvent.change(nameInput, { target: { value: 'New Workflow' } });
     fireEvent.change(descInput, { target: { value: 'Description' } });
     fireEvent.click(createButton);
-    
+
     await waitFor(() => {
       expect(mockOnCreate).toHaveBeenCalledWith('New Workflow', 'Description');
     });
@@ -229,17 +210,11 @@ describe('CreerWorkflowDialog', () => {
     const mockOnClose = jest.fn();
     const mockOnCreate = jest.fn();
 
-    render(
-      <CreerWorkflowDialog
-        isOpen={true}
-        onClose={mockOnClose}
-        onCreate={mockOnCreate}
-      />
-    );
-    
+    render(<CreerWorkflowDialog isOpen={true} onClose={mockOnClose} onCreate={mockOnCreate} />);
+
     const createButton = screen.getByText('dialog_workflow_create_button');
     fireEvent.click(createButton);
-    
+
     expect(createButton).toBeDisabled();
   });
 });

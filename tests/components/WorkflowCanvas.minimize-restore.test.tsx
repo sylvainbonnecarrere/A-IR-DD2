@@ -112,7 +112,13 @@ jest.mock('../../stores/useWorkflowStore', () => ({
 }));
 
 jest.mock('../../contexts/WorkflowCanvasContext', () => ({
-  WorkflowCanvasProvider: ({ children, value }: { children?: React.ReactNode; value: Record<string, any> }) => {
+  WorkflowCanvasProvider: ({
+    children,
+    value,
+  }: {
+    children?: React.ReactNode;
+    value: { onToggleNodeMinimize?: (nodeId: string) => void } & Record<string, unknown>;
+  }) => {
     require('../harnesses/workflowCanvasHarness').getWorkflowCanvasHarness().capturedWorkflowCanvasContextValue = value;
     return <>{children}</>;
   },
