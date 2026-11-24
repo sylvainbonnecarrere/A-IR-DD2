@@ -52,6 +52,15 @@ export default tseslint.config(
     },
   },
   {
+    // US-RC-04 (backend) : `console.log` interdit en erreur dans backend/src
+    // (backend à 0 console.log) ; debug/info/warn/error restent autorisés.
+    // Le front reste en "warn" tant que son stock de console.log n'est pas à 0.
+    files: ['backend/src/**/*.{ts,tsx}'],
+    rules: {
+      'no-console': ['error', { allow: ['debug', 'info', 'warn', 'error'] }],
+    },
+  },
+  {
     // Scripts Node / CI / docker (.js/.cjs/.mjs) : console et require autorisés.
     files: ['**/*.{js,cjs,mjs}'],
     rules: {

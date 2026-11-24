@@ -69,8 +69,8 @@ describe('Simple Test - POST /from-prototype', () => {
         position: { x: 10, y: 20 },
       });
 
-    console.log('Response status:', res.status);
-    console.log('Response body:', JSON.stringify(res.body));
+    console.debug('Response status:', res.status);
+    console.debug('Response body:', JSON.stringify(res.body));
 
     expect(res.status).toBe(201);
     expect(res.body.id).toBeDefined();

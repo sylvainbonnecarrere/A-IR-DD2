@@ -207,6 +207,8 @@ Validation lot 1 : `tsc --noEmit` back 0, `eslint --quiet` 0, ratchet exit 0 (43
 **Dépendances :** US-RC-02/03 (en parallèle possible, périmètres disjoints).
 **Critères d'acceptation :** ratchet `consoleLogBackend` à 0, baisse front, règle error sans régression, eslint 0 erreur.
 
+**État d'avancement (2026-11-23, agent `03-backend`, branche `main`) — PARTIE BACK TERMINÉE :** les 2 `console.log` de `simple-from-prototype.test.ts:72-73` → `console.debug` ; 1 site déguisé trouvé par eslint (`console        .log` dans `migrations/001_add_localEndpoint.ts:44`, invisible au ratchet) → `console.debug` aussi. `eslint.config.mjs` : bloc override `backend/src/**/*.{ts,tsx}` avec `no-console: ["error", { allow: ["debug","info","warn","error"] }]` — bloc disjoint du front (reste en `warn`). Baseline recalée : `consoleLogBackend` 2 → **0**. Validations : tsc back 0, `eslint . --quiet` 0 erreur (preuve négative : fichier temporaire avec `console.log` → 1 error), ratchet exit 0, prettier + `format:changed` OK, suite `simple-from-prototype` 3/3, `test:j6:backend` 126/126, `ci:node25:runtime` OK, audit strict OK. **Reste (06-frontend) :** 126 `console.log` front → `console.debug`, puis flip du bloc global front en `error` une fois le stock front à 0.
+
 ### US-RC-05 — Prettier sur fichiers modifiés en CI (depuis US-HYG-05)
 
 **Agent responsable :** `04-cicd-installation.agent.md`
