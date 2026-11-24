@@ -1,5 +1,6 @@
 import { PatchWorkflowUseCase } from '../patchWorkflow.usecase';
 import { IWorkflowRepository } from '../../../repositories/IWorkflowRepository';
+import type { IWorkflow } from '../../../models/Workflow.model';
 
 describe('PatchWorkflowUseCase', () => {
   const workflowRepository = {
@@ -15,7 +16,7 @@ describe('PatchWorkflowUseCase', () => {
     workflowRepository.patchOwned.mockResolvedValue({
       kind: 'updated',
       workflow: { _id: 'wf-1' },
-    } as any);
+    } as unknown as { kind: 'updated'; workflow: IWorkflow });
 
     const result = await useCase.execute({
       workflowId: 'wf-1',
@@ -24,12 +25,7 @@ describe('PatchWorkflowUseCase', () => {
       expectedVersion: 2,
     });
 
-    expect(workflowRepository.patchOwned).toHaveBeenCalledWith(
-      'wf-1',
-      'user-1',
-      { description: 'patched' },
-      2,
-    );
+    expect(workflowRepository.patchOwned).toHaveBeenCalledWith('wf-1', 'user-1', { description: 'patched' }, 2);
     expect(result).toEqual(expect.objectContaining({ kind: 'updated' }));
   });
 });

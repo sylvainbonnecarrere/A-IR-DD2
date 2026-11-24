@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { CreateWorkflowUseCase } from '../createWorkflow.usecase';
 import { IUserRepository } from '../../../repositories/IUserRepository';
 import { IWorkflowRepository } from '../../../repositories/IWorkflowRepository';
+import type { IWorkflow } from '../../../models/Workflow.model';
+import type { IUser } from '../../../models/User.model';
 
 describe('CreateWorkflowUseCase', () => {
   const workflowRepository: jest.Mocked<IWorkflowRepository> = {
@@ -23,7 +25,7 @@ describe('CreateWorkflowUseCase', () => {
     setDefaultWorkflow: jest.fn(),
     setLastActiveWorkflow: jest.fn(),
     syncWorkflowCount: jest.fn(),
-    getDefaultWorkflowId: jest.fn()
+    getDefaultWorkflowId: jest.fn(),
   };
 
   beforeEach(() => {
@@ -35,22 +37,24 @@ describe('CreateWorkflowUseCase', () => {
     workflowRepository.countByUserId.mockResolvedValue(0);
     workflowRepository.create.mockResolvedValue({
       _id: workflowId,
-      id: workflowId.toString()
-    } as any);
+      id: workflowId.toString(),
+    } as unknown as IWorkflow);
 
     const useCase = new CreateWorkflowUseCase(workflowRepository, userRepository);
     const workflow = await useCase.execute({
       userId: new mongoose.Types.ObjectId().toString(),
-      name: 'First workflow'
+      name: 'First workflow',
     });
 
-    expect(workflowRepository.create).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'First workflow',
-      isActive: true,
-      isDefault: true,
-      isDirty: false,
-      canvasState: { zoom: 1, panX: 0, panY: 0 }
-    }));
+    expect(workflowRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'First workflow',
+        isActive: true,
+        isDefault: true,
+        isDirty: false,
+        canvasState: { zoom: 1, panX: 0, panY: 0 },
+      }),
+    );
     expect(userRepository.setDefaultWorkflow).toHaveBeenCalledWith(expect.any(String), workflowId.toString());
     expect(userRepository.syncWorkflowCount).toHaveBeenCalledWith(expect.any(String), 1);
     expect(workflow).toEqual(expect.objectContaining({ id: workflowId.toString() }));
@@ -58,21 +62,23 @@ describe('CreateWorkflowUseCase', () => {
 
   it('creates a non-default workflow and only resynchronizes the count when workflows already exist', async () => {
     workflowRepository.countByUserId.mockResolvedValue(2);
-    workflowRepository.create.mockResolvedValue({ _id: new mongoose.Types.ObjectId(), id: 'wf-2' } as any);
+    workflowRepository.create.mockResolvedValue({ _id: new mongoose.Types.ObjectId(), id: 'wf-2' } as unknown as IWorkflow);
 
     const useCase = new CreateWorkflowUseCase(workflowRepository, userRepository);
     await useCase.execute({
       userId: new mongoose.Types.ObjectId().toString(),
       name: 'Additional workflow',
-      description: 'desc'
+      description: 'desc',
     });
 
-    expect(workflowRepository.create).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'Additional workflow',
-      description: 'desc',
-      isActive: false,
-      isDefault: false
-    }));
+    expect(workflowRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Additional workflow',
+        description: 'desc',
+        isActive: false,
+        isDefault: false,
+      }),
+    );
     expect(userRepository.setDefaultWorkflow).not.toHaveBeenCalled();
     expect(userRepository.syncWorkflowCount).toHaveBeenCalledWith(expect.any(String), 3);
   });

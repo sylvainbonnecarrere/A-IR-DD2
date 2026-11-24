@@ -1,22 +1,26 @@
 import mongoose from 'mongoose';
 import { CreateWorkflowInstanceUseCase } from '../createWorkflowInstance.usecase';
+import type { IWorkflow } from '../../../models/Workflow.model';
+import type { IAgentInstance } from '../../../models/AgentInstance.model';
+import type { IWorkflowNodeV2 } from '../../../models/WorkflowNodeV2.model';
+import type { IAgentJournal } from '../../../models/AgentJournal.model';
 
 describe('CreateWorkflowInstanceUseCase', () => {
   const workflowRepository = {
     findOwnedById: jest.fn(),
-  } as any;
+  } as unknown as jest.Mocked<ConstructorParameters<typeof CreateWorkflowInstanceUseCase>[0]>;
 
   const agentInstanceModel = {
     create: jest.fn(),
-  } as any;
+  } as unknown as jest.Mocked<ConstructorParameters<typeof CreateWorkflowInstanceUseCase>[1]>;
 
   const workflowNodeModel = {
     create: jest.fn(),
-  } as any;
+  } as unknown as jest.Mocked<ConstructorParameters<typeof CreateWorkflowInstanceUseCase>[2]>;
 
   const agentJournalModel = {
     create: jest.fn(),
-  } as any;
+  } as unknown as jest.Mocked<ConstructorParameters<typeof CreateWorkflowInstanceUseCase>[3]>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -33,18 +37,17 @@ describe('CreateWorkflowInstanceUseCase', () => {
       userId,
       name: 'Workflow A',
       isActive: true,
-    });
+    } as unknown as IWorkflow);
 
-    agentInstanceModel.create.mockResolvedValue([{ _id: instanceId, name: 'Agent A', role: 'assistant', status: 'running' }]);
-    workflowNodeModel.create.mockResolvedValue([{ _id: nodeId, instanceId, position: { x: 10, y: 20 }, nodeType: 'agent' }]);
-    agentJournalModel.create.mockResolvedValue([{ _id: new mongoose.Types.ObjectId() }]);
+    agentInstanceModel.create.mockResolvedValue([
+      { _id: instanceId, name: 'Agent A', role: 'assistant', status: 'running' },
+    ] as unknown as IAgentInstance[]);
+    workflowNodeModel.create.mockResolvedValue([
+      { _id: nodeId, instanceId, position: { x: 10, y: 20 }, nodeType: 'agent' },
+    ] as unknown as IWorkflowNodeV2[]);
+    agentJournalModel.create.mockResolvedValue([{ _id: new mongoose.Types.ObjectId() }] as unknown as IAgentJournal[]);
 
-    const useCase = new CreateWorkflowInstanceUseCase(
-      workflowRepository,
-      agentInstanceModel,
-      workflowNodeModel,
-      agentJournalModel,
-    );
+    const useCase = new CreateWorkflowInstanceUseCase(workflowRepository, agentInstanceModel, workflowNodeModel, agentJournalModel);
 
     const result = await useCase.execute({
       workflowId: workflowId.toString(),
@@ -78,12 +81,7 @@ describe('CreateWorkflowInstanceUseCase', () => {
   it('returns not_found when the workflow is missing or not owned', async () => {
     workflowRepository.findOwnedById.mockResolvedValue(null);
 
-    const useCase = new CreateWorkflowInstanceUseCase(
-      workflowRepository,
-      agentInstanceModel,
-      workflowNodeModel,
-      agentJournalModel,
-    );
+    const useCase = new CreateWorkflowInstanceUseCase(workflowRepository, agentInstanceModel, workflowNodeModel, agentJournalModel);
 
     const result = await useCase.execute({
       workflowId: '507f1f77bcf86cd799439011',

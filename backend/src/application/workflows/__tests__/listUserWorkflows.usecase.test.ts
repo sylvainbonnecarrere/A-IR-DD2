@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import type { IWorkflow } from '../../../models/Workflow.model';
 import { ListUserWorkflowsUseCase } from '../listUserWorkflows.usecase';
 import { IAgentInstanceRepository } from '../../../repositories/IAgentInstanceRepository';
 import { IUserRepository } from '../../../repositories/IUserRepository';
@@ -13,9 +14,9 @@ function buildWorkflow(name: string) {
     name,
     toObject: jest.fn().mockReturnValue({
       _id,
-      name
-    })
-  } as any;
+      name,
+    }),
+  } as unknown as IWorkflow;
 }
 
 describe('ListUserWorkflowsUseCase', () => {
@@ -38,10 +39,10 @@ describe('ListUserWorkflowsUseCase', () => {
     setDefaultWorkflow: jest.fn(),
     setLastActiveWorkflow: jest.fn(),
     syncWorkflowCount: jest.fn(),
-    getDefaultWorkflowId: jest.fn()
+    getDefaultWorkflowId: jest.fn(),
   };
   const agentInstanceRepository: jest.Mocked<IAgentInstanceRepository> = {
-    countByWorkflowIds: jest.fn()
+    countByWorkflowIds: jest.fn(),
   };
 
   beforeEach(() => {
@@ -65,8 +66,8 @@ describe('ListUserWorkflowsUseCase', () => {
       expect.objectContaining({
         _id: createdWorkflow._id,
         name: 'Mon Workflow',
-        agentCount: 0
-      })
+        agentCount: 0,
+      }),
     ]);
   });
 
@@ -76,13 +77,13 @@ describe('ListUserWorkflowsUseCase', () => {
     workflowRepository.findByUserId.mockResolvedValue([firstWorkflow, secondWorkflow]);
     agentInstanceRepository.countByWorkflowIds.mockResolvedValue({
       [firstWorkflow.id]: 2,
-      [secondWorkflow.id]: 1
+      [secondWorkflow.id]: 1,
     });
 
     const useCase = new ListUserWorkflowsUseCase(workflowRepository, userRepository, agentInstanceRepository);
     const result = await useCase.execute({
       userId: new mongoose.Types.ObjectId().toString(),
-      currentDefaultWorkflowId: secondWorkflow.id
+      currentDefaultWorkflowId: secondWorkflow.id,
     });
 
     expect(userRepository.setDefaultWorkflow).toHaveBeenCalledWith(expect.any(String), firstWorkflow.id);

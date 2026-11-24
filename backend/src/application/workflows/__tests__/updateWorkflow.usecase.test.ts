@@ -1,5 +1,7 @@
 import { UpdateWorkflowUseCase } from '../updateWorkflow.usecase';
 import { IWorkflowRepository } from '../../../repositories/IWorkflowRepository';
+import type { IWorkflow } from '../../../models/Workflow.model';
+import type { IUser } from '../../../models/User.model';
 import { IUserRepository } from '../../../repositories/IUserRepository';
 
 describe('UpdateWorkflowUseCase', () => {
@@ -23,10 +25,10 @@ describe('UpdateWorkflowUseCase', () => {
     const workflow = { _id: { toString: () => 'wf-1' } };
     const updatedWorkflow = { _id: 'wf-1', isActive: true };
 
-    workflowRepository.findOwnedById.mockResolvedValue(workflow as any);
+    workflowRepository.findOwnedById.mockResolvedValue(workflow as unknown as IWorkflow);
     workflowRepository.deactivateOthers.mockResolvedValue(1);
-    userRepository.setLastActiveWorkflow.mockResolvedValue({} as any);
-    workflowRepository.update.mockResolvedValue(updatedWorkflow as any);
+    userRepository.setLastActiveWorkflow.mockResolvedValue({} as unknown as IUser);
+    workflowRepository.update.mockResolvedValue(updatedWorkflow as unknown as IWorkflow);
 
     const result = await useCase.execute({
       workflowId: 'wf-1',
@@ -38,17 +40,17 @@ describe('UpdateWorkflowUseCase', () => {
     expect(userRepository.setLastActiveWorkflow).toHaveBeenCalledWith('user-1', 'wf-1');
     expect(workflowRepository.update).toHaveBeenCalledWith(
       'wf-1',
-      expect.objectContaining({ isActive: true, name: 'Updated', isDirty: false, lastSavedAt: expect.any(Date) })
+      expect.objectContaining({ isActive: true, name: 'Updated', isDirty: false, lastSavedAt: expect.any(Date) }),
     );
     expect(result).toBe(updatedWorkflow);
   });
 
   it('syncs default workflow pointers when setting a workflow as default', async () => {
     const useCase = new UpdateWorkflowUseCase(workflowRepository, userRepository);
-    workflowRepository.findOwnedById.mockResolvedValue({ _id: 'wf-1' } as any);
+    workflowRepository.findOwnedById.mockResolvedValue({ _id: 'wf-1' } as unknown as IWorkflow);
     workflowRepository.unsetDefaultForOthers.mockResolvedValue(1);
-    userRepository.setDefaultWorkflow.mockResolvedValue({} as any);
-    workflowRepository.update.mockResolvedValue({ _id: 'wf-1', isDefault: true } as any);
+    userRepository.setDefaultWorkflow.mockResolvedValue({} as unknown as IUser);
+    workflowRepository.update.mockResolvedValue({ _id: 'wf-1', isDefault: true } as unknown as IWorkflow);
 
     await useCase.execute({
       workflowId: 'wf-1',
