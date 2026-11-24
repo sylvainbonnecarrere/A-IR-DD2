@@ -25,9 +25,7 @@ interface ConnectionListItemProps {
   type: 'api' | 'database';
 }
 
-const getStatusIndicator = (
-  status?: string
-): { icon: React.ReactNode; label: string; bgColor: string; textColor: string } => {
+const getStatusIndicator = (status?: string): { icon: React.ReactNode; label: string; bgColor: string; textColor: string } => {
   const statusMap: {
     [key: string]: { icon: string; label: string; bgColor: string; textColor: string };
   } = {
@@ -35,37 +33,35 @@ const getStatusIndicator = (
       icon: '✓',
       label: 'Disponible',
       bgColor: 'bg-green-600',
-      textColor: 'text-green-200'
+      textColor: 'text-green-200',
     },
     tested: {
       icon: '✓',
       label: 'Disponible',
       bgColor: 'bg-green-600',
-      textColor: 'text-green-200'
+      textColor: 'text-green-200',
     },
     disconnected: {
       icon: '✗',
       label: 'Indisponible',
       bgColor: 'bg-red-600',
-      textColor: 'text-red-200'
+      textColor: 'text-red-200',
     },
     error: {
       icon: '⚠',
       label: 'Erreur',
       bgColor: 'bg-red-600',
-      textColor: 'text-red-200'
+      textColor: 'text-red-200',
     },
     testing: {
       icon: '⟳',
       label: 'Test...',
       bgColor: 'bg-yellow-600',
-      textColor: 'text-yellow-200'
-    }
+      textColor: 'text-yellow-200',
+    },
   };
 
-  return (
-    statusMap[status || 'disconnected'] || statusMap['disconnected']
-  );
+  return statusMap[status || 'disconnected'] || statusMap['disconnected'];
 };
 
 const getMethodColor = (method?: string): string => {
@@ -75,7 +71,7 @@ const getMethodColor = (method?: string): string => {
     PUT: 'bg-orange-600 text-orange-200',
     DELETE: 'bg-red-600 text-red-200',
     PATCH: 'bg-purple-600 text-purple-200',
-    HEAD: 'bg-cyan-600 text-cyan-200'
+    HEAD: 'bg-cyan-600 text-cyan-200',
   };
   return colors[method || 'GET'] || colors['GET'];
 };
@@ -88,9 +84,9 @@ export const ConnectionListItem: React.FC<ConnectionListItemProps> = ({
   onDelete,
   onAddToWorkflow,
   onOpen,
-  type
+  type,
 }) => {
-  const { t } = useLocalization();
+  const { t: _t } = useLocalization();
   const statusInfo = getStatusIndicator(item.status);
 
   return (
@@ -136,12 +132,8 @@ export const ConnectionListItem: React.FC<ConnectionListItemProps> = ({
       {type === 'api' && item.method && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className={`text-xs font-bold px-2 py-0.5 rounded ${getMethodColor(item.method)}`}>
-              {item.method}
-            </span>
-            <span className="text-xs text-gray-400 font-medium">
-              {item.format ? `• ${item.format}` : ''}
-            </span>
+            <span className={`text-xs font-bold px-2 py-0.5 rounded ${getMethodColor(item.method)}`}>{item.method}</span>
+            <span className="text-xs text-gray-400 font-medium">{item.format ? `• ${item.format}` : ''}</span>
           </div>
           <p className="text-xs text-gray-500 truncate line-clamp-2 break-all">{item.url}</p>
         </div>
@@ -161,13 +153,9 @@ export const ConnectionListItem: React.FC<ConnectionListItemProps> = ({
             {statusInfo.icon === '✓' && <CheckCircleIcon className="w-2 h-2" />}
             {statusInfo.icon === '✗' && <AlertCircleIcon className="w-2 h-2" />}
             {statusInfo.icon === '⚠' && <AlertCircleIcon className="w-2 h-2" />}
-            {statusInfo.icon === '⟳' && (
-              <span className="text-xs animate-spin">⟳</span>
-            )}
+            {statusInfo.icon === '⟳' && <span className="text-xs animate-spin">⟳</span>}
           </span>
-          <span className={`text-xs font-medium ${statusInfo.textColor}`}>
-            {statusInfo.label}
-          </span>
+          <span className={`text-xs font-medium ${statusInfo.textColor}`}>{statusInfo.label}</span>
         </div>
         {item.lastTestDate && (
           <span className="text-xs text-gray-600 flex items-center gap-1">

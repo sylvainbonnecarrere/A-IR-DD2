@@ -6,7 +6,7 @@ import { useLocalization } from '../hooks/useLocalization';
 import { Button, Card } from './UI';
 import { RobotIndicator } from './RobotPageChrome';
 import { ProvisionalSurfaceNotice } from './ProvisionalSurfaceNotice';
-import { PlusIcon, ClockIcon, SettingsIcon, CloseIcon } from './Icons';
+import { PlusIcon, ClockIcon, CloseIcon } from './Icons';
 import { useNotifications } from '../contexts/NotificationContext';
 
 interface TimEventsPageProps {
@@ -33,9 +33,7 @@ function createInitialEventDraft(): EventDraft {
   };
 }
 
-export const TimEventsPage: React.FC<TimEventsPageProps> = ({
-  onNavigateToWorkflow
-}) => {
+export const TimEventsPage: React.FC<TimEventsPageProps> = ({ onNavigateToWorkflow }) => {
   const { t } = useLocalization();
   const { addNotification } = useNotifications();
   const {
@@ -46,7 +44,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
     prefix: 'event',
     creatorId: RobotId.Tim,
   });
-  const { currentRobotId } = useDesignStore();
+  const { currentRobotId: _currentRobotId } = useDesignStore();
 
   const [isCreating, setIsCreating] = useState(false);
   const [newEvent, setNewEvent] = useState<EventDraft>(createInitialEventDraft());
@@ -57,7 +55,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
         type: 'error',
         title: t('validation_error'),
         message: t('event_name_required'),
-        duration: 3000
+        duration: 3000,
       });
       return;
     }
@@ -67,7 +65,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
         type: 'error',
         title: t('validation_error'),
         message: t('schedule_required_for_scheduled_event'),
-        duration: 3000
+        duration: 3000,
       });
       return;
     }
@@ -77,7 +75,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
       type: newEvent.type,
       schedule: newEvent.schedule || undefined,
       conditions: newEvent.conditions,
-      rate_limit: newEvent.rateLimit
+      rate_limit: newEvent.rateLimit,
     });
 
     if (result.success) {
@@ -85,7 +83,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
         type: 'success',
         title: t('event_created'),
         message: `"${newEvent.name}" ${t('created_successfully')}`,
-        duration: 3000
+        duration: 3000,
       });
       setNewEvent(createInitialEventDraft());
       setIsCreating(false);
@@ -99,28 +97,38 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
         type: 'success',
         title: t('event_deleted'),
         message: `"${name}" ${t('deleted_successfully')}`,
-        duration: 3000
+        duration: 3000,
       });
     }
   };
 
   const getEventTypeColor = (type: EventPrototypeType) => {
     switch (type) {
-      case 'trigger': return 'bg-red-500/20 text-red-300 border-red-500/30';
-      case 'scheduler': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
-      case 'webhook': return 'bg-green-500/20 text-green-300 border-green-500/30';
-      case 'conditional': return 'bg-purple-500/20 text-purple-300 border-purple-500/30';
-      default: return 'bg-gray-500/20 text-gray-300 border-gray-500/30';
+      case 'trigger':
+        return 'bg-red-500/20 text-red-300 border-red-500/30';
+      case 'scheduler':
+        return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+      case 'webhook':
+        return 'bg-green-500/20 text-green-300 border-green-500/30';
+      case 'conditional':
+        return 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+      default:
+        return 'bg-gray-500/20 text-gray-300 border-gray-500/30';
     }
   };
 
   const getEventTypeIcon = (type: EventPrototypeType) => {
     switch (type) {
-      case 'trigger': return '⚡';
-      case 'scheduler': return '📅';
-      case 'webhook': return '🪝';
-      case 'conditional': return '🔀';
-      default: return '⏰';
+      case 'trigger':
+        return '⚡';
+      case 'scheduler':
+        return '📅';
+      case 'webhook':
+        return '🪝';
+      case 'conditional':
+        return '🔀';
+      default:
+        return '⏰';
     }
   };
 
@@ -161,26 +169,15 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
       {/* Actions Bar */}
       <div className="p-6 border-b border-gray-700/50">
         <div className="flex items-center justify-between">
-          <div className="text-sm text-gray-400">
-            {t('tim_events_count', { count: events.length })}
-          </div>
+          <div className="text-sm text-gray-400">{t('tim_events_count', { count: events.length })}</div>
           <div className="flex space-x-3">
             {onNavigateToWorkflow && (
-              <Button
-                onClick={onNavigateToWorkflow}
-                className="flex items-center space-x-2"
-                variant="secondary"
-              >
+              <Button onClick={onNavigateToWorkflow} className="flex items-center space-x-2" variant="secondary">
                 <span>🗺️</span>
                 <span>{t('view_workflows')}</span>
               </Button>
             )}
-            <Button
-              onClick={() => setIsCreating(true)}
-              className="flex items-center space-x-2"
-              variant="primary"
-              tone="red"
-            >
+            <Button onClick={() => setIsCreating(true)} className="flex items-center space-x-2" variant="primary" tone="red">
               <PlusIcon className="w-4 h-4" />
               <span>{t('tim_new_event')}</span>
             </Button>
@@ -193,7 +190,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
         <ProvisionalSurfaceNotice
           description={t(
             'tim_provisional_notice',
-            'Cette page conserve les evenements et limites localement dans la session UI. Aucun service canonique Tim n est encore connecte a ce flux.'
+            'Cette page conserve les evenements et limites localement dans la session UI. Aucun service canonique Tim n est encore connecte a ce flux.',
           )}
         />
 
@@ -275,10 +272,12 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
                 <input
                   type="number"
                   value={newEvent.rateLimit.max_calls}
-                  onChange={(e) => setNewEvent({
-                    ...newEvent,
-                    rateLimit: { ...newEvent.rateLimit, max_calls: parseInt(e.target.value) || 100 }
-                  })}
+                  onChange={(e) =>
+                    setNewEvent({
+                      ...newEvent,
+                      rateLimit: { ...newEvent.rateLimit, max_calls: parseInt(e.target.value) || 100 },
+                    })
+                  }
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-yellow-500"
                   min="1"
                 />
@@ -289,10 +288,12 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
                 <input
                   type="number"
                   value={newEvent.rateLimit.time_window / 3600}
-                  onChange={(e) => setNewEvent({
-                    ...newEvent,
-                    rateLimit: { ...newEvent.rateLimit, time_window: (parseInt(e.target.value) || 1) * 3600 }
-                  })}
+                  onChange={(e) =>
+                    setNewEvent({
+                      ...newEvent,
+                      rateLimit: { ...newEvent.rateLimit, time_window: (parseInt(e.target.value) || 1) * 3600 },
+                    })
+                  }
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-yellow-500"
                   min="1"
                 />
@@ -316,10 +317,7 @@ export const TimEventsPage: React.FC<TimEventsPageProps> = ({
             <ClockIcon className="w-16 h-16 mx-auto mb-4 text-gray-600" />
             <h3 className="text-lg font-medium text-gray-300 mb-2">{t('tim_no_event_configured')}</h3>
             <p className="mb-4">{t('tim_create_first_event')}</p>
-            <Button
-              onClick={() => setIsCreating(true)}
-              className="bg-yellow-600 hover:bg-yellow-700"
-            >
+            <Button onClick={() => setIsCreating(true)} className="bg-yellow-600 hover:bg-yellow-700">
               <PlusIcon className="w-4 h-4 mr-2" />
               {t('tim_first_event')}
             </Button>

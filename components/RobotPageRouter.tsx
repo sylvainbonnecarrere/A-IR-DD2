@@ -1,5 +1,15 @@
 import React, { Suspense, lazy, useMemo, useState } from 'react';
-import { RobotId, LLMConfig, Agent, AgentInstance, AgentBatchDeleteResult, AgentDeletionMediaPolicy, NodePositionUpdateOptions, ChatMessage, MapsPanelPreloadedResults } from '../types';
+import {
+  RobotId,
+  LLMConfig,
+  Agent,
+  AgentInstance,
+  AgentBatchDeleteResult,
+  AgentDeletionMediaPolicy,
+  NodePositionUpdateOptions,
+  ChatMessage,
+  MapsPanelPreloadedResults,
+} from '../types';
 import { useLocalization } from '../hooks/useLocalization';
 import { useDesignStore } from '../stores/useDesignStore';
 import { publishHydrationComponentReady } from '../utils/hydrationComponentReadiness';
@@ -45,12 +55,21 @@ interface RobotPageRouterProps {
   // Props pour WorkflowCanvas
   agents?: Agent[];
   onDeleteNode?: (nodeId: string) => void;
-  onDeleteNodes?: (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Batch delete nodes by instanceId
+  onDeleteNodes?: (
+    instanceIds: string[],
+    mediaPolicy: AgentDeletionMediaPolicy,
+  ) => Promise<AgentBatchDeleteResult> | AgentBatchDeleteResult; // Batch delete nodes by instanceId
   onUpdateNodeMessages?: (nodeId: string, messages: ChatMessage[]) => void;
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
-  onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
+  onOpenImageModificationPanel?: (
+    nodeId: string,
+    sourceImage: string,
+    agent?: Agent,
+    agentInstance?: AgentInstance,
+    mimeType?: string,
+  ) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
@@ -70,7 +89,13 @@ const WorkflowPage: React.FC<{
   onUpdateNodePosition?: (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => void;
   onToggleNodeMinimize?: (nodeId: string) => void;
   onOpenImagePanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
-  onOpenImageModificationPanel?: (nodeId: string, sourceImage: string, agent?: Agent, agentInstance?: AgentInstance, mimeType?: string) => void;
+  onOpenImageModificationPanel?: (
+    nodeId: string,
+    sourceImage: string,
+    agent?: Agent,
+    agentInstance?: AgentInstance,
+    mimeType?: string,
+  ) => void;
   onOpenVideoPanel?: (nodeId: string, agent: Agent, agentInstance: AgentInstance) => void;
   onOpenMapsPanel?: (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => void;
   onOpenFullscreen?: (imageBase64: string, mimeType: string) => void;
@@ -94,53 +119,53 @@ const WorkflowPage: React.FC<{
   onOpenFullscreen,
   onAddToWorkflow,
   headerActions,
-  currentWorkflowId,
+  currentWorkflowId: _currentWorkflowId,
 }) => {
-    const { t } = useLocalization();
-    return (
-      <div className="h-full flex flex-col bg-gray-900 text-gray-100">
-        {/* Header */}
-        <div className="p-4 border-b border-gray-700 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-white">{robotName}</h1>
-            <p className="text-gray-400 text-sm">{description}</p>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* ⭐ Retour graphique 2026-11-19 : plus de nom de workflow dans le header (redondant avec la toolbar) */}
-            {headerActions}
-            {/* ⭐ Uniformisation 2026-11-20 : bloc « Robot Actuel » standard TOUJOURS complètement
-                à droite de la ligne (BOS = jaune), comme sur les pages COM/PHIL/TIM/ARCHI. */}
-            <RobotIndicator color="yellow" robotId={RobotId.Bos} />
-          </div>
+  const { t: _t } = useLocalization();
+  return (
+    <div className="h-full flex flex-col bg-gray-900 text-gray-100">
+      {/* Header */}
+      <div className="p-4 border-b border-gray-700 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-white">{robotName}</h1>
+          <p className="text-gray-400 text-sm">{description}</p>
         </div>
-
-        {/* ⭐ US-J7-13 : barre de commandes V2 en flux layout (h-12 retiré du conteneur canvas,
-            le viewport React Flow n'est pas déplacé) — uniquement sur les pages carte */}
-        <WorkflowToolbar className="shrink-0" />
-
-        {/* Workflow Canvas avec toutes les props nécessaires */}
-        <div className="flex-1 min-h-0">
-          <Suspense fallback={<RouteFallback message="Chargement du workflow..." />}>
-            <LazyWorkflowCanvas
-              agents={agents}
-              llmConfigs={llmConfigs}
-              onCanvasReady={onWorkflowCanvasReady}
-              onDeleteNode={onDeleteNode}
-              onUpdateNodeMessages={onUpdateNodeMessages}
-              onUpdateNodePosition={onUpdateNodePosition}
-              onToggleNodeMinimize={onToggleNodeMinimize}
-              onOpenImagePanel={onOpenImagePanel}
-              onOpenImageModificationPanel={onOpenImageModificationPanel}
-              onOpenVideoPanel={onOpenVideoPanel}
-              onOpenMapsPanel={onOpenMapsPanel}
-              onOpenFullscreen={onOpenFullscreen}
-              onAddToWorkflow={onAddToWorkflow}
-            />
-          </Suspense>
+        <div className="flex items-center gap-3">
+          {/* ⭐ Retour graphique 2026-11-19 : plus de nom de workflow dans le header (redondant avec la toolbar) */}
+          {headerActions}
+          {/* ⭐ Uniformisation 2026-11-20 : bloc « Robot Actuel » standard TOUJOURS complètement
+                à droite de la ligne (BOS = jaune), comme sur les pages COM/PHIL/TIM/ARCHI. */}
+          <RobotIndicator color="yellow" robotId={RobotId.Bos} />
         </div>
       </div>
-    );
-  };
+
+      {/* ⭐ US-J7-13 : barre de commandes V2 en flux layout (h-12 retiré du conteneur canvas,
+            le viewport React Flow n'est pas déplacé) — uniquement sur les pages carte */}
+      <WorkflowToolbar className="shrink-0" />
+
+      {/* Workflow Canvas avec toutes les props nécessaires */}
+      <div className="flex-1 min-h-0">
+        <Suspense fallback={<RouteFallback message="Chargement du workflow..." />}>
+          <LazyWorkflowCanvas
+            agents={agents}
+            llmConfigs={llmConfigs}
+            onCanvasReady={onWorkflowCanvasReady}
+            onDeleteNode={onDeleteNode}
+            onUpdateNodeMessages={onUpdateNodeMessages}
+            onUpdateNodePosition={onUpdateNodePosition}
+            onToggleNodeMinimize={onToggleNodeMinimize}
+            onOpenImagePanel={onOpenImagePanel}
+            onOpenImageModificationPanel={onOpenImageModificationPanel}
+            onOpenVideoPanel={onOpenVideoPanel}
+            onOpenMapsPanel={onOpenMapsPanel}
+            onOpenFullscreen={onOpenFullscreen}
+            onAddToWorkflow={onAddToWorkflow}
+          />
+        </Suspense>
+      </div>
+    </div>
+  );
+};
 
 // Placeholder components for pages without workflow
 const PlaceholderPage: React.FC<{ robotName: string; description: string }> = ({ robotName, description }) => {
@@ -157,9 +182,7 @@ const PlaceholderPage: React.FC<{ robotName: string; description: string }> = ({
 
 const RouteFallback: React.FC<{ message?: string }> = ({ message = 'Chargement de la page...' }) => (
   <div className="flex h-full items-center justify-center bg-gray-900 text-gray-300">
-    <div className="rounded-lg border border-gray-700 bg-gray-800/60 px-4 py-3 text-sm">
-      {message}
-    </div>
+    <div className="rounded-lg border border-gray-700 bg-gray-800/60 px-4 py-3 text-sm">{message}</div>
   </div>
 );
 
@@ -197,16 +220,18 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     }
 
     try {
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        try {
-          publishHydrationComponentReady({
-            source: 'bos-media-button',
-            workflowId: activeWorkflow?._id ?? currentWorkflowId ?? null,
-          });
-        } catch {
-          // ignore readiness signal failures
-        }
-      }));
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          try {
+            publishHydrationComponentReady({
+              source: 'bos-media-button',
+              workflowId: activeWorkflow?._id ?? currentWorkflowId ?? null,
+            });
+          } catch {
+            // ignore readiness signal failures
+          }
+        }),
+      );
     } catch {
       // ignore readiness signal failures
     }
@@ -241,13 +266,7 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     <>
       {/* ⭐ Style bouton uniformisé (composant Button, effets communs) ; la couleur jaune BOS est
           conservée via tone="yellow" (charte : couleur du robot respectée, effets identiques partout). */}
-      <Button
-        type="button"
-        onClick={() => setShowBosMediaModal(true)}
-        disabled={!activeWorkflow}
-        variant="outline"
-        tone="yellow"
-      >
+      <Button type="button" onClick={() => setShowBosMediaModal(true)} disabled={!activeWorkflow} variant="outline" tone="yellow">
         {t('bos_media_button', 'Gestion des fichiers')}
       </Button>
       {showBosMediaModal ? (
@@ -267,7 +286,12 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     case ROBOT_PAGE_ROUTE_IDS.archi:
       return (
         <Suspense fallback={<RouteFallback />}>
-          <LazyArchiPrototypingPage llmConfigs={llmConfigs} onNavigateToWorkflow={handleNavigateToWorkflow} onAddToWorkflow={onAddToWorkflow} onDeleteNodes={onDeleteNodes} />
+          <LazyArchiPrototypingPage
+            llmConfigs={llmConfigs}
+            onNavigateToWorkflow={handleNavigateToWorkflow}
+            onAddToWorkflow={onAddToWorkflow}
+            onDeleteNodes={onDeleteNodes}
+          />
         </Suspense>
       );
     case ROBOT_PAGE_ROUTE_IDS.bosDashboard:
@@ -319,26 +343,17 @@ export const RobotPageRouter: React.FC<RobotPageRouterProps> = ({
     case ROBOT_PAGE_ROUTE_IDS.philData:
       return (
         <Suspense fallback={<RouteFallback />}>
-          <LazyPhilDataPage
-            onNavigateToWorkflow={handleNavigateToWorkflow}
-          />
+          <LazyPhilDataPage onNavigateToWorkflow={handleNavigateToWorkflow} />
         </Suspense>
       );
     case ROBOT_PAGE_ROUTE_IDS.timEvents:
       return (
         <Suspense fallback={<RouteFallback />}>
-          <LazyTimEventsPage
-            onNavigateToWorkflow={handleNavigateToWorkflow}
-          />
+          <LazyTimEventsPage onNavigateToWorkflow={handleNavigateToWorkflow} />
         </Suspense>
       );
     case ROBOT_PAGE_ROUTE_IDS.fallback:
     default:
-      return (
-        <PlaceholderPage
-          robotName={t('page_orchestrator_title')}
-          description={t('page_orchestrator_description')}
-        />
-      );
+      return <PlaceholderPage robotName={t('page_orchestrator_title')} description={t('page_orchestrator_description')} />;
   }
 };

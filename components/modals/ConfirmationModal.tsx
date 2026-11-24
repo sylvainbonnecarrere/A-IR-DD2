@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Button } from '../UI';
+import { Button } from '../UI';
 import { useLocalization } from '../../hooks/useLocalization';
 
 interface ConfirmationModalProps {
@@ -55,29 +55,27 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
         </div>
 
         {/* Message */}
-        <div className={`p-4 rounded-lg mb-6 ${variant === 'danger'
-          ? 'bg-red-900/20 border border-red-500/30'
-          : 'bg-gray-700/50 border border-gray-600/50'
-          }`}>
+        <div
+          className={`p-4 rounded-lg mb-6 ${
+            variant === 'danger' ? 'bg-red-900/20 border border-red-500/30' : 'bg-gray-700/50 border border-gray-600/50'
+          }`}
+        >
           <p className="text-gray-200 whitespace-pre-wrap leading-relaxed">{message}</p>
         </div>
 
         {/* Actions */}
         <div className="flex justify-end gap-3">
-          <Button
-            variant="secondary"
-            onClick={onCancel}
-            className="hover:scale-105 transition-transform"
-          >
+          <Button variant="secondary" onClick={onCancel} className="hover:scale-105 transition-transform">
             {cancelText || t('cancel')}
           </Button>
           <Button
             variant={variant}
             onClick={onConfirm}
-            className={`transition-all duration-200 ${variant === 'danger'
+            className={`transition-all duration-200 ${
+              variant === 'danger'
                 ? 'bg-red-600 hover:bg-red-700 hover:scale-105 hover:shadow-lg hover:shadow-red-500/30'
                 : 'bg-indigo-600 hover:bg-indigo-700 hover:scale-105 hover:shadow-lg hover:shadow-indigo-500/30'
-              }`}
+            }`}
           >
             {confirmText || t('save')}
           </Button>

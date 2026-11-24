@@ -1,15 +1,33 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Button, ToggleSwitch } from '../UI';
-import { CloseIcon, PlusIcon } from '../Icons';
+import { CloseIcon } from '../Icons';
 import { useDesignStore } from '../../stores/useDesignStore';
 import { useRuntimeStore } from '../../stores/useRuntimeStore';
 import { useLocalization } from '../../hooks/useLocalization';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../contexts/NotificationContext';
-import { AgentInstance, HistoryLimitKey, LLMProvider, LLMCapability, LLMConfig, OutputFormat, HistoryConfig, PersistenceConfig, defaultPersistenceConfig, LocalLLMProfile, ToolSelection, defaultWebSearchParams, normalizePersistenceConfig, sanitizePersistenceConfigForApi } from '../../types';
+import {
+  HistoryLimitKey,
+  LLMProvider,
+  LLMCapability,
+  LLMConfig,
+  OutputFormat,
+  PersistenceConfig,
+  defaultPersistenceConfig,
+  LocalLLMProfile,
+  ToolSelection,
+  defaultWebSearchParams,
+  normalizePersistenceConfig,
+  sanitizePersistenceConfigForApi,
+} from '../../types';
 import { LLM_MODELS, getModelCapabilities, getLMStudioMergedModels, getCapabilitiesForLLM } from '../../llmModels';
 import { useLMStudioDetection } from '../../hooks/useLMStudioDetection';
-import { createDefaultHistoryConfig, initializeHistoryConfig, validateAndRepairHistoryConfig, prepareHistoryConfigForSave } from '../../utils/historyConfigDefaults';
+import {
+  createDefaultHistoryConfig,
+  initializeHistoryConfig,
+  validateAndRepairHistoryConfig,
+  prepareHistoryConfigForSave,
+} from '../../utils/historyConfigDefaults';
 import { API_BASE_URL } from '../../config/api.config';
 import { buildGovernanceHeaders } from '../../utils/governanceHeaders';
 import { isLocalProvider, isLMStudio } from '../../utils/llmProviderUtils';
@@ -21,7 +39,11 @@ import { useFunctionStore } from '../../stores/useFunctionStore';
 import { deriveSelectedToolIds, normalizeToolSelections } from '../../services/toolSelectionResolver';
 import { HISTORY_LIMIT_KEYS } from '../../services/historySynthesisPolicy';
 import { getDisplayableNativeFunctions } from '../../utils/llmNativeFunctionCatalog';
-import { buildCanonicalAgentInstanceConfiguration, createDefaultAgentInstanceConfiguration, type CanonicalAgentInstanceConfiguration } from '../../services/agentContractAdapters';
+import {
+  buildCanonicalAgentInstanceConfiguration,
+  createDefaultAgentInstanceConfiguration,
+  type CanonicalAgentInstanceConfiguration,
+} from '../../services/agentContractAdapters';
 import TabIconNeon, { type AgentTabIconName } from '../agent-tabs/TabIconNeon';
 
 type TabId = AgentTabIconName;
@@ -37,1459 +59,1446 @@ const DEFAULT_HISTORY_CONFIG = createDefaultHistoryConfig();
 const getHistoryLimitLabelKey = (limitKey: HistoryLimitKey) => `history_limit_${limitKey}`;
 
 function serializeToolSelection(selection: ToolSelection): string {
-    const versionRef = selection.versionRef ?? {};
+  const versionRef = selection.versionRef ?? {};
 
-    return JSON.stringify({
-        toolId: selection.toolId,
-        versionTag: versionRef.versionTag ?? null,
-        versionNumber: versionRef.versionNumber ?? null,
-        workspaceId: versionRef.workspaceId ?? null,
-    });
+  return JSON.stringify({
+    toolId: selection.toolId,
+    versionTag: versionRef.versionTag ?? null,
+    versionNumber: versionRef.versionNumber ?? null,
+    workspaceId: versionRef.workspaceId ?? null,
+  });
 }
 
 function areToolSelectionListsEquivalent(left: ToolSelection[], right: ToolSelection[]): boolean {
-    if (left.length !== right.length) {
-        return false;
-    }
+  if (left.length !== right.length) {
+    return false;
+  }
 
-    const normalizedLeft = left.map(serializeToolSelection).sort();
-    const normalizedRight = right.map(serializeToolSelection).sort();
+  const normalizedLeft = left.map(serializeToolSelection).sort();
+  const normalizedRight = right.map(serializeToolSelection).sort();
 
-    return normalizedLeft.every((entry, index) => entry === normalizedRight[index]);
+  return normalizedLeft.every((entry, index) => entry === normalizedRight[index]);
 }
 
 /**
  * Modal de Configuration Enrichie par Instance
- * 
+ *
  * Principe SOLID :
  * - Chaque instance a sa propre configuration (clone du prototype)
  * - Modifications isolées : pas d'impact sur le prototype d'origine
  * - Structure extensible : onglets futurs (Liens, Tâches, Logs, Erreurs)
- * 
+ *
  * Rendu au niveau App.tsx pour affichage en vrai plein écran
  */
-export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localLLMProfiles?: LocalLLMProfile[] }> = ({ llmConfigs, localLLMProfiles = EMPTY_LOCAL_LLM_PROFILES }) => {
-    const { t } = useLocalization();
-    const { getResolvedInstance, updateInstanceConfig, updateAgentInstance } = useDesignStore();
-    const { configModalInstanceId, setConfigModalInstanceId } = useRuntimeStore();
-    const { user, accessToken } = useAuth();
-    const { addNotification } = useNotifications();
+export const AgentConfigurationModal: React.FC<{ llmConfigs: LLMConfig[]; localLLMProfiles?: LocalLLMProfile[] }> = ({
+  llmConfigs,
+  localLLMProfiles = EMPTY_LOCAL_LLM_PROFILES,
+}) => {
+  const { t } = useLocalization();
+  const { getResolvedInstance, updateInstanceConfig, updateAgentInstance } = useDesignStore();
+  const { configModalInstanceId, setConfigModalInstanceId } = useRuntimeStore();
+  const { user, accessToken } = useAuth();
+  const { addNotification } = useNotifications();
 
-    // Tous les hooks DOIVENT être appelés avant les early returns
-    const [activeTab, setActiveTab] = useState<TabId>('config');
-    const [hasChanges, setHasChanges] = useState(false);
-    const [editedName, setEditedName] = useState('');
-    const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  // Tous les hooks DOIVENT être appelés avant les early returns
+  const [activeTab, setActiveTab] = useState<TabId>('config');
+  const [hasChanges, setHasChanges] = useState(false);
+  const [editedName, setEditedName] = useState('');
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
-    const [selectedApplicationToolSelections, setSelectedApplicationToolSelections] = useState<ToolSelection[]>([]);
-    const availableFunctions = useFunctionStore(state => state.functions);
+  const [selectedApplicationToolSelections, setSelectedApplicationToolSelections] = useState<ToolSelection[]>([]);
+  const availableFunctions = useFunctionStore((state) => state.functions);
 
-    // Récupérer l'instance et le prototype (peut être null)
-    const resolved = configModalInstanceId ? getResolvedInstance(configModalInstanceId) : null;
+  // Récupérer l'instance et le prototype (peut être null)
+  const resolved = configModalInstanceId ? getResolvedInstance(configModalInstanceId) : null;
 
-    // Configuration initiale (utilisée uniquement pour l'initialisation du useState)
-    const [editedConfig, setEditedConfig] = useState<CanonicalAgentInstanceConfiguration>(createDefaultAgentInstanceConfiguration());
-    
-    const [editedPersistenceConfig, setEditedPersistenceConfig] = useState<PersistenceConfig>(normalizePersistenceConfig(defaultPersistenceConfig));
+  // Configuration initiale (utilisée uniquement pour l'initialisation du useState)
+  const [editedConfig, setEditedConfig] = useState<CanonicalAgentInstanceConfiguration>(createDefaultAgentInstanceConfiguration());
 
-    // Synchronise editedConfig and editedName when instance changes
-    useEffect(() => {
-        if (!configModalInstanceId) return;
+  const [editedPersistenceConfig, setEditedPersistenceConfig] = useState<PersistenceConfig>(
+    normalizePersistenceConfig(defaultPersistenceConfig),
+  );
 
-        const currentResolved = getResolvedInstance(configModalInstanceId);
-        if (!currentResolved) return;
+  // Synchronise editedConfig and editedName when instance changes
+  useEffect(() => {
+    if (!configModalInstanceId) return;
 
-        const instanceConfig = currentResolved.instance.configuration_json;
-        const prototypeConfig = currentResolved.prototype;
-        
-        // Initialize historyConfig with smart defaults
-        const enabledProviders = Array.from(new Set([
-          instanceConfig?.llmProvider || prototypeConfig.llmProvider,
-          prototypeConfig.llmProvider,
-          LLMProvider.Gemini
-        ])).filter(Boolean) as LLMProvider[];
-        
-        const historyConfigValue = instanceConfig?.historyConfig 
-          ? validateAndRepairHistoryConfig(instanceConfig.historyConfig, enabledProviders)
-          : (prototypeConfig.historyConfig 
-            ? validateAndRepairHistoryConfig(prototypeConfig.historyConfig, enabledProviders)
-            : initializeHistoryConfig(undefined, enabledProviders));
-        
-        // Resolve LMStudio provider + local profile ID, with auto-assignment for legacy agents
-        const resolvedLLMProvider = (instanceConfig?.llmProvider || prototypeConfig.llmProvider || 'openai') as LLMProvider;
-        let resolvedLocalLLMProfileId = instanceConfig?.localLLMProfileId ?? prototypeConfig.localLLMProfileId ?? '';
-        // Legacy LMStudio agent (created before multi-profile feature) has no profileId → auto-assign first enabled profile
-        if (isLMStudio(resolvedLLMProvider) && !resolvedLocalLLMProfileId) {
-            const firstEnabled = localLLMProfiles.find(p => p.enabled);
-            if (firstEnabled) resolvedLocalLLMProfileId = firstEnabled.id;
-        }
-        // Fix model: if LMStudio+profile is set but model is empty, fall back to profile.detectedModel
-        const rawModel = instanceConfig?.model || prototypeConfig.model || '';
-        const resolvedModel = (!rawModel && isLMStudio(resolvedLLMProvider) && resolvedLocalLLMProfileId)
-            ? (localLLMProfiles.find(p => p.id === resolvedLocalLLMProfileId)?.detectedModel || '')
-            : rawModel;
+    const currentResolved = getResolvedInstance(configModalInstanceId);
+    if (!currentResolved) return;
 
-        const hydratedConfig = buildCanonicalAgentInstanceConfiguration(currentResolved.instance, prototypeConfig);
+    const instanceConfig = currentResolved.instance.configuration_json;
+    const prototypeConfig = currentResolved.prototype;
 
-        const currentConfig: CanonicalAgentInstanceConfiguration = {
-            ...createDefaultAgentInstanceConfiguration(),
-            ...hydratedConfig,
-            role: instanceConfig?.role || prototypeConfig.role || '',
-            model: resolvedModel,
-            llmProvider: resolvedLLMProvider,
-            systemPrompt: instanceConfig?.systemPrompt || prototypeConfig.systemPrompt || '',
-            tools: JSON.parse(JSON.stringify(hydratedConfig.tools)),
-            outputConfig: instanceConfig?.outputConfig
-                ? JSON.parse(JSON.stringify(instanceConfig.outputConfig))
-                : (prototypeConfig.outputConfig ? JSON.parse(JSON.stringify(prototypeConfig.outputConfig)) : undefined),
-            webSearchParams: JSON.parse(JSON.stringify(instanceConfig?.webSearchParams || prototypeConfig.webSearchParams || defaultWebSearchParams)),
-            capabilities: instanceConfig?.capabilities
-                ? [...instanceConfig.capabilities]
-                : (prototypeConfig.capabilities ? [...prototypeConfig.capabilities] : []),
-            // historyConfig always initialized with smart defaults
-            historyConfig: historyConfigValue,
-            localLLMProfileId: resolvedLocalLLMProfileId,
-            position: currentResolved.instance.position,
-            functionInheritance: instanceConfig?.functionInheritance,
-            toolSelections: hydratedConfig.toolSelections,
-            links: instanceConfig?.links || [],
-            tasks: instanceConfig?.tasks || [],
-            logs: instanceConfig?.logs || [],
-            errors: instanceConfig?.errors || []
-        };
+    // Initialize historyConfig with smart defaults
+    const enabledProviders = Array.from(
+      new Set([instanceConfig?.llmProvider || prototypeConfig.llmProvider, prototypeConfig.llmProvider, LLMProvider.Gemini]),
+    ).filter(Boolean) as LLMProvider[];
 
-        setEditedConfig(currentConfig);
-        setEditedName(currentResolved.instance.name);
-        
-        const instancePersistence = currentResolved.instance.persistenceConfig;
-        const prototypePersistence = prototypeConfig.persistenceConfig;
-        setEditedPersistenceConfig(normalizePersistenceConfig({
-            ...defaultPersistenceConfig,
-            ...(prototypePersistence || {}),
-            ...(instancePersistence || {})
-        }));
+    const historyConfigValue = instanceConfig?.historyConfig
+      ? validateAndRepairHistoryConfig(instanceConfig.historyConfig, enabledProviders)
+      : prototypeConfig.historyConfig
+        ? validateAndRepairHistoryConfig(prototypeConfig.historyConfig, enabledProviders)
+        : initializeHistoryConfig(undefined, enabledProviders);
 
-        const fi = instanceConfig?.functionInheritance;
-        const instanceToolSelections = normalizeToolSelections(instanceConfig?.toolSelections, undefined, availableFunctions);
-        const overrideToolSelections = normalizeToolSelections(fi?.overrideToolSelections, fi?.overrideFunctionIds, availableFunctions);
-        const prototypeToolSelections = normalizeToolSelections(currentResolved.prototype.toolSelections, currentResolved.prototype.functionIds, availableFunctions);
+    // Resolve LMStudio provider + local profile ID, with auto-assignment for legacy agents
+    const resolvedLLMProvider = (instanceConfig?.llmProvider || prototypeConfig.llmProvider || 'openai') as LLMProvider;
+    let resolvedLocalLLMProfileId = instanceConfig?.localLLMProfileId ?? prototypeConfig.localLLMProfileId ?? '';
+    // Legacy LMStudio agent (created before multi-profile feature) has no profileId → auto-assign first enabled profile
+    if (isLMStudio(resolvedLLMProvider) && !resolvedLocalLLMProfileId) {
+      const firstEnabled = localLLMProfiles.find((p) => p.enabled);
+      if (firstEnabled) resolvedLocalLLMProfileId = firstEnabled.id;
+    }
+    // Fix model: if LMStudio+profile is set but model is empty, fall back to profile.detectedModel
+    const rawModel = instanceConfig?.model || prototypeConfig.model || '';
+    const resolvedModel =
+      !rawModel && isLMStudio(resolvedLLMProvider) && resolvedLocalLLMProfileId
+        ? localLLMProfiles.find((p) => p.id === resolvedLocalLLMProfileId)?.detectedModel || ''
+        : rawModel;
 
-        setSelectedApplicationToolSelections(
-            instanceToolSelections.length > 0
-                ? instanceToolSelections
-                : overrideToolSelections.length > 0
-                    ? overrideToolSelections
-                    : prototypeToolSelections
-        );
+    const hydratedConfig = buildCanonicalAgentInstanceConfiguration(currentResolved.instance, prototypeConfig);
 
-        setHasChanges(false);
-    }, [availableFunctions, configModalInstanceId, getResolvedInstance, localLLMProfiles]);
+    const currentConfig: CanonicalAgentInstanceConfiguration = {
+      ...createDefaultAgentInstanceConfiguration(),
+      ...hydratedConfig,
+      role: instanceConfig?.role || prototypeConfig.role || '',
+      model: resolvedModel,
+      llmProvider: resolvedLLMProvider,
+      systemPrompt: instanceConfig?.systemPrompt || prototypeConfig.systemPrompt || '',
+      tools: JSON.parse(JSON.stringify(hydratedConfig.tools)),
+      outputConfig: instanceConfig?.outputConfig
+        ? JSON.parse(JSON.stringify(instanceConfig.outputConfig))
+        : prototypeConfig.outputConfig
+          ? JSON.parse(JSON.stringify(prototypeConfig.outputConfig))
+          : undefined,
+      webSearchParams: JSON.parse(
+        JSON.stringify(instanceConfig?.webSearchParams || prototypeConfig.webSearchParams || defaultWebSearchParams),
+      ),
+      capabilities: instanceConfig?.capabilities
+        ? [...instanceConfig.capabilities]
+        : prototypeConfig.capabilities
+          ? [...prototypeConfig.capabilities]
+          : [],
+      // historyConfig always initialized with smart defaults
+      historyConfig: historyConfigValue,
+      localLLMProfileId: resolvedLocalLLMProfileId,
+      position: currentResolved.instance.position,
+      functionInheritance: instanceConfig?.functionInheritance,
+      toolSelections: hydratedConfig.toolSelections,
+      links: instanceConfig?.links || [],
+      tasks: instanceConfig?.tasks || [],
+      logs: instanceConfig?.logs || [],
+      errors: instanceConfig?.errors || [],
+    };
 
-    const prototypeToolSelections = useMemo(() => {
-        if (!resolved) {
-            return [];
-        }
+    setEditedConfig(currentConfig);
+    setEditedName(currentResolved.instance.name);
 
-        return normalizeToolSelections(resolved.prototype.toolSelections, resolved.prototype.functionIds, availableFunctions);
-    }, [availableFunctions, resolved]);
-
-    const activeApplicationFunctionCount = selectedApplicationToolSelections.length;
-    const activeNativeProviderFunctions = useMemo(
-        () => getDisplayableNativeFunctions(editedConfig.capabilities, editedConfig.llmProvider),
-        [editedConfig.capabilities, editedConfig.llmProvider],
+    const instancePersistence = currentResolved.instance.persistenceConfig;
+    const prototypePersistence = prototypeConfig.persistenceConfig;
+    setEditedPersistenceConfig(
+      normalizePersistenceConfig({
+        ...defaultPersistenceConfig,
+        ...(prototypePersistence || {}),
+        ...(instancePersistence || {}),
+      }),
     );
-    const availableNativeProviderCapabilities = useMemo(() => {
-        if (!editedConfig.llmProvider || !editedConfig.model) {
-            return [];
-        }
 
-        return getModelCapabilities(editedConfig.llmProvider as LLMProvider, editedConfig.model);
-    }, [editedConfig.llmProvider, editedConfig.model]);
-    const functionTabBadgeCount = activeApplicationFunctionCount + activeNativeProviderFunctions.length;
+    const fi = instanceConfig?.functionInheritance;
+    const instanceToolSelections = normalizeToolSelections(instanceConfig?.toolSelections, undefined, availableFunctions);
+    const overrideToolSelections = normalizeToolSelections(fi?.overrideToolSelections, fi?.overrideFunctionIds, availableFunctions);
+    const prototypeToolSelections = normalizeToolSelections(
+      currentResolved.prototype.toolSelections,
+      currentResolved.prototype.functionIds,
+      availableFunctions,
+    );
 
-    // Only initialize capabilities from model defaults when no explicit selection was saved.
-    // Prototype and instance selections must stay authoritative for the Functions tab.
-    useEffect(() => {
-        if (!editedConfig.llmProvider || !editedConfig.model) return;
-        if (Array.isArray(editedConfig.capabilities) && editedConfig.capabilities.length > 0) return;
-        
-        const newCapabilities = getCapabilitiesForLLM(
-            editedConfig.llmProvider as LLMProvider,
-            editedConfig.model
-        );
+    setSelectedApplicationToolSelections(
+      instanceToolSelections.length > 0
+        ? instanceToolSelections
+        : overrideToolSelections.length > 0
+          ? overrideToolSelections
+          : prototypeToolSelections,
+    );
 
-        if (newCapabilities.length === 0) {
-            return;
-        }
+    setHasChanges(false);
+  }, [availableFunctions, configModalInstanceId, getResolvedInstance, localLLMProfiles]);
 
-        setEditedConfig(prev => {
-            if (Array.isArray(prev.capabilities) && prev.capabilities.length > 0) {
-                return prev;
-            }
-
-            return {
-                ...prev,
-                capabilities: newCapabilities,
-            };
-        });
-    }, [editedConfig.capabilities, editedConfig.llmProvider, editedConfig.model]);
-
-    // Early returns APRÈS tous les hooks
-    if (!configModalInstanceId) return null;
-
+  const prototypeToolSelections = useMemo(() => {
     if (!resolved) {
-        return (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-                <div className="bg-gray-800 p-6 rounded-lg">
-                    <p className="text-red-400">{t('agentConfig_instanceNotFound')}</p>
-                    <Button onClick={() => setConfigModalInstanceId(null)} className="mt-4">{t('agentConfig_closeButton')}</Button>
-                </div>
-            </div>
-        );
+      return [];
     }
 
-    const { instance, prototype } = resolved;
+    return normalizeToolSelections(resolved.prototype.toolSelections, resolved.prototype.functionIds, availableFunctions);
+  }, [availableFunctions, resolved]);
 
-    const handleSave = async () => {
-        // 1. Sauvegarder le nom de l'agent (niveau instance, pas config)
-        if (editedName !== instance.name) {
-            updateAgentInstance(configModalInstanceId, { name: editedName });
-        }
-        
-        updateAgentInstance(configModalInstanceId, { persistenceConfig: editedPersistenceConfig });
+  const activeApplicationFunctionCount = selectedApplicationToolSelections.length;
+  const activeNativeProviderFunctions = useMemo(
+    () => getDisplayableNativeFunctions(editedConfig.capabilities, editedConfig.llmProvider),
+    [editedConfig.capabilities, editedConfig.llmProvider],
+  );
+  const availableNativeProviderCapabilities = useMemo(() => {
+    if (!editedConfig.llmProvider || !editedConfig.model) {
+      return [];
+    }
 
-        // Prepare configuration to save (preserve runtime data and validate history settings)
-        const enabledProvidersList = llmConfigs
-          .filter(c => c.enabled)
-          .map(c => c.provider);
-        const normalizedSelectedApplicationToolSelections = normalizeToolSelections(selectedApplicationToolSelections, undefined, availableFunctions);
-        const inheritsPrototypeApplicationFunctions = areToolSelectionListsEquivalent(
-            normalizedSelectedApplicationToolSelections,
-            prototypeToolSelections,
-        );
-        
-        const configToSave = {
-            ...editedConfig,
-            historyConfig: prepareHistoryConfigForSave(editedConfig.historyConfig || {}, enabledProvidersList),
-            functionInheritance: {
-                inheritFromPrototype: inheritsPrototypeApplicationFunctions,
-                overrideFunctionIds: inheritsPrototypeApplicationFunctions ? [] : deriveSelectedToolIds(normalizedSelectedApplicationToolSelections),
-                overrideToolSelections: inheritsPrototypeApplicationFunctions ? [] : normalizedSelectedApplicationToolSelections,
-            },
-            toolSelections: normalizedSelectedApplicationToolSelections,
-            // Preserve runtime data (logs, errors, tasks, links)
-            logs: instance.configuration_json?.logs || [],
-            errors: instance.configuration_json?.errors || [],
-            tasks: instance.configuration_json?.tasks || [],
-            links: instance.configuration_json?.links || [],
-        };
-        
-        // Update local store
-        updateInstanceConfig(configModalInstanceId, configToSave);
-        
-        // Sync changes to backend
-        if (user && instance.id && accessToken) {
-            try {
-                const persistenceConfigForApi = sanitizePersistenceConfigForApi(editedPersistenceConfig);
-                const response = await fetch(`${API_BASE_URL}/api/agent-instances/${instance.id}`, {
-                    method: 'PUT',
-                    headers: buildGovernanceHeaders(accessToken, {
-                        'Content-Type': 'application/json'
-                    }),
-                    body: JSON.stringify({
-                        configuration_json: configToSave,
-                        name: editedName,
-                        persistenceConfig: persistenceConfigForApi
-                    })
-                });
+    return getModelCapabilities(editedConfig.llmProvider as LLMProvider, editedConfig.model);
+  }, [editedConfig.llmProvider, editedConfig.model]);
+  const functionTabBadgeCount = activeApplicationFunctionCount + activeNativeProviderFunctions.length;
 
-                if (!response.ok) {
-                    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-                    addNotification({
-                        type: 'error',
-                        title: 'Erreur de sauvegarde',
-                        message: error.error || 'Impossible de synchroniser avec le serveur'
-                    });
-                } else {
-                    // Read backend response and sync store with validated data
-                    const updatedInstance = await response.json();
-                    if (updatedInstance?.configuration_json) {
-                        updateInstanceConfig(configModalInstanceId, updatedInstance.configuration_json);
-                    }
-                    
-                    addNotification({
-                        type: 'success',
-                        title: 'Configuration sauvegardée',
-                        message: 'Les changements ont été synchronisés avec le serveur'
-                    });
-                }
-            } catch (err) {
-                const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-                addNotification({
-                    type: 'error',
-                    title: 'Erreur réseau',
-                    message: `Impossible de joindre le serveur: ${errorMsg}`
-                });
-                console.error('[AgentConfigurationModal] Sync error:', err);
-            }
-        }
-        
-        setHasChanges(false);
-        setConfigModalInstanceId(null); // Fermer le modal
-    };
+  // Only initialize capabilities from model defaults when no explicit selection was saved.
+  // Prototype and instance selections must stay authoritative for the Functions tab.
+  useEffect(() => {
+    if (!editedConfig.llmProvider || !editedConfig.model) return;
+    if (Array.isArray(editedConfig.capabilities) && editedConfig.capabilities.length > 0) return;
 
-    const handleCancel = () => {
-        if (hasChanges) {
-            setShowCancelConfirm(true);
-        } else {
-            setConfigModalInstanceId(null); // Fermer le modal
-        }
-    };
+    const newCapabilities = getCapabilitiesForLLM(editedConfig.llmProvider as LLMProvider, editedConfig.model);
 
-    const handleConfirmCancel = () => {
-        setShowCancelConfirm(false);
-        setConfigModalInstanceId(null);
-    };
+    if (newCapabilities.length === 0) {
+      return;
+    }
 
-    const handleDenyCancel = () => {
-        setShowCancelConfirm(false);
-    };
+    setEditedConfig((prev) => {
+      if (Array.isArray(prev.capabilities) && prev.capabilities.length > 0) {
+        return prev;
+      }
 
-    const handleConfigChange = (field: string, value: unknown) => {
-        setEditedConfig(prev => ({ ...prev, [field]: value }));
-        setHasChanges(true);
-    };
+      return {
+        ...prev,
+        capabilities: newCapabilities,
+      };
+    });
+  }, [editedConfig.capabilities, editedConfig.llmProvider, editedConfig.model]);
 
+  // Early returns APRÈS tous les hooks
+  if (!configModalInstanceId) return null;
+
+  if (!resolved) {
     return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-            <div className="w-full h-full max-w-6xl bg-gray-800 rounded-lg shadow-2xl flex flex-col">
-
-                {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b border-gray-700 bg-gray-900/50 rounded-t-lg">
-                    <div className="flex items-center space-x-3">
-                        <div className={`w-3 h-3 rounded-full ${hasChanges ? 'bg-yellow-400 animate-pulse' : 'bg-cyan-400'}`}></div>
-                        <h2 className="text-xl font-semibold text-white">
-                            ⚙️ {editedName || instance.name}
-                        </h2>
-                        <span className="text-sm text-gray-400">
-                            ({editedConfig.model} • {editedConfig.llmProvider})
-                        </span>
-                    </div>
-
-                    <Button
-                        variant="ghost"
-                        onClick={handleCancel}
-                        className="p-2 h-10 w-10 text-gray-400 hover:text-white hover:bg-gray-700"
-                    >
-                        <CloseIcon width={20} height={20} />
-                    </Button>
-                </div>
-
-                {/* Tabs */}
-                <div className="flex border-b border-gray-700 bg-gray-900/30">
-                    <TabButton
-                        active={activeTab === 'config'}
-                        onClick={() => setActiveTab('config')}
-                        tabId="config"
-                    >
-                        {t('agentConfig_tab_config')}
-                    </TabButton>
-                    <TabButton
-                        active={activeTab === 'historique'}
-                        onClick={() => setActiveTab('historique')}
-                        tabId="historique"
-                    >
-                        {t('agentConfig_tab_history')}
-                    </TabButton>
-                    <TabButton
-                        active={activeTab === 'fonctions'}
-                        onClick={() => setActiveTab('fonctions')}
-                        badge={functionTabBadgeCount || undefined}
-                        tabId="fonctions"
-                    >
-                        {t('agentConfig_tab_functions')}
-                    </TabButton>
-                    <TabButton
-                        active={activeTab === 'formatage'}
-                        onClick={() => setActiveTab('formatage')}
-                        tabId="formatage"
-                    >
-                        {t('agentConfig_tab_formatting')}
-                    </TabButton>
-                    <TabButton
-                        active={activeTab === 'persistence'}
-                        onClick={() => setActiveTab('persistence')}
-                        tabId="persistence"
-                    >
-                        {t('agentConfig_tab_persistence')}
-                    </TabButton>
-                    <TabButton
-                        active={activeTab === 'links'}
-                        onClick={() => setActiveTab('links')}
-                        badge={editedConfig.links?.length}
-                        tabId="links"
-                    >
-                        {t('agentConfig_tab_links')}
-                    </TabButton>
-                    <TabButton
-                        active={activeTab === 'tasks'}
-                        onClick={() => setActiveTab('tasks')}
-                        badge={editedConfig.tasks?.length}
-                        tabId="tasks"
-                    >
-                        {t('agentConfig_tab_tasks')}
-                    </TabButton>
-                    <TabButton
-                        active={activeTab === 'logs'}
-                        onClick={() => setActiveTab('logs')}
-                        badge={editedConfig.logs?.length}
-                        tabId="logs"
-                    >
-                        {t('agentConfig_tab_logs')}
-                    </TabButton>
-                    <TabButton
-                        active={activeTab === 'errors'}
-                        onClick={() => setActiveTab('errors')}
-                        badge={editedConfig.errors?.length}
-                        tabId="errors"
-                    >
-                        {t('agentConfig_tab_errors')}
-                    </TabButton>
-                </div>
-
-                {/* Content */}
-                <div className="flex-1 overflow-y-auto p-6">
-                    {activeTab === 'config' && (
-                        <ConfigurationTab
-                            config={editedConfig}
-                            onChange={handleConfigChange}
-                            llmConfigs={llmConfigs}
-                            localLLMProfiles={localLLMProfiles}
-                            agentName={editedName}
-                            onNameChange={(name) => {
-                                setEditedName(name);
-                                setHasChanges(true);
-                            }}
-                            t={t}
-                        />
-                    )}
-
-                    {activeTab === 'historique' && (
-                        <HistoryTab
-                            config={editedConfig}
-                            onChange={handleConfigChange}
-                            llmConfigs={llmConfigs}
-                            t={t}
-                        />
-                    )}
-
-                    {activeTab === 'fonctions' && (
-                        <FunctionsTab
-                            selectedApplicationToolSelections={selectedApplicationToolSelections}
-                            llmProvider={editedConfig.llmProvider}
-                            model={editedConfig.model}
-                            capabilities={editedConfig.capabilities || []}
-                            availableCapabilities={availableNativeProviderCapabilities}
-                            onApplicationToolsChange={(toolSelections) => { setSelectedApplicationToolSelections(toolSelections); setHasChanges(true); }}
-                            onProviderCapabilitiesChange={(capabilities) => handleConfigChange('capabilities', capabilities)}
-                        />
-                    )}
-
-                    {activeTab === 'formatage' && (
-                        <FormattingTab
-                            config={editedConfig}
-                            onChange={handleConfigChange}
-                            t={t}
-                        />
-                    )}
-                    
-                    {activeTab === 'persistence' && (
-                        <div className="space-y-4">
-                            <div className="bg-gray-700/50 p-3 rounded-lg mb-4">
-                                <p className="text-gray-300 text-sm">
-                                    <span className="text-cyan-400 font-medium">💾 Configuration de sauvegarde</span>
-                                    <br />
-                                    Ces paramètres contrôlent ce qui sera automatiquement sauvegardé pour cette instance d'agent,
-                                    y compris les images générées et les médias uploadés.
-                                </p>
-                            </div>
-                            
-                            <AgentPersistenceForm
-                                config={editedPersistenceConfig}
-                                onChange={(newConfig) => {
-                                    setEditedPersistenceConfig(newConfig);
-                                    setHasChanges(true);
-                                }}
-                                disabled={false}
-                            />
-                        </div>
-                    )}
-
-                    {activeTab === 'links' && (
-                        <PlaceholderTab
-                            title={t('agentConfig_placeholder_links_title')}
-                            description={t('agentConfig_placeholder_links_desc')}
-                            icon="🔗"
-                        />
-                    )}
-
-                    {activeTab === 'tasks' && (
-                        <PlaceholderTab
-                            title={t('agentConfig_placeholder_tasks_title')}
-                            description={t('agentConfig_placeholder_tasks_desc')}
-                            icon="✅"
-                        />
-                    )}
-
-                    {activeTab === 'logs' && (
-                        <PlaceholderTab
-                            title={t('agentConfig_placeholder_logs_title')}
-                            description={t('agentConfig_placeholder_logs_desc')}
-                            icon="📋"
-                            items={editedConfig.logs}
-                        />
-                    )}
-
-                    {activeTab === 'errors' && (
-                        <PlaceholderTab
-                            title={t('agentConfig_placeholder_errors_title')}
-                            description={t('agentConfig_placeholder_errors_desc')}
-                            icon="❌"
-                            items={editedConfig.errors}
-                        />
-                    )}
-                </div>
-
-                {/* Footer */}
-                <div className="border-t border-gray-700 bg-gray-900/30 p-4 flex justify-between items-center">
-                    <div className="text-sm text-gray-400">
-                        Prototype source : <span className="text-cyan-400 font-mono">{prototype.name}</span>
-                    </div>
-
-                    <div className="flex space-x-2">
-                        <Button
-                            variant="ghost"
-                            onClick={handleCancel}
-                            className="px-6 py-2"
-                        >
-                            {t('agentConfig_cancelButton')}
-                        </Button>
-                        <Button
-                            onClick={handleSave}
-                            disabled={!hasChanges || (isLMStudio(editedConfig.llmProvider as LLMProvider) && !!editedConfig.localLLMProfileId && !editedConfig.model)}
-                            className="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {t('agentConfig_saveButton')}
-                        </Button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Modal de confirmation d'abandon */}
-            {showCancelConfirm && (
-                <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center">
-                    <div className="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 p-6 max-w-md">
-                        <h3 className="text-lg font-semibold text-white mb-4">
-                            {t('agentConfig_confirmCancel_title')}
-                        </h3>
-                        <div className="flex justify-end space-x-3 mt-6">
-                            <Button
-                                variant="ghost"
-                                onClick={handleDenyCancel}
-                                className="px-4 py-2"
-                            >
-                                {t('agentConfig_confirmCancel_no')}
-                            </Button>
-                            <Button
-                                onClick={handleConfirmCancel}
-                                className="px-4 py-2 bg-red-600 hover:bg-red-700"
-                            >
-                                {t('agentConfig_confirmCancel_yes')}
-                            </Button>
-                        </div>
-                    </div>
-                </div>
-            )}
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div className="bg-gray-800 p-6 rounded-lg">
+          <p className="text-red-400">{t('agentConfig_instanceNotFound')}</p>
+          <Button onClick={() => setConfigModalInstanceId(null)} className="mt-4">
+            {t('agentConfig_closeButton')}
+          </Button>
         </div>
+      </div>
     );
+  }
+
+  const { instance, prototype } = resolved;
+
+  const handleSave = async () => {
+    // 1. Sauvegarder le nom de l'agent (niveau instance, pas config)
+    if (editedName !== instance.name) {
+      updateAgentInstance(configModalInstanceId, { name: editedName });
+    }
+
+    updateAgentInstance(configModalInstanceId, { persistenceConfig: editedPersistenceConfig });
+
+    // Prepare configuration to save (preserve runtime data and validate history settings)
+    const enabledProvidersList = llmConfigs.filter((c) => c.enabled).map((c) => c.provider);
+    const normalizedSelectedApplicationToolSelections = normalizeToolSelections(
+      selectedApplicationToolSelections,
+      undefined,
+      availableFunctions,
+    );
+    const inheritsPrototypeApplicationFunctions = areToolSelectionListsEquivalent(
+      normalizedSelectedApplicationToolSelections,
+      prototypeToolSelections,
+    );
+
+    const configToSave = {
+      ...editedConfig,
+      historyConfig: prepareHistoryConfigForSave(editedConfig.historyConfig || {}, enabledProvidersList),
+      functionInheritance: {
+        inheritFromPrototype: inheritsPrototypeApplicationFunctions,
+        overrideFunctionIds: inheritsPrototypeApplicationFunctions
+          ? []
+          : deriveSelectedToolIds(normalizedSelectedApplicationToolSelections),
+        overrideToolSelections: inheritsPrototypeApplicationFunctions ? [] : normalizedSelectedApplicationToolSelections,
+      },
+      toolSelections: normalizedSelectedApplicationToolSelections,
+      // Preserve runtime data (logs, errors, tasks, links)
+      logs: instance.configuration_json?.logs || [],
+      errors: instance.configuration_json?.errors || [],
+      tasks: instance.configuration_json?.tasks || [],
+      links: instance.configuration_json?.links || [],
+    };
+
+    // Update local store
+    updateInstanceConfig(configModalInstanceId, configToSave);
+
+    // Sync changes to backend
+    if (user && instance.id && accessToken) {
+      try {
+        const persistenceConfigForApi = sanitizePersistenceConfigForApi(editedPersistenceConfig);
+        const response = await fetch(`${API_BASE_URL}/api/agent-instances/${instance.id}`, {
+          method: 'PUT',
+          headers: buildGovernanceHeaders(accessToken, {
+            'Content-Type': 'application/json',
+          }),
+          body: JSON.stringify({
+            configuration_json: configToSave,
+            name: editedName,
+            persistenceConfig: persistenceConfigForApi,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+          addNotification({
+            type: 'error',
+            title: 'Erreur de sauvegarde',
+            message: error.error || 'Impossible de synchroniser avec le serveur',
+          });
+        } else {
+          // Read backend response and sync store with validated data
+          const updatedInstance = await response.json();
+          if (updatedInstance?.configuration_json) {
+            updateInstanceConfig(configModalInstanceId, updatedInstance.configuration_json);
+          }
+
+          addNotification({
+            type: 'success',
+            title: 'Configuration sauvegardée',
+            message: 'Les changements ont été synchronisés avec le serveur',
+          });
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+        addNotification({
+          type: 'error',
+          title: 'Erreur réseau',
+          message: `Impossible de joindre le serveur: ${errorMsg}`,
+        });
+        console.error('[AgentConfigurationModal] Sync error:', err);
+      }
+    }
+
+    setHasChanges(false);
+    setConfigModalInstanceId(null); // Fermer le modal
+  };
+
+  const handleCancel = () => {
+    if (hasChanges) {
+      setShowCancelConfirm(true);
+    } else {
+      setConfigModalInstanceId(null); // Fermer le modal
+    }
+  };
+
+  const handleConfirmCancel = () => {
+    setShowCancelConfirm(false);
+    setConfigModalInstanceId(null);
+  };
+
+  const handleDenyCancel = () => {
+    setShowCancelConfirm(false);
+  };
+
+  const handleConfigChange = (field: string, value: unknown) => {
+    setEditedConfig((prev) => ({ ...prev, [field]: value }));
+    setHasChanges(true);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+      <div className="w-full h-full max-w-6xl bg-gray-800 rounded-lg shadow-2xl flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-700 bg-gray-900/50 rounded-t-lg">
+          <div className="flex items-center space-x-3">
+            <div className={`w-3 h-3 rounded-full ${hasChanges ? 'bg-yellow-400 animate-pulse' : 'bg-cyan-400'}`}></div>
+            <h2 className="text-xl font-semibold text-white">⚙️ {editedName || instance.name}</h2>
+            <span className="text-sm text-gray-400">
+              ({editedConfig.model} • {editedConfig.llmProvider})
+            </span>
+          </div>
+
+          <Button variant="ghost" onClick={handleCancel} className="p-2 h-10 w-10 text-gray-400 hover:text-white hover:bg-gray-700">
+            <CloseIcon width={20} height={20} />
+          </Button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-gray-700 bg-gray-900/30">
+          <TabButton active={activeTab === 'config'} onClick={() => setActiveTab('config')} tabId="config">
+            {t('agentConfig_tab_config')}
+          </TabButton>
+          <TabButton active={activeTab === 'historique'} onClick={() => setActiveTab('historique')} tabId="historique">
+            {t('agentConfig_tab_history')}
+          </TabButton>
+          <TabButton
+            active={activeTab === 'fonctions'}
+            onClick={() => setActiveTab('fonctions')}
+            badge={functionTabBadgeCount || undefined}
+            tabId="fonctions"
+          >
+            {t('agentConfig_tab_functions')}
+          </TabButton>
+          <TabButton active={activeTab === 'formatage'} onClick={() => setActiveTab('formatage')} tabId="formatage">
+            {t('agentConfig_tab_formatting')}
+          </TabButton>
+          <TabButton active={activeTab === 'persistence'} onClick={() => setActiveTab('persistence')} tabId="persistence">
+            {t('agentConfig_tab_persistence')}
+          </TabButton>
+          <TabButton active={activeTab === 'links'} onClick={() => setActiveTab('links')} badge={editedConfig.links?.length} tabId="links">
+            {t('agentConfig_tab_links')}
+          </TabButton>
+          <TabButton active={activeTab === 'tasks'} onClick={() => setActiveTab('tasks')} badge={editedConfig.tasks?.length} tabId="tasks">
+            {t('agentConfig_tab_tasks')}
+          </TabButton>
+          <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} badge={editedConfig.logs?.length} tabId="logs">
+            {t('agentConfig_tab_logs')}
+          </TabButton>
+          <TabButton
+            active={activeTab === 'errors'}
+            onClick={() => setActiveTab('errors')}
+            badge={editedConfig.errors?.length}
+            tabId="errors"
+          >
+            {t('agentConfig_tab_errors')}
+          </TabButton>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {activeTab === 'config' && (
+            <ConfigurationTab
+              config={editedConfig}
+              onChange={handleConfigChange}
+              llmConfigs={llmConfigs}
+              localLLMProfiles={localLLMProfiles}
+              agentName={editedName}
+              onNameChange={(name) => {
+                setEditedName(name);
+                setHasChanges(true);
+              }}
+              t={t}
+            />
+          )}
+
+          {activeTab === 'historique' && <HistoryTab config={editedConfig} onChange={handleConfigChange} llmConfigs={llmConfigs} t={t} />}
+
+          {activeTab === 'fonctions' && (
+            <FunctionsTab
+              selectedApplicationToolSelections={selectedApplicationToolSelections}
+              llmProvider={editedConfig.llmProvider}
+              model={editedConfig.model}
+              capabilities={editedConfig.capabilities || []}
+              availableCapabilities={availableNativeProviderCapabilities}
+              onApplicationToolsChange={(toolSelections) => {
+                setSelectedApplicationToolSelections(toolSelections);
+                setHasChanges(true);
+              }}
+              onProviderCapabilitiesChange={(capabilities) => handleConfigChange('capabilities', capabilities)}
+            />
+          )}
+
+          {activeTab === 'formatage' && <FormattingTab config={editedConfig} onChange={handleConfigChange} t={t} />}
+
+          {activeTab === 'persistence' && (
+            <div className="space-y-4">
+              <div className="bg-gray-700/50 p-3 rounded-lg mb-4">
+                <p className="text-gray-300 text-sm">
+                  <span className="text-cyan-400 font-medium">💾 Configuration de sauvegarde</span>
+                  <br />
+                  Ces paramètres contrôlent ce qui sera automatiquement sauvegardé pour cette instance d'agent, y compris les images
+                  générées et les médias uploadés.
+                </p>
+              </div>
+
+              <AgentPersistenceForm
+                config={editedPersistenceConfig}
+                onChange={(newConfig) => {
+                  setEditedPersistenceConfig(newConfig);
+                  setHasChanges(true);
+                }}
+                disabled={false}
+              />
+            </div>
+          )}
+
+          {activeTab === 'links' && (
+            <PlaceholderTab
+              title={t('agentConfig_placeholder_links_title')}
+              description={t('agentConfig_placeholder_links_desc')}
+              icon="🔗"
+            />
+          )}
+
+          {activeTab === 'tasks' && (
+            <PlaceholderTab
+              title={t('agentConfig_placeholder_tasks_title')}
+              description={t('agentConfig_placeholder_tasks_desc')}
+              icon="✅"
+            />
+          )}
+
+          {activeTab === 'logs' && (
+            <PlaceholderTab
+              title={t('agentConfig_placeholder_logs_title')}
+              description={t('agentConfig_placeholder_logs_desc')}
+              icon="📋"
+              items={editedConfig.logs}
+            />
+          )}
+
+          {activeTab === 'errors' && (
+            <PlaceholderTab
+              title={t('agentConfig_placeholder_errors_title')}
+              description={t('agentConfig_placeholder_errors_desc')}
+              icon="❌"
+              items={editedConfig.errors}
+            />
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-gray-700 bg-gray-900/30 p-4 flex justify-between items-center">
+          <div className="text-sm text-gray-400">
+            Prototype source : <span className="text-cyan-400 font-mono">{prototype.name}</span>
+          </div>
+
+          <div className="flex space-x-2">
+            <Button variant="ghost" onClick={handleCancel} className="px-6 py-2">
+              {t('agentConfig_cancelButton')}
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={
+                !hasChanges ||
+                (isLMStudio(editedConfig.llmProvider as LLMProvider) && !!editedConfig.localLLMProfileId && !editedConfig.model)
+              }
+              className="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {t('agentConfig_saveButton')}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Modal de confirmation d'abandon */}
+      {showCancelConfirm && (
+        <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center">
+          <div className="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 p-6 max-w-md">
+            <h3 className="text-lg font-semibold text-white mb-4">{t('agentConfig_confirmCancel_title')}</h3>
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button variant="ghost" onClick={handleDenyCancel} className="px-4 py-2">
+                {t('agentConfig_confirmCancel_no')}
+              </Button>
+              <Button onClick={handleConfirmCancel} className="px-4 py-2 bg-red-600 hover:bg-red-700">
+                {t('agentConfig_confirmCancel_yes')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 // Tab Button Component
 // ⭐ L'icône TabIconNeon est au-dessus du libellé ; ses états (défaut / hover / actif)
 // sont pilotés par les classes .agent-tab-btn / .tab-active + :hover (voir index.css).
 const TabButton: React.FC<{
-    active: boolean;
-    onClick: () => void;
-    children: React.ReactNode;
-    badge?: number;
-    tabId: TabId;
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  badge?: number;
+  tabId: TabId;
 }> = ({ active, onClick, children, badge, tabId }) => (
-    <button
-        onClick={onClick}
-        className={`
+  <button
+    onClick={onClick}
+    className={`
       agent-tab-btn inline-flex flex-col items-center px-4 py-2 font-medium transition-colors relative
-      ${active
-                ? 'tab-active text-cyan-400 border-b-2 border-cyan-400 bg-gray-800/50'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/30'
-            }
+      ${
+        active
+          ? 'tab-active text-cyan-400 border-b-2 border-cyan-400 bg-gray-800/50'
+          : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/30'
+      }
     `}
-    >
-        <TabIconNeon
-            name={tabId}
-            className="w-10 h-10 mb-1 flex-shrink-0"
-            data-testid={`tab-icon-${tabId}`}
-        />
-        <span className="inline-flex items-center">
-            {children}
-            {badge !== undefined && badge > 0 && (
-                <span className="ml-2 px-2 py-0.5 text-xs bg-cyan-600 text-white rounded-full">
-                    {badge}
-                </span>
-            )}
-        </span>
-    </button>
+  >
+    <TabIconNeon name={tabId} className="w-10 h-10 mb-1 flex-shrink-0" data-testid={`tab-icon-${tabId}`} />
+    <span className="inline-flex items-center">
+      {children}
+      {badge !== undefined && badge > 0 && <span className="ml-2 px-2 py-0.5 text-xs bg-cyan-600 text-white rounded-full">{badge}</span>}
+    </span>
+  </button>
 );
 
 // Configuration Tab Component
 const ConfigurationTab: React.FC<{
-    config: CanonicalAgentInstanceConfiguration;
-    onChange: (field: string, value: unknown) => void;
-    llmConfigs: LLMConfig[];
-    localLLMProfiles: LocalLLMProfile[];
-    agentName: string;
-    onNameChange: (name: string) => void;
-    t: (key: string) => string;
+  config: CanonicalAgentInstanceConfiguration;
+  onChange: (field: string, value: unknown) => void;
+  llmConfigs: LLMConfig[];
+  localLLMProfiles: LocalLLMProfile[];
+  agentName: string;
+  onNameChange: (name: string) => void;
+  t: (key: string) => string;
 }> = ({ config, onChange, llmConfigs, localLLMProfiles, agentName, onNameChange, t }) => {
+  const { user: _user, accessToken } = useAuth();
 
-    const { user, accessToken } = useAuth();
+  // Transient detection states for inline model detection
+  const [isDetectingLocalModel, setIsDetectingLocalModel] = useState(false);
+  const [inlineDetectionError, setInlineDetectionError] = useState<string | null>(null);
 
-    // Transient detection states for inline model detection
-    const [isDetectingLocalModel, setIsDetectingLocalModel] = useState(false);
-    const [inlineDetectionError, setInlineDetectionError] = useState<string | null>(null);
+  // Cloud providers only — local profiles are listed separately in the dropdown
+  const availableProviders = useMemo(
+    () => llmConfigs.filter((c) => c.enabled && !isLocalProvider(c.provider)).map((c) => c.provider),
+    [llmConfigs],
+  );
 
-    // Cloud providers only — local profiles are listed separately in the dropdown
-    const availableProviders = useMemo(() =>
-        llmConfigs.filter(c => c.enabled && !isLocalProvider(c.provider)).map(c => c.provider),
-        [llmConfigs]
-    );
+  // Composite select value: 'local:<id>' for local profiles, provider enum for cloud
+  const providerSelectValue =
+    isLMStudio(config.llmProvider) && config.localLLMProfileId ? `local:${config.localLLMProfileId}` : config.llmProvider || '';
 
-    // Composite select value: 'local:<id>' for local profiles, provider enum for cloud
-    const providerSelectValue = isLMStudio(config.llmProvider) && config.localLLMProfileId
-        ? `local:${config.localLLMProfileId}`
-        : (config.llmProvider || '');
+  // LMStudio uses localEndpoint (plaintext URL); apiKey fallback for legacy records
+  const lmStudioConfig = llmConfigs.find((c) => c.provider === LLMProvider.LMStudio);
+  const lmStudioEndpoint = lmStudioConfig?.localEndpoint || lmStudioConfig?.apiKey;
+  // useMemo ensures originalCapabilities tracks the current config (not stale from first mount)
+  const originalCapabilities = useMemo(() => config.capabilities || [], [config.capabilities]);
+  const [endpointChanged, setEndpointChanged] = useState(false);
 
-    // LMStudio uses localEndpoint (plaintext URL); apiKey fallback for legacy records
-    const lmStudioConfig = llmConfigs.find(c => c.provider === LLMProvider.LMStudio);
-    const lmStudioEndpoint = lmStudioConfig?.localEndpoint || lmStudioConfig?.apiKey;
-    // useMemo ensures originalCapabilities tracks the current config (not stale from first mount)
-    const originalCapabilities = useMemo(() => config.capabilities || [], [config.capabilities]);
-    const [endpointChanged, setEndpointChanged] = useState(false);
+  const [lmStudioDynamicModels, setLmStudioDynamicModels] = useState<ModelOption[]>([]);
+  const [isLoadingLMStudioModels, setIsLoadingLMStudioModels] = useState(false);
 
-    const [lmStudioDynamicModels, setLmStudioDynamicModels] = useState<ModelOption[]>([]);
-    const [isLoadingLMStudioModels, setIsLoadingLMStudioModels] = useState(false);
+  const {
+    detection: lmStudioDetection,
+    isDetecting: isDetectingLMStudio,
+    redetect: redetectLMStudio,
+  } = useLMStudioDetection({
+    // Legacy endpoint only when no local profile is selected — profiles use inline detection
+    endpoint: config.llmProvider === LLMProvider.LMStudio && !config.localLLMProfileId ? lmStudioEndpoint : undefined,
+    autoDetect: false, // Ne pas auto-détecter au mount (agent déjà configuré)
+    onSuccess: (detection) => {
+      // Auto-update capabilities
+      onChange('capabilities', detection.capabilities);
+      setEndpointChanged(false);
+    },
+  });
 
-    const { detection: lmStudioDetection, isDetecting: isDetectingLMStudio, redetect: redetectLMStudio } = useLMStudioDetection({
-        // Legacy endpoint only when no local profile is selected — profiles use inline detection
-        endpoint: config.llmProvider === LLMProvider.LMStudio && !config.localLLMProfileId ? lmStudioEndpoint : undefined,
-        autoDetect: false, // Ne pas auto-détecter au mount (agent déjà configuré)
-        onSuccess: (detection) => {
-            // Auto-update capabilities
-            onChange('capabilities', detection.capabilities);
-            setEndpointChanged(false);
-        }
-    });
+  useEffect(() => {
+    if (config.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint && !config.localLLMProfileId) {
+      setIsLoadingLMStudioModels(true);
+      getLMStudioMergedModels(lmStudioEndpoint)
+        .then((models) => {
+          setLmStudioDynamicModels(models);
+        })
+        .catch(() => {
+          setLmStudioDynamicModels([]);
+        })
+        .finally(() => setIsLoadingLMStudioModels(false));
+    } else {
+      setLmStudioDynamicModels([]);
+    }
+  }, [config.llmProvider, config.localLLMProfileId, lmStudioEndpoint]);
 
-    useEffect(() => {
-        if (config.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint && !config.localLLMProfileId) {
-            setIsLoadingLMStudioModels(true);
-            getLMStudioMergedModels(lmStudioEndpoint)
-                .then(models => {
-                    setLmStudioDynamicModels(models);
-                })
-                .catch(() => {
-                    setLmStudioDynamicModels([]);
-                })
-                .finally(() => setIsLoadingLMStudioModels(false));
-        } else {
-            setLmStudioDynamicModels([]);
-        }
-    }, [config.llmProvider, config.localLLMProfileId, lmStudioEndpoint]);
+  // Détecter changement d'endpoint
+  useEffect(() => {
+    if (config.llmProvider === LLMProvider.LMStudio && !config.localLLMProfileId) {
+      // Comparer endpoint actuel vs celui stocké dans config (si disponible)
+      // Pour simplifier, on détecte si l'utilisateur change le provider vers LMStudio
+      const hasDetection = !!lmStudioDetection;
+      if (lmStudioEndpoint && !hasDetection) {
+        setEndpointChanged(true);
+      }
+    } else {
+      setEndpointChanged(false);
+    }
+  }, [config.llmProvider, config.localLLMProfileId, lmStudioEndpoint, lmStudioDetection]);
 
-    // Détecter changement d'endpoint
-    useEffect(() => {
-        if (config.llmProvider === LLMProvider.LMStudio && !config.localLLMProfileId) {
-            // Comparer endpoint actuel vs celui stocké dans config (si disponible)
-            // Pour simplifier, on détecte si l'utilisateur change le provider vers LMStudio
-            const hasDetection = !!lmStudioDetection;
-            if (lmStudioEndpoint && !hasDetection) {
-                setEndpointChanged(true);
-            }
-        } else {
-            setEndpointChanged(false);
-        }
-    }, [config.llmProvider, config.localLLMProfileId, lmStudioEndpoint, lmStudioDetection]);
+  // Comparer capabilities before/after
+  const capabilityChanges = useMemo(() => {
+    if (!lmStudioDetection) return { added: [], removed: [] };
 
-    // Comparer capabilities before/after
-    const capabilityChanges = useMemo(() => {
-        if (!lmStudioDetection) return { added: [], removed: [] };
+    const newCaps = lmStudioDetection.capabilities;
+    const oldCaps = originalCapabilities;
 
-        const newCaps = lmStudioDetection.capabilities;
-        const oldCaps = originalCapabilities;
+    return {
+      added: newCaps.filter((cap) => !oldCaps.includes(cap)),
+      removed: oldCaps.filter((cap) => !newCaps.includes(cap)),
+    };
+  }, [lmStudioDetection, originalCapabilities]);
 
-        return {
-            added: newCaps.filter(cap => !oldCaps.includes(cap)),
-            removed: oldCaps.filter(cap => !newCaps.includes(cap))
-        };
-    }, [lmStudioDetection, originalCapabilities]);
+  const hasCapabilityChanges = capabilityChanges.added.length > 0 || capabilityChanges.removed.length > 0;
 
-    const hasCapabilityChanges = capabilityChanges.added.length > 0 || capabilityChanges.removed.length > 0;
+  // Obtenir les modèles disponibles pour le provider sélectionné
+  const availableModels = useMemo<ModelOption[]>(() => {
+    if (!config.llmProvider) return [];
 
-    // Obtenir les modèles disponibles pour le provider sélectionné
-    const availableModels = useMemo<ModelOption[]>(() => {
-        if (!config.llmProvider) return [];
+    if (config.llmProvider === LLMProvider.LMStudio && lmStudioDynamicModels.length > 0) {
+      return lmStudioDynamicModels;
+    }
 
-        if (config.llmProvider === LLMProvider.LMStudio && lmStudioDynamicModels.length > 0) {
-            return lmStudioDynamicModels;
-        }
+    // Fallback: Modèles statiques
+    const staticModels = LLM_MODELS[config.llmProvider as LLMProvider] || [];
+    return staticModels.map((id) => ({ id, name: id }));
+  }, [config.llmProvider, lmStudioDynamicModels]);
 
-        // Fallback: Modèles statiques
-        const staticModels = LLM_MODELS[config.llmProvider as LLMProvider] || [];
-        return staticModels.map(id => ({ id, name: id }));
-    }, [config.llmProvider, lmStudioDynamicModels]);
+  // Obtenir les capacités disponibles pour le modèle sélectionné
+  const modelCapabilities = useMemo(() => {
+    if (!config.llmProvider || !config.model) return [];
+    return getModelCapabilities(config.llmProvider as LLMProvider, config.model);
+  }, [config.llmProvider, config.model]);
 
-    // Obtenir les capacités disponibles pour le modèle sélectionné
-    const modelCapabilities = useMemo(() => {
-        if (!config.llmProvider || !config.model) return [];
-        return getModelCapabilities(config.llmProvider as LLMProvider, config.model);
-    }, [config.llmProvider, config.model]);
-
-    const handleProviderChange = (value: string) => {
-        if (value.startsWith('local:')) {
-            const profileId = value.replace('local:', '');
-            const profile = localLLMProfiles.find(p => p.id === profileId);
-            if (profile) {
-                onChange('llmProvider', LLMProvider.LMStudio);
-                onChange('localLLMProfileId', profileId);
-                onChange('model', profile.detectedModel ?? '');
-                setInlineDetectionError(null);
-            }
-            return;
-        }
-        // Cloud provider path
-        const provider = value as LLMProvider;
-        onChange('llmProvider', provider);
-        onChange('localLLMProfileId', '');
+  const handleProviderChange = (value: string) => {
+    if (value.startsWith('local:')) {
+      const profileId = value.replace('local:', '');
+      const profile = localLLMProfiles.find((p) => p.id === profileId);
+      if (profile) {
+        onChange('llmProvider', LLMProvider.LMStudio);
+        onChange('localLLMProfileId', profileId);
+        onChange('model', profile.detectedModel ?? '');
         setInlineDetectionError(null);
-        let models: ModelOption[] = [];
-        if (provider === LLMProvider.LMStudio && lmStudioDynamicModels.length > 0) {
-            models = lmStudioDynamicModels;
-        } else {
-            models = (LLM_MODELS[provider] || []).map((id: string) => ({ id }));
-        }
-        const modelIds = models.map((m: ModelOption) => typeof m === 'string' ? m : m.id);
-        if (models.length > 0 && !modelIds.includes(config.model)) {
-            onChange('model', modelIds[0]);
-        }
-    };
+      }
+      return;
+    }
+    // Cloud provider path
+    const provider = value as LLMProvider;
+    onChange('llmProvider', provider);
+    onChange('localLLMProfileId', '');
+    setInlineDetectionError(null);
+    let models: ModelOption[] = [];
+    if (provider === LLMProvider.LMStudio && lmStudioDynamicModels.length > 0) {
+      models = lmStudioDynamicModels;
+    } else {
+      models = (LLM_MODELS[provider] || []).map((id: string) => ({ id }));
+    }
+    const modelIds = models.map((m: ModelOption) => (typeof m === 'string' ? m : m.id));
+    if (models.length > 0 && !modelIds.includes(config.model)) {
+      onChange('model', modelIds[0]);
+    }
+  };
 
-    // Inline model detection for local profiles
-    const handleInlineDetect = async () => {
-        const profile = localLLMProfiles.find(p => p.id === config.localLLMProfileId);
-        if (!profile) return;
-        setIsDetectingLocalModel(true);
-        setInlineDetectionError(null);
-        try {
-            const apiUrl = `${API_BASE_URL}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(profile.endpoint)}`;
-            const response = await fetch(apiUrl, {
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' },
-                signal: AbortSignal.timeout(15000)
-            });
-            const result = await response.json();
-            if (!result.healthy || !result.modelId) {
-                setInlineDetectionError(result.error || t('agentForm_localModel_notDetected'));
-                return;
-            }
-            onChange('model', result.modelId);
-            if (accessToken) {
-                void localLLMProfileService.updateProfile(
-                    profile.id,
-                    {
-                        name: profile.name,
-                        endpoint: profile.endpoint,
-                        capabilities: profile.capabilities as Record<string, boolean>,
-                        enabled: profile.enabled,
-                        detectedModel: result.modelId
-                    },
-                    { useApi: true, token: accessToken }
-                );
-            }
-        } catch (err: unknown) {
-            setInlineDetectionError((err instanceof Error ? err.message : undefined) || t('agentForm_localModel_notDetected'));
-        } finally {
-            setIsDetectingLocalModel(false);
-        }
-    };
+  // Inline model detection for local profiles
+  const handleInlineDetect = async () => {
+    const profile = localLLMProfiles.find((p) => p.id === config.localLLMProfileId);
+    if (!profile) return;
+    setIsDetectingLocalModel(true);
+    setInlineDetectionError(null);
+    try {
+      const apiUrl = `${API_BASE_URL}/api/local-llm/detect-capabilities?endpoint=${encodeURIComponent(profile.endpoint)}`;
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(15000),
+      });
+      const result = await response.json();
+      if (!result.healthy || !result.modelId) {
+        setInlineDetectionError(result.error || t('agentForm_localModel_notDetected'));
+        return;
+      }
+      onChange('model', result.modelId);
+      if (accessToken) {
+        void localLLMProfileService.updateProfile(
+          profile.id,
+          {
+            name: profile.name,
+            endpoint: profile.endpoint,
+            capabilities: profile.capabilities as Record<string, boolean>,
+            enabled: profile.enabled,
+            detectedModel: result.modelId,
+          },
+          { useApi: true, token: accessToken },
+        );
+      }
+    } catch (err: unknown) {
+      setInlineDetectionError((err instanceof Error ? err.message : undefined) || t('agentForm_localModel_notDetected'));
+    } finally {
+      setIsDetectingLocalModel(false);
+    }
+  };
 
-    const toggleCapability = (cap: LLMCapability) => {
-        // Chat is mandatory and cannot be disabled
-        if (cap === LLMCapability.Chat) return;
-        
-        const current = config.capabilities || [];
-        const updated = current.includes(cap)
-            ? current.filter((c: LLMCapability) => c !== cap)
-            : [...current, cap];
-        onChange('capabilities', updated);
-    };
+  const toggleCapability = (cap: LLMCapability) => {
+    // Chat is mandatory and cannot be disabled
+    if (cap === LLMCapability.Chat) return;
 
-    // Ensure Chat is always present in displayed capability list
-    const displayCapabilities = useMemo(() => {
-        const caps = [...modelCapabilities];
-        if (!caps.includes(LLMCapability.Chat)) {
-            caps.unshift(LLMCapability.Chat); // Add Chat at start
-        }
-        return caps;
-    }, [modelCapabilities]);
+    const current = config.capabilities || [];
+    const updated = current.includes(cap) ? current.filter((c: LLMCapability) => c !== cap) : [...current, cap];
+    onChange('capabilities', updated);
+  };
 
-    return (
-        <div className="space-y-6">
-            {/* Identité de l'Agent */}
-            <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
-                <h3 className="text-lg font-semibold text-white mb-4">{t('agentConfig_identity_title')}</h3>
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                            {t('agentConfig_identity_nameLabel')}
-                        </label>
-                        <input
-                            type="text"
-                            value={agentName}
-                            onChange={(e) => onNameChange(e.target.value)}
-                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
-                            placeholder={t('agentConfig_identity_namePlaceholder')}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                            {t('agentConfig_identity_roleLabel')}
-                        </label>
-                        <input
-                            type="text"
-                            value={config.role || ''}
-                            onChange={(e) => onChange('role', e.target.value)}
-                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
-                            placeholder={t('agentConfig_identity_rolePlaceholder')}
-                        />
-                    </div>
-                </div>
-            </div>
+  // Ensure Chat is always present in displayed capability list
+  const displayCapabilities = useMemo(() => {
+    const caps = [...modelCapabilities];
+    if (!caps.includes(LLMCapability.Chat)) {
+      caps.unshift(LLMCapability.Chat); // Add Chat at start
+    }
+    return caps;
+  }, [modelCapabilities]);
 
-            {/* Configuration LLM */}
-            <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
-                <h3 className="text-lg font-semibold text-white mb-4">{t('agentConfig_llm_title')}</h3>
-
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                            {t('agentConfig_llm_providerLabel')}
-                        </label>
-                        <select
-                            value={providerSelectValue}
-                            onChange={(e) => handleProviderChange(e.target.value)}
-                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
-                        >
-                            {!providerSelectValue && <option value="">{t('agentConfig_llm_providerPlaceholder')}</option>}
-                            {/* Cloud providers */}
-                            {availableProviders.map(provider => (
-                                <option key={provider} value={provider}>{provider}</option>
-                            ))}
-                            {/* Local LLM profiles */}
-                            {localLLMProfiles.filter(p => p.enabled).map(profile => (
-                                <option key={profile.id} value={`local:${profile.id}`}>{profile.name}</option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                            {t('agentConfig_llm_modelLabel')}
-                            {config.llmProvider === LLMProvider.LMStudio && isLoadingLMStudioModels && !config.localLLMProfileId && (
-                                <span className="ml-2 text-xs text-cyan-400">⌛ Chargement modèles...</span>
-                            )}
-                        </label>
-                        {/* Local profile selected: show detectedModel or inline detection button */}
-                        {isLMStudio(config.llmProvider) && config.localLLMProfileId ? (
-                            <div className="space-y-2">
-                                {config.model ? (
-                                    <div className="w-full px-3 py-2 bg-gray-700 border border-green-600/50 rounded text-green-400 text-sm flex items-center gap-2">
-                                        ✅ <span className="font-mono truncate">{config.model}</span>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        <div className="w-full px-3 py-2 bg-gray-900/50 border border-red-500/50 rounded text-red-400 text-xs">
-                                            {t('agentForm_localModel_notDetected')}
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={handleInlineDetect}
-                                            disabled={isDetectingLocalModel}
-                                            className="w-full px-3 py-1.5 rounded text-sm font-medium transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
-                                            style={{
-                                                background: isDetectingLocalModel
-                                                    ? 'linear-gradient(90deg,rgba(6,182,212,0.3),rgba(59,130,246,0.3))'
-                                                    : 'linear-gradient(90deg,#06b6d4,#3b82f6)'
-                                            }}
-                                        >
-                                            {isDetectingLocalModel ? `🔍 ${t('agentForm_localModel_detecting')}` : `🔍 ${t('agentForm_localModel_detect')}`}
-                                        </button>
-                                    </div>
-                                )}
-                                {config.model && (
-                                    <button
-                                        type="button"
-                                        onClick={handleInlineDetect}
-                                        disabled={isDetectingLocalModel}
-                                        className="text-xs text-cyan-400 hover:text-cyan-300 underline disabled:opacity-60"
-                                    >
-                                        {isDetectingLocalModel ? t('agentForm_localModel_detecting') : t('agentForm_localModel_redetect')}
-                                    </button>
-                                )}
-                                {inlineDetectionError && (
-                                    <p className="text-xs text-red-400">{inlineDetectionError}</p>
-                                )}
-                            </div>
-                        ) : (
-                            /* Cloud / legacy LMStudio path */
-                            <select
-                                value={config.model || ''}
-                                onChange={(e) => onChange('model', e.target.value)}
-                                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
-                                disabled={!config.llmProvider || availableModels.length === 0 || isLoadingLMStudioModels}
-                            >
-                                {!config.model && <option value="">{t('agentConfig_llm_modelPlaceholder')}</option>}
-                                {availableModels.map((model: ModelOption) => {
-                                    const modelId = typeof model === 'string' ? model : model.id;
-                                    const modelName = typeof model === 'string' ? model : model.name;
-                                    const isDynamic = typeof model === 'object' && model.isDynamic;
-                                    return (
-                                        <option key={modelId} value={modelId}>
-                                            {modelName} {!isDynamic && config.llmProvider === LLMProvider.LMStudio ? '(Statique)' : ''}
-                                        </option>
-                                    );
-                                })}
-                            </select>
-                        )}
-                    </div>
-                </div>
-
-                <div className="mt-4">
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                        {t('agentConfig_llm_systemPromptLabel')}
-                    </label>
-                    <textarea
-                        value={config.systemPrompt || ''}
-                        onChange={(e) => onChange('systemPrompt', e.target.value)}
-                        rows={8}
-                        className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm resize-vertical focus:border-cyan-500 focus:outline-none"
-                        placeholder={t('agentConfig_llm_systemPromptPlaceholder')}
-                    />
-                </div>
-            </div>
-
-            {/* LMStudio Auto-Detection Panel — legacy mode only */}
-            {config.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint && (
-                <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
-                    <h3 className="text-lg font-semibold text-white mb-4">🤖 Détection LMStudio</h3>
-
-                    {/* Alert: Endpoint Modifié ou Re-détection recommandée */}
-                    {endpointChanged && !lmStudioDetection && (
-                        <div className="mb-4 p-3 rounded-md" style={{
-                            background: 'rgba(251, 191, 36, 0.15)',
-                            border: '1px solid rgba(251, 191, 36, 0.5)',
-                            animation: 'pulse-warning 2s ease-in-out infinite'
-                        }}>
-                            <div className="flex items-center gap-2">
-                                <span className="text-yellow-400 text-xl">⚠️</span>
-                                <span className="text-yellow-300 font-semibold">Endpoint modifié ou modèle changé</span>
-                            </div>
-                            <p className="text-yellow-200 text-sm mt-1">
-                                Les capacités doivent être re-détectées pour garantir la compatibilité
-                            </p>
-                            <button
-                                onClick={redetectLMStudio}
-                                disabled={isDetectingLMStudio}
-                                className="mt-2 px-4 py-2 rounded-md text-sm font-medium transition-all duration-300"
-                                style={{
-                                    background: 'linear-gradient(90deg, #fbbf24, #f59e0b)',
-                                    border: '1px solid #fbbf24',
-                                    color: '#1f2937',
-                                    fontWeight: 'bold',
-                                    boxShadow: '0 0 15px rgba(251, 191, 36, 0.5)',
-                                    animation: 'laser-pulse 2s ease-in-out infinite',
-                                    cursor: isDetectingLMStudio ? 'not-allowed' : 'pointer',
-                                    opacity: isDetectingLMStudio ? 0.6 : 1
-                                }}
-                            >
-                                🔄 Re-détecter maintenant
-                            </button>
-                        </div>
-                    )}
-
-                    {/* Skeleton UI pendant détection */}
-                    {isDetectingLMStudio && (
-                        <div className="space-y-3 relative">
-                            <div className="h-4 rounded" style={{
-                                background: 'linear-gradient(90deg, rgba(100, 100, 100, 0.3) 25%, rgba(150, 150, 150, 0.5) 50%, rgba(100, 100, 100, 0.3) 75%)',
-                                backgroundSize: '200% 100%',
-                                animation: 'skeleton-wave 1.5s ease-in-out infinite'
-                            }} />
-                            <div className="grid grid-cols-2 gap-3">
-                                {[1, 2, 3, 4].map(i => (
-                                    <div key={i} className="h-10 rounded-lg" style={{
-                                        background: 'linear-gradient(90deg, rgba(100, 100, 100, 0.3) 25%, rgba(150, 150, 150, 0.5) 50%, rgba(100, 100, 100, 0.3) 75%)',
-                                        backgroundSize: '200% 100%',
-                                        animation: `skeleton-wave 1.5s ease-in-out infinite ${i * 0.2}s`
-                                    }} />
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Comparaison Before/After si changements détectés */}
-                    {lmStudioDetection && hasCapabilityChanges && (
-                        <div className="mb-4 p-4 rounded-lg" style={{
-                            background: 'rgba(147, 51, 234, 0.1)',
-                            border: '1px solid rgba(147, 51, 234, 0.4)'
-                        }}>
-                            <h4 className="text-purple-400 mb-3 font-semibold">🔄 Changements Détectés</h4>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                {/* Before (Removed Capabilities) */}
-                                {capabilityChanges.removed.length > 0 && (
-                                    <div>
-                                        <h5 className="text-red-400 text-sm mb-2">❌ Anciennes</h5>
-                                        <div className="space-y-1">
-                                            {capabilityChanges.removed.map(cap => (
-                                                <div key={cap} className="px-2 py-1 rounded text-xs" style={{
-                                                    background: 'rgba(239, 68, 68, 0.1)',
-                                                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                                                    color: '#fca5a5',
-                                                    textDecoration: 'line-through'
-                                                }}>
-                                                    {cap}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* After (Added Capabilities) */}
-                                {capabilityChanges.added.length > 0 && (
-                                    <div>
-                                        <h5 className="text-green-400 text-sm mb-2">✅ Nouvelles</h5>
-                                        <div className="space-y-1">
-                                            {capabilityChanges.added.map(cap => (
-                                                <div key={cap} className="px-2 py-1 rounded text-xs" style={{
-                                                    background: 'rgba(34, 197, 94, 0.1)',
-                                                    border: '1px solid rgba(34, 197, 94, 0.3)',
-                                                    color: '#86efac',
-                                                    animation: 'flash-green 1s ease-in-out 3'
-                                                }}>
-                                                    {cap}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Detected capabilities (same as AgentFormModal) */}
-                    {lmStudioDetection && !hasCapabilityChanges && (
-                        <div className="grid grid-cols-2 gap-3">
-                            {lmStudioDetection.capabilities.map((cap, index) => (
-                                <div
-                                    key={cap}
-                                    className="flex items-center gap-2 p-2.5 rounded-lg"
-                                    style={{
-                                        background: 'rgba(6, 182, 212, 0.1)',
-                                        border: '1px solid rgba(6, 182, 212, 0.3)',
-                                        animation: `capability-check 0.6s ease-out ${index * 0.15}s both`,
-                                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
-                                    }}
-                                >
-                                    <span className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center" style={{
-                                        background: 'rgba(34, 197, 94, 0.3)',
-                                        border: '2px solid #4ade80'
-                                    }}>
-                                        <span className="text-green-400 text-xs font-bold">✓</span>
-                                    </span>
-                                    <span className="text-cyan-300 text-sm font-medium">
-                                        {cap === LLMCapability.Chat && '💬 Chat'}
-                                        {cap === LLMCapability.FunctionCalling && '🛠️ Functions'}
-                                        {cap === LLMCapability.OutputFormatting && '📋 JSON'}
-                                        {cap === LLMCapability.URLAnalysis && '🔗 URL Analysis'}
-                                        {cap === LLMCapability.Embedding && '🧮 Embed'}
-                                        {cap === LLMCapability.ImageGeneration && '🎨 Images'}
-                                        {cap === LLMCapability.ImageModification && '🖼️ Image Edit'}
-                                        {cap === LLMCapability.WebSearch && '🔎 Web Search'}
-                                        {cap === LLMCapability.VideoGeneration && '🎬 Video'}
-                                        {cap === LLMCapability.MapsGrounding && '🗺️ Maps'}
-                                        {cap === LLMCapability.WebSearchGrounding && '🌐 Web Grounding'}
-                                        {cap === LLMCapability.OCR && '🔍 OCR'}
-                                        {!Object.values(LLMCapability).includes(cap) && cap}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* Re-detect button (always visible) */}
-                    {lmStudioDetection && (
-                        <button
-                            onClick={redetectLMStudio}
-                            disabled={isDetectingLMStudio}
-                            className="mt-3 px-4 py-2 rounded-md text-sm font-medium transition-all duration-300"
-                            style={{
-                                background: 'linear-gradient(90deg, rgba(6, 182, 212, 0.2), rgba(59, 130, 246, 0.2))',
-                                border: '1px solid rgba(6, 182, 212, 0.5)',
-                                color: '#06b6d4',
-                                cursor: isDetectingLMStudio ? 'not-allowed' : 'pointer',
-                                opacity: isDetectingLMStudio ? 0.6 : 1
-                            }}
-                            onMouseEnter={(e) => {
-                                if (!isDetectingLMStudio) {
-                                    e.currentTarget.style.boxShadow = '0 0 15px rgba(6, 182, 212, 0.6)';
-                                    e.currentTarget.style.transform = 'translateY(-2px)';
-                                }
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.boxShadow = 'none';
-                                e.currentTarget.style.transform = 'translateY(0)';
-                            }}
-                        >
-                            🔄 Re-détecter les capacités
-                        </button>
-                    )}
-                </div>
-            )}
-
-            {/* Capacités (pour non-LMStudio providers) */}
-            {config.llmProvider !== LLMProvider.LMStudio && (
-                <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
-                    <h3 className="text-lg font-semibold text-white mb-4">{t('agentConfig_capabilities_title')}</h3>
-                    <div className="grid grid-cols-2 gap-3">
-                        {displayCapabilities.map((cap) => (
-                            <label key={cap} className={`flex items-center space-x-2 p-2 rounded ${
-                                cap === LLMCapability.Chat 
-                                    ? 'cursor-not-allowed bg-gray-800/30' 
-                                    : 'cursor-pointer hover:bg-gray-800'
-                            }`}>
-                                <input
-                                    type="checkbox"
-                                    checked={config.capabilities?.includes(cap) || cap === LLMCapability.Chat || false}
-                                    onChange={() => toggleCapability(cap)}
-                                    disabled={cap === LLMCapability.Chat}
-                                    className={`w-4 h-4 rounded focus:ring-cyan-500 ${
-                                        cap === LLMCapability.Chat
-                                            ? 'text-green-600 border-green-600 cursor-not-allowed'
-                                            : 'text-cyan-600 border-gray-600'
-                                    }`}
-                                />
-                                <span className={`text-sm ${
-                                    cap === LLMCapability.Chat
-                                        ? 'text-green-400 font-semibold'
-                                        : 'text-gray-300'
-                                }`}>
-                                    {cap}
-                                    {cap === LLMCapability.Chat && ' (obligatoire)'}
-                                </span>
-                            </label>
-                        ))}
-                    </div>
-                    {displayCapabilities.length === 0 && (
-                        <p className="text-sm text-gray-500">{t('agentConfig_capabilities_empty')}</p>
-                    )}
-                </div>
-            )}
-
+  return (
+    <div className="space-y-6">
+      {/* Identité de l'Agent */}
+      <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+        <h3 className="text-lg font-semibold text-white mb-4">{t('agentConfig_identity_title')}</h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_identity_nameLabel')}</label>
+            <input
+              type="text"
+              value={agentName}
+              onChange={(e) => onNameChange(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
+              placeholder={t('agentConfig_identity_namePlaceholder')}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_identity_roleLabel')}</label>
+            <input
+              type="text"
+              value={config.role || ''}
+              onChange={(e) => onChange('role', e.target.value)}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
+              placeholder={t('agentConfig_identity_rolePlaceholder')}
+            />
+          </div>
         </div>
-    );
+      </div>
+
+      {/* Configuration LLM */}
+      <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+        <h3 className="text-lg font-semibold text-white mb-4">{t('agentConfig_llm_title')}</h3>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_llm_providerLabel')}</label>
+            <select
+              value={providerSelectValue}
+              onChange={(e) => handleProviderChange(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
+            >
+              {!providerSelectValue && <option value="">{t('agentConfig_llm_providerPlaceholder')}</option>}
+              {/* Cloud providers */}
+              {availableProviders.map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}
+                </option>
+              ))}
+              {/* Local LLM profiles */}
+              {localLLMProfiles
+                .filter((p) => p.enabled)
+                .map((profile) => (
+                  <option key={profile.id} value={`local:${profile.id}`}>
+                    {profile.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              {t('agentConfig_llm_modelLabel')}
+              {config.llmProvider === LLMProvider.LMStudio && isLoadingLMStudioModels && !config.localLLMProfileId && (
+                <span className="ml-2 text-xs text-cyan-400">⌛ Chargement modèles...</span>
+              )}
+            </label>
+            {/* Local profile selected: show detectedModel or inline detection button */}
+            {isLMStudio(config.llmProvider) && config.localLLMProfileId ? (
+              <div className="space-y-2">
+                {config.model ? (
+                  <div className="w-full px-3 py-2 bg-gray-700 border border-green-600/50 rounded text-green-400 text-sm flex items-center gap-2">
+                    ✅ <span className="font-mono truncate">{config.model}</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="w-full px-3 py-2 bg-gray-900/50 border border-red-500/50 rounded text-red-400 text-xs">
+                      {t('agentForm_localModel_notDetected')}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleInlineDetect}
+                      disabled={isDetectingLocalModel}
+                      className="w-full px-3 py-1.5 rounded text-sm font-medium transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                      style={{
+                        background: isDetectingLocalModel
+                          ? 'linear-gradient(90deg,rgba(6,182,212,0.3),rgba(59,130,246,0.3))'
+                          : 'linear-gradient(90deg,#06b6d4,#3b82f6)',
+                      }}
+                    >
+                      {isDetectingLocalModel ? `🔍 ${t('agentForm_localModel_detecting')}` : `🔍 ${t('agentForm_localModel_detect')}`}
+                    </button>
+                  </div>
+                )}
+                {config.model && (
+                  <button
+                    type="button"
+                    onClick={handleInlineDetect}
+                    disabled={isDetectingLocalModel}
+                    className="text-xs text-cyan-400 hover:text-cyan-300 underline disabled:opacity-60"
+                  >
+                    {isDetectingLocalModel ? t('agentForm_localModel_detecting') : t('agentForm_localModel_redetect')}
+                  </button>
+                )}
+                {inlineDetectionError && <p className="text-xs text-red-400">{inlineDetectionError}</p>}
+              </div>
+            ) : (
+              /* Cloud / legacy LMStudio path */
+              <select
+                value={config.model || ''}
+                onChange={(e) => onChange('model', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:border-cyan-500 focus:outline-none"
+                disabled={!config.llmProvider || availableModels.length === 0 || isLoadingLMStudioModels}
+              >
+                {!config.model && <option value="">{t('agentConfig_llm_modelPlaceholder')}</option>}
+                {availableModels.map((model: ModelOption) => {
+                  const modelId = typeof model === 'string' ? model : model.id;
+                  const modelName = typeof model === 'string' ? model : model.name;
+                  const isDynamic = typeof model === 'object' && model.isDynamic;
+                  return (
+                    <option key={modelId} value={modelId}>
+                      {modelName} {!isDynamic && config.llmProvider === LLMProvider.LMStudio ? '(Statique)' : ''}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_llm_systemPromptLabel')}</label>
+          <textarea
+            value={config.systemPrompt || ''}
+            onChange={(e) => onChange('systemPrompt', e.target.value)}
+            rows={8}
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm resize-vertical focus:border-cyan-500 focus:outline-none"
+            placeholder={t('agentConfig_llm_systemPromptPlaceholder')}
+          />
+        </div>
+      </div>
+
+      {/* LMStudio Auto-Detection Panel — legacy mode only */}
+      {config.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint && (
+        <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+          <h3 className="text-lg font-semibold text-white mb-4">🤖 Détection LMStudio</h3>
+
+          {/* Alert: Endpoint Modifié ou Re-détection recommandée */}
+          {endpointChanged && !lmStudioDetection && (
+            <div
+              className="mb-4 p-3 rounded-md"
+              style={{
+                background: 'rgba(251, 191, 36, 0.15)',
+                border: '1px solid rgba(251, 191, 36, 0.5)',
+                animation: 'pulse-warning 2s ease-in-out infinite',
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-yellow-400 text-xl">⚠️</span>
+                <span className="text-yellow-300 font-semibold">Endpoint modifié ou modèle changé</span>
+              </div>
+              <p className="text-yellow-200 text-sm mt-1">Les capacités doivent être re-détectées pour garantir la compatibilité</p>
+              <button
+                onClick={redetectLMStudio}
+                disabled={isDetectingLMStudio}
+                className="mt-2 px-4 py-2 rounded-md text-sm font-medium transition-all duration-300"
+                style={{
+                  background: 'linear-gradient(90deg, #fbbf24, #f59e0b)',
+                  border: '1px solid #fbbf24',
+                  color: '#1f2937',
+                  fontWeight: 'bold',
+                  boxShadow: '0 0 15px rgba(251, 191, 36, 0.5)',
+                  animation: 'laser-pulse 2s ease-in-out infinite',
+                  cursor: isDetectingLMStudio ? 'not-allowed' : 'pointer',
+                  opacity: isDetectingLMStudio ? 0.6 : 1,
+                }}
+              >
+                🔄 Re-détecter maintenant
+              </button>
+            </div>
+          )}
+
+          {/* Skeleton UI pendant détection */}
+          {isDetectingLMStudio && (
+            <div className="space-y-3 relative">
+              <div
+                className="h-4 rounded"
+                style={{
+                  background:
+                    'linear-gradient(90deg, rgba(100, 100, 100, 0.3) 25%, rgba(150, 150, 150, 0.5) 50%, rgba(100, 100, 100, 0.3) 75%)',
+                  backgroundSize: '200% 100%',
+                  animation: 'skeleton-wave 1.5s ease-in-out infinite',
+                }}
+              />
+              <div className="grid grid-cols-2 gap-3">
+                {[1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className="h-10 rounded-lg"
+                    style={{
+                      background:
+                        'linear-gradient(90deg, rgba(100, 100, 100, 0.3) 25%, rgba(150, 150, 150, 0.5) 50%, rgba(100, 100, 100, 0.3) 75%)',
+                      backgroundSize: '200% 100%',
+                      animation: `skeleton-wave 1.5s ease-in-out infinite ${i * 0.2}s`,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Comparaison Before/After si changements détectés */}
+          {lmStudioDetection && hasCapabilityChanges && (
+            <div
+              className="mb-4 p-4 rounded-lg"
+              style={{
+                background: 'rgba(147, 51, 234, 0.1)',
+                border: '1px solid rgba(147, 51, 234, 0.4)',
+              }}
+            >
+              <h4 className="text-purple-400 mb-3 font-semibold">🔄 Changements Détectés</h4>
+
+              <div className="grid grid-cols-2 gap-4">
+                {/* Before (Removed Capabilities) */}
+                {capabilityChanges.removed.length > 0 && (
+                  <div>
+                    <h5 className="text-red-400 text-sm mb-2">❌ Anciennes</h5>
+                    <div className="space-y-1">
+                      {capabilityChanges.removed.map((cap) => (
+                        <div
+                          key={cap}
+                          className="px-2 py-1 rounded text-xs"
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.1)',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            color: '#fca5a5',
+                            textDecoration: 'line-through',
+                          }}
+                        >
+                          {cap}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* After (Added Capabilities) */}
+                {capabilityChanges.added.length > 0 && (
+                  <div>
+                    <h5 className="text-green-400 text-sm mb-2">✅ Nouvelles</h5>
+                    <div className="space-y-1">
+                      {capabilityChanges.added.map((cap) => (
+                        <div
+                          key={cap}
+                          className="px-2 py-1 rounded text-xs"
+                          style={{
+                            background: 'rgba(34, 197, 94, 0.1)',
+                            border: '1px solid rgba(34, 197, 94, 0.3)',
+                            color: '#86efac',
+                            animation: 'flash-green 1s ease-in-out 3',
+                          }}
+                        >
+                          {cap}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Detected capabilities (same as AgentFormModal) */}
+          {lmStudioDetection && !hasCapabilityChanges && (
+            <div className="grid grid-cols-2 gap-3">
+              {lmStudioDetection.capabilities.map((cap, index) => (
+                <div
+                  key={cap}
+                  className="flex items-center gap-2 p-2.5 rounded-lg"
+                  style={{
+                    background: 'rgba(6, 182, 212, 0.1)',
+                    border: '1px solid rgba(6, 182, 212, 0.3)',
+                    animation: `capability-check 0.6s ease-out ${index * 0.15}s both`,
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                  }}
+                >
+                  <span
+                    className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
+                    style={{
+                      background: 'rgba(34, 197, 94, 0.3)',
+                      border: '2px solid #4ade80',
+                    }}
+                  >
+                    <span className="text-green-400 text-xs font-bold">✓</span>
+                  </span>
+                  <span className="text-cyan-300 text-sm font-medium">
+                    {cap === LLMCapability.Chat && '💬 Chat'}
+                    {cap === LLMCapability.FunctionCalling && '🛠️ Functions'}
+                    {cap === LLMCapability.OutputFormatting && '📋 JSON'}
+                    {cap === LLMCapability.URLAnalysis && '🔗 URL Analysis'}
+                    {cap === LLMCapability.Embedding && '🧮 Embed'}
+                    {cap === LLMCapability.ImageGeneration && '🎨 Images'}
+                    {cap === LLMCapability.ImageModification && '🖼️ Image Edit'}
+                    {cap === LLMCapability.WebSearch && '🔎 Web Search'}
+                    {cap === LLMCapability.VideoGeneration && '🎬 Video'}
+                    {cap === LLMCapability.MapsGrounding && '🗺️ Maps'}
+                    {cap === LLMCapability.WebSearchGrounding && '🌐 Web Grounding'}
+                    {cap === LLMCapability.OCR && '🔍 OCR'}
+                    {!Object.values(LLMCapability).includes(cap) && cap}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Re-detect button (always visible) */}
+          {lmStudioDetection && (
+            <button
+              onClick={redetectLMStudio}
+              disabled={isDetectingLMStudio}
+              className="mt-3 px-4 py-2 rounded-md text-sm font-medium transition-all duration-300"
+              style={{
+                background: 'linear-gradient(90deg, rgba(6, 182, 212, 0.2), rgba(59, 130, 246, 0.2))',
+                border: '1px solid rgba(6, 182, 212, 0.5)',
+                color: '#06b6d4',
+                cursor: isDetectingLMStudio ? 'not-allowed' : 'pointer',
+                opacity: isDetectingLMStudio ? 0.6 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (!isDetectingLMStudio) {
+                  e.currentTarget.style.boxShadow = '0 0 15px rgba(6, 182, 212, 0.6)';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              🔄 Re-détecter les capacités
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Capacités (pour non-LMStudio providers) */}
+      {config.llmProvider !== LLMProvider.LMStudio && (
+        <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+          <h3 className="text-lg font-semibold text-white mb-4">{t('agentConfig_capabilities_title')}</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {displayCapabilities.map((cap) => (
+              <label
+                key={cap}
+                className={`flex items-center space-x-2 p-2 rounded ${
+                  cap === LLMCapability.Chat ? 'cursor-not-allowed bg-gray-800/30' : 'cursor-pointer hover:bg-gray-800'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={config.capabilities?.includes(cap) || cap === LLMCapability.Chat || false}
+                  onChange={() => toggleCapability(cap)}
+                  disabled={cap === LLMCapability.Chat}
+                  className={`w-4 h-4 rounded focus:ring-cyan-500 ${
+                    cap === LLMCapability.Chat ? 'text-green-600 border-green-600 cursor-not-allowed' : 'text-cyan-600 border-gray-600'
+                  }`}
+                />
+                <span className={`text-sm ${cap === LLMCapability.Chat ? 'text-green-400 font-semibold' : 'text-gray-300'}`}>
+                  {cap}
+                  {cap === LLMCapability.Chat && ' (obligatoire)'}
+                </span>
+              </label>
+            ))}
+          </div>
+          {displayCapabilities.length === 0 && <p className="text-sm text-gray-500">{t('agentConfig_capabilities_empty')}</p>}
+        </div>
+      )}
+    </div>
+  );
 };
 
 // History Tab Component
 const HistoryTab: React.FC<{
-    config: CanonicalAgentInstanceConfiguration;
-    onChange: (field: string, value: unknown) => void;
-    llmConfigs: LLMConfig[];
-    t: (key: string) => string;
+  config: CanonicalAgentInstanceConfiguration;
+  onChange: (field: string, value: unknown) => void;
+  llmConfigs: LLMConfig[];
+  t: (key: string) => string;
 }> = ({ config, onChange, llmConfigs, t }) => {
-    const availableProviders = llmConfigs.filter(c => c.enabled).map(c => c.provider);
+  const availableProviders = llmConfigs.filter((c) => c.enabled).map((c) => c.provider);
 
-    const [lmStudioDynamicModelsHistory, setLmStudioDynamicModelsHistory] = useState<ModelOption[]>([]);
-    const [isLoadingLMStudioModelsHistory, setIsLoadingLMStudioModelsHistory] = useState(false);
-    // Alias local (const) pour bénéficier du narrowing dans les callbacks JSX ci-dessous
-    const historyConfig = config.historyConfig;
-    // LMStudio uses localEndpoint (plaintext URL); apiKey fallback for legacy records
-    const lmStudioHistoryConfig = llmConfigs.find(c => c.provider === LLMProvider.LMStudio);
-    const lmStudioEndpoint = lmStudioHistoryConfig?.localEndpoint || lmStudioHistoryConfig?.apiKey;
+  const [lmStudioDynamicModelsHistory, setLmStudioDynamicModelsHistory] = useState<ModelOption[]>([]);
+  const [isLoadingLMStudioModelsHistory, setIsLoadingLMStudioModelsHistory] = useState(false);
+  // Alias local (const) pour bénéficier du narrowing dans les callbacks JSX ci-dessous
+  const historyConfig = config.historyConfig;
+  // LMStudio uses localEndpoint (plaintext URL); apiKey fallback for legacy records
+  const lmStudioHistoryConfig = llmConfigs.find((c) => c.provider === LLMProvider.LMStudio);
+  const lmStudioEndpoint = lmStudioHistoryConfig?.localEndpoint || lmStudioHistoryConfig?.apiKey;
 
-    // Fetch modèles LMStudio si history provider est LMStudio
-    useEffect(() => {
-        if (historyConfig?.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint) {
-            setIsLoadingLMStudioModelsHistory(true);
-            getLMStudioMergedModels(lmStudioEndpoint)
-                .then(models => setLmStudioDynamicModelsHistory(models))
-                .catch(() => setLmStudioDynamicModelsHistory([]))
-                .finally(() => setIsLoadingLMStudioModelsHistory(false));
-        } else {
-            setLmStudioDynamicModelsHistory([]);
-        }
-    }, [historyConfig?.llmProvider, lmStudioEndpoint]);
+  // Fetch modèles LMStudio si history provider est LMStudio
+  useEffect(() => {
+    if (historyConfig?.llmProvider === LLMProvider.LMStudio && lmStudioEndpoint) {
+      setIsLoadingLMStudioModelsHistory(true);
+      getLMStudioMergedModels(lmStudioEndpoint)
+        .then((models) => setLmStudioDynamicModelsHistory(models))
+        .catch(() => setLmStudioDynamicModelsHistory([]))
+        .finally(() => setIsLoadingLMStudioModelsHistory(false));
+    } else {
+      setLmStudioDynamicModelsHistory([]);
+    }
+  }, [historyConfig?.llmProvider, lmStudioEndpoint]);
 
-    const availableModels = useMemo<ModelOption[]>(() => {
-        if (!historyConfig?.llmProvider) return [];
+  const availableModels = useMemo<ModelOption[]>(() => {
+    if (!historyConfig?.llmProvider) return [];
 
-        if (historyConfig.llmProvider === LLMProvider.LMStudio && lmStudioDynamicModelsHistory.length > 0) {
-            return lmStudioDynamicModelsHistory;
-        }
+    if (historyConfig.llmProvider === LLMProvider.LMStudio && lmStudioDynamicModelsHistory.length > 0) {
+      return lmStudioDynamicModelsHistory;
+    }
 
-        const staticModels = LLM_MODELS[historyConfig.llmProvider as LLMProvider] || [];
-        return staticModels.map(id => ({ id, name: id }));
-    }, [historyConfig?.llmProvider, lmStudioDynamicModelsHistory]);
+    const staticModels = LLM_MODELS[historyConfig.llmProvider as LLMProvider] || [];
+    return staticModels.map((id) => ({ id, name: id }));
+  }, [historyConfig?.llmProvider, lmStudioDynamicModelsHistory]);
 
-    const handleProviderChange = (provider: LLMProvider) => {
-        let models: ModelOption[] = [];
+  const handleProviderChange = (provider: LLMProvider) => {
+    let models: ModelOption[] = [];
 
-        if (provider === LLMProvider.LMStudio && lmStudioDynamicModelsHistory.length > 0) {
-            models = lmStudioDynamicModelsHistory;
-        } else {
-            models = (LLM_MODELS[provider] || []).map(id => ({ id }));
-        }
+    if (provider === LLMProvider.LMStudio && lmStudioDynamicModelsHistory.length > 0) {
+      models = lmStudioDynamicModelsHistory;
+    } else {
+      models = (LLM_MODELS[provider] || []).map((id) => ({ id }));
+    }
 
-        const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
-        // Preserve existing history config when changing LLM provider
-        onChange('historyConfig', {
-            ...historyConfig,
-            llmProvider: provider,
-            model: modelIds[0] || ''
-        });
-    };
+    const modelIds = models.map((m) => (typeof m === 'string' ? m : m.id));
+    // Preserve existing history config when changing LLM provider
+    onChange('historyConfig', {
+      ...historyConfig,
+      llmProvider: provider,
+      model: modelIds[0] || '',
+    });
+  };
 
-    return (
-        <div className="space-y-6">
-            <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
-                <ToggleSwitch
-                    label={t('agentConfig_history_enableLabel')}
-                    checked={historyConfig?.enabled || false}
-                    onChange={(checked) => onChange('historyConfig', { ...historyConfig, enabled: checked })}
-                />
-                {historyConfig?.enabled && (
-                    <div className="mt-4 space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_history_limitsLabel')}</label>
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                {HISTORY_LIMIT_KEYS.map((key) => {
-                                    const isEnabled = historyConfig?.enabledLimits?.[key] ?? DEFAULT_HISTORY_CONFIG.enabledLimits[key];
-                                    return (
-                                    <div key={key} className="rounded-md border border-gray-700 bg-gray-800/40 p-3 space-y-2">
-                                        <div className="flex items-center justify-between gap-3">
-                                            <label className="text-xs font-medium text-gray-300">{t(getHistoryLimitLabelKey(key))}</label>
-                                            <label className="flex items-center gap-2 text-xs text-gray-400">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isEnabled}
-                                                    aria-label={`${t('history_limit_active')} ${t(getHistoryLimitLabelKey(key))}`}
-                                                    onChange={(e) => onChange('historyConfig', {
-                                                        ...historyConfig,
-                                                        enabledLimits: {
-                                                            ...historyConfig.enabledLimits,
-                                                            [key]: e.target.checked,
-                                                        }
-                                                    })}
-                                                    className="h-4 w-4 rounded border-gray-500 bg-gray-700 text-indigo-500 focus:ring-indigo-500"
-                                                />
-                                                <span>{t('history_limit_active')}</span>
-                                            </label>
-                                        </div>
-                                        <input
-                                            type="number"
-                                            value={historyConfig.limits[key]}
-                                            onChange={(e) => onChange('historyConfig', {
-                                                ...historyConfig,
-                                                limits: { ...historyConfig.limits, [key]: parseInt(e.target.value, 10) || 0 }
-                                            })}
-                                            disabled={!isEnabled}
-                                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                                        />
-                                    </div>
-                                )})}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_history_synthesisLabel')}</label>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-xs text-gray-400">{t('agentConfig_history_llmProviderLabel')}</label>
-                                    <select
-                                        value={historyConfig?.llmProvider || 'gemini'}
-                                        onChange={(e) => handleProviderChange(e.target.value as LLMProvider)}
-                                        className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm mt-1"
-                                    >
-                                        {availableProviders.map(provider => (
-                                            <option key={provider} value={provider}>{provider}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="text-xs text-gray-400">
-                                        {t('agentConfig_history_llmModelLabel')}
-                                        {historyConfig?.llmProvider === LLMProvider.LMStudio && isLoadingLMStudioModelsHistory && (
-                                            <span className="ml-2 text-cyan-400">⌛</span>
-                                        )}
-                                    </label>
-                                    <select
-                                        value={historyConfig?.model || ''}
-                                        onChange={(e) => onChange('historyConfig', { ...historyConfig, model: e.target.value })}
-                                        className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm mt-1"
-                                        disabled={isLoadingLMStudioModelsHistory}
-                                    >
-                                        {availableModels.map(model => {
-                                            const modelId = typeof model === 'string' ? model : model.id;
-                                            const modelName = typeof model === 'string' ? model : model.name;
-                                            const isDynamic = typeof model === 'object' && model.isDynamic;
-                                            return (
-                                                <option key={modelId} value={modelId}>
-                                                    {modelName} {!isDynamic && historyConfig?.llmProvider === LLMProvider.LMStudio ? '(Statique)' : ''}
-                                                </option>
-                                            );
-                                        })}
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_history_systemPromptLabel')}</label>
-                            <textarea
-                                value={historyConfig?.systemPrompt || ''}
-                                onChange={(e) => onChange('historyConfig', { ...historyConfig, systemPrompt: e.target.value })}
-                                rows={4}
-                                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm"
-                                placeholder="Résume la conversation de manière factuelle..."
-                            />
-                        </div>
+  return (
+    <div className="space-y-6">
+      <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+        <ToggleSwitch
+          label={t('agentConfig_history_enableLabel')}
+          checked={historyConfig?.enabled || false}
+          onChange={(checked) => onChange('historyConfig', { ...historyConfig, enabled: checked })}
+        />
+        {historyConfig?.enabled && (
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_history_limitsLabel')}</label>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                {HISTORY_LIMIT_KEYS.map((key) => {
+                  const isEnabled = historyConfig?.enabledLimits?.[key] ?? DEFAULT_HISTORY_CONFIG.enabledLimits[key];
+                  return (
+                    <div key={key} className="rounded-md border border-gray-700 bg-gray-800/40 p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-xs font-medium text-gray-300">{t(getHistoryLimitLabelKey(key))}</label>
+                        <label className="flex items-center gap-2 text-xs text-gray-400">
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            aria-label={`${t('history_limit_active')} ${t(getHistoryLimitLabelKey(key))}`}
+                            onChange={(e) =>
+                              onChange('historyConfig', {
+                                ...historyConfig,
+                                enabledLimits: {
+                                  ...historyConfig.enabledLimits,
+                                  [key]: e.target.checked,
+                                },
+                              })
+                            }
+                            className="h-4 w-4 rounded border-gray-500 bg-gray-700 text-indigo-500 focus:ring-indigo-500"
+                          />
+                          <span>{t('history_limit_active')}</span>
+                        </label>
+                      </div>
+                      <input
+                        type="number"
+                        value={historyConfig.limits[key]}
+                        onChange={(e) =>
+                          onChange('historyConfig', {
+                            ...historyConfig,
+                            limits: { ...historyConfig.limits, [key]: parseInt(e.target.value, 10) || 0 },
+                          })
+                        }
+                        disabled={!isEnabled}
+                        className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                      />
                     </div>
-                )}
+                  );
+                })}
+              </div>
             </div>
-        </div>
-    );
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_history_synthesisLabel')}</label>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-gray-400">{t('agentConfig_history_llmProviderLabel')}</label>
+                  <select
+                    value={historyConfig?.llmProvider || 'gemini'}
+                    onChange={(e) => handleProviderChange(e.target.value as LLMProvider)}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm mt-1"
+                  >
+                    {availableProviders.map((provider) => (
+                      <option key={provider} value={provider}>
+                        {provider}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400">
+                    {t('agentConfig_history_llmModelLabel')}
+                    {historyConfig?.llmProvider === LLMProvider.LMStudio && isLoadingLMStudioModelsHistory && (
+                      <span className="ml-2 text-cyan-400">⌛</span>
+                    )}
+                  </label>
+                  <select
+                    value={historyConfig?.model || ''}
+                    onChange={(e) => onChange('historyConfig', { ...historyConfig, model: e.target.value })}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm mt-1"
+                    disabled={isLoadingLMStudioModelsHistory}
+                  >
+                    {availableModels.map((model) => {
+                      const modelId = typeof model === 'string' ? model : model.id;
+                      const modelName = typeof model === 'string' ? model : model.name;
+                      const isDynamic = typeof model === 'object' && model.isDynamic;
+                      return (
+                        <option key={modelId} value={modelId}>
+                          {modelName} {!isDynamic && historyConfig?.llmProvider === LLMProvider.LMStudio ? '(Statique)' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_history_systemPromptLabel')}</label>
+              <textarea
+                value={historyConfig?.systemPrompt || ''}
+                onChange={(e) => onChange('historyConfig', { ...historyConfig, systemPrompt: e.target.value })}
+                rows={4}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm"
+                placeholder="Résume la conversation de manière factuelle..."
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 // Functions Tab Component
 const FunctionsTab: React.FC<{
-    selectedApplicationToolSelections: ToolSelection[];
-    llmProvider: LLMProvider;
-    model?: string;
-    capabilities: LLMCapability[];
-    availableCapabilities: LLMCapability[];
-    onApplicationToolsChange: (toolSelections: ToolSelection[]) => void;
-    onProviderCapabilitiesChange: (capabilities: LLMCapability[]) => void;
-}> = ({ selectedApplicationToolSelections, llmProvider, model, capabilities, availableCapabilities, onApplicationToolsChange, onProviderCapabilitiesChange }) => {
-    return (
-        <div className="grid gap-6 xl:grid-cols-2 items-start">
-            <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700 h-full">
-                <div className="mb-4">
-                    <h3 className="text-sm font-semibold text-white">Fonctions natives/custom application</h3>
-                    <p className="mt-1 text-xs text-gray-400">
-                        Fonctions versionnees issues de Phil et persistees via toolSelections pour cette instance.
-                    </p>
-                </div>
-
-                <div className="max-h-[34rem] overflow-y-auto pr-2">
-                    <FunctionSelector
-                        selectedToolSelections={selectedApplicationToolSelections}
-                        onChangeToolSelections={onApplicationToolsChange}
-                    />
-                </div>
-            </div>
-
-            <LLMNativeFunctionsPanel
-                llmProvider={llmProvider}
-                model={model}
-                capabilities={capabilities}
-                availableCapabilities={availableCapabilities}
-                onChangeSelectedCapabilities={onProviderCapabilitiesChange}
-                emptyMessage="Aucune fonction provider/cloud disponible pour cette configuration."
-            />
+  selectedApplicationToolSelections: ToolSelection[];
+  llmProvider: LLMProvider;
+  model?: string;
+  capabilities: LLMCapability[];
+  availableCapabilities: LLMCapability[];
+  onApplicationToolsChange: (toolSelections: ToolSelection[]) => void;
+  onProviderCapabilitiesChange: (capabilities: LLMCapability[]) => void;
+}> = ({
+  selectedApplicationToolSelections,
+  llmProvider,
+  model,
+  capabilities,
+  availableCapabilities,
+  onApplicationToolsChange,
+  onProviderCapabilitiesChange,
+}) => {
+  return (
+    <div className="grid gap-6 xl:grid-cols-2 items-start">
+      <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700 h-full">
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold text-white">Fonctions natives/custom application</h3>
+          <p className="mt-1 text-xs text-gray-400">
+            Fonctions versionnees issues de Phil et persistees via toolSelections pour cette instance.
+          </p>
         </div>
-    );
+
+        <div className="max-h-[34rem] overflow-y-auto pr-2">
+          <FunctionSelector selectedToolSelections={selectedApplicationToolSelections} onChangeToolSelections={onApplicationToolsChange} />
+        </div>
+      </div>
+
+      <LLMNativeFunctionsPanel
+        llmProvider={llmProvider}
+        model={model}
+        capabilities={capabilities}
+        availableCapabilities={availableCapabilities}
+        onChangeSelectedCapabilities={onProviderCapabilitiesChange}
+        emptyMessage="Aucune fonction provider/cloud disponible pour cette configuration."
+      />
+    </div>
+  );
 };
 
 // Formatting Tab Component
 const FormattingTab: React.FC<{
-    config: CanonicalAgentInstanceConfiguration;
-    onChange: (field: string, value: unknown) => void;
-    t: (key: string) => string;
+  config: CanonicalAgentInstanceConfiguration;
+  onChange: (field: string, value: unknown) => void;
+  t: (key: string) => string;
 }> = ({ config, onChange, t }) => {
-    // Alias local (const) pour bénéficier du narrowing dans les callbacks JSX ci-dessous
-    const outputConfig = config.outputConfig;
-    const outputFormats: OutputFormat[] = ['json', 'xml', 'yaml', 'shell', 'powershell', 'python', 'html', 'css', 'javascript', 'typescript', 'php', 'sql', 'mysql', 'mongodb'];
+  // Alias local (const) pour bénéficier du narrowing dans les callbacks JSX ci-dessous
+  const outputConfig = config.outputConfig;
+  const outputFormats: OutputFormat[] = [
+    'json',
+    'xml',
+    'yaml',
+    'shell',
+    'powershell',
+    'python',
+    'html',
+    'css',
+    'javascript',
+    'typescript',
+    'php',
+    'sql',
+    'mysql',
+    'mongodb',
+  ];
 
-    return (
-        <div className="space-y-6">
-            <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
-                <ToggleSwitch
-                    label={t('agentConfig_formatting_enableLabel')}
-                    checked={outputConfig?.enabled || false}
-                    onChange={(checked) => onChange('outputConfig', { ...outputConfig, enabled: checked })}
-                />
-                {outputConfig?.enabled && (
-                    <div className="mt-4 space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_formatting_formatLabel')}</label>
-                            <select
-                                value={outputConfig?.format || 'json'}
-                                onChange={(e) => onChange('outputConfig', { ...outputConfig, format: e.target.value as OutputFormat })}
-                                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
-                            >
-                                {outputFormats.map(fmt => (
-                                    <option key={fmt} value={fmt}>{fmt.toUpperCase()}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="bg-gray-800/50 p-3 rounded">
-                            <p className="text-xs text-gray-400">
-                                💡 La sortie structurée force le LLM à générer du contenu dans le format spécifié.
-                            </p>
-                        </div>
-                    </div>
-                )}
+  return (
+    <div className="space-y-6">
+      <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+        <ToggleSwitch
+          label={t('agentConfig_formatting_enableLabel')}
+          checked={outputConfig?.enabled || false}
+          onChange={(checked) => onChange('outputConfig', { ...outputConfig, enabled: checked })}
+        />
+        {outputConfig?.enabled && (
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">{t('agentConfig_formatting_formatLabel')}</label>
+              <select
+                value={outputConfig?.format || 'json'}
+                onChange={(e) => onChange('outputConfig', { ...outputConfig, format: e.target.value as OutputFormat })}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
+              >
+                {outputFormats.map((fmt) => (
+                  <option key={fmt} value={fmt}>
+                    {fmt.toUpperCase()}
+                  </option>
+                ))}
+              </select>
             </div>
-        </div>
-    );
+            <div className="bg-gray-800/50 p-3 rounded">
+              <p className="text-xs text-gray-400">💡 La sortie structurée force le LLM à générer du contenu dans le format spécifié.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 // Placeholder Tab Component
 const PlaceholderTab: React.FC<{
-    title: string;
-    description: string;
-    icon: string;
-    items?: unknown[];
+  title: string;
+  description: string;
+  icon: string;
+  items?: unknown[];
 }> = ({ title, description, icon, items }) => (
-    <div className="flex flex-col items-center justify-center h-full text-gray-400">
-        <div className="text-6xl mb-4">{icon}</div>
-        <h3 className="text-xl font-semibold text-white mb-2">{title}</h3>
-        <p className="text-center max-w-md mb-4">{description}</p>
-        {items && items.length > 0 && (
-            <div className="mt-4 text-sm">
-                {items.length} élément(s) disponible(s)
-            </div>
-        )}
-        <div className="mt-6 px-4 py-2 bg-gray-700/50 rounded text-sm">
-            🚧 Fonctionnalité à venir
-        </div>
-    </div>
+  <div className="flex flex-col items-center justify-center h-full text-gray-400">
+    <div className="text-6xl mb-4">{icon}</div>
+    <h3 className="text-xl font-semibold text-white mb-2">{title}</h3>
+    <p className="text-center max-w-md mb-4">{description}</p>
+    {items && items.length > 0 && <div className="mt-4 text-sm">{items.length} élément(s) disponible(s)</div>}
+    <div className="mt-6 px-4 py-2 bg-gray-700/50 rounded text-sm">🚧 Fonctionnalité à venir</div>
+  </div>
 );

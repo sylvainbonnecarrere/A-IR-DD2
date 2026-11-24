@@ -20,25 +20,13 @@ interface ConfirmCancelRunModalProps {
   onCancel: () => void;
 }
 
-export const ConfirmCancelRunModal: React.FC<ConfirmCancelRunModalProps> = ({
-  isOpen,
-  runId,
-  isSubmitting,
-  onConfirm,
-  onCancel,
-}) => {
+export const ConfirmCancelRunModal: React.FC<ConfirmCancelRunModalProps> = ({ isOpen, runId, isSubmitting, onConfirm, onCancel }) => {
   const { t } = useLocalization();
   const cancelRef = useRef<HTMLButtonElement | null>(null);
   const titleId = 'confirm-cancel-run-title';
 
   return (
-    <AccessibleModal
-      isOpen={isOpen}
-      onClose={onCancel}
-      role="alertdialog"
-      labelledBy={titleId}
-      initialFocusRef={cancelRef}
-    >
+    <AccessibleModal isOpen={isOpen} onClose={onCancel} role="alertdialog" labelledBy={titleId} initialFocusRef={cancelRef}>
       <div className="flex items-start gap-3 mb-4">
         <div className="flex-shrink-0 w-10 h-10 bg-red-900/40 rounded-full flex items-center justify-center">
           <ExclamationTriangleIcon className="w-6 h-6 text-red-400" />
@@ -48,9 +36,7 @@ export const ConfirmCancelRunModal: React.FC<ConfirmCancelRunModalProps> = ({
             {t('workflow.cancelRun.title')}
           </h3>
           <p className="text-sm text-gray-300">{t('workflow.cancelRun.body')}</p>
-          {runId ? (
-            <p className="text-xs text-gray-500 mt-2 font-mono break-all">{runId}</p>
-          ) : null}
+          {runId ? <p className="text-xs text-gray-500 mt-2 font-mono break-all">{runId}</p> : null}
         </div>
         <ModalCloseButton onClick={onCancel} label={t('workflow.cancelRun.cancel')} />
       </div>
@@ -90,18 +76,11 @@ export const ResetAndRelaunchModal: React.FC<ResetAndRelaunchModalProps> = ({
   const { t } = useLocalization();
   const cancelRef = useRef<HTMLButtonElement | null>(null);
   const titleId = 'reset-and-relaunch-title';
-  const errorKey = errorCode && errorCode !== 'default'
-    ? `workflow.resetAndRelaunch.errors.${errorCode}`
-    : 'workflow.resetAndRelaunch.errors.default';
+  const errorKey =
+    errorCode && errorCode !== 'default' ? `workflow.resetAndRelaunch.errors.${errorCode}` : 'workflow.resetAndRelaunch.errors.default';
 
   return (
-    <AccessibleModal
-      isOpen={isOpen}
-      onClose={onCancel}
-      role="alertdialog"
-      labelledBy={titleId}
-      initialFocusRef={cancelRef}
-    >
+    <AccessibleModal isOpen={isOpen} onClose={onCancel} role="alertdialog" labelledBy={titleId} initialFocusRef={cancelRef}>
       <div className="flex items-start gap-3 mb-4">
         <div className="flex-shrink-0 w-10 h-10 bg-orange-900/40 rounded-full flex items-center justify-center">
           <ShieldAlertIcon className="w-6 h-6 text-orange-400" />
@@ -111,14 +90,8 @@ export const ResetAndRelaunchModal: React.FC<ResetAndRelaunchModalProps> = ({
             {t('workflow.resetAndRelaunch.title')}
           </h3>
           <p className="text-sm text-gray-300">{t('workflow.resetAndRelaunch.body')}</p>
-          {lockHeld ? (
-            <p className="text-xs text-orange-300 mt-2 font-medium">
-              🔒 {t('workflow.resetAndRelaunch.lockHeld')}
-            </p>
-          ) : null}
-          {runId ? (
-            <p className="text-xs text-gray-500 mt-2 font-mono break-all">{runId}</p>
-          ) : null}
+          {lockHeld ? <p className="text-xs text-orange-300 mt-2 font-medium">🔒 {t('workflow.resetAndRelaunch.lockHeld')}</p> : null}
+          {runId ? <p className="text-xs text-gray-500 mt-2 font-mono break-all">{runId}</p> : null}
           {errorCode ? (
             <p role="alert" className="text-xs text-red-400 mt-2 font-medium" data-testid="reset-relaunch-error">
               {t(errorKey, t('workflow.resetAndRelaunch.errors.default'))}
@@ -152,14 +125,16 @@ export const RunDetailModal: React.FC<RunDetailModalProps> = ({ isOpen, run, onC
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const titleId = 'run-detail-title';
 
-  const rows: Array<[string, string]> = run ? [
-    [t('workflow.runDetail.runId'), run.executionId],
-    [t('workflow.runDetail.status'), t(`workflow.status.${run.status}`, run.status)],
-    [t('workflow.runDetail.createdAt'), run.createdAt ? new Date(run.createdAt).toLocaleString() : '—'],
-    [t('workflow.runDetail.startedAt'), run.timing?.startedAt ? new Date(run.timing.startedAt).toLocaleString() : '—'],
-    [t('workflow.runDetail.finishedAt'), run.timing?.finishedAt ? new Date(run.timing.finishedAt).toLocaleString() : '—'],
-    [t('workflow.runDetail.durationMs'), run.timing?.durationMs != null ? `${run.timing.durationMs} ms` : '—'],
-  ] : [];
+  const rows: Array<[string, string]> = run
+    ? [
+        [t('workflow.runDetail.runId'), run.executionId],
+        [t('workflow.runDetail.status'), t(`workflow.status.${run.status}`, run.status)],
+        [t('workflow.runDetail.createdAt'), run.createdAt ? new Date(run.createdAt).toLocaleString() : '—'],
+        [t('workflow.runDetail.startedAt'), run.timing?.startedAt ? new Date(run.timing.startedAt).toLocaleString() : '—'],
+        [t('workflow.runDetail.finishedAt'), run.timing?.finishedAt ? new Date(run.timing.finishedAt).toLocaleString() : '—'],
+        [t('workflow.runDetail.durationMs'), run.timing?.durationMs != null ? `${run.timing.durationMs} ms` : '—'],
+      ]
+    : [];
 
   return (
     <AccessibleModal
@@ -188,7 +163,9 @@ export const RunDetailModal: React.FC<RunDetailModalProps> = ({ isOpen, run, onC
             <p className="text-xs text-orange-300 font-medium pt-2">🔒 {t('workflow.runs.lockHeld')}</p>
           ) : null}
           {run.error?.message ? (
-            <p role="alert" className="text-xs text-red-400 pt-2">{t('workflow.runDetail.error')}: {run.error.message}</p>
+            <p role="alert" className="text-xs text-red-400 pt-2">
+              {t('workflow.runDetail.error')}: {run.error.message}
+            </p>
           ) : null}
         </dl>
       ) : (
@@ -213,7 +190,7 @@ interface RunHistoryModalProps {
   onSelectRun?: (runId: string) => void;
 }
 
-export const RunHistoryModal: React.FC<RunHistoryModalProps> = ({ isOpen, workflowId, runs, onClose, onSelectRun }) => {
+export const RunHistoryModal: React.FC<RunHistoryModalProps> = ({ isOpen, workflowId: _workflowId, runs, onClose, onSelectRun }) => {
   const { t } = useLocalization();
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const titleId = 'run-history-title';
@@ -252,7 +229,7 @@ export const RunHistoryModal: React.FC<RunHistoryModalProps> = ({ isOpen, workfl
                   />
                   <span className="text-sm text-gray-100 font-mono truncate flex-1">{run.executionId}</span>
                   <span className="text-xs text-gray-300">{t(`workflow.status.${run.status}`, run.status)}</span>
-                  {(run.lockHeld === true || run.status === 'quarantined') ? (
+                  {run.lockHeld === true || run.status === 'quarantined' ? (
                     <span className="text-xs text-orange-300 font-medium">🔒 {t('workflow.runs.lockHeld')}</span>
                   ) : null}
                   <span className="text-xs text-gray-500">{new Date(run.createdAt).toLocaleString()}</span>

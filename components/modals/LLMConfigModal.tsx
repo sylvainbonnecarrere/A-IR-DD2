@@ -1,6 +1,6 @@
 /**
  * 🎯 COMPONENT: LLMConfigModal
- * 
+ *
  * Directive SOLID: Checklist de conformité
  * ✅ Importe useLLMConfigs (JAMAIS fetch ou localStorage)
  * ✅ Récupère données du hook (getConfig)
@@ -12,7 +12,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLLMConfigs } from '../../hooks/useLLMConfigs';
 import { useLocalization } from '../../hooks/useLocalization';
-import type { ILLMConfigUI } from '../../types';
 
 interface LLMConfigModalProps {
   provider: string;
@@ -20,7 +19,7 @@ interface LLMConfigModalProps {
   onSuccess?: () => void;
 }
 
-const LLM_PROVIDERS = [
+const _LLM_PROVIDERS = [
   'OpenAI',
   'Anthropic',
   'Gemini',
@@ -30,17 +29,12 @@ const LLM_PROVIDERS = [
   'Perplexity',
   'Qwen',
   'Kimi',
-  'LLM local (on premise)'
+  'LLM local (on premise)',
 ];
 
-export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
-  provider,
-  onClose,
-  onSuccess
-}) => {
+export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({ provider, onClose, onSuccess }) => {
   // 📌 DIRECTIVE SOLID: Utiliser le hook
-  const { getConfig, updateConfig, deleteConfig, loading, error, clearError } =
-    useLLMConfigs();
+  const { getConfig, updateConfig, deleteConfig, loading, error, clearError } = useLLMConfigs();
   const { t } = useLocalization();
 
   // Form state
@@ -48,7 +42,7 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
     apiKey: '',
     apiKeyConfirm: '',
     enabled: true,
-    capabilities: {} as Record<string, boolean>
+    capabilities: {} as Record<string, boolean>,
   });
   const [isLoading, setIsLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -63,13 +57,11 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
             apiKey: '', // ⚠️ Ne jamais afficher l'API key existante
             apiKeyConfirm: '',
             enabled: config.enabled,
-            capabilities: config.capabilities
+            capabilities: config.capabilities,
           });
         }
       } catch (err) {
-        setFormError(
-          err instanceof Error ? err.message : 'Erreur chargement config'
-        );
+        setFormError(err instanceof Error ? err.message : 'Erreur chargement config');
       }
     };
 
@@ -112,7 +104,7 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
       await updateConfig(provider, {
         apiKey: formData.apiKey,
         enabled: formData.enabled,
-        capabilities: formData.capabilities
+        capabilities: formData.capabilities,
       });
 
       // Succès
@@ -120,15 +112,13 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
         apiKey: '',
         apiKeyConfirm: '',
         enabled: true,
-        capabilities: {}
+        capabilities: {},
       });
 
       onSuccess?.();
       onClose();
     } catch (err) {
-      setFormError(
-        err instanceof Error ? err.message : 'Erreur sauvegarde config'
-      );
+      setFormError(err instanceof Error ? err.message : 'Erreur sauvegarde config');
     } finally {
       setIsLoading(false);
     }
@@ -148,9 +138,7 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
       onSuccess?.();
       onClose();
     } catch (err) {
-      setFormError(
-        err instanceof Error ? err.message : 'Erreur suppression config'
-      );
+      setFormError(err instanceof Error ? err.message : 'Erreur suppression config');
     } finally {
       setIsLoading(false);
     }
@@ -164,13 +152,8 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
       <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
         {/* Header */}
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold">
-            Configuration {provider}
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 text-2xl"
-          >
+          <h2 className="text-xl font-bold">Configuration {provider}</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-2xl">
             ×
           </button>
         </div>
@@ -179,10 +162,7 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
         {displayError && (
           <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
             <p className="text-sm">{displayError}</p>
-            <button
-              onClick={clearError}
-              className="text-xs underline mt-1"
-            >
+            <button onClick={clearError} className="text-xs underline mt-1">
               Effacer
             </button>
           </div>
@@ -192,15 +172,11 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* API Key Input */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Clé API
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Clé API</label>
             <input
               type="password"
               value={formData.apiKey}
-              onChange={(e) =>
-                setFormData({ ...formData, apiKey: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
               placeholder="sk-..."
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={combinedLoading}
@@ -209,15 +185,11 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
 
           {/* API Key Confirmation */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Confirmer la clé API
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Confirmer la clé API</label>
             <input
               type="password"
               value={formData.apiKeyConfirm}
-              onChange={(e) =>
-                setFormData({ ...formData, apiKeyConfirm: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, apiKeyConfirm: e.target.value })}
               placeholder="sk-..."
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={combinedLoading}
@@ -230,9 +202,7 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
               type="checkbox"
               id="enabled"
               checked={formData.enabled}
-              onChange={(e) =>
-                setFormData({ ...formData, enabled: e.target.checked })
-              }
+              onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
               disabled={combinedLoading}
               className="h-4 w-4 text-blue-600"
             />
@@ -273,9 +243,7 @@ export const LLMConfigModal: React.FC<LLMConfigModalProps> = ({
 
         {/* Info */}
         <div className="mt-4 p-3 bg-blue-50 rounded text-sm text-blue-700">
-          <p>
-            🔒 Votre clé API est chiffrée côté serveur (AES-256-GCM).
-          </p>
+          <p>🔒 Votre clé API est chiffrée côté serveur (AES-256-GCM).</p>
         </div>
       </div>
     </div>

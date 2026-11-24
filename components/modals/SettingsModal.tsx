@@ -33,10 +33,7 @@ interface LLMConfigWithHasKey extends LLMConfig {
   hasLocalEndpoint?: boolean; // For authenticated mode - indicates if endpoint exists
 }
 
-function areCapabilitiesEqual(
-  left: LLMConfigWithHasKey['capabilities'],
-  right: LLMConfigWithHasKey['capabilities']
-): boolean {
+function areCapabilitiesEqual(left: LLMConfigWithHasKey['capabilities'], right: LLMConfigWithHasKey['capabilities']): boolean {
   const leftEntries = Object.entries(left || {}).sort(([a], [b]) => a.localeCompare(b));
   const rightEntries = Object.entries(right || {}).sort(([a], [b]) => a.localeCompare(b));
 
@@ -146,20 +143,19 @@ function buildCloudProfilePayload(profile: CloudConnectionProfileDraft) {
   };
 }
 
-
 export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: SettingsModalProps) => {
   const [currentLLMConfigs, setCurrentLLMConfigs] = useState<LLMConfigWithHasKey[]>(JSON.parse(JSON.stringify(propConfigs)));
   const { t, locale, setLocale } = useLocalization();
   const { addNotification } = useNotifications();
   const { user, isAuthenticated, refreshRuntimeConfigState } = useAuth();
-  const { configs: hookConfigs, loading: hookLoading, updateConfig, deleteConfig } = useLLMConfigs();
+  const { configs: hookConfigs, loading: hookLoading, updateConfig, deleteConfig: _deleteConfig } = useLLMConfigs();
   const { saveMode, setSaveMode, isLoading: saveModeLoading } = useSaveMode();
   const {
     profiles: hookProfiles,
     loading: hookProfilesLoading,
     createProfile: createLLMProfile,
     updateProfile: updateLLMProfile,
-    deleteProfile: deleteLLMProfile
+    deleteProfile: deleteLLMProfile,
   } = useLocalLLMProfiles();
   const {
     profiles: hookCloudProfiles,
@@ -196,17 +192,15 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
   // ⭐ NEW: Merge for BOTH authenticated AND guest mode
   useEffect(() => {
     if (!hookLoading) {
-      const apiConfigsMap = new Map(
-        hookConfigs.map(hc => [hc.provider?.trim() || '', hc])
-      );
-      
-      const mergedConfigs: LLMConfigWithHasKey[] = propConfigs.map(defaultConfig => {
+      const apiConfigsMap = new Map(hookConfigs.map((hc) => [hc.provider?.trim() || '', hc]));
+
+      const mergedConfigs: LLMConfigWithHasKey[] = propConfigs.map((defaultConfig) => {
         const userConfig = apiConfigsMap.get(defaultConfig.provider?.trim() || '');
-        
+
         if (!userConfig) {
           return defaultConfig;
         }
-        
+
         return {
           provider: defaultConfig.provider,
           enabled: userConfig.enabled,
@@ -214,13 +208,11 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
           localEndpoint: userConfig.localEndpoint || '',
           capabilities: userConfig.capabilities || defaultConfig.capabilities,
           hasApiKey: userConfig.hasApiKey,
-          hasLocalEndpoint: userConfig.hasLocalEndpoint
+          hasLocalEndpoint: userConfig.hasLocalEndpoint,
         } as LLMConfigWithHasKey;
       });
-      
-      setCurrentLLMConfigs(prev => (
-        areConfigsEqual(prev, mergedConfigs) ? prev : mergedConfigs
-      ));
+
+      setCurrentLLMConfigs((prev) => (areConfigsEqual(prev, mergedConfigs) ? prev : mergedConfigs));
     }
   }, [hookLoading, hookConfigs, propConfigs]);
 
@@ -230,42 +222,38 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
 
     if (hookProfiles.length > 0) {
       // Normal case: use loaded profiles as draft
-      setLocalProfiles(prev => (
-        areProfilesEqual(prev, hookProfiles) ? prev : hookProfiles
-      ));
+      setLocalProfiles((prev) => (areProfilesEqual(prev, hookProfiles) ? prev : hookProfiles));
 
-      const nextOriginalIds = new Set(hookProfiles.map(p => p.id));
-      setOriginalProfileIds(prev => (
-        areSetsEqual(prev, nextOriginalIds) ? prev : nextOriginalIds
-      ));
+      const nextOriginalIds = new Set(hookProfiles.map((p) => p.id));
+      setOriginalProfileIds((prev) => (areSetsEqual(prev, nextOriginalIds) ? prev : nextOriginalIds));
     } else {
       // Cold start OR migration: check if legacy single endpoint exists
-      const localConfig = currentLLMConfigs.find(c => isLocalProvider(c.provider));
+      const localConfig = currentLLMConfigs.find((c) => isLocalProvider(c.provider));
       const legacyEndpoint = localConfig?.localEndpoint;
       if (legacyEndpoint && !legacyEndpoint.includes('•')) {
         // Idempotent migration: show legacy endpoint as "Premier LLM"
-        const migratedProfiles = [{
-          id: '',
-          name: 'Premier LLM',
-          endpoint: legacyEndpoint,
-          capabilities: {} as LocalLLMProfile['capabilities'],
-          enabled: true
-        }];
+        const migratedProfiles = [
+          {
+            id: '',
+            name: 'Premier LLM',
+            endpoint: legacyEndpoint,
+            capabilities: {} as LocalLLMProfile['capabilities'],
+            enabled: true,
+          },
+        ];
 
-        setLocalProfiles(prev => (
-          areProfilesEqual(prev, migratedProfiles) ? prev : migratedProfiles
-        ));
+        setLocalProfiles((prev) => (areProfilesEqual(prev, migratedProfiles) ? prev : migratedProfiles));
       } else {
-        setLocalProfiles(prev => (prev.length === 0 ? prev : []));
+        setLocalProfiles((prev) => (prev.length === 0 ? prev : []));
       }
-      setOriginalProfileIds(prev => (prev.size === 0 ? prev : new Set()));
+      setOriginalProfileIds((prev) => (prev.size === 0 ? prev : new Set()));
     }
-  }, [hookProfiles, hookProfilesLoading]);
+  }, [hookProfiles, hookProfilesLoading, currentLLMConfigs]);
 
   useEffect(() => {
     if (!isAuthenticated) {
-      setCloudProfiles(prev => (prev.length === 0 ? prev : []));
-      setOriginalCloudProfileIds(prev => (prev.size === 0 ? prev : new Set()));
+      setCloudProfiles((prev) => (prev.length === 0 ? prev : []));
+      setOriginalCloudProfileIds((prev) => (prev.size === 0 ? prev : new Set()));
       return;
     }
 
@@ -274,62 +262,68 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
     }
 
     const drafts = hookCloudProfiles.map(toCloudProfileDraft);
-    setCloudProfiles(prev => (areCloudProfilesEqual(prev, drafts) ? prev : drafts));
+    setCloudProfiles((prev) => (areCloudProfilesEqual(prev, drafts) ? prev : drafts));
 
-    const nextIds = new Set(hookCloudProfiles.map(profile => profile.id));
-    setOriginalCloudProfileIds(prev => (areSetsEqual(prev, nextIds) ? prev : nextIds));
+    const nextIds = new Set(hookCloudProfiles.map((profile) => profile.id));
+    setOriginalCloudProfileIds((prev) => (areSetsEqual(prev, nextIds) ? prev : nextIds));
   }, [hookCloudProfiles, hookCloudProfilesLoading, isAuthenticated]);
 
   // --- Local profile handlers (draft mutations, persisted on Save) ---
   const handleAddProfile = () => {
-    setLocalProfiles(prev => [...prev, {
-      id: '',
-      name: '',
-      endpoint: 'http://localhost:11434',
-      capabilities: {} as LocalLLMProfile['capabilities'],
-      enabled: true
-    }]);
+    setLocalProfiles((prev) => [
+      ...prev,
+      {
+        id: '',
+        name: '',
+        endpoint: 'http://localhost:11434',
+        capabilities: {} as LocalLLMProfile['capabilities'],
+        enabled: true,
+      },
+    ]);
   };
 
   const handleDeleteProfile = (index: number) => {
-    setLocalProfiles(prev => prev.filter((_, i) => i !== index));
+    setLocalProfiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleProfileChange = (index: number, updated: LocalLLMProfile) => {
-    setLocalProfiles(prev => prev.map((p, i) => i === index ? updated : p));
+    setLocalProfiles((prev) => prev.map((p, i) => (i === index ? updated : p)));
   };
 
   const handleAddCloudProfile = () => {
-    setCloudProfiles(prev => [...prev, {
-      id: '',
-      displayName: '',
-      provider: 's3',
-      enabled: true,
-      hasSecretMaterial: false,
-      target: {
-        bucketName: '',
-        region: '',
-        endpoint: null,
-        forcePathStyle: false,
-        keyPrefix: null,
+    setCloudProfiles((prev) => [
+      ...prev,
+      {
+        id: '',
+        displayName: '',
+        provider: 's3',
+        enabled: true,
+        hasSecretMaterial: false,
+        target: {
+          bucketName: '',
+          region: '',
+          endpoint: null,
+          forcePathStyle: false,
+          keyPrefix: null,
+        },
+        status: {
+          state: 'missing_secret',
+          lastValidatedAt: null,
+          lastErrorCode: null,
+          lastValidationMessage: null,
+        },
+        secretSummary: {},
+        secretInput: {},
       },
-      status: {
-        state: 'missing_secret',
-        lastValidatedAt: null,
-        lastErrorCode: null,
-        lastValidationMessage: null,
-      },
-      secretSummary: {},
-      secretInput: {},
-    }]);
+    ]);
   };
 
   const handleDeleteCloudProfile = (index: number) => {
-    setCloudProfiles(prev => prev.filter((_, i) => i !== index));
+    setCloudProfiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleCloudProfileChange = (index: number, updated: CloudConnectionProfileDraft) => {
-    setCloudProfiles(prev => prev.map((profile, currentIndex) => currentIndex === index ? updated : profile));
+    setCloudProfiles((prev) => prev.map((profile, currentIndex) => (currentIndex === index ? updated : profile)));
   };
 
   const handleTestCloudProfile = async (index: number) => {
@@ -345,81 +339,75 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
         handleCloudProfileChange(index, toCloudProfileDraft(result.profile));
       }
     } catch (err) {
-      notifyError(
-        t('settings_cloud_test_error_title', 'Erreur test cloud'),
-        err instanceof Error ? err.message : 'Test impossible'
-      );
+      notifyError(t('settings_cloud_test_error_title', 'Erreur test cloud'), err instanceof Error ? err.message : 'Test impossible');
     } finally {
       setTestingCloudProfileId(null);
     }
   };
 
   const handleProviderToggle = (provider: LLMProvider, enabled: boolean) => {
-    setCurrentLLMConfigs(prev =>
-      prev.map(c => (c.provider === provider ? { ...c, enabled } : c))
-    );
+    setCurrentLLMConfigs((prev) => prev.map((c) => (c.provider === provider ? { ...c, enabled } : c)));
   };
 
   const handleCapabilityToggle = (provider: LLMProvider, capability: LLMCapability, enabled: boolean) => {
-    setCurrentLLMConfigs(prev =>
-      prev.map(c =>
-        c.provider === provider
-          ? { ...c, capabilities: { ...c.capabilities, [capability]: enabled } }
-          : c
-      )
+    setCurrentLLMConfigs((prev) =>
+      prev.map((c) => (c.provider === provider ? { ...c, capabilities: { ...c.capabilities, [capability]: enabled } } : c)),
     );
-  }
+  };
 
   const handleApiKeyChange = (provider: LLMProvider, apiKey: string) => {
-    setCurrentLLMConfigs(prev =>
-      prev.map(c => (c.provider === provider ? { ...c, apiKey } : c))
-    );
+    setCurrentLLMConfigs((prev) => prev.map((c) => (c.provider === provider ? { ...c, apiKey } : c)));
   };
 
   const handleSave = async () => {
     setIsSaving(true);
     let finalConfigs = currentLLMConfigs;
-    
+
     try {
       // Build a map of original (API) configs for comparison
-      const originalConfigsMap = new Map(hookConfigs.map(hc => [hc.provider, hc]));
-      
+      const originalConfigsMap = new Map(hookConfigs.map((hc) => [hc.provider, hc]));
+
       // Track all saves to get responses
       const savePromises: Promise<ILLMConfigUI>[] = [];
-      
+
       // STEP 1: Iterate all configs and save those that changed
       for (const config of currentLLMConfigs) {
         const originalConfig = originalConfigsMap.get(config.provider);
-        
+
         // Determine if config changed - FIXED: Don't require endpoint to be non-empty
         const enabledChanged = !originalConfig || originalConfig.enabled !== config.enabled;
         const apiKeyChanged = config.apiKey && !config.apiKey.includes('•') && config.apiKey !== originalConfig?.apiKey;
-        const endpointChanged = !originalConfig || (config.localEndpoint !== originalConfig?.localEndpoint && !config.localEndpoint?.includes('•'));
+        const endpointChanged =
+          !originalConfig || (config.localEndpoint !== originalConfig?.localEndpoint && !config.localEndpoint?.includes('•'));
         const capabilitiesChanged = JSON.stringify(config.capabilities) !== JSON.stringify(originalConfig?.capabilities);
-        
+
         // Save if ANY field changed
         if (enabledChanged || apiKeyChanged || endpointChanged || capabilitiesChanged) {
           console.debug(`[SettingsModal] Saving ${config.provider}`);
-          
+
           // Send both fields - backend will use the appropriate one based on provider type
           savePromises.push(
-            updateConfig(config.provider, {
-              apiKey: config.apiKey,
-              localEndpoint: config.localEndpoint,
-              enabled: config.enabled,
-              capabilities: config.capabilities
-            }, false)
+            updateConfig(
+              config.provider,
+              {
+                apiKey: config.apiKey,
+                localEndpoint: config.localEndpoint,
+                enabled: config.enabled,
+                capabilities: config.capabilities,
+              },
+              false,
+            ),
           );
         }
       }
-      
+
       // STEP 2: Wait for all saves to complete and get responses
       if (savePromises.length > 0) {
         const savedConfigs = await Promise.all(savePromises);
-        
+
         // STEP 3: Build final configs with server responses merged in
         finalConfigs = currentLLMConfigs.map((config): LLMConfigWithHasKey => {
-          const savedResponse = savedConfigs.find(sc => sc.provider === config.provider);
+          const savedResponse = savedConfigs.find((sc) => sc.provider === config.provider);
           if (savedResponse) {
             return {
               ...config,
@@ -428,21 +416,20 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
               localEndpoint: savedResponse.localEndpoint || '',
               apiKey: savedResponse.apiKey || '',
               hasApiKey: savedResponse.hasApiKey,
-              hasLocalEndpoint: savedResponse.hasLocalEndpoint
+              hasLocalEndpoint: savedResponse.hasLocalEndpoint,
             };
           }
           return config;
         });
       }
-      
+
       // STEP 4: Update UI state with final configs
       setCurrentLLMConfigs(finalConfigs);
-      
     } catch (err) {
       console.error('[SettingsModal] Failed to save configs:', err);
       notifyError(
         t('settings_save_error_title', 'Erreur de sauvegarde'),
-        err instanceof Error ? err.message : 'Impossible de sauvegarder les configurations'
+        err instanceof Error ? err.message : 'Impossible de sauvegarder les configurations',
       );
       setIsSaving(false);
       return;
@@ -458,7 +445,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
           endpoint: profile.endpoint,
           capabilities: profile.capabilities as Record<string, boolean>,
           enabled: profile.enabled,
-          detectedModel: profile.detectedModel ?? null
+          detectedModel: profile.detectedModel ?? null,
         };
         if (!profile.id) {
           // New profile (no persisted id yet) — skip if both name and endpoint are empty
@@ -472,16 +459,15 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
       }
       // 2. Delete profiles that were removed during the session
       for (const id of originalProfileIds) {
-        if (!localProfiles.some(p => p.id === id)) {
+        if (!localProfiles.some((p) => p.id === id)) {
           await deleteLLMProfile(id, false);
         }
       }
-
     } catch (profileErr) {
       console.error('[SettingsModal] Failed to save local LLM profiles:', profileErr);
       notifyError(
         t('settings_local_profiles_error_title', 'Erreur profils LLM locaux'),
-        profileErr instanceof Error ? profileErr.message : 'Sauvegarde échouée'
+        profileErr instanceof Error ? profileErr.message : 'Sauvegarde échouée',
       );
     }
 
@@ -498,7 +484,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
       }
 
       for (const id of originalCloudProfileIds) {
-        if (!cloudProfiles.some(profile => profile.id === id)) {
+        if (!cloudProfiles.some((profile) => profile.id === id)) {
           await deleteCloudProfile(id, false);
         }
       }
@@ -506,7 +492,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
       console.error('[SettingsModal] Failed to save cloud profiles:', cloudErr);
       notifyError(
         t('settings_cloud_profiles_error_title', 'Erreur profils cloud'),
-        cloudErr instanceof Error ? cloudErr.message : 'Sauvegarde échouée'
+        cloudErr instanceof Error ? cloudErr.message : 'Sauvegarde échouée',
       );
       setIsSaving(false);
       return;
@@ -521,7 +507,11 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm" aria-modal="true" role="dialog">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm"
+      aria-modal="true"
+      role="dialog"
+    >
       <div className="bg-gray-800 border border-gray-700 rounded-lg shadow-xl w-full max-w-[37.125rem] m-4">
         {/* Custom Header with User Info */}
         <div className="flex flex-col p-4 border-b border-gray-700">
@@ -546,14 +536,38 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
         <div className="p-6">
           <div className="border-b border-gray-700">
             <nav className="-mb-px flex space-x-6" aria-label="Tabs">
-              <button type="button" onClick={() => setActiveTab('llms')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'llms' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>{t('settings_llms_tab')}</button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('llms')}
+                className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'llms' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}
+              >
+                {t('settings_llms_tab')}
+              </button>
               {isAuthenticated && (
-                <button type="button" onClick={() => setActiveTab('cloud')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'cloud' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>Cloud</button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('cloud')}
+                  className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'cloud' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}
+                >
+                  Cloud
+                </button>
               )}
               {isAuthenticated && (
-                <button type="button" onClick={() => setActiveTab('save')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'save' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>Enregistrement</button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('save')}
+                  className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'save' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}
+                >
+                  Enregistrement
+                </button>
               )}
-              <button type="button" onClick={() => setActiveTab('language')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'language' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>{t('settings_language_tab')}</button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('language')}
+                className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'language' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}
+              >
+                {t('settings_language_tab')}
+              </button>
             </nav>
           </div>
           <div className="pt-4 max-h-[60vh] overflow-y-auto pr-2">
@@ -562,7 +576,8 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                 <div className="bg-indigo-900/20 border border-indigo-600/30 rounded-lg p-4">
                   <h4 className="text-sm font-semibold text-indigo-400 mb-3">Profils cloud securises</h4>
                   <p className="text-sm text-gray-400 mb-4">
-                    Les secrets S3/GCS sont centralises ici puis references par les agents via un profil, sans re-saisie dans la persistence agent.
+                    Les secrets S3/GCS sont centralises ici puis references par les agents via un profil, sans re-saisie dans la persistence
+                    agent.
                   </p>
 
                   {hookCloudProfilesLoading ? (
@@ -603,17 +618,15 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
               <div className="space-y-4">
                 <div className="bg-indigo-900/20 border border-indigo-600/30 rounded-lg p-4">
                   <h4 className="text-sm font-semibold text-indigo-400 mb-3">{t('settings_language_title')}</h4>
-                  <p className="text-sm text-gray-400 mb-4">
-                    {t('settings_language_desc')}
-                  </p>
-                  
+                  <p className="text-sm text-gray-400 mb-4">{t('settings_language_desc')}</p>
+
                   <div className="grid grid-cols-1 gap-3">
                     {Object.entries(locales).map(([localeCode, localeName]) => (
-                      <label 
+                      <label
                         key={localeCode}
                         className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all ${
-                          locale === localeCode 
-                            ? 'bg-indigo-900/40 border-2 border-indigo-500' 
+                          locale === localeCode
+                            ? 'bg-indigo-900/40 border-2 border-indigo-500'
                             : 'bg-gray-800 border-2 border-transparent hover:border-gray-600'
                         }`}
                       >
@@ -635,9 +648,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                           <span className="text-sm font-medium text-gray-200">{localeName}</span>
                         </div>
                         {locale === localeCode && (
-                          <span className="text-xs bg-indigo-500/30 text-indigo-300 px-2 py-1 rounded">
-                            Actuelle
-                          </span>
+                          <span className="text-xs bg-indigo-500/30 text-indigo-300 px-2 py-1 rounded">Actuelle</span>
                         )}
                       </label>
                     ))}
@@ -654,16 +665,14 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
               <div className="space-y-6">
                 <div className="bg-indigo-900/20 border border-indigo-600/30 rounded-lg p-4">
                   <h4 className="text-sm font-semibold text-indigo-400 mb-3">Mode d'enregistrement</h4>
-                  <p className="text-sm text-gray-400 mb-4">
-                    Choisissez comment sauvegarder votre travail sur le workflow.
-                  </p>
-                  
+                  <p className="text-sm text-gray-400 mb-4">Choisissez comment sauvegarder votre travail sur le workflow.</p>
+
                   <div className="space-y-3">
                     {/* Option Manuel */}
-                    <label 
+                    <label
                       className={`flex items-start gap-3 p-4 rounded-lg cursor-pointer transition-all ${
-                        saveMode === 'manual' 
-                          ? 'bg-indigo-900/40 border-2 border-indigo-500' 
+                        saveMode === 'manual'
+                          ? 'bg-indigo-900/40 border-2 border-indigo-500'
                           : 'bg-gray-800 border-2 border-transparent hover:border-gray-600'
                       }`}
                     >
@@ -679,19 +688,18 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                       <div className="flex-1">
                         <span className="text-sm font-medium text-gray-200 block">Manuel</span>
                         <span className="text-xs text-gray-400 mt-1 block">
-                          Un bouton de sauvegarde apparaît sur le workflow. Cliquez dessus ou utilisez Ctrl+S pour enregistrer vos modifications.
+                          Un bouton de sauvegarde apparaît sur le workflow. Cliquez dessus ou utilisez Ctrl+S pour enregistrer vos
+                          modifications.
                         </span>
                       </div>
-                      {saveMode === 'manual' && (
-                        <span className="text-xs bg-indigo-500/30 text-indigo-300 px-2 py-1 rounded">Actif</span>
-                      )}
+                      {saveMode === 'manual' && <span className="text-xs bg-indigo-500/30 text-indigo-300 px-2 py-1 rounded">Actif</span>}
                     </label>
 
                     {/* Option Automatique */}
-                    <label 
+                    <label
                       className={`flex items-start gap-3 p-4 rounded-lg cursor-pointer transition-all ${
-                        saveMode === 'auto' 
-                          ? 'bg-indigo-900/40 border-2 border-indigo-500' 
+                        saveMode === 'auto'
+                          ? 'bg-indigo-900/40 border-2 border-indigo-500'
                           : 'bg-gray-800 border-2 border-transparent hover:border-gray-600'
                       }`}
                     >
@@ -710,21 +718,17 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                           Vos modifications sont enregistrées automatiquement après chaque action. Le bouton de sauvegarde n'apparaît pas.
                         </span>
                       </div>
-                      {saveMode === 'auto' && (
-                        <span className="text-xs bg-indigo-500/30 text-indigo-300 px-2 py-1 rounded">Actif</span>
-                      )}
+                      {saveMode === 'auto' && <span className="text-xs bg-indigo-500/30 text-indigo-300 px-2 py-1 rounded">Actif</span>}
                     </label>
                   </div>
 
-                  {saveModeLoading && (
-                    <p className="text-xs text-gray-500 mt-3 animate-pulse">Chargement du mode...</p>
-                  )}
+                  {saveModeLoading && <p className="text-xs text-gray-500 mt-3 animate-pulse">Chargement du mode...</p>}
                 </div>
 
                 {/* Info supplémentaire */}
                 <div className="text-xs text-gray-500 bg-gray-800/50 rounded-lg p-3">
-                  💡 <strong>Conseil :</strong> Le mode manuel est recommandé pour les workflows complexes. 
-                  Il vous permet de contrôler précisément quand vos modifications sont persistées.
+                  💡 <strong>Conseil :</strong> Le mode manuel est recommandé pour les workflows complexes. Il vous permet de contrôler
+                  précisément quand vos modifications sont persistées.
                 </div>
               </div>
             )}
@@ -732,9 +736,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
               <div className="space-y-6">
                 {!isAuthenticated && (
                   <div className="p-3 rounded-md bg-amber-900/30 border border-amber-700/50">
-                    <p className="text-sm text-amber-400">
-                      {t('settings_guest_mode_warning')}
-                    </p>
+                    <p className="text-sm text-amber-400">{t('settings_guest_mode_warning')}</p>
                   </div>
                 )}
                 {currentLLMConfigs.map(({ provider, enabled, capabilities, apiKey }) => (
@@ -761,37 +763,37 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                                 className="w-full p-2 text-sm bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
                               />
                               {getProviderHelperText(provider) && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                  {getProviderHelperText(provider)}
-                                </p>
+                                <p className="text-xs text-gray-500 mt-1">{getProviderHelperText(provider)}</p>
                               )}
                             </div>
 
                             {/* Cloud provider: capabilities toggles */}
                             <div className="space-y-2 pt-2">
-                              {Object.keys(capabilities).sort().map(capStr => {
-                                const cap = capStr as LLMCapability;
-                                return (
-                                  <div key={cap} className="flex items-center justify-between">
-                                    <div className="flex items-center">
-                                      <span className="text-sm text-gray-400">{cap}</span>
-                                      {cap === LLMCapability.WebSearch && provider === LLMProvider.Gemini && (
-                                        <span className="ml-2 text-xs text-gray-500">{t('settings_gemini_optimized')}</span>
-                                      )}
-                                      {cap === LLMCapability.Reasoning && provider === LLMProvider.DeepSeek && (
-                                        <span className="ml-2 text-xs text-green-500">R1 Reasoning</span>
-                                      )}
-                                      {cap === LLMCapability.CacheOptimization && provider === LLMProvider.DeepSeek && (
-                                        <span className="ml-2 text-xs text-blue-500">0.014¢/1K tokens</span>
-                                      )}
+                              {Object.keys(capabilities)
+                                .sort()
+                                .map((capStr) => {
+                                  const cap = capStr as LLMCapability;
+                                  return (
+                                    <div key={cap} className="flex items-center justify-between">
+                                      <div className="flex items-center">
+                                        <span className="text-sm text-gray-400">{cap}</span>
+                                        {cap === LLMCapability.WebSearch && provider === LLMProvider.Gemini && (
+                                          <span className="ml-2 text-xs text-gray-500">{t('settings_gemini_optimized')}</span>
+                                        )}
+                                        {cap === LLMCapability.Reasoning && provider === LLMProvider.DeepSeek && (
+                                          <span className="ml-2 text-xs text-green-500">R1 Reasoning</span>
+                                        )}
+                                        {cap === LLMCapability.CacheOptimization && provider === LLMProvider.DeepSeek && (
+                                          <span className="ml-2 text-xs text-blue-500">0.014¢/1K tokens</span>
+                                        )}
+                                      </div>
+                                      <ToggleSwitch
+                                        checked={capabilities[cap] || false}
+                                        onChange={(checked) => handleCapabilityToggle(provider, cap, checked)}
+                                      />
                                     </div>
-                                    <ToggleSwitch
-                                      checked={capabilities[cap] || false}
-                                      onChange={(checked) => handleCapabilityToggle(provider, cap, checked)}
-                                    />
-                                  </div>
-                                );
-                              })}
+                                  );
+                                })}
                             </div>
                           </>
                         ) : (
@@ -801,11 +803,7 @@ export const SettingsModal = ({ llmConfigs: propConfigs, onClose, onSave }: Sett
                               <p className="text-xs text-gray-400 animate-pulse">Chargement des profils...</p>
                             ) : (
                               <>
-                                {localProfiles.length === 0 && (
-                                  <p className="text-xs text-gray-500 italic">
-                                    Aucun LLM local configuré.
-                                  </p>
-                                )}
+                                {localProfiles.length === 0 && <p className="text-xs text-gray-500 italic">Aucun LLM local configuré.</p>}
                                 {localProfiles.map((profile, index) => (
                                   <LocalLLMProfileCard
                                     key={profile.id || `new-${index}`}

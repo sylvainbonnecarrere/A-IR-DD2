@@ -162,7 +162,7 @@ const MediaStorageSelector: React.FC<{
  * Formulaire principal de configuration de persistance
  */
 export const AgentPersistenceForm: React.FC<AgentPersistenceFormProps> = ({ config, onChange, disabled = false }) => {
-  const { t } = useLocalization();
+  const { t: _t } = useLocalization();
   const { isAuthenticated } = useAuth();
   const { profiles: cloudProfiles, loading: cloudProfilesLoading } = useCloudConnectionProfiles();
   const normalizedConfig = normalizePersistenceConfig(config);

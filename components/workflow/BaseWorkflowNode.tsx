@@ -14,7 +14,7 @@ export interface NodeHandle {
 export interface BaseWorkflowNodeData {
   label: string;
   robotId: RobotId;
-  config: Record<string, any>;
+  config: Record<string, unknown>;
   status: 'idle' | 'running' | 'success' | 'error' | 'warning';
   handles: {
     inputs: NodeHandle[];
@@ -44,9 +44,9 @@ export const getRobotColor = (robotId: RobotId): { primary: string; secondary: s
   }
 };
 
-const getStatusStyles = (status: BaseWorkflowNodeData['status'], colors: { primary: string; secondary: string; accent: string }) => {
+const getStatusStyles = (status: BaseWorkflowNodeData['status'], _colors: { primary: string; secondary: string; accent: string }) => {
   const baseStyles = `border-2 transition-all duration-300 backdrop-blur-sm`;
-  
+
   switch (status) {
     case 'running':
       return `${baseStyles} border-blue-400 bg-gradient-to-br from-blue-500/20 to-blue-600/10 shadow-lg shadow-blue-400/30 animate-pulse`;
@@ -81,7 +81,7 @@ export const BaseWorkflowNode: React.FC<BaseWorkflowNodeProps> = memo(({ data, s
   const statusStyles = getStatusStyles(data.status, colors);
 
   return (
-    <div 
+    <div
       className={`
         min-w-[240px] rounded-lg p-4 text-white font-sans
         ${statusStyles}
@@ -89,15 +89,13 @@ export const BaseWorkflowNode: React.FC<BaseWorkflowNodeProps> = memo(({ data, s
       `}
       style={{
         borderColor: selected ? colors.accent : colors.primary,
-        background: selected 
-          ? `linear-gradient(135deg, ${colors.primary}20, ${colors.secondary}10)` 
-          : undefined
+        background: selected ? `linear-gradient(135deg, ${colors.primary}20, ${colors.secondary}10)` : undefined,
       }}
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center space-x-2">
-          <div 
+          <div
             className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
             style={{ backgroundColor: colors.primary, color: '#000' }}
           >
@@ -109,24 +107,16 @@ export const BaseWorkflowNode: React.FC<BaseWorkflowNodeProps> = memo(({ data, s
       </div>
 
       {/* Title */}
-      <h3 className="text-white font-semibold mb-2 text-lg leading-tight">
-        {data.label}
-      </h3>
+      <h3 className="text-white font-semibold mb-2 text-lg leading-tight">{data.label}</h3>
 
       {/* Description */}
-      {data.description && (
-        <p className="text-gray-300 text-sm mb-3 leading-relaxed">
-          {data.description}
-        </p>
-      )}
+      {data.description && <p className="text-gray-300 text-sm mb-3 leading-relaxed">{data.description}</p>}
 
       {/* Config Preview */}
       {Object.keys(data.config).length > 0 && (
         <div className="text-xs text-gray-400 mb-2">
           <span className="opacity-75">Config: </span>
-          <span className="text-gray-300">
-            {Object.keys(data.config).length} parameter(s)
-          </span>
+          <span className="text-gray-300">{Object.keys(data.config).length} parameter(s)</span>
         </div>
       )}
 
@@ -140,7 +130,7 @@ export const BaseWorkflowNode: React.FC<BaseWorkflowNodeProps> = memo(({ data, s
           className="w-3 h-3 border-2 border-white bg-gray-700 hover:bg-gray-600 transition-colors"
           style={{
             top: `${30 + index * 25}px`,
-            borderColor: colors.primary
+            borderColor: colors.primary,
           }}
         />
       ))}
@@ -155,7 +145,7 @@ export const BaseWorkflowNode: React.FC<BaseWorkflowNodeProps> = memo(({ data, s
           className="w-3 h-3 border-2 border-white bg-gray-700 hover:bg-gray-600 transition-colors"
           style={{
             top: `${30 + index * 25}px`,
-            borderColor: colors.primary
+            borderColor: colors.primary,
           }}
         />
       ))}

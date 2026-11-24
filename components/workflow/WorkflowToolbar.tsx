@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 
 import {
   StopIcon,
@@ -65,13 +65,7 @@ const STATUS_ICON: Partial<Record<string, React.ReactNode>> = {
  */
 export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = '' }) => {
   const { t } = useLocalization();
-  const {
-    currentWorkflow,
-    execution,
-    executeWorkflow,
-    toggleConfigPanel,
-    isConfigPanelOpen,
-  } = useWorkflowStore();
+  const { currentWorkflow, execution, executeWorkflow, toggleConfigPanel, isConfigPanelOpen } = useWorkflowStore();
   const nodes = useDesignStore((state) => state.nodes);
   const edges = useDesignStore((state) => state.edges);
   const currentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
@@ -97,7 +91,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
 
   // Le statut REST/temps réel est autoritaire ; `execution` (store workflow) sert de repli local.
   // ('paused' legacy est ramené à 'stopped' : aucune sémantique de pause côté contrat V2.)
-  const executionStatus = execution?.status === 'paused' ? 'stopped' as const : execution?.status as FunctionRunStatus | undefined;
+  const executionStatus = execution?.status === 'paused' ? ('stopped' as const) : (execution?.status as FunctionRunStatus | undefined);
   const effectiveRunStatus: FunctionRunStatus | null = (runtimeStatus as FunctionRunStatus | null) ?? executionStatus ?? null;
 
   const isOffline = connectionState === 'offline';
@@ -195,17 +189,20 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
 
   const statusLabel = effectiveRunStatus
     ? t(`workflow.status.${effectiveRunStatus}`, String(effectiveRunStatus))
-    : (syncState === 'loading' ? t('workflow.states.loading') : t('workflow.states.empty'));
+    : syncState === 'loading'
+      ? t('workflow.states.loading')
+      : t('workflow.states.empty');
 
-  const statusToneClass = effectiveRunStatus === 'running' || effectiveRunStatus === 'queued'
-    ? 'text-blue-400'
-    : effectiveRunStatus === 'completed'
-      ? 'text-green-400'
-      : effectiveRunStatus === 'failed'
-        ? 'text-red-400'
-        : effectiveRunStatus === 'worker_lost' || effectiveRunStatus === 'quarantined' || lockHeld
-          ? 'text-orange-400'
-          : 'text-gray-400';
+  const statusToneClass =
+    effectiveRunStatus === 'running' || effectiveRunStatus === 'queued'
+      ? 'text-blue-400'
+      : effectiveRunStatus === 'completed'
+        ? 'text-green-400'
+        : effectiveRunStatus === 'failed'
+          ? 'text-red-400'
+          : effectiveRunStatus === 'worker_lost' || effectiveRunStatus === 'quarantined' || lockHeld
+            ? 'text-orange-400'
+            : 'text-gray-400';
 
   const ledClass = CONNECTION_LED_CLASSES[connectionState] ?? CONNECTION_LED_CLASSES.offline;
   const connectionLabel = t(`workflow.connection.${connectionState}`, connectionState);
@@ -232,16 +229,20 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = ''
             data-connection={connectionState}
           >
             <span aria-hidden="true" className={`w-2.5 h-2.5 rounded-full ${ledClass}`} />
-            <span
-              className="info-bubble"
-              data-testid="workflow-connection-bubble"
-            >
-              <span className="font-semibold text-gray-100">{t('workflow.connectionLed.title')}</span>{' '}{connectionLabel}. {t('workflow.connectionLed.hint')}
+            <span className="info-bubble" data-testid="workflow-connection-bubble">
+              <span className="font-semibold text-gray-100">{t('workflow.connectionLed.title')}</span> {connectionLabel}.{' '}
+              {t('workflow.connectionLed.hint')}
             </span>
           </span>
           <div className="text-sm truncate w-56 shrink-0">
             <span className="text-gray-500">{t('workflow.current')}:</span>
-            <span className="ml-2 font-medium text-yellow-400 truncate" title={workflowName ?? undefined} data-testid="workflow-current-name">{workflowName || t('workflow.noWorkflow')}</span>
+            <span
+              className="ml-2 font-medium text-yellow-400 truncate"
+              title={workflowName ?? undefined}
+              data-testid="workflow-current-name"
+            >
+              {workflowName || t('workflow.noWorkflow')}
+            </span>
           </div>
           {/* ⭐ 2026-11-20 : bloc de 3 boutons permute AVANT le texte de statut (chargement / X run) */}
           <RunControls onRun={handleExecute} canRun={runtimeActionPolicy.canLaunch} isLaunching={isLaunching} className="ml-1" />

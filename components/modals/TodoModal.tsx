@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button, Card, Modal } from '../UI';
-import { PlusIcon, EditIcon, CloseIcon, SaveIcon } from '../Icons';
+import { PlusIcon, CloseIcon, SaveIcon } from '../Icons';
 
 interface TodoItem {
   id: string;
@@ -47,35 +47,33 @@ export const TodoModal: React.FC<TodoModalProps> = ({ isOpen, onClose }) => {
 
   const handleAddTodo = () => {
     if (!newTodo.title.trim()) return;
-    
+
     const todo: TodoItem = {
       id: createTodoId(),
       title: newTodo.title,
       description: newTodo.description,
       priority: newTodo.priority,
       status: 'pending',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
     };
-    
+
     setTodos((previousTodos) => [...previousTodos, todo]);
     setNewTodo({ title: '', description: '', priority: 'medium' });
     setIsCreating(false);
   };
 
   const handleToggleStatus = (id: string) => {
-    setTodos((previousTodos) => previousTodos.map((todo) => {
-      if (todo.id === id) {
-        const nextStatus = todo.status === 'pending'
-          ? 'in-progress'
-          : todo.status === 'in-progress'
-            ? 'completed'
-            : 'pending';
+    setTodos((previousTodos) =>
+      previousTodos.map((todo) => {
+        if (todo.id === id) {
+          const nextStatus = todo.status === 'pending' ? 'in-progress' : todo.status === 'in-progress' ? 'completed' : 'pending';
 
-        return { ...todo, status: nextStatus };
-      }
+          return { ...todo, status: nextStatus };
+        }
 
-      return todo;
-    }));
+        return todo;
+      }),
+    );
   };
 
   const handleDeleteTodo = (id: string) => {
@@ -84,19 +82,27 @@ export const TodoModal: React.FC<TodoModalProps> = ({ isOpen, onClose }) => {
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'border-red-500 bg-red-500/10 text-red-300';
-      case 'medium': return 'border-yellow-500 bg-yellow-500/10 text-yellow-300';
-      case 'low': return 'border-green-500 bg-green-500/10 text-green-300';
-      default: return 'border-gray-500 bg-gray-500/10 text-gray-300';
+      case 'high':
+        return 'border-red-500 bg-red-500/10 text-red-300';
+      case 'medium':
+        return 'border-yellow-500 bg-yellow-500/10 text-yellow-300';
+      case 'low':
+        return 'border-green-500 bg-green-500/10 text-green-300';
+      default:
+        return 'border-gray-500 bg-gray-500/10 text-gray-300';
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'completed': return '✅';
-      case 'in-progress': return '🔄';
-      case 'pending': return '⏳';
-      default: return '📝';
+      case 'completed':
+        return '✅';
+      case 'in-progress':
+        return '🔄';
+      case 'pending':
+        return '⏳';
+      default:
+        return '📝';
     }
   };
 
@@ -105,14 +111,14 @@ export const TodoModal: React.FC<TodoModalProps> = ({ isOpen, onClose }) => {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Gestionnaire de Taches - Interne" size="lg">
       <div className="space-y-6 max-h-96 overflow-y-auto">
-
         <Card className="border border-amber-500/40 bg-amber-500/10 p-4">
           <div className="text-sm font-medium text-amber-200">Outil interne / surface provisoire</div>
           <p className="mt-1 text-xs text-amber-100/80">
-            Les taches de ce modal restent locales a cette session UI. Elles ne sont ni persistees ni synchronisees avec un service canonique.
+            Les taches de ce modal restent locales a cette session UI. Elles ne sont ni persistees ni synchronisees avec un service
+            canonique.
           </p>
         </Card>
-        
+
         {/* Add New Todo */}
         <Card className="p-4">
           {!isCreating ? (
@@ -147,7 +153,7 @@ export const TodoModal: React.FC<TodoModalProps> = ({ isOpen, onClose }) => {
                     const nextPriority = e.target.value;
                     setNewTodo({
                       ...newTodo,
-                      priority: isTodoPriority(nextPriority) ? nextPriority : 'medium'
+                      priority: isTodoPriority(nextPriority) ? nextPriority : 'medium',
                     });
                   }}
                   className="px-3 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-indigo-500"
@@ -192,13 +198,9 @@ export const TodoModal: React.FC<TodoModalProps> = ({ isOpen, onClose }) => {
                       </span>
                     </div>
                     {todo.description && (
-                      <p className={`text-sm ${todo.status === 'completed' ? 'text-gray-500' : 'text-gray-300'}`}>
-                        {todo.description}
-                      </p>
+                      <p className={`text-sm ${todo.status === 'completed' ? 'text-gray-500' : 'text-gray-300'}`}>{todo.description}</p>
                     )}
-                    <p className="text-xs text-gray-500 mt-1">
-                      Créé le {new Date(todo.created_at).toLocaleDateString('fr-FR')}
-                    </p>
+                    <p className="text-xs text-gray-500 mt-1">Créé le {new Date(todo.created_at).toLocaleDateString('fr-FR')}</p>
                   </div>
                   <div className="flex space-x-1">
                     <button

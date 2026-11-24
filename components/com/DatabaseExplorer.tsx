@@ -23,7 +23,7 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({
   onExecuteQuery,
   onRefresh,
 }) => {
-  const { t } = useLocalization();
+  const { t: _t } = useLocalization();
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [queryMode, setQueryMode] = useState<'sql' | 'json'>('sql');
   const [query, setQuery] = useState('SELECT * FROM users LIMIT 10;');

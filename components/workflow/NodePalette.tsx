@@ -18,7 +18,7 @@ interface NodeTemplate {
   description: string;
   robotId: RobotId;
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
-  defaultConfig: Record<string, any>;
+  defaultConfig: Record<string, unknown>;
 }
 
 interface NodePaletteProps {
@@ -190,7 +190,7 @@ const getRobotIcon = (robotId: RobotId) => {
   }
 };
 
-export const NodePalette: React.FC<NodePaletteProps> = ({ onNodeAdd, currentRobot, isOpen, onToggle }) => {
+export const NodePalette: React.FC<NodePaletteProps> = ({ onNodeAdd, currentRobot: _currentRobot, isOpen, onToggle }) => {
   const [expandedRobots, setExpandedRobots] = useState<Set<RobotId>>(
     new Set([RobotId.Archi]), // Archi expanded by default
   );
