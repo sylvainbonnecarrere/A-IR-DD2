@@ -3,8 +3,9 @@
 //   recalibrer tout l'existant. Les règles "dette" (any, console.log, unused-vars...)
 //   sont en "warn" ; la dette any/console.log est en plus ratchetée (bloquée en
 //   augmentation) par scripts/ci/hygiene-ratchet.mjs.
-// - Note : react-hooks/rules-of-hooks v6 + React 19 produit des faux positifs sur
-//   l'existant (ex. V2AgentNode.tsx) -> "warn" volontaire.
+// - Note : react-hooks/rules-of-hooks est en "error" depuis US-RC-08 (2026-11-24) :
+//   les 55 warnings restants de US-RC-07 etaient de vraies violations (return anticipe
+//   avant les hooks dans V2AgentNode.tsx et AutoSaveIndicator.tsx), corrigees dans le code.
 import tseslint from 'typescript-eslint';
 import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
@@ -49,7 +50,7 @@ export default tseslint.config(
     settings: { react: { version: 'detect' } },
     rules: {
       ...LEGACY_DEBT_RULES,
-      'react-hooks/rules-of-hooks': 'warn', // faux positifs v6/React19 sur l'existant
+      'react-hooks/rules-of-hooks': 'error', // US-RC-08 : 0 warning, regle bloquante
       'react-hooks/exhaustive-deps': 'warn',
       'react/react-in-jsx-scope': 'off',
       // Erreurs bloquantes restantes : celles de `recommended` non surclassées ci-dessus

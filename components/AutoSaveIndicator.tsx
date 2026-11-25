@@ -36,9 +36,6 @@ interface AutoSaveIndicatorProps {
 }
 
 export const AutoSaveIndicator: React.FC<AutoSaveIndicatorProps> = ({ status, lastSavedAt, error, isEnabled, className = '' }) => {
-  // Don't render if auto-save is disabled
-  if (!isEnabled) return null;
-
   // Signal UI hydration readiness when this control first appears
   React.useEffect(() => {
     try {
@@ -57,6 +54,9 @@ export const AutoSaveIndicator: React.FC<AutoSaveIndicatorProps> = ({ status, la
       // ignore
     }
   }, []);
+
+  // Don't render if auto-save is disabled (après les hooks : rules-of-hooks)
+  if (!isEnabled) return null;
 
   // Don't render idle state (too noisy)
   if (status === 'idle' && !lastSavedAt) return null;

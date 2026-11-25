@@ -372,16 +372,6 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
   // Read minimize state from store
   const isMinimized = useRuntimeStore((state) => state.getIsNodeMinimized(id));
 
-  // Protection: if agent is null, show error state
-  if (!nodeAgent) {
-    return (
-      <div className="min-w-80 bg-red-900/50 border-2 border-red-500 rounded-lg p-4">
-        <div className="text-red-300 font-medium">{t('agent_not_found')}</div>
-        <div className="text-red-400 text-sm mt-2">ID Node: {id}</div>
-      </div>
-    );
-  }
-
   // Runtime store for messages and execution state
   const getNodeMessages = useRuntimeStore((state) => state.getNodeMessages);
   const addNodeMessage = useRuntimeStore((state) => state.addNodeMessage);
@@ -689,6 +679,16 @@ export const V2AgentNode = memo(function V2AgentNode({ data, id, selected }: Nod
     },
     [accessToken, agentInstance, updateInstanceConfig],
   );
+
+  // Protection: if agent is null, show error state (après tous les hooks : rules-of-hooks)
+  if (!nodeAgent) {
+    return (
+      <div className="min-w-80 bg-red-900/50 border-2 border-red-500 rounded-lg p-4">
+        <div className="text-red-300 font-medium">{t('agent_not_found')}</div>
+        <div className="text-red-400 text-sm mt-2">ID Node: {id}</div>
+      </div>
+    );
+  }
 
   const handleConfirmDelete = () => {
     if (onDeleteNode) {
