@@ -335,6 +335,15 @@ Tous les `console.log(` étaient des appels simples (aucun espion `console.log` 
 
 **Garde-fous :** aucune étape de push sans la revue signée ; ne jamais lancer `filter-repo` dans le working repo directement (`--force` + suppression du remote `origin` par défaut — le mirror isole ce piège) ; si `git filter-repo` reste indisponible après pip, fallback documenté = `git filter-branch --index-filter` avec `git rm --cached --ignore-unmatch` sur la liste des 425 chemins `.pyc` (générée via `git rev-list --all --objects`), sur le mirror uniquement (lent) ; ne pas toucher au contenu du working tree ni aux workflows CI.
 
+**Préparation exécutée (2026-11-24, agent `04-cicd-installation`, dry-run sur miroir jetable `C:\AITest\A-IR-DD2\A-IR-DD2-mirror-rc09` — AUCUN push) :**
+
+- Outillage : `git filter-repo` installé via le vrai Python 3.13 (`pip install --user git-filter-repo`, version `a40bce548d2c`) ; invocation **`python -m git_filter_repo`** (le shim n'est PAS un sous-commanditaire git) — BFG toujours exclu (pas de java).
+- Mesures re-vérifiées sur le working repo @ `50028b4` : 425 chemins `.pyc` distincts dans l'historique, **0 suivis**, 22 refs distantes (21 branches + HEAD), **0 tag**, git 2.55.0, pack ~33 MiO.
+- Dry-run : `git clone --mirror` neuf → `python -m git_filter_repo --path-glob '*.pyc' --path-glob '*__pycache__/*' --invert-paths --force` → **0 `.pyc` restant** (`rev-list --all --objects`), `git fsck --full` propre, **arbre de `main` inchangé** (`a8892f4` avant = après ; nouveau tip `85445ef` sur la base `586faf4`), 21 branches conservées, 382 commits réécrits (commit-map), branche `Tools_v2` nettoyée (0 `.pyc` dans son arbre), remote `origin` supprimé par filter-repo (attendu, d'où le mirror).
+- Faisabilité push : `main` **non protégée** (API 404 protection) → force-push possible. **13 PRs ouvertes** (12 dependabot + `copilot/fix-frontend-component-tests` #23) ont pour head des branches qui seront réécrites par `--force --all` → conséquence à acter en revue (fermeture/recréation des PRs bot).
+- **Séquencement bloquant** : le working repo local est ahead 3 de `origin/main` (`9fb904a` US-RC-08 + docs `fa5974c`/`50028b4`) — le responsable doit **pousser ce main d'abord** (push normal), puis re-cloner le miroir frais, re-jouer le filtre et re-vérifier, AVANT toute revue signée et tout force-push (sinon le force-push écraserait RC-08).
+- **Décision à prendre en revue signée** : (a) `git push origin --force --all` depuis le miroir (critère « historique sans `.pyc` » satisfait sur tout le remote ; 21 branches réécrites, 13 PRs ouvertes impactées, tous les SHAs cités dans les docs invalidés, collaborateurs → re-clone) — **recommandé** ; (b) force-push `main` seul + suppression des 20 autres branches (critère non satisfait sur les branches supprimées, PRs fermées automatiquement) ; (c) main seul, branches laissées (critère NON satisfait — déconseillé).
+
 ### US-RC-10 — Contrat partagé front/back des événements runtime
 
 **Agent responsable :** `06-frontend.agent.md`
