@@ -86,7 +86,7 @@ jobs:
           echo "deploy_ref=$deploy_ref" >> "$GITHUB_OUTPUT"
 
       - name: Checkout deployment ref
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.validate.outputs.deploy_ref }}
 
@@ -103,12 +103,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.deploy_ref }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24.22.1
           cache: npm
@@ -152,12 +152,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.deploy_ref }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24.22.1
           cache: npm
@@ -217,13 +217,13 @@ jobs:
 
       - name: Checkout repository
         if: ${{ inputs.run_runtime_checks }}
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.deploy_ref }}
 
       - name: Setup Node.js
         if: ${{ inputs.run_runtime_checks }}
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24.22.1
           cache: npm
@@ -233,7 +233,7 @@ jobs:
 
       - name: Setup Python
         if: ${{ inputs.run_runtime_checks }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -297,12 +297,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.deploy_ref }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24.22.1
           cache: npm
@@ -387,7 +387,7 @@ jobs:
 
     steps:
       - name: Download deploy bundle artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}
 
