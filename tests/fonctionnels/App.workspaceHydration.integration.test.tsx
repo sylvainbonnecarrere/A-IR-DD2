@@ -208,6 +208,10 @@ jest.mock('../../stores/useFunctionStore', () => ({
 }));
 
 describe('App workspace hydration integration flows', () => {
+  // Render complet d'App + waitFor en cascade : 5 s (defaut jest) est trop juste sur un
+  // runner CI charge (vu en CI : timeout a 6,5 s sur le test de switch de workflow).
+  jest.setTimeout(20000);
+
   const workspacePayload = buildWorkspacePayload();
 
   beforeEach(() => {
