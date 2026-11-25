@@ -292,6 +292,19 @@ Tous les `console.log(` étaient des appels simples (aucun espion `console.log` 
 **Dépendances :** US-RC-02.
 **Critères d'acceptation :** 0 faux positif, règle `error` active, eslint 0 erreur.
 
+
+**État d’avancement (2026-11-24, agent `06-frontend`, branche `main`, commit `9fb904a`) : IMPLÉMENTÉE ET VALIDÉE — `lintWarningsFrontend` 55 → 0, règle `react-hooks/rules-of-hooks` repassée en `error`.**
+
+**Constat d’analyse (correction de l’hypothèse initiale) :** le plugin installé est `eslint-plugin-react-hooks` **7.1.1** (pas v6), et les 55 warnings n’étaient **pas des faux positifs** mais de vraies violations *rules-of-hooks* : un `return` anticipé placé **avant** les hooks — `AutoSaveIndicator.tsx` (`if (!isEnabled) return null;` avant le `useEffect`) et `V2AgentNode.tsx` (`if (!nodeAgent) return <erreur/>` L376 avant ~30 hooks L386–L668). Le bon traitement est donc une correction du code (hooks toujours avant tout `return`), pas un pin de plugin.
+
+- `components/AutoSaveIndicator.tsx` : `if (!isEnabled) return null;` déplacé après le `useEffect`.
+- `components/V2AgentNode.tsx` : bloc `if (!nodeAgent) { return … }` déplacé après le dernier hook (fin L691). Vérifié avant déplacement : les sélecteurs appelés avec `nodeAgent` null l’acceptent (`Agent | null`), aucune dépendance des hooks au early-return.
+- `eslint.config.mjs` : `react-hooks/rules-of-hooks` : `"warn" → "error"`, commentaires d'en-tête mis à jour.
+
+**Validations :** `npm run lint` = **0 erreur, 0 warning** repo-wide (règle `error` active, critère « 0 faux positif » dépassé : 0 warning tout court) ; `tsc --noEmit` 0 ; ratchet exit 0 (`lintWarningsFrontend` 55 → 0, tous compteurs 0/0/0/0/0/0) + `--self-test` OK (3/3) ; `format:changed` OK ; `audit:workflow-architecture:strict` OK ; `npm test -- --runInBand` **95 suites / 589 tests PASS**. Baseline recalée : `lintWarningsFrontend: 0`.
+
+**Handoff :** US-RC-08 clôturée. La règle `rules-of-hooks` étant bloquante, toute future violation (hook après un `return` anticipé) casse le gate `hygiene-gate` en CI. Reste du backlog : US-RC-09 (historique `.pyc`, optionnel, revue signée), US-RC-10 (contrat partagé runtime), US-RC-11 (extraction App.tsx, optionnel).
+
 ### US-RC-09 — Nettoyage historique git des `.pyc` (depuis US-HYG-09)
 
 **Agent responsable :** `04-cicd-installation.agent.md`
