@@ -195,7 +195,10 @@ jobs:
         run: npm --prefix backend ci
 
       - name: Run backend Jest suite
-        run: npm --prefix backend test -- --runInBand
+        # --forceExit : des handles ouverts (mongoose, workers) empêchent jest de
+        # terminer seul après le summary -> le job atteignait timeout-minutes: 30 et
+        # le run apparaissait "cancelled".
+        run: npm --prefix backend test -- --runInBand --forceExit
 
   hygiene-gate:
     name: Hygiene Gate

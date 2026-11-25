@@ -223,6 +223,8 @@ router.post('/check', requireAuth, validateRequest(checkSyntaxSchema), async (re
       valid: result.valid,
       errorCount: result.errors.length,
     });
+
+    return res.status(200).json(result);
   } catch (error: unknown) {
     const errMessage = errorMessageOf(error);
     logger.error('[SandboxRoute] POST /check error:', error);
