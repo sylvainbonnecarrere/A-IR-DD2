@@ -1,56 +1,32 @@
-Bumps dependabots : 
-Bump actions/dependency-review-action from 4 to 5
-Bump @vitejs/plugin-react from 5.2.0 to 6.1.1
-Bump @testing-library/jest-dom from 6.9.1 to 7.0.1
-Bump actions/setup-node from 5 to 7
-Bump actions/setup-python from 5 to 7
-Bump @google/genai from 2.19.0 to 2.21.0
-Bump helmet from 7.2.0 to 8.3.0 in /backend
-Bump @testing-library/user-event from 14.6.6 to 14.6.7
-Bump actions/setup-node from 5 to 7
-Bump typescript from 5.9.3 to 7.0.2 in /backend
-Bump @testing-library/jest-dom from 6.9.1 to 7.0.1
-Bump helmet from 7.2.0 to 8.3.0 in /backend
-Bump @testing-library/user-event from 14.6.6 to 14.6.7
-Bump typescript from 5.9.3 to 7.0.2 in /backend
-Bump actions/checkout from 5 to 7
-Bump @google/genai from 2.19.0 to 2.21.0
-Bump actions/setup-python from 5 to 7
-Bump actions/download-artifact from 4 to 8
-Bump actions/download-artifact from 4 to 8
+1- npm_and_yarn in /backend for qs - Update #1731130325
+ Dependabot cannot update qs to a non-vulnerable version
+The latest possible version that can be installed is 6.16.0 because of the following conflicting dependencies:
 
-Backend test with Mongo : 
-"FAIL src/__tests__/sandbox.routes.test.ts (31.351 s)
-  ● Sandbox routes › executes POST /api/sandbox/check through auth and runtime-backed Python syntax validation
+express@4.22.2 requires qs@6.16.0 via body-parser@1.20.9
+express-rate-limit@8.6.2 requires qs@6.16.0 via a transitive dependency on body-parser@1.20.9
+express@4.22.2 requires qs@6.16.0
+express-rate-limit@8.6.2 requires qs@6.16.0 via express@4.22.2
+supertest@7.2.2 requires qs@6.16.0 via superagent@10.3.0
+A patched version exists for qs, but the available update path still resolves it to 6.16.0
+The earliest fixed version is 6.16.1.
 
-    thrown: "Exceeded timeout of 30000 ms for a test.
-    Add a timeout value to this test to increase the timeout, if this is a long-running test. See https://jestjs.io/docs/api#testname-fn-timeout."
+2-npm_and_yarn in /backend for minimatch - Update #1731130335
+Dependabot cannot update minimatch to a non-vulnerable version
+The latest possible version that can be installed is 9.0.9 because of the following conflicting dependencies:
 
-      at _getError (node_modules/jest-circus/build/jestAdapterInit.js:1985:12)
-          at Array.map (<anonymous>)
+jest@30.5.2 requires minimatch@9.0.9 via a transitive dependency on glob@13.0.6
+ts-jest@29.4.15 requires minimatch@9.0.9 via a transitive dependency on glob@13.0.6
+jest@30.5.2 requires minimatch@9.0.9 via a transitive dependency on test-exclude@7.0.2
+ts-jest@29.4.15 requires minimatch@9.0.9 via a transitive dependency on test-exclude@7.0.2
+jest@30.5.2 requires minimatch@9.0.9 via a transitive dependency on glob@10.5.0
+ts-jest@29.4.15 requires minimatch@9.0.9 via a transitive dependency on glob@10.5.0
+A patched version exists for minimatch, but the available update path still resolves it to 9.0.9
+The earliest fixed version is 11.0.1.
+3-npm_and_yarn in /. for minimatch - Update #1731130484
+ Dependabot cannot update minimatch to a non-vulnerable version
+The latest possible version that can be installed is 9.0.9 because of the following conflicting dependency:
 
-    Cause:
-        thrown: "Exceeded timeout of 30000 ms for a test.
-        Add a timeout value to this test to increase the timeout, if this is a long-running test. See https://jestjs.io/docs/api#testname-fn-timeout."
+A patched version exists for minimatch, but the available update path still resolves it to 9.0.9
+The earliest fixed version is 11.0.1.
 
-          579 |     });
-          580 |
-        > 581 |     it('executes POST /api/sandbox/check through auth and runtime-backed Python syntax validation', async () => {
-              |     ^
-          582 |         const fixture = await createFixture('python');
-          583 |         const checkSyntaxSpy = jest.spyOn(ExecutionOrchestrator.prototype, 'checkSyntax').mockResolvedValue({
-          584 |             valid: false,
-
-          at src/__tests__/sandbox.routes.test.ts:581:5
-          at Object.<anonymous> (src/__tests__/sandbox.routes.test.ts:21:1)
-
-
-Test Suites: 1 failed, 5 skipped, 121 passed, 122 of 127 total
-Tests:       1 failed, 28 skipped, 827 passed, 856 total
-Snapshots:   0 total
-Time:        110.356 s
-Ran all test suites.
-Jest did not exit one second after the test run has completed.
-
-'This usually means that there are asynchronous operations that weren't stopped in your tests. Consider running Jest with `--detectOpenHandles` to troubleshoot this issue.
-Error: The operation was canceled."
+Troubleshoot Dependabot errors
