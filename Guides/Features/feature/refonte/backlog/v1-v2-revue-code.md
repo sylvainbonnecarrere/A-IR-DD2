@@ -314,6 +314,27 @@ Tous les `console.log(` étaient des appels simples (aucun espion `console.log` 
 **Dépendances :** série US-RC-00a/b/c commitée (le `.gitignore` doit exister avant — c'est le cas depuis `ba6ee8b`).
 **Critères d'acceptation :** historique sans `.pyc`, clone sain vérifié, revue signée.
 
+
+**Handoff (2026-11-24, rédigé par `06-frontend` pour `04-cicd-installation`, branche `main` @ `fa5974c`) — US-RC-09 prête à démarrer, en attente de la revue signée du responsable projet (réécriture d’historique = opération destructive).**
+
+**État mesuré sur `main` @ `fa5974c` (2026-11-24) :**
+
+- `.pyc` suivis aujourd’hui : **0** (`git ls-files | grep .pyc` = 0) ; `.gitignore` L199-201 (`__pycache__/`, `*.pyc`) présent depuis `ba6ee8b` — dépendance satisfaite.
+- `.pyc` dans l’historique : **425 chemins distincts** (`git rev-list --all --objects | grep .pyc | awk "{print \$2}" | sort -u | wc -l` = 425 — le « 30 » du descriptif initial était un sous-ensemble ; ne pas se fier au chiffre du backlog, re-mesurer avant/après). Présents dans `main`, `origin/main`, `origin/Tools_v2`, `origin/copilot/fix-frontend-component-tests`, branches locales `Tools_v2`, `feat/2B-2-edge-collision`, `feat/j7-02-quarantine-exit-fencing` ; absents de `origin/V2-Backend-Persistance`.
+- Remote : `origin` = `https://github.com/sylvainbonnecarrere/A-IR-DD2.git`, **22 branches distantes**, **0 tag**, git 2.55.0.
+- Outillage disponible : `git filter-repo` **n’est PAS installé** ; BFG indisponible (pas de java). Python réel : `/c/Users/Sylvain/AppData/Local/Programs/Python/Python313/python` (pip 25.0.1) — **ne pas utiliser** le shim `python3` de WindowsApps (stub Microsoft Store). Installation prévue : `python -m pip install --user git-filter-repo`.
+
+**Procédure proposée (à valider par la revue signée avant tout push) :**
+
+1. `python -m pip install --user git-filter-repo` (avec le Python 3.13 ci-dessus) ; vérifier `git filter-repo --version`.
+2. Travailler sur un **clone mirror** neuf, jamais directement sur le working repo : `git clone --mirror https://github.com/sylvainbonnecarrere/A-IR-DD2.git A-IR-DD2-mirror.git` puis `cd A-IR-DD2-mirror.git && git filter-repo --path-glob "*.pyc" --invert-paths --force` (couvre aussi `__pycache__/` puisque tout fichier `.pyc` est sous ce glob ; ajouter `--path-glob "*__pycache__*"` si des non-.pyc y traînent).
+3. Vérifier dans le mirror : `git rev-list --all --objects | grep -c ".pyc"` = **0** ; `git fsck --full` OK ; `git log --oneline -5` lisible ; arbres de `main` inchangés au tree près des `.pyc` (`git diff <old-main> <new-main> --stat` sur un clone de travail — attendu : aucun changement de fichier, seuls les SHAs changent).
+4. **Revue signée du responsable projet** (obligatoire, US en P3 optionnel mais destructeur) : consigner la décision dans cette section, puis seulement : `git push origin --force --all` (0 tag à pousser). Conséquence à acter dans la revue : **tous les SHAs référencés dans ce backlog et les docs (ba6ee8b, 9fb904a, fa5974c…) seront invalidés** ; les collaborateurs doivent re-cloner (`git clone` neuf) ou `git fetch origin && git reset --hard origin/main` — à communiquer. Les branches `dependabot/*` et feature branches seront aussi réécrites (elles contiennent les `.pyc`) ; alternative à discuter en revue : ne force-push que `main` et supprimer/recréer les autres branches, mais le critère « historique sans .pyc » vise le miroir complet.
+5. Vérification « clone sain » après rewrite : clone frais du repo distant dans un nouveau répertoire, puis `npm ci` et gates rapides : `npm run lint` (0 erreur 0 warning attendu — `rules-of-hooks` en error depuis US-RC-08), `node scripts/ci/hygiene-ratchet.mjs` exit 0 + `--self-test` OK (baseline 0/0/0/0/0/0), `GITHUB_BASE_REF=main npm run format:changed` OK, `npm run audit:workflow-architecture:strict` OK, `npm test -- --runInBand` 95/589 PASS. Le push force sur `main` déclenche le CI (`hygiene-gate` inclus) : run vert attendu, arbre identique.
+6. Clôturer : mettre à jour cette section (état d’avancement + revue signée + mesures avant/après 425 → 0), committer le backlog **sur le nouveau `main` réécrit**.
+
+**Garde-fous :** aucune étape de push sans la revue signée ; ne jamais lancer `filter-repo` dans le working repo directement (`--force` + suppression du remote `origin` par défaut — le mirror isole ce piège) ; si `git filter-repo` reste indisponible après pip, fallback documenté = `git filter-branch --index-filter` avec `git rm --cached --ignore-unmatch` sur la liste des 425 chemins `.pyc` (générée via `git rev-list --all --objects`), sur le mirror uniquement (lent) ; ne pas toucher au contenu du working tree ni aux workflows CI.
+
 ### US-RC-10 — Contrat partagé front/back des événements runtime
 
 **Agent responsable :** `06-frontend.agent.md`
