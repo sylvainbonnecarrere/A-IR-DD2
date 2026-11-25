@@ -7,8 +7,11 @@ beautifulsoup4>=4.12.0
 lxml>=5.0.0
 
 # web_search_py.py
-ddgs>=9.0.0
-duckduckgo-search>=6.0.0
+# 2026-11-25 : duckduckgo-search>=6.0.0 retiré — lignée 8.x non maintenue, son METADATA
+# embarque un échantillon de réponse Bing (champ image_token, alerte GitGuardian faux positif)
+# et du contenu promotionnel tiers. web_search_py.py est un stub (aucun import) en attendant la
+# réimplémentation ; on épingle la lignée renommée officielle et auditée.
+ddgs==9.14.1
 
 # environment / config (function_context.py, runner.py)
 python-dotenv>=1.0.0
