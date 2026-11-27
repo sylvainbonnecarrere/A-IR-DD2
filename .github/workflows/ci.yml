@@ -232,6 +232,12 @@ jobs:
       - name: Hygiene ratchet self-test
         run: npm run hygiene:self-test
 
+      - name: Runtime event contract parity (front genere depuis le contrat backend)
+        run: npm run contract:check
+
+      - name: Contract parity self-test
+        run: npm run contract:check:self-test
+
       - name: Prettier check on changed files (blocking, R4)
         env:
           # github.base_ref n'existe que sur pull_request ; fallback 'main' sinon.
