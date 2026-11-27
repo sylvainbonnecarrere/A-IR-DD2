@@ -1,19 +1,16 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Agent, LLMConfig, RobotId } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
+import { AppOverlays, DeferredUiFallback } from './components/AppOverlays';
 import { RobotPageRouter } from './components/RobotPageRouter';
 import { Header } from './components/Header';
 import { useLocalization } from './hooks/useLocalization';
-import { Button } from './components/UI';
-import { FullscreenChatModal } from './components/modals/FullscreenChatModal';
-import { AgentConfigurationModal } from './components/modals/AgentConfigurationModal';
 import { useRuntimeStore } from './stores/useRuntimeStore';
 import { useDesignStore } from './stores/useDesignStore';
 
 import { useAppShellStore } from './stores/useAppShellStore';
 import { NotificationProvider } from './contexts';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { NotificationDisplay } from './components/NotificationDisplay';
 import { QueryProvider } from './providers';
 import { getSettingsStorage } from './utils/SettingsStorage';
 import { webSocketService } from './services/webSocketService';
@@ -32,40 +29,10 @@ import { useAgentInstanceCreation } from './hooks/useAgentInstanceCreation';
 import { useMediaPanelActions } from './hooks/useMediaPanelActions';
 import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from './utils/robotPageRouting';
 
-const LazySettingsModal = lazy(async () => {
-  const module = await import('./components/modals/SettingsModal');
-  return { default: module.SettingsModal };
-});
-const LazyLoginModal = lazy(async () => {
-  const module = await import('./components/modals/LoginModal');
-  return { default: module.LoginModal };
-});
-const LazyRegisterModal = lazy(async () => {
-  const module = await import('./components/modals/RegisterModal');
-  return { default: module.RegisterModal };
-});
-const LazyImageGenerationPanel = lazy(async () => {
-  const module = await import('./components/panels/ImageGenerationPanel');
-  return { default: module.ImageGenerationPanel };
-});
-const LazyImageModificationPanel = lazy(async () => {
-  const module = await import('./components/panels/ImageModificationPanel');
-  return { default: module.ImageModificationPanel };
-});
-const LazyVideoGenerationConfigPanel = lazy(async () => {
-  const module = await import('./components/panels/VideoGenerationConfigPanel');
-  return { default: module.VideoGenerationConfigPanel };
-});
-const LazyMapsGroundingConfigPanel = lazy(async () => {
-  const module = await import('./components/panels/MapsGroundingConfigPanel');
-  return { default: module.MapsGroundingConfigPanel };
-});
 const LazyHyperspaceReveal = lazy(async () => {
   const module = await import('./components/HyperspaceReveal');
   return { default: module.HyperspaceReveal };
 });
-
-const DeferredUiFallback: React.FC = () => null;
 
 function isRobotId(robotId: string): robotId is RobotId {
   return Object.values(RobotId).includes(robotId as RobotId);
@@ -88,35 +55,10 @@ export function AppContent() {
     isLoading: authLoading,
     error: authError,
   } = useAuth();
-  const isSettingsModalOpen = useAppShellStore((state) => state.isSettingsModalOpen);
-  const isLoginModalOpen = useAppShellStore((state) => state.isLoginModalOpen);
-  const isRegisterModalOpen = useAppShellStore((state) => state.isRegisterModalOpen);
-  const isImagePanelOpen = useAppShellStore((state) => state.isImagePanelOpen);
-  const isImageModificationPanelOpen = useAppShellStore((state) => state.isImageModificationPanelOpen);
-  const isVideoPanelOpen = useAppShellStore((state) => state.isVideoPanelOpen);
-  const isMapsPanelOpen = useAppShellStore((state) => state.isMapsPanelOpen);
-  const currentImageNodeId = useAppShellStore((state) => state.currentImageNodeId);
-  const currentImageAgent = useAppShellStore((state) => state.currentImageAgent);
-  const currentImageAgentInstance = useAppShellStore((state) => state.currentImageAgentInstance);
-  const _currentVideoNodeId = useAppShellStore((state) => state.currentVideoNodeId);
-  const _currentVideoAgent = useAppShellStore((state) => state.currentVideoAgent);
-  const _currentVideoAgentInstance = useAppShellStore((state) => state.currentVideoAgentInstance);
-  const currentMapsNodeId = useAppShellStore((state) => state.currentMapsNodeId);
-  const editingImageInfo = useAppShellStore((state) => state.editingImageInfo);
-  const mapsPreloadedResults = useAppShellStore((state) => state.mapsPreloadedResults);
-  const fullscreenImage = useAppShellStore((state) => state.fullscreenImage);
   const currentPath = useAppShellStore((state) => state.currentPath);
   const showHyperspace = useAppShellStore((state) => state.showHyperspace);
   const hyperspaceActive = useAppShellStore((state) => state.hyperspaceActive);
   const setSettingsModalOpen = useAppShellStore((state) => state.setSettingsModalOpen);
-  const setLoginModalOpen = useAppShellStore((state) => state.setLoginModalOpen);
-  const setRegisterModalOpen = useAppShellStore((state) => state.setRegisterModalOpen);
-  const setImagePanelOpen = useAppShellStore((state) => state.setImagePanelOpen);
-  const setImageModificationPanelOpen = useAppShellStore((state) => state.setImageModificationPanelOpen);
-  const setVideoPanelOpen = useAppShellStore((state) => state.setVideoPanelOpen);
-  const setMapsPanelOpen = useAppShellStore((state) => state.setMapsPanelOpen);
-  const setMapsPreloadedResults = useAppShellStore((state) => state.setMapsPreloadedResults);
-  const setFullscreenImage = useAppShellStore((state) => state.setFullscreenImage);
   const setCurrentPath = useAppShellStore((state) => state.setCurrentPath);
   const setShowHyperspace = useAppShellStore((state) => state.setShowHyperspace);
   const setHyperspaceActive = useAppShellStore((state) => state.setHyperspaceActive);
@@ -195,7 +137,6 @@ export function AppContent() {
   const recordRuntimeEvent = useRuntimeStore((state) => state.recordRuntimeEvent);
   const runtimeStoreLLMConfigs = useRuntimeStore((state) => state.llmConfigs);
   const runtimeStoreLocalLLMProfiles = useRuntimeStore((state) => state.localLLMProfiles);
-  const _runtimeNodeMessages = useRuntimeStore((state) => state.nodeMessages);
   const llmConfigs = runtimeStoreLLMConfigs.length > 0 ? runtimeStoreLLMConfigs : authRuntimeLLMConfigs;
   const localLLMProfiles = runtimeStoreLocalLLMProfiles.length > 0 ? runtimeStoreLocalLLMProfiles : authLocalLLMProfiles;
 
@@ -230,8 +171,6 @@ export function AppContent() {
   const designAgents = useDesignStore((state) => state.agents);
   const validateWorkflowIntegrity = useDesignStore((state) => state.validateWorkflowIntegrity);
   const cleanupOrphanedInstances = useDesignStore((state) => state.cleanupOrphanedInstances);
-  const _hydrateFromServer = useDesignStore((state) => state.hydrateFromServer);
-  const _agentInstances = useDesignStore((state) => state.agentInstances);
   const designWorkflows = useDesignStore((state) => state.workflows);
   const designCurrentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
 
@@ -451,107 +390,18 @@ export function AppContent() {
             </main>
           </div>
 
-          {isSettingsModalOpen && (
-            <Suspense fallback={<DeferredUiFallback />}>
-              <LazySettingsModal llmConfigs={llmConfigs} onClose={() => setSettingsModalOpen(false)} onSave={handleSaveSettings} />
-            </Suspense>
-          )}
-
-          {isLoginModalOpen && (
-            <Suspense fallback={<DeferredUiFallback />}>
-              <LazyLoginModal isOpen={isLoginModalOpen} onClose={() => setLoginModalOpen(false)} />
-            </Suspense>
-          )}
-
-          {isRegisterModalOpen && (
-            <Suspense fallback={<DeferredUiFallback />}>
-              <LazyRegisterModal isOpen={isRegisterModalOpen} onClose={() => setRegisterModalOpen(false)} />
-            </Suspense>
-          )}
-
-          {isImagePanelOpen && (
-            <Suspense fallback={<DeferredUiFallback />}>
-              <LazyImageGenerationPanel
-                isOpen={isImagePanelOpen}
-                nodeId={currentImageNodeId}
-                agent={currentImageAgent}
-                agentInstance={currentImageAgentInstance}
-                llmConfigs={llmConfigs}
-                onClose={() => setImagePanelOpen(false)}
-                onImageGenerated={handleImageGenerated}
-                onOpenImageModificationPanel={handleOpenImageModificationPanel}
-              />
-            </Suspense>
-          )}
-
-          {isImageModificationPanelOpen && (
-            <Suspense fallback={<DeferredUiFallback />}>
-              <LazyImageModificationPanel
-                isOpen={isImageModificationPanelOpen}
-                editingImageInfo={editingImageInfo}
-                llmConfigs={llmConfigs}
-                onClose={() => setImageModificationPanelOpen(false)}
-                onImageModified={handleImageModified}
-              />
-            </Suspense>
-          )}
-
-          {isVideoPanelOpen && (
-            <Suspense fallback={<DeferredUiFallback />}>
-              <LazyVideoGenerationConfigPanel isOpen={isVideoPanelOpen} onClose={() => setVideoPanelOpen(false)} />
-            </Suspense>
-          )}
-
-          {isMapsPanelOpen && (
-            <Suspense fallback={<DeferredUiFallback />}>
-              <LazyMapsGroundingConfigPanel
-                isOpen={isMapsPanelOpen}
-                nodeId={currentMapsNodeId}
-                llmConfigs={llmConfigs}
-                onClose={() => {
-                  setMapsPanelOpen(false);
-                  setMapsPreloadedResults(null);
-                }}
-                preloadedResults={mapsPreloadedResults || undefined}
-              />
-            </Suspense>
-          )}
-
-          {fullscreenImage && (
-            <div
-              className="fixed inset-0 z-[70] flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-sm"
-              onClick={() => setFullscreenImage(null)}
-            >
-              <img
-                src={`data:${fullscreenImage.mimeType};base64,${fullscreenImage.src}`}
-                alt={t('fullscreenModal_alt')}
-                className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
-                onClick={(e) => e.stopPropagation()}
-              />
-              <Button
-                variant="ghost"
-                onClick={() => setFullscreenImage(null)}
-                className="absolute top-4 right-4 text-white text-2xl px-2 py-2"
-                aria-label={t('fullscreenModal_close_aria')}
-              >
-                &times;
-              </Button>
-            </div>
-          )}
-
-          {/* Fullscreen Chat Modal */}
-          <FullscreenChatModal
+          {/* ⭐ US-RC-11 (vague 4) : JSX des overlays extrait dans components/AppOverlays.tsx (rendu identique) */}
+          <AppOverlays
+            llmConfigs={llmConfigs}
+            localLLMProfiles={localLLMProfiles}
+            onSaveSettings={handleSaveSettings}
+            onImageGenerated={handleImageGenerated}
+            onOpenImageModificationPanel={handleOpenImageModificationPanel}
+            onImageModified={handleImageModified}
             onDeleteNode={handleDeleteNode}
             onOpenMapsPanel={handleOpenMapsPanel}
             onOpenFullscreen={handleOpenFullscreen}
-            onOpenImageModificationPanel={handleOpenImageModificationPanel}
-            onImageGenerated={handleImageGenerated}
           />
-
-          {/* Configuration Modal */}
-          <AgentConfigurationModal llmConfigs={llmConfigs} localLLMProfiles={localLLMProfiles} />
-
-          <NotificationDisplay />
         </div>
       </NotificationProvider>
     </QueryProvider>
