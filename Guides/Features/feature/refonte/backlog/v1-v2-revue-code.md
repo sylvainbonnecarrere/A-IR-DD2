@@ -454,3 +454,4 @@ Tailles mesurées sur `main` @ `ba6ee8b` :
 | `backend/src/services/databaseInit.ts` | 1145 | bootstrap + migrations + seed + index concentrés (§11 du backlog source : zone à haut risque) |
 
 **Objectif de la prochaine feature :** découpage par responsabilité (composants/presenters, use cases, repositories, modules d'init), en US dédiées avec suites de non-régression vertes à chaque extraction.
+- **Round 6 — PR #23 RobotPageRouter (2026-11-25, commit `26ca728`)** : vérifié, le fix n'était PAS sur main. Le fix copilot était incomplet (crash aussi dans `WorkflowToolbar` : `workflows.find`, `nodes.length`, `edges.forEach`). Guard `Array.isArray` appliqué sur `workflows` (RobotPageRouter + WorkflowToolbar) et `nodes`/`edges` (WorkflowToolbar) + test de régression « workflows is malformed ». Suites components 35/35 (142 tests), tsc 0, lint 0, ratchet OK. PR #23 fermée (branche supprimée), **0 PR ouverte restante**.
