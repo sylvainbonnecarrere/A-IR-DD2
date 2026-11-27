@@ -1,29 +1,8 @@
-chore(deps): Bump react-dom and @types/react-dom
+Run npm run contract:check
 
-Unread
-#43
-·dependabot[bot] opened 10 hours ago
-Bot
-·
-1
-chore(deps-dev): Bump @types/node from 24.19.2 to 26.6.6 in /backend
+> llm-agent-workflow-orchestrator@0.0.0 contract:check
+> node scripts/ci/sync-runtime-contract.mjs --check
 
-Unread
-#42
-·dependabot[bot] opened 10 hours ago
-Bot
-·
-1
-chore(deps-dev): Bump @types/node from 26.5.0 to 26.6.6
-
-#41
-·dependabot[bot] opened 10 hours ago
-Bot
-·
-1
-chore(deps): Bump actions/upload-artifact from 4 to 7
-
-#40
-·dependabot[bot] opened 10 hours ago
-Bot
-·
+[contract] DRIFT détecté sur types/runtimeEvent.generated.ts: sha256 contrat attendu da3f4c921f6c3db4d642fbd39dc4a26c979377c48cdd520df9228704ef83fae8, en-tête fichier fd0577e30900d5e40369127b0d891fe8f0357f83fd2e6310b2de5929bcaa271e
+[contract] Corriger : modifier le contrat backend (PR 03-backend) puis `npm run contract:sync`, ou régénérer depuis le contrat courant.
+Error: Process completed with exit code 1.

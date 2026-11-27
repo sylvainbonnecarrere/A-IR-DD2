@@ -23,6 +23,10 @@
  *
  * Le fichier généré porte en en-tête le sha256 du contrat source ; `--check` compare
  * le contenu régénéré (hash inclus) au fichier présent — toute divergence bloque.
+ *
+ * Note EOL : les lectures sont normalisées en LF (les blobs commités sont LF ;
+ * un working tree Windows en autocrlf est CRLF) pour que le hash soit identique
+ * en local et en CI.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -43,6 +47,14 @@ const GENERATED_REL = 'types/runtimeEvent.generated.ts';
 
 // US-J7-09 : types de quarantaine/fencing que le contrat doit contenir (16 littéraux au total).
 const REQUIRED_QUARANTINE_TYPES = ['run:quarantined', 'run:fenced', 'run:recovery_relaunched'];
+
+const normalizeLf = (text) => text.replace(/\r\n/g, '\n');
+function readContractSource() {
+  return normalizeLf(readFileSync(CONTRACT_PATH, 'utf8'));
+}
+function readGeneratedSource() {
+  return normalizeLf(readFileSync(GENERATED_PATH, 'utf8'));
+}
 
 function stringLiteralsOf(arrayLiteral) {
   const values = [];
@@ -135,13 +147,13 @@ export interface RuntimeEventEnvelope {
 }
 
 async function runCheck() {
-  const contractSource = readFileSync(CONTRACT_PATH, 'utf8');
+  const contractSource = readContractSource();
   const expected = await buildGenerated(contractSource);
   if (!existsSync(GENERATED_PATH)) {
     console.error(`[contract] ${GENERATED_REL} absent — lancer npm run contract:sync`);
     return false;
   }
-  const current = readFileSync(GENERATED_PATH, 'utf8');
+  const current = readGeneratedSource();
   if (current !== expected) {
     const expectedHash = /sha256:([0-9a-f]{64})/.exec(expected)?.[1];
     const currentHash = /sha256:([0-9a-f]{64})/.exec(current)?.[1];
@@ -158,7 +170,7 @@ async function runCheck() {
 }
 
 async function runSelfTest() {
-  const contractSource = readFileSync(CONTRACT_PATH, 'utf8');
+  const contractSource = readContractSource();
   const expected = await buildGenerated(contractSource);
   const assert = (cond, message) => {
     if (!cond) throw new Error(`self-test failed: ${message}`);
@@ -171,18 +183,21 @@ async function runSelfTest() {
     assert((expected.match(/\|/g) || []).length >= 16, 'le type RuntimeEventType doit contenir au moins 16 littéraux');
     // 2. Arbre propre : le fichier présent correspond au contrat courant.
     assert(existsSync(GENERATED_PATH), `${GENERATED_REL} doit exister (lancer npm run contract:sync)`);
-    assert(readFileSync(GENERATED_PATH, 'utf8') === expected, '--check doit passer sur un arbre propre');
+    assert(readGeneratedSource() === expected, '--check doit passer sur un arbre propre');
     // 3. Simulation en mémoire : fichier généré altéré -> --check échoue (aucun fichier touché).
     const tampered = expected.replace("'run:queued'", "'run:removed'");
-    assert(tampered !== expected && tampered !== readFileSync(GENERATED_PATH, 'utf8'), '--check doit détecter un contenu généré altéré');
+    assert(tampered !== expected && tampered !== readGeneratedSource(), '--check doit détecter un contenu généré altéré');
     // 4. Simulation en mémoire : contrat source modifié -> le hash change et le contenu régénéré diverge.
-    const drifted = buildGenerated(contractSource + '\n// simulation drift\n');
+    const drifted = await buildGenerated(contractSource + '\n// simulation drift\n');
     assert(drifted !== expected, '--check doit détecter un contrat source modifié (hash sha256 en en-tête)');
+    // 5. Robustesse EOL : un contrat relu en CRLF (working tree Windows autocrlf) donne le même hash LF.
+    const crlfSource = contractSource.replace(/\n/g, '\r\n');
+    assert(normalizeLf(crlfSource) === contractSource, 'la normalisation LF doit rendre le hash EOL-independant');
   } catch (error) {
     console.error(error.message);
     process.exit(1);
   }
-  console.log('[contract] self-test OK (parité hash + contenu, détection de drift en mémoire, aucun fichier touché)');
+  console.log('[contract] self-test OK (parité hash + contenu, détection de drift en mémoire, EOL LF normalisé, aucun fichier touché)');
   process.exit(0);
 }
 
@@ -192,7 +207,7 @@ if (mode === '--self-test') {
 } else if (mode === '--check') {
   process.exit((await runCheck()) ? 0 : 1);
 } else {
-  const contractSource = readFileSync(CONTRACT_PATH, 'utf8');
+  const contractSource = readContractSource();
   const generated = await buildGenerated(contractSource);
   writeFileSync(GENERATED_PATH, generated);
   console.log(
