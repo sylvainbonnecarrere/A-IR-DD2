@@ -66,19 +66,22 @@ const STATUS_ICON: Partial<Record<string, React.ReactNode>> = {
 export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({ className = '' }) => {
   const { t } = useLocalization();
   const { currentWorkflow, execution, executeWorkflow, toggleConfigPanel, isConfigPanelOpen } = useWorkflowStore();
-  const nodes = useDesignStore((state) => state.nodes);
-  const edges = useDesignStore((state) => state.edges);
+  const nodesRaw = useDesignStore((state) => state.nodes);
+  const edgesRaw = useDesignStore((state) => state.edges);
+  const nodes = useMemo(() => (Array.isArray(nodesRaw) ? nodesRaw : []), [nodesRaw]);
+  const edges = useMemo(() => (Array.isArray(edgesRaw) ? edgesRaw : []), [edgesRaw]);
   const currentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
   const workflows = useDesignStore((state) => state.workflows);
 
   const workflowId = currentWorkflowId ?? currentWorkflow?.id ?? null;
+  const workflowsList = useMemo(() => (Array.isArray(workflows) ? workflows : []), [workflows]);
   const workflowName = useMemo(() => {
     if (workflowId) {
-      const match = workflows.find((workflow) => workflow._id === workflowId);
+      const match = workflowsList.find((workflow) => workflow._id === workflowId);
       if (match?.name) return match.name;
     }
     return currentWorkflow?.name ?? null;
-  }, [currentWorkflow?.name, workflowId, workflows]);
+  }, [currentWorkflow?.name, workflowId, workflowsList]);
 
   const { refresh } = useWorkflowRunSync(workflowId);
   const { runId: latestRunId, status: runtimeStatus, lockHeld, syncState, connectionState } = useWorkflowRunStatus(workflowId);
