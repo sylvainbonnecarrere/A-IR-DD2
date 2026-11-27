@@ -6,3 +6,8 @@ Run npm run contract:check
 [contract] DRIFT détecté sur types/runtimeEvent.generated.ts: sha256 contrat attendu da3f4c921f6c3db4d642fbd39dc4a26c979377c48cdd520df9228704ef83fae8, en-tête fichier fd0577e30900d5e40369127b0d891fe8f0357f83fd2e6310b2de5929bcaa271e
 [contract] Corriger : modifier le contrat backend (PR 03-backend) puis `npm run contract:sync`, ou régénérer depuis le contrat courant.
 Error: Process completed with exit code 1.
+
+--- RÉSOLU (2026-11-25, 06-frontend, commit 2bf8c2d) ---
+Cause racine : le hash sha256 était calculé sur le contrat lu en CRLF (working tree Windows autocrlf) ; les blobs commités sont en LF, donc en CI (checkout ubuntu, LF) le hash attendu était da3f4c92… et non fd0577e3…
+Correctif : scripts/ci/sync-runtime-contract.mjs normalise désormais CRLF->LF à la lecture du contrat ET du fichier généré (readContractSource/readGeneratedSource), hash EOL-indépendant ; self-test renforcé d’une assertion EOL ; types/runtimeEvent.generated.ts régénéré avec sha256 da3f4c921f6c… (identique au blob LF, donc identique en CI).
+Vérifié : contract:check + contract:check:self-test exit 0 localement avec le hash CI.
