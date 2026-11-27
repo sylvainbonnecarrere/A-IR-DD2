@@ -10,6 +10,7 @@ import {
   type AgentInstance,
 } from '../types';
 import type { FunctionRunRecord, FunctionRunStatus } from '../types/function.types';
+import type { RuntimeEventEnvelope } from '../types/runtimeEvent.generated';
 
 const isDevelopmentEnvironment = process.env.NODE_ENV !== 'production';
 
@@ -76,18 +77,6 @@ const renameNodeInSet = (values: Set<string>, fromNodeId: string, toNodeId: stri
  * WebSocket states, logs, données volatiles
  */
 export type RuntimeConnectionState = 'connected' | 'reconnecting' | 'offline' | 'degraded';
-
-export interface RuntimeEventEnvelope {
-  id: string;
-  type: string;
-  version: 1;
-  aggregateType: 'run' | 'task';
-  aggregateId: string;
-  workspaceId: string;
-  correlationId?: string;
-  occurredAt: string;
-  payload: Record<string, unknown>;
-}
 
 interface RuntimeStore {
   // Chat & Execution State

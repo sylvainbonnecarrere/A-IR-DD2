@@ -29,7 +29,7 @@ import { NotificationDisplay } from './components/NotificationDisplay';
 import { QueryProvider } from './providers';
 import { getSettingsStorage } from './utils/SettingsStorage';
 import { webSocketService } from './services/webSocketService';
-import type { RuntimeEventEnvelope } from './services/webSocketService';
+import type { RuntimeEventEnvelope } from './types/runtimeEvent.generated';
 // ⭐ ÉTAPE 5: Import HydrationOverlay for loading state
 import { HydrationOverlay } from './components/HydrationOverlay';
 // ⭐ V2: Import WorkflowSwitchOverlay for workflow switch (Bos amber)

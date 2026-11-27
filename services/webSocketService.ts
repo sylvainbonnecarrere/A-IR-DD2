@@ -1,19 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { ChatMessage } from '../types';
 import { authSessionStorage } from '../utils/authSessionStorage';
-
-// Types pour les événements (synchronisés avec le backend)
-export interface RuntimeEventEnvelope {
-  id: string;
-  type: string;
-  version: 1;
-  aggregateType: 'run' | 'task';
-  aggregateId: string;
-  workspaceId: string;
-  correlationId?: string;
-  occurredAt: string;
-  payload: Record<string, unknown>;
-}
+import { isRuntimeEventEnvelope } from './runtimeEventGuard';
 
 interface ServerToClientEvents {
   'agent:position:updated': (data: { nodeId: string; position: { x: number; y: number }; userId: string }) => void;
@@ -22,7 +10,8 @@ interface ServerToClientEvents {
   'workspace:user:joined': (data: { userId: string; userInfo: ConnectedUser['userInfo'] }) => void;
   'workspace:user:left': (data: { userId: string }) => void;
   'user:cursor:updated': (data: { x: number; y: number; userId: string }) => void;
-  'runtime:event': (data: RuntimeEventEnvelope) => void;
+  // US-RC-10 : données réseau non sûres — validées par isRuntimeEventEnvelope au handler
+  'runtime:event': (data: unknown) => void;
   'connection:status': (status: 'connected' | 'disconnected' | 'error') => void;
 }
 
@@ -256,6 +245,11 @@ class WebSocketService {
     });
 
     this.socket.on('runtime:event', (data) => {
+      // US-RC-10 : fail-closed — enveloppe invalide = drop + warn, jamais propagée
+      if (!isRuntimeEventEnvelope(data)) {
+        console.warn('[WebSocket] runtime:event rejeté (enveloppe invalide):', data);
+        return;
+      }
       try {
         this.emit('runtimeEvent', data);
       } catch (error) {
