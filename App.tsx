@@ -1,14 +1,11 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Agent,
-  AgentBatchDeleteResult,
-  AgentDeletionMediaPolicy,
   LLMConfig,
   LLMCapability,
   ChatMessage,
   RobotId,
   AgentInstance,
-  NodePositionUpdateOptions,
   MapsPanelPreloadedResults,
   normalizePersistenceConfig,
 } from './types';
@@ -36,7 +33,6 @@ import { HydrationOverlay } from './components/HydrationOverlay';
 import { WorkflowSwitchOverlay } from './components/WorkflowSwitchOverlay';
 // ⭐ AUTO-SAVE: Import PersistenceService for immediate instance creation
 import { PersistenceService } from './services/persistenceService';
-import { deleteWorkflowInstance, deleteWorkflowInstances, persistNodePosition } from './services/appWorkflowPersistenceService';
 
 import { resolveActiveWorkflowId } from './services/workflowIdResolver';
 import { remapAgentInstanceReference, remapEditingImageInfo, remapPanelNodeId } from './utils/mediaPanelRuntimeSync';
@@ -46,6 +42,7 @@ import { remapAgentInstanceReference, remapEditingImageInfo, remapPanelNodeId } 
 import { useJournalQueue } from './hooks/useJournalQueue';
 
 import { useAppWorkflowController } from './hooks/useAppWorkflowController';
+import { useNodePersistenceActions } from './hooks/useNodePersistenceActions';
 import { findAvailableWorkflowNodePosition } from './utils/workflowNodePlacement';
 import { generateRuntimeMessageId } from './utils/runtimeMessageId';
 import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from './utils/robotPageRouting';
@@ -258,15 +255,10 @@ export function AppContent() {
   const validateWorkflowIntegrity = useDesignStore((state) => state.validateWorkflowIntegrity);
   const cleanupOrphanedInstances = useDesignStore((state) => state.cleanupOrphanedInstances);
   const addAgentInstance = useDesignStore((state) => state.addAgentInstance);
-  const deleteNode = useDesignStore((state) => state.deleteNode);
-  const deleteAgentInstance = useDesignStore((state) => state.deleteAgentInstance);
   const _hydrateFromServer = useDesignStore((state) => state.hydrateFromServer);
   const updateInstanceId = useDesignStore((state) => state.updateInstanceId);
-  const updateAgentInstance = useDesignStore((state) => state.updateAgentInstance);
   const addNode = useDesignStore((state) => state.addNode);
-  const updateNode = useDesignStore((state) => state.updateNode);
   const _agentInstances = useDesignStore((state) => state.agentInstances);
-  const storeNodes = useDesignStore((state) => state.nodes);
   const designWorkflows = useDesignStore((state) => state.workflows);
   const designCurrentWorkflowId = useDesignStore((state) => state.currentWorkflowId);
 
@@ -642,88 +634,12 @@ export function AppContent() {
     ],
   );
 
-  /**
-   * ⭐ FIX: Suppression robuste d'un node avec persistance backend
-   * Gère les deux formats d'ID (legacy et V2)
-   */
-  const handleDeleteNode = useCallback(
-    async (nodeId: string) => {
-      console.debug('[App] handleDeleteNode called with:', nodeId);
-
-      const v2Node = storeNodes.find((node) => node.id === nodeId);
-      const finalInstanceId = v2Node?.data?.agentInstance?.id || (nodeId.startsWith('node-') ? nodeId.replace(/^node-/, '') : undefined);
-
-      console.debug('[App] Delete node resolution:', {
-        nodeId,
-        storeInstanceId: v2Node?.data?.agentInstance?.id,
-        finalInstanceId,
-      });
-
-      deleteNode(nodeId);
-
-      if (finalInstanceId) {
-        deleteAgentInstance(finalInstanceId);
-        const workflowId = resolveCurrentWorkflowId();
-        const deleted = await deleteWorkflowInstance({
-          workflowId,
-          instanceId: finalInstanceId,
-          isAuthenticated,
-          accessToken,
-        });
-
-        if (deleted) {
-          console.debug('[App] ✅ Agent instance deleted from backend:', finalInstanceId);
-        }
-      }
-    },
-    [storeNodes, deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId],
-  );
-
-  const handleDeleteNodes = useCallback(
-    async (instanceIds: string[], mediaPolicy: AgentDeletionMediaPolicy = 'delete_media'): Promise<AgentBatchDeleteResult> => {
-      console.debug('[App] handleDeleteNodes called with:', instanceIds, 'policy:', mediaPolicy);
-
-      const workflowId = resolveCurrentWorkflowId();
-      return deleteWorkflowInstances({
-        workflowId,
-        instanceIds,
-        mediaPolicy,
-        isAuthenticated,
-        accessToken,
-        onDeleteLocalNode: (nodeId) => deleteNode(nodeId),
-        onDeleteLocalInstance: (instanceId) => deleteAgentInstance(instanceId),
-      });
-    },
-    [deleteNode, deleteAgentInstance, isAuthenticated, accessToken, resolveCurrentWorkflowId],
-  );
-
-  const handleUpdateNodePosition = useCallback(
-    (nodeId: string, position: { x: number; y: number }, options?: NodePositionUpdateOptions) => {
-      const designState = useDesignStore.getState();
-      const movedNode = designState.nodes.find((node) => node.id === nodeId);
-      const instanceId = movedNode?.data.agentInstance?.id;
-      updateNode(nodeId, { position });
-
-      if (instanceId) {
-        updateAgentInstance(instanceId, { position });
-      }
-
-      if (!options?.persist || !instanceId) {
-        return;
-      }
-
-      void persistNodePosition({
-        nodeId,
-        position,
-        instanceId,
-        isAuthenticated,
-        accessToken,
-        updateNode,
-        updateAgentInstance,
-      });
-    },
-    [accessToken, isAuthenticated, updateAgentInstance, updateNode],
-  );
+  // ⭐ US-RC-11 (vague 1) : actions de persistance des nœuds extraites dans un hook dédié (signatures inchangées)
+  const { handleDeleteNode, handleDeleteNodes, handleUpdateNodePosition } = useNodePersistenceActions({
+    isAuthenticated,
+    accessToken,
+    resolveCurrentWorkflowId,
+  });
 
   const handleOpenImagePanel = (nodeId: string, agent: Agent, agentInstance: AgentInstance) => {
     setCurrentImageNodeId(nodeId);

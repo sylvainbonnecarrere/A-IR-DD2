@@ -3,7 +3,8 @@
 **Auteur initial :** `01-architecte-bdd` (revue architecturale, 2026-11-21)
 **Revue critique et mise à jour :** `09-architecte-applicatif` (2026-11-23)
 **Date :** 2026-11-21, révisée le 2026-11-23
-**Branche :** `main` @ `ba6ee8b` — la vague 1 d'hygiène de `06-frontend` est **commitée** (2026-11-23 13:11 UTC, 119 fichiers, +4164/−867 ; working tree propre au 2026-11-23 13:28 UTC). La revue initiale décrivait un working tree non commité @ `f2499f6` ; ce n'est plus l'état courant.
+**Branche :** `main` @ `bc6dbfe` (2026-11-23) — la vague 1 d'hygiène de `06-frontend` est **commitée** (`ba6ee8b`, 119 fichiers, +4164/−867). La revue initiale décrivait un working tree non commité @ `f2499f6` ; ce n'est plus l'état courant.
+**État d'avancement (2026-11-23, `09-architecte-applicatif`) :** clôturées et commitées — `US-RC-00a` (R1 + test `tests/unitaires/App.addAgentStaleClosure.test.tsx`), `US-RC-00b` (R2 : ratchet `--cached --others --exclude-standard` + `--self-test` ; R4 : `format:changed` déplacé vers `scripts/ci/format-changed.mjs`, bloquant), `US-RC-00c` (R3 : en-tête « reference only »), `US-RC-01` (job `hygiene-gate` dans `ci.yml`), `US-RC-09` (purge historique `.pyc`, revue signée), **`US-RC-10` validée par le responsable** (contrat runtime partagé généré depuis le Zod backend + parité CI, commits `649df7a`/`c5b63a2`/`2bf8c2d`) ; `US-RC-07` lot 1 livré (`e52ade1`). **En cours : `US-RC-11` (`06-frontend`, co-responsable `09-architecte-applicatif` — recommandations ci-dessous).**
 **Backlog source clôturé :** `Guides/Features/feature/refonte/backlog/v1-v2-refonte-backlog.md` (gate de cutover V2 §13 : **GO signé 2026-11-19**, toutes US J0–J7 closes)
 **Objectif :** valider la première vague de corrections d'hygiène (désormais committée), corriger les réserves architecturales **restées ouvertes** avant d'activer le gate CI, puis planifier la suite (dette `any`, `console.log`, lint/prettier, CI) en US exécutables.
 
@@ -407,6 +408,34 @@ Tous les `console.log(` étaient des appels simples (aucun espion `console.log` 
 **Description :** `App.tsx` reste la zone à haut risque (§11 du backlog source) : extraire sa logique métier restante (orchestration persistance, remaps d'instances, hydratation) vers des hooks/services dédiés, **une extraction par US**, sans alourdir le composant. R1 (US-RC-00a) en est la première correction ponctuelle, pas une extraction.
 **Dépendances :** US-RC-00a ; tests d'hydratation (`test:integration:hydration`) et canvas (`test:canvas:non-regression`) verts à chaque extraction.
 **Critères d'acceptation :** par extraction : responsabilité déplacée vers un hook/service nommé, `App.tsx` strictement allégé, `tsc` 0, suites hydratation/canvas vertes.
+
+#### Recommandations du co-responsable `09-architecte-applicatif` (2026-11-23) — orientation et revue des frontières
+
+Analyse mesurée d'`App.tsx` sur `main` @ `bc6dbfe` : **1000 lignes**, `AppContent` concentre encore 4 blocs de logique métier + ~150 lignes de JSX d'overlays :
+
+| Bloc | Lignes | Responsabilités mêlées | Frontière cible (port) |
+|---|---|---|---|
+| `addAgentToWorkflow` | 423–648 (~225) | création instance + placement + auto-save backend (`PersistenceService.createAgentInstance`) + **remap d'ID cross-store** (6 états média via `utils/mediaPanelRuntimeSync.ts`) + création du node V2 | `AgentInstanceLifecyclePort` + `MediaPanelSyncPort` |
+| `handleDeleteNode` / `handleDeleteNodes` | 649–699 | suppression node/instance + persistance backend (`deleteWorkflowInstance(s)`, policy média) | `AgentInstanceLifecyclePort` |
+| `handleUpdateNodePosition` | 700–726 | position + `persistNodePosition` | `AgentInstanceLifecyclePort` |
+| handlers panneaux média (`handleOpenImagePanel`, `handleImageGenerated`, `handleImageModified`, `handleOpenVideoPanel`, `handleOpenMapsPanel`, `handleOpenFullscreen`, `handleUpdateNodeMessages`, …) | 728–840 | ouverture panneaux + messages runtime + journal (`enqueueJournalEntry`) | `MediaPanelActionsPort` + `JournalPort` |
+| JSX des 8 modales/panels lazy | 843–990 (~150) | rendu pur d'overlays | composant `components/AppOverlays.tsx` |
+
+Services/hooks existants à **réutiliser, pas dupliquer** : `services/appWorkflowPersistenceService.ts` (153 l.), `services/persistenceService.ts` (752 l.), `utils/mediaPanelRuntimeSync.ts` (59 l.), `hooks/useAppWorkflowController.ts` (278 l.), `hooks/useWorkspaceHydrationOrchestrator.ts` (565 l.), `hooks/useJournalQueue.ts` (307 l.). Le test de garde-fou R1 `tests/unitaires/App.addAgentStaleClosure.test.tsx` est en place.
+
+**Ordre d'extraction imposé — une vague = une PR, tests verts avant la suivante :**
+1. **Vague 1** — `hooks/useNodePersistenceActions.ts` : `handleUpdateNodePosition`, `handleDeleteNode`, `handleDeleteNodes` (petits, déjà adossés à des services) ;
+2. **Vague 2** — `hooks/useMediaPanelActions.ts` : ouverture des panneaux image/vidéo/maps/fullscreen + `handleImageGenerated`/`handleImageModified` (journal via `useJournalQueue`) ;
+3. **Vague 3** — `hooks/useAgentInstanceCreation.ts` : `addAgentToWorkflow` (le plus gros), avec toute la synchro média extraite dans **`services/mediaPanelSyncService.ts`** : une seule fonction `syncMediaPanelsOnInstanceIdRemap(fromInstanceId, toInstanceId, workflowId)` qui lit les stores via `getState()` et applique les 6 remaps (`remapPanelNodeId` ×3, `remapAgentInstanceReference` ×2, `remapEditingImageInfo`) ;
+4. **Vague 4** — `components/AppOverlays.tsx` : le JSX des 8 overlays lazy (props identiques, rendu déplacé tel quel).
+
+**Règles de revue des frontières — bloquantes pour ma validation (09) :**
+1. `App.tsx` n'appelle plus directement `PersistenceService`, `appWorkflowPersistenceService`, `webSocketService`, `enqueueJournalEntry` — uniquement via les hooks/services nommés ci-dessus ;
+2. tout accès cross-store (`useAppShellStore` ↔ `useDesignStore` ↔ `useRuntimeStore`) dans un callback async passe par `getState()` (leçon R1/US-RC-00a) et vit **encapsulé dans `mediaPanelSyncService`**, pas dispersé dans le composant ;
+3. les signatures des handlers passés à `RobotPageRouter` / `FullscreenChatModal` restent **inchangées** — l'extraction déplace le code, ne renomme rien (contrat stable) ;
+4. aucun nouveau store global : réutiliser `useAppShellStore` / `useDesignStore` / `useRuntimeStore` existants ;
+5. par vague : `tsc` 0, `eslint` 0 erreur, ratchet OK, `test:integration:hydration` + `test:canvas:non-regression` + `test:components:ci` + tests unitaires `App.*` verts — aucun changement de comportement ;
+6. cible mesurable : `App.tsx` < **400 lignes** (rendu + wiring) à la fin des 4 vagues, chaque hook extrait < **200 lignes**.
 
 ---
 
