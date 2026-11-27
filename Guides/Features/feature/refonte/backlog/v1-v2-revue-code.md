@@ -439,6 +439,14 @@ Services/hooks existants à **réutiliser, pas dupliquer** : `services/appWorkfl
 
 ---
 
+
+**État d'avancement (2026-11-27, agent `06-frontend`, branche `main`, commit `324803c`) — vague 1 LIVRÉE : `hooks/useNodePersistenceActions.ts` extrait, `App.tsx` 1000 → 916 lignes.**
+
+- **Extraction** : `handleDeleteNode`, `handleDeleteNodes`, `handleUpdateNodePosition` déplacés tels quels vers `hooks/useNodePersistenceActions.ts` (hook nommé, < 200 lignes), appelés depuis `AppContent` via `useNodePersistenceActions({ isAuthenticated, accessToken, resolveCurrentWorkflowId })`. **Signatures des handlers inchangées** (règle 3) — `RobotPageRouter`/`FullscreenChatModal` non touchés.
+- **Règles de frontière appliquées** : `App.tsx` n'importe plus `appWorkflowPersistenceService` (règle 1 pour ce port) ; dans le callback async `handleDeleteNode`, `storeNodes` (sélecteur) est remplacé par `useDesignStore.getState().nodes` (règle 2, leçon R1) ; aucun nouveau store (règle 4) ; imports nettoyés (3 types, le service, 4 sélecteurs d'actions, `storeNodes`).
+- **Validations vague 1** : `tsc --noEmit` 0 ; `npm run lint` 0 erreur 0 warning ; ratchet exit 0 (0/0/0/0/0/0) + `--self-test` OK ; `contract:check` OK ; `format:changed` OK ; `audit:workflow-architecture:strict` OK ; `npm test -- --runInBand` **96 suites / 595 tests PASS** (dont hydratation `App.workspaceHydration` unit+intégration, canvas `WorkflowCanvas.render`, `RobotPageRouter.workflow-delete`, test de garde-fou R1 `App.addAgentStaleClosure`). Aucun changement de comportement.
+- **Reste pour les vagues suivantes** (cette US = une extraction par session) : vague 2 `hooks/useMediaPanelActions.ts`, vague 3 `hooks/useAgentInstanceCreation.ts` + `services/mediaPanelSyncService.ts` (`addAgentToWorkflow`), vague 4 `components/AppOverlays.tsx`. Cible : `App.tsx` < 400 lignes.
+
 ## 4. Principes retenus pour toute la revue (SOLID & patterns)
 
 1. **Contrats aux frontières, pas de `any` au milieu** : typage par *ports/adapters* — Zod aux entrées HTTP/socket, génériques aux accès storage, contrats partagés front/back (US-RC-10). Un contrat fort élimine plus de dette que dix typages locaux.
