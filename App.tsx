@@ -1,14 +1,5 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
-import {
-  Agent,
-  LLMConfig,
-  LLMCapability,
-  ChatMessage,
-  RobotId,
-  AgentInstance,
-  MapsPanelPreloadedResults,
-  normalizePersistenceConfig,
-} from './types';
+import { Agent, LLMConfig, LLMCapability, RobotId, AgentInstance, normalizePersistenceConfig } from './types';
 import { NavigationLayout } from './components/NavigationLayout';
 import { RobotPageRouter } from './components/RobotPageRouter';
 import { Header } from './components/Header';
@@ -38,13 +29,10 @@ import { resolveActiveWorkflowId } from './services/workflowIdResolver';
 import { remapAgentInstanceReference, remapEditingImageInfo, remapPanelNodeId } from './utils/mediaPanelRuntimeSync';
 // ⭐ V2: Import apiClient for workflow switch orchestration
 
-// ⭐ FIX QA: Import useJournalQueue for image persistence
-import { useJournalQueue } from './hooks/useJournalQueue';
-
 import { useAppWorkflowController } from './hooks/useAppWorkflowController';
 import { useNodePersistenceActions } from './hooks/useNodePersistenceActions';
+import { useMediaPanelActions } from './hooks/useMediaPanelActions';
 import { findAvailableWorkflowNodePosition } from './utils/workflowNodePlacement';
-import { generateRuntimeMessageId } from './utils/runtimeMessageId';
 import { ROBOT_PAGE_ROUTE_IDS, resolveRobotPageRoute } from './utils/robotPageRouting';
 
 const LazySettingsModal = lazy(async () => {
@@ -131,10 +119,8 @@ export function AppContent() {
   const setVideoPanelOpen = useAppShellStore((state) => state.setVideoPanelOpen);
   const setMapsPanelOpen = useAppShellStore((state) => state.setMapsPanelOpen);
   const setCurrentImageNodeId = useAppShellStore((state) => state.setCurrentImageNodeId);
-  const setCurrentImageAgent = useAppShellStore((state) => state.setCurrentImageAgent);
   const setCurrentImageAgentInstance = useAppShellStore((state) => state.setCurrentImageAgentInstance);
   const setCurrentVideoNodeId = useAppShellStore((state) => state.setCurrentVideoNodeId);
-  const setCurrentVideoAgent = useAppShellStore((state) => state.setCurrentVideoAgent);
   const setCurrentVideoAgentInstance = useAppShellStore((state) => state.setCurrentVideoAgentInstance);
   const setCurrentMapsNodeId = useAppShellStore((state) => state.setCurrentMapsNodeId);
   const setEditingImageInfo = useAppShellStore((state) => state.setEditingImageInfo);
@@ -214,7 +200,6 @@ export function AppContent() {
   const updateLLMConfigs = useRuntimeStore((state) => state.updateLLMConfigs);
   const updateLocalLLMProfiles = useRuntimeStore((state) => state.updateLocalLLMProfiles);
   const setNavigationHandler = useRuntimeStore((state) => state.setNavigationHandler);
-  const addNodeMessage = useRuntimeStore((state) => state.addNodeMessage);
   const setRuntimeConnectionState = useRuntimeStore((state) => state.setRuntimeConnectionState);
   const recordRuntimeEvent = useRuntimeStore((state) => state.recordRuntimeEvent);
   const runtimeStoreLLMConfigs = useRuntimeStore((state) => state.llmConfigs);
@@ -264,9 +249,6 @@ export function AppContent() {
 
   // ⭐ V2: The design store is the canonical workflow identity source.
   // Legacy workflow-store fallback is intentionally removed from the active workflow resolver.
-
-  // ⭐ FIX QA: Journal queue for persisting generated images
-  const { enqueueEntry: enqueueJournalEntry } = useJournalQueue();
 
   const resolveCurrentWorkflowId = useCallback(
     () =>
@@ -641,110 +623,18 @@ export function AppContent() {
     resolveCurrentWorkflowId,
   });
 
-  const handleOpenImagePanel = (nodeId: string, agent: Agent, agentInstance: AgentInstance) => {
-    setCurrentImageNodeId(nodeId);
-    setCurrentImageAgent(agent);
-    setCurrentImageAgentInstance(agentInstance);
-    setImagePanelOpen(true);
-  };
-
-  const handleImageGenerated = (nodeId: string, imageBase64: string) => {
-    const imageMessage: ChatMessage = {
-      id: generateRuntimeMessageId('image'),
-      sender: 'agent',
-      text: t('app_generatedImageText'),
-      image: imageBase64,
-      mimeType: 'image/png',
-      timestamp: new Date(),
-    };
-    addNodeMessage(nodeId, imageMessage);
-
-    // ⭐ FIX QA: Persist generated image to journal
-    const instanceId = nodeId.replace('node-', '');
-    const workflowId = resolveCurrentWorkflowId();
-    if (instanceId && workflowId) {
-      enqueueJournalEntry(workflowId, instanceId, 'chat', {
-        messageId: imageMessage.id,
-        role: 'agent',
-        content: t('app_generatedImageText'),
-        imageBase64: imageBase64,
-        mimeType: 'image/png',
-      });
-    }
-  };
-
-  const handleOpenImageModificationPanel = (
-    nodeId: string,
-    sourceImage: string,
-    agent?: Agent,
-    agentInstance?: AgentInstance,
-    mimeType: string = 'image/png',
-  ) => {
-    setEditingImageInfo({ nodeId, sourceImage, mimeType, agent, agentInstance });
-    setImageModificationPanelOpen(true);
-  };
-
-  const handleOpenVideoPanel = (nodeId: string, agent: Agent, agentInstance: AgentInstance) => {
-    setCurrentVideoNodeId(nodeId);
-    setCurrentVideoAgent(agent);
-    setCurrentVideoAgentInstance(agentInstance);
-    setVideoPanelOpen(true);
-  };
-
-  const handleOpenMapsPanel = (nodeId: string, preloadedResults?: MapsPanelPreloadedResults) => {
-    setCurrentMapsNodeId(nodeId);
-    setMapsPreloadedResults(preloadedResults || null);
-    setMapsPanelOpen(true);
-  };
-
-  const handleImageModified = (nodeId: string, newImage: string, text: string) => {
-    const message: ChatMessage = {
-      id: generateRuntimeMessageId('image-modified'),
-      sender: 'agent',
-      text: text,
-      image: newImage,
-      mimeType: 'image/png',
-      timestamp: new Date(),
-    };
-    addNodeMessage(nodeId, message);
-
-    // ⭐ FIX QA: Persist modified image to journal
-    const instanceId = nodeId.replace('node-', '');
-    const workflowId = resolveCurrentWorkflowId();
-    if (instanceId && workflowId) {
-      enqueueJournalEntry(workflowId, instanceId, 'chat', {
-        messageId: message.id,
-        role: 'agent',
-        content: text,
-        imageBase64: newImage,
-        mimeType: 'image/png',
-      });
-    }
-  };
-
-  const handleToggleNodeMinimize = (nodeId: string) => {
-    // ⭐ ARCHITECTURE FIX: Store minimize state in useRuntimeStore (transient UI state, not persisted)
-    // This approach separates concerns: coordinates in Design Store, UI state in Runtime Store
-    const { toggleNodeMinimized } = useRuntimeStore.getState();
-    toggleNodeMinimized(nodeId);
-    console.debug('[App] Toggled minimize for node:', nodeId);
-  };
-
-  const handleUpdateNodeMessages = (nodeId: string, messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    const runtimeStore = useRuntimeStore.getState();
-    const previousMessages = runtimeStore.getNodeMessages(nodeId);
-    runtimeStore.setNodeMessages(nodeId, typeof messages === 'function' ? messages(previousMessages) : messages);
-  };
-
-  const handleOpenFullscreen = (src: string, mimeType: string) => {
-    setFullscreenImage({ src, mimeType });
-  };
-
-  const _handleOpenAgentFullscreen = (nodeId: string) => {
-    // Utiliser le store runtime pour ouvrir le FullscreenChatModal existant
-    const { setFullscreenChatNodeId } = useRuntimeStore.getState();
-    setFullscreenChatNodeId(nodeId);
-  };
+  // ⭐ US-RC-11 (vague 2) : handlers des panneaux média extraits dans un hook dédié (signatures inchangées)
+  const {
+    handleOpenImagePanel,
+    handleImageGenerated,
+    handleOpenImageModificationPanel,
+    handleOpenVideoPanel,
+    handleOpenMapsPanel,
+    handleImageModified,
+    handleToggleNodeMinimize,
+    handleUpdateNodeMessages,
+    handleOpenFullscreen,
+  } = useMediaPanelActions({ resolveCurrentWorkflowId });
 
   const handleAddToWorkflow = (agent: Agent) => {
     addAgentToWorkflow(agent);
