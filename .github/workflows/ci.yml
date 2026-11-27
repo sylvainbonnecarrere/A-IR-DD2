@@ -39,7 +39,7 @@ jobs:
 
       - name: Upload frontend dist
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-dist-${{ github.sha }}
           path: dist
@@ -135,7 +135,7 @@ jobs:
 
       - name: Upload backend dist
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-dist-${{ github.sha }}
           path: backend/dist
@@ -297,7 +297,7 @@ jobs:
 
       - name: Upload CI run report artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-report-${{ github.sha }}
           path: ci-report-${{ github.sha }}.json

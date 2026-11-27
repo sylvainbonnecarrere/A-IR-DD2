@@ -278,7 +278,7 @@ jobs:
 
       - name: Upload runtime scan report
         if: ${{ inputs.run_runtime_checks && !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deployment-runtime-scan-report
           path: backend/runtime-scan-report.json
@@ -352,7 +352,7 @@ jobs:
           sha256sum deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}.tgz > deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}.tgz.sha256
 
       - name: Upload deploy bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deploy-bundle-${{ needs.preflight.outputs.deploy_sha }}
           path: |
@@ -530,7 +530,7 @@ jobs:
 
       - name: Upload deployment report artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deploy-report-${{ needs.preflight.outputs.deploy_sha }}
           path: deploy-report-${{ needs.preflight.outputs.deploy_sha }}.json

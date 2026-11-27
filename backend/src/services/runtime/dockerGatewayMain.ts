@@ -146,6 +146,19 @@ async function runDockerGateway(): Promise<void> {
 
   await daemon.start();
   logger.info(`Docker gateway listening on ${socketPath}`);
+
+  // Sweep des réservations de nom orphelines (état terminal, opération plus active) :
+  // leftovers de crash/SIGKILL. Par ID immuable uniquement, fail-closed (tout doute -> conservé).
+  try {
+    const fenced = await admission.getFencedOperations();
+    const activeOperationIds = new Set(fenced.map((entry) => entry.id));
+    const swept = await reconciler.sweepOrphanReservations(activeOperationIds);
+    if (swept.length > 0) {
+      logger.info(`Docker gateway: ${swept.length} orphan reservation container(s) removed`, swept);
+    }
+  } catch (error) {
+    logger.warn('Docker gateway: orphan reservation sweep skipped (fail-closed)', error instanceof Error ? error.message : error);
+  }
 }
 
 if (require.main === module) {

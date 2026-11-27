@@ -1,32 +1,29 @@
-1- npm_and_yarn in /backend for qs - Update #1731130325
- Dependabot cannot update qs to a non-vulnerable version
-The latest possible version that can be installed is 6.16.0 because of the following conflicting dependencies:
+chore(deps): Bump react-dom and @types/react-dom
 
-express@4.22.2 requires qs@6.16.0 via body-parser@1.20.9
-express-rate-limit@8.6.2 requires qs@6.16.0 via a transitive dependency on body-parser@1.20.9
-express@4.22.2 requires qs@6.16.0
-express-rate-limit@8.6.2 requires qs@6.16.0 via express@4.22.2
-supertest@7.2.2 requires qs@6.16.0 via superagent@10.3.0
-A patched version exists for qs, but the available update path still resolves it to 6.16.0
-The earliest fixed version is 6.16.1.
+Unread
+#43
+·dependabot[bot] opened 10 hours ago
+Bot
+·
+1
+chore(deps-dev): Bump @types/node from 24.19.2 to 26.6.6 in /backend
 
-2-npm_and_yarn in /backend for minimatch - Update #1731130335
-Dependabot cannot update minimatch to a non-vulnerable version
-The latest possible version that can be installed is 9.0.9 because of the following conflicting dependencies:
+Unread
+#42
+·dependabot[bot] opened 10 hours ago
+Bot
+·
+1
+chore(deps-dev): Bump @types/node from 26.5.0 to 26.6.6
 
-jest@30.5.2 requires minimatch@9.0.9 via a transitive dependency on glob@13.0.6
-ts-jest@29.4.15 requires minimatch@9.0.9 via a transitive dependency on glob@13.0.6
-jest@30.5.2 requires minimatch@9.0.9 via a transitive dependency on test-exclude@7.0.2
-ts-jest@29.4.15 requires minimatch@9.0.9 via a transitive dependency on test-exclude@7.0.2
-jest@30.5.2 requires minimatch@9.0.9 via a transitive dependency on glob@10.5.0
-ts-jest@29.4.15 requires minimatch@9.0.9 via a transitive dependency on glob@10.5.0
-A patched version exists for minimatch, but the available update path still resolves it to 9.0.9
-The earliest fixed version is 11.0.1.
-3-npm_and_yarn in /. for minimatch - Update #1731130484
- Dependabot cannot update minimatch to a non-vulnerable version
-The latest possible version that can be installed is 9.0.9 because of the following conflicting dependency:
+#41
+·dependabot[bot] opened 10 hours ago
+Bot
+·
+1
+chore(deps): Bump actions/upload-artifact from 4 to 7
 
-A patched version exists for minimatch, but the available update path still resolves it to 9.0.9
-The earliest fixed version is 11.0.1.
-
-Troubleshoot Dependabot errors
+#40
+·dependabot[bot] opened 10 hours ago
+Bot
+·
